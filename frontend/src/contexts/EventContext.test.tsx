@@ -522,6 +522,41 @@ describe('EventProvider permissions and forms', () => {
     })
   })
 
+  it('reconciles a linked server enabled after the browser stream connects', async () => {
+    const busySessionID = 'session-remote-busy'
+    mocks.listActiveSessions.mockImplementation((serverId?: string) =>
+      Promise.resolve(serverId === 'srv_remote' ? { [busySessionID]: {} } : {}),
+    )
+
+    const { rerender } = render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const handleStatusChange = lastSubscribeCall[0].onStatusChange as (connected: boolean) => void
+
+    act(() => {
+      handleStatusChange(true)
+    })
+
+    expect(mocks.listActiveSessions).not.toHaveBeenCalledWith('srv_remote')
+
+    mocks.servers = [{ id: 'srv_remote', enabled: true }]
+    rerender(<Harness />)
+
+    await waitFor(() => {
+      expect(useSessionStatus.getState().statuses.get(busySessionID)).toEqual({ type: 'busy' })
+    })
+    const remoteFetches = () =>
+      mocks.listActiveSessions.mock.calls.filter(([serverId]) => serverId === 'srv_remote')
+    expect(remoteFetches()).toHaveLength(1)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sync' }))
+    mocks.servers = [{ id: 'srv_remote', enabled: true }]
+    rerender(<Harness />)
+
+    expect(remoteFetches()).toHaveLength(1)
+  })
+
   it('clears settled pending actions on an upstream resync while the browser stream stays connected', async () => {
     mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
     mocks.listPendingPermissions.mockResolvedValue([])

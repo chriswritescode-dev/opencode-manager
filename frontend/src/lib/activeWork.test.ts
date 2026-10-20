@@ -6,6 +6,7 @@ import type { RepoSibling, RepoWorktreeSource } from '@opencode-manager/shared/u
 import {
   buildActiveWork,
   buildRepoActivityIndex,
+  buildServerActivityIndex,
   buildWorktreeActivity,
   collectActiveRoots,
   formatActivityEmptyMessage,
@@ -15,6 +16,7 @@ import {
   repoActivityFromIndex,
   resolveSessionBranch,
   rootSessionID,
+  serverActivityFromIndex,
   type ActiveWorktree,
 } from './activeWork'
 
@@ -265,6 +267,127 @@ describe('buildRepoActivityIndex and repoActivityFromIndex', () => {
     }
 
     expect(buildRepoActivityIndex(input)).toBe(buildRepoActivityIndex(input))
+  })
+})
+
+describe('buildServerActivityIndex and serverActivityFromIndex', () => {
+  const noShells = new Map<string, { sessionID: string; directory: string }>()
+
+  const stateFor = (
+    serverId: string,
+    input: Parameters<typeof buildServerActivityIndex>[0],
+  ): 'needs-input' | 'running' | null =>
+    serverActivityFromIndex(serverId, buildServerActivityIndex(input))
+
+  it('ignores local sessions', () => {
+    const state = stateFor('srv_kitchen', {
+      statuses: statuses({ session: { type: 'busy' } }),
+      parents: new Map(),
+      runningShells: noShells,
+      directories: new Map([['session', '/home/me/app']]),
+      sessionServers: new Map(),
+      pendingInputSessionIDs: [],
+    })
+
+    expect(state).toBeNull()
+  })
+
+  it('marks the server named by a server-keyed directory', () => {
+    const state = stateFor('srv_kitchen', {
+      statuses: statuses({ session: { type: 'busy' } }),
+      parents: new Map(),
+      runningShells: noShells,
+      directories: new Map([['session', 'srv_kitchen|/home/me/app']]),
+      sessionServers: new Map(),
+      pendingInputSessionIDs: [],
+    })
+
+    expect(state).toBe('running')
+  })
+
+  it('marks the server named by the session-server index', () => {
+    const state = stateFor('srv_kitchen', {
+      statuses: statuses({ session: { type: 'busy' } }),
+      parents: new Map(),
+      runningShells: noShells,
+      directories: new Map([['session', '/home/me/app']]),
+      sessionServers: new Map([['session', 'srv_kitchen']]),
+      pendingInputSessionIDs: [],
+    })
+
+    expect(state).toBe('running')
+  })
+
+  it('rolls a remote needs-input child up to its root on that server', () => {
+    const input: Parameters<typeof buildServerActivityIndex>[0] = {
+      statuses: statuses({}),
+      parents: new Map([['child', 'root'], ['root', null]]),
+      runningShells: noShells,
+      directories: new Map([['root', 'srv_kitchen|/home/me/app']]),
+      sessionServers: new Map(),
+      pendingInputSessionIDs: ['child'],
+    }
+
+    expect(stateFor('srv_kitchen', input)).toBe('needs-input')
+    expect(stateFor('srv_office', input)).toBeNull()
+  })
+
+  it('keeps servers apart when the same directory is active on both', () => {
+    const runningInput: Parameters<typeof buildServerActivityIndex>[0] = {
+      statuses: statuses({ kitchen: { type: 'busy' } }),
+      parents: new Map(),
+      runningShells: noShells,
+      directories: new Map([['kitchen', 'srv_kitchen|/home/me/app']]),
+      sessionServers: new Map(),
+      pendingInputSessionIDs: [],
+    }
+
+    expect(stateFor('srv_kitchen', runningInput)).toBe('running')
+    expect(stateFor('srv_office', runningInput)).toBeNull()
+  })
+
+  it('prefers needs-input over running', () => {
+    const state = stateFor('srv_kitchen', {
+      statuses: statuses({ busy: { type: 'busy' }, waiting: { type: 'busy' } }),
+      parents: new Map(),
+      runningShells: noShells,
+      directories: new Map([
+        ['busy', 'srv_kitchen|/home/me/app'],
+        ['waiting', 'srv_kitchen|/home/me/other'],
+      ]),
+      sessionServers: new Map(),
+      pendingInputSessionIDs: ['waiting'],
+    })
+
+    expect(state).toBe('needs-input')
+  })
+
+  it('marks a running shell on its server', () => {
+    const state = stateFor('srv_kitchen', {
+      statuses: statuses({}),
+      parents: new Map(),
+      runningShells: new Map([
+        ['shell-1', { sessionID: 'orphan', directory: 'srv_kitchen|/home/me/app' }],
+      ]),
+      directories: new Map(),
+      sessionServers: new Map([['orphan', 'srv_kitchen']]),
+      pendingInputSessionIDs: [],
+    })
+
+    expect(state).toBe('running')
+  })
+
+  it('reuses the index for the same snapshot references', () => {
+    const input: Parameters<typeof buildServerActivityIndex>[0] = {
+      statuses: statuses({ session: { type: 'busy' } }),
+      parents: new Map(),
+      runningShells: noShells,
+      directories: new Map([['session', 'srv_kitchen|/home/me/app']]),
+      sessionServers: new Map(),
+      pendingInputSessionIDs: [],
+    }
+
+    expect(buildServerActivityIndex(input)).toBe(buildServerActivityIndex(input))
   })
 })
 
@@ -557,7 +680,7 @@ describe('buildActiveWork', () => {
     expect(groups.recent).toEqual([])
   })
 
-  it('never emits a recent row for a remote session', () => {
+  it('emits a recent remote root with its server label and server session path', () => {
     const sessions = [createSession('remote', NOW - 1000, '/home/me/app')]
 
     const groups = buildActiveWork({
@@ -569,9 +692,41 @@ describe('buildActiveWork', () => {
       roots: emptyRoots,
       outcomes: new Map(),
       sessionServers: new Map([['remote', 'srv_kitchen']]),
+      serverNames: new Map([['srv_kitchen', 'Kitchen']]),
     })
 
-    expect(groups).toEqual({ needsInput: [], running: [], recent: [] })
+    expect(groups.recent).toHaveLength(1)
+    expect(groups.recent[0].repo).toBeNull()
+    expect(groups.recent[0].serverId).toBe('srv_kitchen')
+    expect(groups.recent[0].serverName).toBe('Kitchen')
+    expect(groups.recent[0].state).toBe('recent')
+    expect(groups.recent[0].path).toBe('/servers/srv_kitchen/sessions/remote')
+  })
+
+  it('rolls a remote child up to its remote root and keeps only the root row', () => {
+    const parents = new Map<string, string | null>([
+      ['remote-root', null],
+      ['remote-child', 'remote-root'],
+    ])
+    const sessions = [
+      createSession('remote-root', NOW - 4000, '/home/me/app'),
+      createSession('remote-child', NOW - 1000, '/home/me/app', 'remote-root'),
+    ]
+
+    const groups = buildActiveWork({
+      now: NOW,
+      windowMs: WINDOW_MS,
+      repos: [repoA],
+      sessions,
+      parents,
+      roots: emptyRoots,
+      outcomes: new Map(),
+      sessionServers: new Map([['remote-root', 'srv_kitchen']]),
+      serverNames: new Map([['srv_kitchen', 'Kitchen']]),
+    })
+
+    expect(groups.recent.map((item) => item.session.id)).toEqual(['remote-root'])
+    expect(groups.recent[0].updatedAt).toBe(NOW - 1000)
   })
 })
 

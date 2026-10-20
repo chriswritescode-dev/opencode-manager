@@ -1,16 +1,31 @@
 import { Hono } from 'hono'
-import { FuseMultiRunRequestSchema, LaunchMultiRunRequestSchema } from '@opencode-manager/shared/schemas'
+import {
+  FuseMultiRunRequestSchema,
+  LaunchMultiRunRequestSchema,
+  type MultiRunTarget,
+} from '@opencode-manager/shared/schemas'
 import { MultiRunError, type MultiRunService } from '../services/multi-runs'
 import { handleServiceError, parseId, parseJsonBody } from '../utils/route-helpers'
 import { ServiceError } from '../utils/service-error'
+
+function listTarget(repoId: string | undefined, serverId: string | undefined, directory: string | undefined): MultiRunTarget {
+  if (serverId) {
+    if (!directory) {
+      throw new MultiRunError('Missing directory', 400)
+    }
+    return { kind: 'server', serverId, directory }
+  }
+
+  return { kind: 'repo', repoId: parseId(repoId, 'repoId', MultiRunError) }
+}
 
 export function createMultiRunRoutes(service: MultiRunService) {
   const app = new Hono()
 
   app.get('/', (c) => {
     try {
-      const repoId = parseId(c.req.query('repoId'), 'repoId', MultiRunError)
-      return c.json({ runs: service.list(repoId) })
+      const target = listTarget(c.req.query('repoId'), c.req.query('serverId'), c.req.query('directory'))
+      return c.json({ runs: service.list(target) })
     } catch (error) {
       return handleServiceError(c, error, 'Failed to list multi-runs', ServiceError)
     }

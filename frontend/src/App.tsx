@@ -1,12 +1,13 @@
 
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { createBrowserRouter, RouterProvider, Outlet, useNavigate, useLocation, useParams, Navigate } from 'react-router-dom'
 import { useEffect, useRef, useCallback, type ReactNode } from 'react'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { Toaster } from 'sonner'
 import { Repos } from './pages/Repos'
 import { RepoDetail } from './pages/RepoDetail'
-import { RemoteServer } from './pages/RemoteServer'
+import { LinkedServerRedirect } from './pages/LinkedServerRedirect'
+import { RemoteProject } from './pages/RemoteProject'
 import { SessionDetail } from './pages/SessionDetail'
 import { Schedules } from './pages/Schedules'
 import { GlobalSchedules } from './pages/GlobalSchedules'
@@ -40,7 +41,8 @@ import { useAuth } from '@/hooks/useAuth'
 import { useOpenCodeFailureToast } from '@/hooks/useOpenCodeFailureToast'
 import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 import { useGlobalShortcutActions } from '@/hooks/useGlobalShortcutActions'
-import { useSession } from '@/hooks/useOpenCode'
+import { useSidebarServerRouteSync } from '@/hooks/useSidebarServerSelection'
+import { sessionQueryOptions } from '@/hooks/useOpenCode'
 import { RestartServerDialog } from '@/components/settings/RestartServerDialog'
 
 const queryClient = new QueryClient({
@@ -115,9 +117,12 @@ export function PermissionDialogWrapper() {
   } = usePermissions()
   const { getRepoIdForSession } = useEventContext()
   const isRemotePermission = currentPermission !== null && !isLocalOpenCodeServer(currentPermission.serverId)
-  const { data: session } = useSession(
-    isRemotePermission ? undefined : currentPermission?.sessionID,
-    currentDirectory ?? undefined,
+  const { data: session } = useQuery(
+    sessionQueryOptions(
+      currentPermission?.sessionID,
+      currentDirectory ?? undefined,
+      currentPermission?.serverId ?? LOCAL_OPENCODE_SERVER_ID,
+    ),
   )
 
   const canOpenCurrentSession = currentPermission !== null
@@ -160,11 +165,13 @@ function AppShell() {
   const rootRef = useRef<HTMLDivElement>(null)
   const { openSheet, open } = useMobileTabBar()
 
+  useSidebarServerRouteSync()
+
   const swipeNav = useSwipeNavigation()
 
   const getRouteSwipeBackTarget = useCallback(
-    () => getSwipeBackTarget(location.pathname, location.search),
-    [location.pathname, location.search]
+    () => swipeNav?.backTarget() ?? getSwipeBackTarget(location.pathname, location.search),
+    [swipeNav, location.pathname, location.search]
   )
 
   const canSwipeBack = useCallback(
@@ -311,9 +318,14 @@ const router = createBrowserRouter([
       },
       {
         path: '/servers/:serverId',
+        element: <LinkedServerRedirect />,
+        loader: protectedLoader,
+      },
+      {
+        path: '/servers/:serverId/projects',
         element: (
           <ServerScope>
-            <RemoteServer />
+            <RemoteProject />
           </ServerScope>
         ),
         loader: protectedLoader,

@@ -10,7 +10,7 @@ import { SquareFill } from "@/components/ui/square-fill";
 import { Header } from "@/components/ui/header";
 import { Badge } from "@/components/ui/badge";
 import { SessionPickerDialog } from "@/components/session/SessionPickerDialog";
-import { getRepoPath, getServerPath, getServerSessionPath, getSessionListPath, getSessionPath } from '@/lib/navigation'
+import { getRepoPath, getServerProjectPath, getServerSessionPath, getSessionListPath, getSessionPath } from '@/lib/navigation'
 import { FetchError } from '@/api/fetchWrapper'
 
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
@@ -49,6 +49,7 @@ import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog
 import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
 import { compactSession, forkSession, listProjects, listSessionMessages } from "@/api/opencode";
 import { useOpenCodeServerId, isLocalOpenCodeServer } from "@/contexts/OpenCodeServerContext";
+import { useSwipeNavigation } from "@/contexts/SwipeNavigationContext";
 import { useOpenCodeServers, useOpenCodeServerStatuses } from "@/hooks/useOpenCodeServers";
 import { serverScopedKey } from "@/lib/serverScope";
 import { useSessionStatus } from "@/stores/sessionStatusStore";
@@ -62,7 +63,7 @@ import { FormPrompt } from "@/components/session/FormPrompt";
 import { clearFormDraft } from "@/lib/formDrafts";
 import { MinimizedFormIndicator } from "@/components/session/MinimizedFormIndicator";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
-import { SourceControlPanel } from "@/components/source-control";
+import { SourceControlPanel, RemoteSourceControlPanel } from "@/components/source-control";
 import { TerminalPanel } from "@/components/terminal/TerminalPanel";
 import { PreviewPanel } from "@/components/preview/PreviewPanel";
 import { SessionSendErrorBanner } from "@/components/session/SessionSendErrorBanner";
@@ -129,10 +130,11 @@ export function SessionDetail() {
   const { id, sessionId } = useParams<{ id: string; sessionId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const swipeNav = useSwipeNavigation();
   const repoId = Number(id) || 0;
   const isAssistantSession = new URLSearchParams(location.search).get('assistant') === '1';
   const { preferences, updateSettings } = useSettings();
-  const { open: openSettings, setActiveTab: setSettingsTab } = useSettingsDialog();
+  const { open: openSettings, openTab: openSettingsTab } = useSettingsDialog();
   const messageContainerRef = useRef<HTMLDivElement>(null);
   const promptInputRef = useRef<PromptInputHandle>(null);
   const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false);
@@ -199,6 +201,17 @@ export function SessionDetail() {
       : undefined
   );
   const sessionDirectory = isRemoteServer ? resolvedDirectory : resolvedDirectory ?? repoDirectory;
+  const remoteProjectBackPath = isRemoteServer && sessionDirectory
+    ? getServerProjectPath(serverId, sessionDirectory)
+    : '/';
+
+  useEffect(() => {
+    if (!isRemoteServer) return;
+    swipeNav?.setBackTarget(remoteProjectBackPath);
+    return () => {
+      swipeNav?.setBackTarget(null);
+    };
+  }, [isRemoteServer, remoteProjectBackPath, swipeNav]);
 
   const { data: repoSiblings } = useRepoSiblings(!isAssistantSession && !isRemoteServer && repo && !repo.isWorktree ? repoId : undefined);
 
@@ -356,7 +369,7 @@ export function SessionDetail() {
       ? requestedWalkthroughSource
       : undefined;
   const handleSkillLoaded = useCallback((skill: SkillFileInfo) => showToast.success(`Loaded skill: ${skill.name}`), []);
-  const handleConnectProvider = useCallback(() => setSettingsTab('providers'), [setSettingsTab]);
+  const handleConnectProvider = useCallback(() => openSettingsTab('providers'), [openSettingsTab]);
 
   useAutoOpenWalkthrough({
     sessionId,
@@ -504,12 +517,12 @@ export function SessionDetail() {
 
   const handleCloseSession = useCallback(() => {
     if (isRemoteServer) {
-      navigate(getServerPath(serverId))
+      navigate(remoteProjectBackPath)
       return
     }
     const tab = new URLSearchParams(location.search).get('repoTab') ?? undefined;
     navigate(getSessionListPath(repoId, isAssistantSession, tab))
-  }, [navigate, repoId, isAssistantSession, isRemoteServer, serverId, location.search])
+  }, [navigate, repoId, isAssistantSession, isRemoteServer, remoteProjectBackPath, location.search])
 
   const handleOpenModelDialog = useCallback(() => {
     promptInputRef.current?.openModelPicker();
@@ -719,8 +732,8 @@ export function SessionDetail() {
     return (
       <SessionRouteFallback
         message="Session not found"
-        backTo={isRemoteServer ? getServerPath(serverId) : getSessionListPath(repoId, isAssistantSession, listTab)}
-        backLabel={isRemoteServer ? 'Back to server' : 'Back to sessions'}
+        backTo={isRemoteServer ? remoteProjectBackPath : getSessionListPath(repoId, isAssistantSession, listTab)}
+        backLabel={isRemoteServer ? 'Back to projects' : 'Back to sessions'}
       />
     );
   }
@@ -730,8 +743,8 @@ export function SessionDetail() {
       return (
         <SessionRouteFallback
           message="Failed to load session"
-          backTo={getServerPath(serverId)}
-          backLabel="Back to server"
+          backTo={remoteProjectBackPath}
+          backLabel="Back to projects"
         />
       );
     }
@@ -758,7 +771,7 @@ export function SessionDetail() {
       : getRepoDisplayName(repo);
   const tabFromUrl = new URLSearchParams(location.search).get('repoTab') ?? undefined;
   const sessionBackPath = isRemoteServer
-    ? getServerPath(serverId)
+    ? remoteProjectBackPath
     : getSessionListPath(repoId, isAssistantSession, tabFromUrl);
 
   return (
@@ -795,7 +808,14 @@ export function SessionDetail() {
               onChange={handleRenameSession}
               subtitle={
                 <span className="text-highlight">
-                  {workspaceDisplayName}
+                  {isRemoteServer ? (
+                    <>
+                      <span className="text-info">{linkedServer?.name ?? 'Linked server'}</span>
+                      {sessionDirectory && ` · ${getDirectoryName(sessionDirectory)}`}
+                    </>
+                  ) : (
+                    workspaceDisplayName
+                  )}
                   {sessionBranch && <span className="font-mono sm:hidden"> · {sessionBranch}</span>}
                 </span>
               }
@@ -826,7 +846,7 @@ export function SessionDetail() {
               isReconnecting={streamReconnecting}
               revertMessageID={revertMessageID}
             />
-            {!isRemoteServer && <SessionMoreButton />}
+            <SessionMoreButton />
           </Header.Actions>
         </Header>
 
@@ -927,7 +947,7 @@ export function SessionDetail() {
               )}
               <div className={cn(isFormSheetOpen && "shrink-0 px-[3%]")}>
                 <SessionSendErrorBanner sessionId={sessionId} isConnected={streamConnected} isReconnecting={streamReconnecting} />
-                {!isRemoteServer && <SessionGoalBar sessionID={sessionId} />}
+                <SessionGoalBar sessionID={sessionId} />
                 <BackgroundWorkBar
                   sessionID={sessionId}
                   directory={sessionDirectory}
@@ -954,13 +974,14 @@ export function SessionDetail() {
       {docked && (
         <ToolSidePanel
           panel={sidePanel}
-          repoId={repoId}
+          repoId={isRemoteServer ? undefined : repoId}
           sessionId={sessionId}
           directory={sessionDirectory}
           filesBasePath={workspaceBasePath}
           currentBranch={repo?.currentBranch || repo?.branch || "main"}
           selectedFilePath={selectedFilePath}
           repoDirectory={isRemoteServer ? sessionDirectory : repoDirectory}
+          terminalTarget={isRemoteServer ? { kind: 'server', serverId } : { kind: 'repo', repoId }}
           onSkillLoaded={handleSkillLoaded}
           walkthroughSourceRequest={walkthroughSourceRequest}
           walkthroughModel={modelRef}
@@ -1076,24 +1097,31 @@ export function SessionDetail() {
         />
       )}
 
-      {!isRemoteServer && (
-        <SourceControlPanel
-          repoId={repoId}
-          isOpen={!docked && sourceControlOpen}
-          onClose={() => setSourceControlOpen(false)}
-          currentBranch={repo?.currentBranch || repo?.branch || "main"}
-          repoName={workspaceDisplayName}
-        />
-      )}
+      {isRemoteServer
+        ? sessionDirectory && (
+          <RemoteSourceControlPanel
+            serverId={serverId}
+            directory={sessionDirectory}
+            isOpen={!docked && sourceControlOpen}
+            onClose={() => setSourceControlOpen(false)}
+          />
+        )
+        : (
+          <SourceControlPanel
+            repoId={repoId}
+            isOpen={!docked && sourceControlOpen}
+            onClose={() => setSourceControlOpen(false)}
+            currentBranch={repo?.currentBranch || repo?.branch || "main"}
+            repoName={workspaceDisplayName}
+          />
+        )}
 
-      {!isRemoteServer && (
-        <TerminalPanel
-          repoId={repoId}
-          directory={sessionDirectory}
-          isOpen={!docked && terminalOpen}
-          onClose={() => setTerminalOpen(false)}
-        />
-      )}
+      <TerminalPanel
+        target={isRemoteServer ? { kind: 'server', serverId } : { kind: 'repo', repoId }}
+        directory={sessionDirectory}
+        isOpen={!docked && terminalOpen}
+        onClose={() => setTerminalOpen(false)}
+      />
 
       {!isRemoteServer && (
         <PreviewPanel

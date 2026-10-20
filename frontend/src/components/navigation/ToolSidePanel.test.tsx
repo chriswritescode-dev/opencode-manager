@@ -27,8 +27,18 @@ vi.mock('@/components/file-browser/FileBrowser', () => ({
 vi.mock('@/components/source-control', () => ({
   SourceControlContent: () => <div>source-control-tool</div>,
 }))
+vi.mock('@/components/source-control/RemoteSourceControlContent', () => ({
+  RemoteSourceControlContent: ({ serverId, directory }: { serverId: string; directory: string }) => (
+    <div>remote-source-control-tool {serverId} {directory}</div>
+  ),
+}))
 vi.mock('@/components/terminal/TerminalPanel', () => ({
-  TerminalWorkspace: () => <div>terminal-tool</div>,
+  TerminalWorkspace: ({ onLastTerminalExited }: { onLastTerminalExited?: () => void }) => (
+    <div>
+      terminal-tool
+      <button type="button" onClick={onLastTerminalExited}>Exit last terminal</button>
+    </div>
+  ),
 }))
 vi.mock('@/components/preview/PreviewPanel', () => ({ PreviewWorkspace: () => <div>preview-tool</div> }))
 vi.mock('@/components/schedules/RepoSchedulesContent', () => ({
@@ -317,6 +327,16 @@ describe('ToolSidePanel', () => {
     expect(search().has('terminal')).toBe(false)
   })
 
+  it('closes the docked terminal panel when the last terminal exits', async () => {
+    const user = userEvent.setup()
+    renderAt('?panel=terminal&terminal=pty-1')
+
+    await user.click(await screen.findByRole('button', { name: 'Exit last terminal' }))
+
+    await waitFor(() => expect(search().has('panel')).toBe(false))
+    expect(search().has('terminal')).toBe(false)
+  })
+
   it('falls back to the dialog when not docked', async () => {
     renderAt('?panel=sourceControl', false)
 
@@ -360,10 +380,41 @@ describe('ToolSidePanel', () => {
       within(rail)
         .getAllByRole('button')
         .map((button) => button.getAttribute('aria-label') ?? button.textContent?.trim()),
-    ).toEqual(['Activity', 'MCP', 'Skills'])
+    ).toEqual(['Activity', 'MCP', 'Skills', 'Source Control', 'Terminal'])
 
     await user.click(screen.getByRole('button', { name: 'MCP' }))
     expect(await screen.findByText('mcp-tool')).toBeInTheDocument()
+  })
+
+  it('opens the remote source control panel for a linked-server session', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/servers/srv_kitchen/sessions/ses_remote']}>
+        <RemoteHarness />
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Source Control' }))
+
+    expect(
+      await screen.findByText('remote-source-control-tool srv_kitchen /home/me/app'),
+    ).toBeInTheDocument()
+    expect(search().get('panel')).toBe('sourceControl')
+    expect(screen.queryByText('source-control-tool')).not.toBeInTheDocument()
+  })
+
+  it('opens the skills panel for a linked-server session', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/servers/srv_kitchen/sessions/ses_remote']}>
+        <RemoteHarness />
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Skills' }))
+
+    expect(await screen.findByText('skills-tool')).toBeInTheDocument()
+    expect(search().get('panel')).toBe('skills')
   })
 
   it('opens the Activity panel with rows and the window label when clicked', async () => {

@@ -7,6 +7,7 @@ const BASE_URL = 'http://localhost:5003'
 const goal: SessionGoal = {
   id: 7,
   sessionId: 'ses_1',
+  serverId: 'local',
   directory: '/repo',
   objective: 'fix the flaky test',
   status: 'active',
@@ -27,6 +28,8 @@ const goal: SessionGoal = {
 const run: MultiRun = {
   id: 3,
   repoId: 1,
+  serverId: 'local',
+  directory: null,
   name: 'sweep',
   prompt: 'hello',
   isolated: true,

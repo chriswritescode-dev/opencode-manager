@@ -6,6 +6,7 @@ import '@xterm/xterm/css/xterm.css'
 import { resizeTerminal } from '@/api/terminals'
 import { applyCtrlModifier } from '@/lib/terminal-protocol'
 import { resolveTerminalTheme } from '@/lib/terminal-theme'
+import { terminalTargetKey, type TerminalTarget } from '@/lib/terminal-target'
 import { useTerminalSocket } from '@/hooks/useTerminalSocket'
 import { useMobile } from '@/hooks/useMobile'
 import { cn } from '@/lib/utils'
@@ -19,7 +20,7 @@ export interface TerminalViewHandle {
 }
 
 interface TerminalViewProps {
-  repoId: number
+  target: TerminalTarget
   directory: string | undefined
   ptyID: string
   active: boolean
@@ -30,7 +31,7 @@ interface TerminalViewProps {
 }
 
 export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(function TerminalView({
-  repoId,
+  target,
   directory,
   ptyID,
   active,
@@ -50,7 +51,11 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(fu
   const isMobile = useMobile()
   const isMobileRef = useRef(isMobile)
   const activeRef = useRef(active)
+  const targetRef = useRef(target)
+  const targetKey = terminalTargetKey(target)
   const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null)
+
+  targetRef.current = target
 
   ctrlArmedRef.current = ctrlArmed
   onCtrlConsumedRef.current = onCtrlConsumed
@@ -78,7 +83,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(fu
   }, [])
 
   const { send } = useTerminalSocket({
-    repoId,
+    target,
     directory,
     ptyID,
     onOutput: handleOutput,
@@ -170,7 +175,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(fu
         const lastSize = lastSizeRef.current
         if (lastSize && lastSize.cols === size.cols && lastSize.rows === size.rows) return
         lastSizeRef.current = size
-        resizeTerminal(repoId, ptyID, { directory, cols: size.cols, rows: size.rows }).catch(() => {})
+        resizeTerminal(targetRef.current, ptyID, { directory, cols: size.cols, rows: size.rows }).catch(() => {})
       }, RESIZE_DEBOUNCE_MS)
     }
 
@@ -182,7 +187,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(fu
       observer.disconnect()
       if (timer) clearTimeout(timer)
     }
-  }, [repoId, directory, ptyID])
+  }, [targetKey, directory, ptyID])
 
   useEffect(() => {
     if (!active) return

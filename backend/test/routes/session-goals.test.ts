@@ -190,4 +190,23 @@ describe('session goal routes', () => {
 
     expect(res.status).toBe(404)
   })
+
+  it('scopes goals by serverId', async () => {
+    const app = createTestApp(db)
+
+    const postRes = await app.request('/session-goals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: startBody({ serverId: 'srv_remote' }),
+    })
+    expect(postRes.status).toBe(201)
+    const created = await postRes.json() as { goal: { serverId: string } }
+    expect(created.goal.serverId).toBe('srv_remote')
+
+    const remoteRes = await app.request('/session-goals?sessionId=ses_1&serverId=srv_remote')
+    await expect(remoteRes.json()).resolves.toMatchObject({ goal: { serverId: 'srv_remote' } })
+
+    const localRes = await app.request('/session-goals?sessionId=ses_1')
+    await expect(localRes.json()).resolves.toEqual({ goal: null })
+  })
 })

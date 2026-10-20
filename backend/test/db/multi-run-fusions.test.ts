@@ -53,7 +53,7 @@ describe('multi-run fusions', () => {
   function createRun(models = ['openai/a', 'openai/b']): number {
     const run = createMultiRunWithEntries(
       db,
-      { repoId: REPO_ID, name: 'Sweep', prompt: 'go', isolated: true, baseRef: null },
+      { repoId: REPO_ID, serverId: 'local', directory: null, name: 'Sweep', prompt: 'go', isolated: true, baseRef: null },
       models,
     )
     return run.id
@@ -167,7 +167,7 @@ describe('multi-run fusions', () => {
       truncated: false,
     })
 
-    const listed = listMultiRuns(db, REPO_ID, 20)
+    const listed = listMultiRuns(db, { kind: 'repo', repoId: REPO_ID }, 20)
     expect(listed[0]?.fusions).toHaveLength(1)
     expect(listed[0]?.fusions[0]?.sources).toHaveLength(2)
   })
@@ -175,7 +175,7 @@ describe('multi-run fusions', () => {
   it('returns an empty fusion list for runs without fusions', () => {
     const multiRunId = createRun()
     expect(getMultiRun(db, multiRunId)?.fusions).toEqual([])
-    expect(listMultiRuns(db, REPO_ID, 20)[0]?.fusions).toEqual([])
+    expect(listMultiRuns(db, { kind: 'repo', repoId: REPO_ID }, 20)[0]?.fusions).toEqual([])
   })
 
   it('reads a fusion by its request id', () => {

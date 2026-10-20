@@ -1,4 +1,5 @@
 export { SourceControlPanel, SourceControlContent } from './SourceControlPanel'
+export { RemoteSourceControlPanel } from './RemoteSourceControlContent'
 export { ChangesTab } from './ChangesTab'
 export { CommitsTab } from './CommitsTab'
 export { BranchesTab } from './BranchesTab'

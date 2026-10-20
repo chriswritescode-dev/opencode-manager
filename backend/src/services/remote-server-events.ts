@@ -6,7 +6,7 @@ import {
   type OpenCodeServer,
   type OpenCodeServerStatus,
 } from '@opencode-manager/shared/schemas'
-import { type OpenCodeApi, type V2Event } from '@opencode-manager/shared/opencode'
+import { sessionIDFromEvent, type OpenCodeApi, type V2Event } from '@opencode-manager/shared/opencode'
 import { logger } from '../utils/logger'
 import type {
   OpenCodeServerChange,
@@ -32,6 +32,9 @@ export interface RemoteEventAggregator {
   sendRemoteResync(serverId: string): void
   hasClientDirectory(clientId: string, key: string): boolean
   setRemoteReplayHandler(handler: RemoteReplayHandler | null): void
+  notifyServerEvent(serverId: string, directory: string | null, event: V2Event): void
+  notifyServerConnected(serverId: string): void
+  setRemoteSubagentResolver(resolver: ((serverId: string, sessionId: string) => boolean) | null): void
 }
 
 export interface RemoteEventSource {
@@ -60,6 +63,7 @@ interface RemoteServerStream {
   versionRequested: boolean
   versionProbeToken: number
   sessionDirectories: Map<string, string>
+  subagentSessions: Set<string>
 }
 
 function createDefaultEventSource(url: string, init?: RemoteEventSourceInit): RemoteEventSource {
@@ -102,6 +106,7 @@ export class RemoteServerEventHub {
     this.started = true
     this.aggregator.setRemoteReplayHandler((clientId, serverId, directory) =>
       this.replayPendingActions(clientId, serverId, directory))
+    this.aggregator.setRemoteSubagentResolver((serverId, sessionId) => this.isSubagentSession(serverId, sessionId))
     this.unsubscribeRegistry = this.registry.onChange(change => this.handleRegistryChange(change))
     this.connectAll()
   }
@@ -116,6 +121,11 @@ export class RemoteServerEventHub {
       this.forgetStream(serverId)
     }
     this.aggregator.setRemoteReplayHandler(null)
+    this.aggregator.setRemoteSubagentResolver(null)
+  }
+
+  isSubagentSession(serverId: string, sessionId: string): boolean {
+    return this.streams.get(serverId)?.subagentSessions.has(sessionId) ?? false
   }
 
   getStatuses(): OpenCodeServerStatus[] {
@@ -230,6 +240,7 @@ export class RemoteServerEventHub {
     stream.error = null
     stream.reconnectDelay = this.reconnectDelayMs
     logger.info(`Remote event stream connected: ${serverId}`)
+    this.aggregator.notifyServerConnected(serverId)
     this.aggregator.sendRemoteResync(serverId)
     void this.refreshVersion(serverId)
     void this.replaySessionStatuses(serverId, source)
@@ -268,7 +279,16 @@ export class RemoteServerEventHub {
     if (!routed) return
 
     try {
-      this.aggregator.deliverRemoteEnvelope(serverId, routed.resolvedDirectory ?? null, routed.payloadJson)
+      const { event, resolvedDirectory, payloadJson } = routed
+      const sessionID = sessionIDFromEvent(event)
+      if (sessionID && event.type === 'session.deleted') {
+        stream.subagentSessions.delete(sessionID)
+      } else if (event.type === 'session.created' && event.data.parentID) {
+        stream.subagentSessions.add(event.data.sessionID)
+      }
+
+      this.aggregator.notifyServerEvent(serverId, resolvedDirectory ?? null, event)
+      this.aggregator.deliverRemoteEnvelope(serverId, resolvedDirectory ?? null, payloadJson)
     } catch (error) {
       logger.error(`Remote event stream failed to handle ${routed.event.type} for ${serverId}:`, error)
     }
@@ -393,6 +413,7 @@ export class RemoteServerEventHub {
       versionRequested: false,
       versionProbeToken: 0,
       sessionDirectories: new Map(),
+      subagentSessions: new Set(),
     }
     this.streams.set(serverId, stream)
     return stream

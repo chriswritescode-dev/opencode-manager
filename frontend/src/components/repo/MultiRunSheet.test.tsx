@@ -119,6 +119,8 @@ function fusion(overrides: Partial<MultiRunFusion> = {}): MultiRunFusion {
 const oneStartedRun: MultiRun = {
   id: 3,
   repoId: 7,
+  serverId: 'local',
+  directory: null,
   name: 'Sweep',
   prompt: 'go',
   isolated: true,
@@ -162,7 +164,14 @@ function createWrapper() {
 function renderSheet(overrides: Partial<React.ComponentProps<typeof MultiRunSheet>> = {}) {
   const onOpenChange = vi.fn()
   const view = render(
-    <MultiRunSheet repoId={7} directory="/repo" defaultBaseRef="main" open onOpenChange={onOpenChange} {...overrides} />,
+    <MultiRunSheet
+      target={{ kind: 'repo', repoId: 7 }}
+      directory="/repo"
+      defaultBaseRef="main"
+      open
+      onOpenChange={onOpenChange}
+      {...overrides}
+    />,
     { wrapper: createWrapper() },
   )
   return { ...view, onOpenChange }
@@ -712,6 +721,95 @@ describe('MultiRunSheet', () => {
       const message = screen.getByText('An earlier attempt is already running.').parentElement as HTMLElement
       await user.click(within(message).getByRole('button', { name: 'Open' }))
       expect(mockNavigate).toHaveBeenCalledWith('/repos/7/sessions/ses_recovered')
+    })
+  })
+
+  describe('Linked server target', () => {
+    const serverTarget = { kind: 'server', serverId: 'srv_kitchen', directory: '/srv/app' } as const
+    const serverRun: MultiRun = {
+      ...oneStartedRun,
+      repoId: null,
+      serverId: 'srv_kitchen',
+      directory: '/srv/app',
+    }
+
+    function renderServerSheet() {
+      return renderSheet({ target: serverTarget, directory: '/srv/app', defaultBaseRef: undefined })
+    }
+
+    it('lists the runs of the server directory', async () => {
+      mocks.listMultiRuns.mockResolvedValue([serverRun])
+      renderServerSheet()
+
+      expect(await screen.findByRole('region', { name: 'Sweep' })).toBeInTheDocument()
+      expect(mocks.listMultiRuns).toHaveBeenCalledWith(serverTarget)
+    })
+
+    it('launches with the server target instead of a repository', async () => {
+      const user = userEvent.setup()
+      mocks.launchMultiRun.mockResolvedValue(serverRun)
+      renderServerSheet()
+
+      await fillLaunchForm(user)
+      await user.click(screen.getByRole('button', { name: 'Launch' }))
+
+      await waitFor(() => {
+        expect(mocks.launchMultiRun).toHaveBeenCalledWith({
+          serverId: 'srv_kitchen',
+          directory: '/srv/app',
+          name: 'Sweep',
+          prompt: 'go',
+          models: ['openai/gpt-4o'],
+          isolate: true,
+        })
+      })
+    })
+
+    it('takes the base ref as text because server branches are not listed', async () => {
+      const user = userEvent.setup()
+      mocks.launchMultiRun.mockResolvedValue(serverRun)
+      renderServerSheet()
+
+      await openNewRun(user)
+      expect(screen.getByRole('textbox', { name: 'Start from' })).toBeInTheDocument()
+      expect(screen.queryByRole('combobox', { name: 'Start from' })).not.toBeInTheDocument()
+      await user.type(screen.getByLabelText('Start from'), 'release')
+      expect(mocks.listBranches).not.toHaveBeenCalled()
+
+      await user.type(screen.getByLabelText('Group name'), 'Sweep')
+      await user.type(screen.getByLabelText('Prompt'), 'go')
+      await user.click(screen.getByRole('checkbox', { name: 'GPT-4o' }))
+      await user.click(screen.getByRole('button', { name: 'Launch' }))
+
+      await waitFor(() => {
+        expect(mocks.launchMultiRun).toHaveBeenCalledWith(expect.objectContaining({ baseRef: 'release' }))
+      })
+    })
+
+    it('opens sessions on the server route and hides the local-only walkthrough', async () => {
+      const user = userEvent.setup()
+      mocks.listMultiRuns.mockResolvedValue([serverRun])
+      const { onOpenChange } = renderServerSheet()
+
+      const card = await screen.findByRole('region', { name: 'Sweep' })
+      expect(within(card).queryByRole('button', { name: /walkthrough/i })).not.toBeInTheDocument()
+
+      await user.click(within(card).getByRole('button', { name: 'Open' }))
+
+      expect(onOpenChange).toHaveBeenCalledWith(false)
+      expect(mockNavigate).toHaveBeenCalledWith('/servers/srv_kitchen/sessions/ses_11')
+    })
+
+    it('opens a server fusion session on the server route', async () => {
+      const user = userEvent.setup()
+      mocks.listMultiRuns.mockResolvedValue([{ ...serverRun, fusions: [fusion()] }])
+      renderServerSheet()
+
+      const card = await screen.findByRole('region', { name: 'Sweep' })
+      const fusionRow = within(card).getByText('from 1 source (truncated)').closest('li') as HTMLElement
+      await user.click(within(fusionRow).getByRole('button', { name: 'Open' }))
+
+      expect(mockNavigate).toHaveBeenCalledWith('/servers/srv_kitchen/sessions/ses_fusion')
     })
   })
 })

@@ -249,7 +249,23 @@ describe('OpenCodeEventStream', () => {
 
     expect(transport.posts).toContainEqual({
       path: '/api/sse/visibility',
-      body: { clientId: 'client-1', visible: true, activeSessionId: 'session-1' },
+      body: { clientId: 'client-1', visible: true, activeSessionId: 'session-1', activeServerId: 'local' },
+    })
+  })
+
+  it('reports the active server id for a remote server route', async () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+
+    const subscription = stream.subscribeGlobalMonitor({ directories: ['srv_a|/repo'], onEvent: vi.fn() })
+    transport.openConnection()
+    transport.connected('client-1')
+    subscription.reportVisibility(true, 'session-1', 'srv_a')
+    await Promise.resolve()
+
+    expect(transport.posts).toContainEqual({
+      path: '/api/sse/visibility',
+      body: { clientId: 'client-1', visible: true, activeSessionId: 'session-1', activeServerId: 'srv_a' },
     })
   })
 

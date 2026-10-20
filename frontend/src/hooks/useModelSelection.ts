@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { locationAgentKey, useModelStore, type ActiveAgent, type ModelPick, type ModelSelection } from '@/stores/modelStore'
-import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { serverScopedKey } from '@/lib/serverScope'
 import { buildServerDirectoryKey } from '@opencode-manager/shared/schemas'
 import { useProviders } from './useProviders'
@@ -62,13 +62,12 @@ export function modelStateQueryKey() {
 }
 
 export function useOpenCodeModelState(_directory?: string, enabled = true) {
-  const serverId = useOpenCodeServerId()
   return useQuery({
-    queryKey: serverScopedKey(modelStateQueryKey(), serverId),
+    queryKey: modelStateQueryKey(),
     queryFn: () => getOpenCodeModelState(),
     staleTime: 30000,
     placeholderData: keepPreviousData,
-    enabled: enabled && isLocalOpenCodeServer(serverId),
+    enabled,
   })
 }
 
@@ -123,8 +122,7 @@ export function useModelStateMutation<TInput>(
   errorMessage: string,
 ) {
   const queryClient = useQueryClient()
-  const serverId = useOpenCodeServerId()
-  const queryKey = serverScopedKey(modelStateQueryKey(), serverId)
+  const queryKey = modelStateQueryKey()
 
   return useMutation({
     mutationFn: fetcher,
@@ -222,8 +220,6 @@ export function useModelSelection(
 ): UseModelSelectionResult {
   const { data: catalog, isPlaceholderData: catalogIsPlaceholder } = useProviders(directory)
   const serverId = useOpenCodeServerId()
-  const isLocalServer = isLocalOpenCodeServer(serverId)
-
   const activeAgent = useModelStore((state) => state.activeAgent)
   const newSessionPicks = useModelStore((state) => state.newSessionPicks)
   const sessionPicks = useModelStore((state) => state.sessionPicks)
@@ -231,14 +227,13 @@ export function useModelSelection(
   const setSessionPick = useModelStore((state) => state.setSessionPick)
   const setActiveAgent = useModelStore((state) => state.setActiveAgent)
 
-  const { data: localModelState } = useOpenCodeModelState()
-  const modelState = isLocalServer ? localModelState : undefined
+  const { data: modelState, isError: modelStateFailed } = useOpenCodeModelState()
   const { data: configModelString } = useOpenCodeConfiguredModel(directory)
 
   const isModelReady = Boolean(
     catalog &&
       !catalogIsPlaceholder &&
-      (!isLocalServer || modelState !== undefined) &&
+      (modelState !== undefined || modelStateFailed) &&
       configModelString !== undefined,
   )
 
@@ -353,16 +348,14 @@ export function useModelSelection(
     } else {
       setNewSessionPick(key, nextModel)
     }
-    if (isLocalServer) updateRecentModel.mutate(nextModel)
+    updateRecentModel.mutate(nextModel)
   }
 
   const toggleFavorite = (nextModel: ModelSelection) => {
-    if (!isLocalServer) return
     updateFavoriteModel.mutate(nextModel)
   }
 
   const removeRecent = (nextModel: ModelSelection) => {
-    if (!isLocalServer) return
     removeRecentMutation.mutate(nextModel)
   }
 

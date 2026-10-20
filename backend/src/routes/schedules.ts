@@ -9,6 +9,13 @@ import type { ScheduleRunWorktreesMode } from '@opencode-manager/shared/types'
 import { ScheduleService, ScheduleServiceError } from '../services/schedules'
 import { parseId, handleServiceError } from '../utils/route-helpers'
 
+function parseServerId(value: string | undefined): string {
+  if (!value) {
+    throw new ScheduleServiceError('OpenCode server id is required', 400)
+  }
+  return value
+}
+
 function parseRunListLimit(value: string | undefined): number {
   if (value === undefined) {
     return 20
@@ -261,6 +268,135 @@ export function createScheduleRoutes(scheduleService: ScheduleService) {
       const runId = parseId(c.req.param('runId'), 'run id', ScheduleServiceError)
       const worktrees = parseWorktreesMode(c.req.query('worktrees'))
       await scheduleService.deleteRun(repoId, jobId, runId, worktrees)
+      return c.json({ success: true })
+    } catch (error) {
+      return handleServiceError(c, error, 'Failed to delete schedule run', ScheduleServiceError)
+    }
+  })
+
+  return app
+}
+
+/**
+ * Schedule routes for a project directory on a linked OpenCode server. They mirror the
+ * repo routes without worktree endpoints, because remote runs execute in place.
+ */
+export function createServerScheduleRoutes(scheduleService: ScheduleService) {
+  const app = new Hono()
+
+  app.get('/', (c) => {
+    try {
+      return c.json({ jobs: scheduleService.listServerJobs(parseServerId(c.req.param('serverId'))) })
+    } catch (error) {
+      return handleServiceError(c, error, 'Failed to list schedules', ScheduleServiceError)
+    }
+  })
+
+  app.post('/', async (c) => {
+    try {
+      const serverId = parseServerId(c.req.param('serverId'))
+      const body = await c.req.json()
+      const input = CreateScheduleJobRequestSchema.parse(body)
+      if (!input.directory) {
+        throw new ScheduleServiceError('A remote schedule requires an absolute target directory', 400)
+      }
+      const job = await scheduleService.createServerJob(serverId, input.directory, input)
+      return c.json({ job }, 201)
+    } catch (error) {
+      return handleServiceError(c, error, 'Failed to create schedule', ScheduleServiceError)
+    }
+  })
+
+  app.get('/:jobId', (c) => {
+    try {
+      const jobId = parseId(c.req.param('jobId'), 'schedule id', ScheduleServiceError)
+      const job = scheduleService.getServerJob(parseServerId(c.req.param('serverId')), jobId)
+      if (!job) {
+        return c.json({ error: 'Schedule not found' }, 404)
+      }
+      return c.json({ job })
+    } catch (error) {
+      return handleServiceError(c, error, 'Failed to get schedule', ScheduleServiceError)
+    }
+  })
+
+  app.patch('/:jobId', async (c) => {
+    try {
+      const jobId = parseId(c.req.param('jobId'), 'schedule id', ScheduleServiceError)
+      const body = await c.req.json()
+      const input = UpdateScheduleJobRequestSchema.parse(body)
+      const job = await scheduleService.updateServerJob(parseServerId(c.req.param('serverId')), jobId, input)
+      return c.json({ job })
+    } catch (error) {
+      return handleServiceError(c, error, 'Failed to update schedule', ScheduleServiceError)
+    }
+  })
+
+  app.delete('/:jobId', async (c) => {
+    try {
+      const jobId = parseId(c.req.param('jobId'), 'schedule id', ScheduleServiceError)
+      await scheduleService.deleteServerJob(parseServerId(c.req.param('serverId')), jobId)
+      return c.json({ success: true })
+    } catch (error) {
+      return handleServiceError(c, error, 'Failed to delete schedule', ScheduleServiceError)
+    }
+  })
+
+  app.post('/:jobId/run', async (c) => {
+    try {
+      const jobId = parseId(c.req.param('jobId'), 'schedule id', ScheduleServiceError)
+      const run = await scheduleService.runServerJob(parseServerId(c.req.param('serverId')), jobId, 'manual')
+      return c.json({ run })
+    } catch (error) {
+      return handleServiceError(c, error, 'Failed to run schedule', ScheduleServiceError)
+    }
+  })
+
+  app.get('/:jobId/runs', (c) => {
+    try {
+      const jobId = parseId(c.req.param('jobId'), 'schedule id', ScheduleServiceError)
+      const limit = parseRunListLimit(c.req.query('limit'))
+      return c.json({ runs: scheduleService.listServerRuns(parseServerId(c.req.param('serverId')), jobId, limit) })
+    } catch (error) {
+      return handleServiceError(c, error, 'Failed to list schedule runs', ScheduleServiceError)
+    }
+  })
+
+  app.get('/:jobId/runs/:runId', (c) => {
+    try {
+      const jobId = parseId(c.req.param('jobId'), 'schedule id', ScheduleServiceError)
+      const runId = parseId(c.req.param('runId'), 'run id', ScheduleServiceError)
+      return c.json({ run: scheduleService.getServerRun(parseServerId(c.req.param('serverId')), jobId, runId) })
+    } catch (error) {
+      return handleServiceError(c, error, 'Failed to get schedule run', ScheduleServiceError)
+    }
+  })
+
+  app.post('/:jobId/runs/:runId/cancel', async (c) => {
+    try {
+      const jobId = parseId(c.req.param('jobId'), 'schedule id', ScheduleServiceError)
+      const runId = parseId(c.req.param('runId'), 'run id', ScheduleServiceError)
+      const run = await scheduleService.cancelServerRun(parseServerId(c.req.param('serverId')), jobId, runId)
+      return c.json({ run })
+    } catch (error) {
+      return handleServiceError(c, error, 'Failed to cancel schedule run', ScheduleServiceError)
+    }
+  })
+
+  app.delete('/:jobId/runs', async (c) => {
+    try {
+      const jobId = parseId(c.req.param('jobId'), 'schedule id', ScheduleServiceError)
+      return c.json(await scheduleService.clearServerRunHistory(parseServerId(c.req.param('serverId')), jobId))
+    } catch (error) {
+      return handleServiceError(c, error, 'Failed to clear schedule run history', ScheduleServiceError)
+    }
+  })
+
+  app.delete('/:jobId/runs/:runId', async (c) => {
+    try {
+      const jobId = parseId(c.req.param('jobId'), 'schedule id', ScheduleServiceError)
+      const runId = parseId(c.req.param('runId'), 'run id', ScheduleServiceError)
+      await scheduleService.deleteServerRun(parseServerId(c.req.param('serverId')), jobId, runId)
       return c.json({ success: true })
     } catch (error) {
       return handleServiceError(c, error, 'Failed to delete schedule run', ScheduleServiceError)

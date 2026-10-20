@@ -23,6 +23,18 @@ import type { SettingsService } from './settings'
 
 const OPENCODE_STATE_DB_FILENAMES = new Set(['opencode.db', 'opencode.db-shm', 'opencode.db-wal'])
 
+export const OPENCODE_STATE_IMPORT_EXCLUDED_ENTRIES: ReadonlySet<string> = new Set([
+  'worktree',
+  'snapshot',
+  'repos',
+  'bin',
+  'log',
+  'tool-output',
+  'shell',
+])
+
+const OPENCODE_STATE_IMPORT_EXCLUDED_SUFFIXES = ['.log']
+
 export interface OpenCodeImportStatus {
   configSourcePath: string | null
   configSourcePaths: string[]
@@ -93,11 +105,37 @@ function escapeSqliteValue(value: string): string {
   return value.replace(/'/g, "''")
 }
 
-async function copyOpenCodeStateFiles(sourcePath: string, targetPath: string): Promise<void> {
+function getTopLevelEntryContainingPath(sourcePath: string, targetPath: string): string | null {
+  const relativeTargetPath = path.relative(path.resolve(sourcePath), path.resolve(targetPath))
+
+  if (relativeTargetPath === '' || relativeTargetPath.startsWith('..') || path.isAbsolute(relativeTargetPath)) {
+    return null
+  }
+
+  return relativeTargetPath.split(path.sep)[0] ?? null
+}
+
+export function shouldImportOpenCodeStateEntry(entryName: string, sourcePath: string, targetPath: string): boolean {
+  if (OPENCODE_STATE_IMPORT_EXCLUDED_ENTRIES.has(entryName)) {
+    return false
+  }
+
+  if (OPENCODE_STATE_IMPORT_EXCLUDED_SUFFIXES.some(suffix => entryName.endsWith(suffix))) {
+    return false
+  }
+
+  return entryName !== getTopLevelEntryContainingPath(sourcePath, targetPath)
+}
+
+async function copyOpenCodeStateFiles(sourcePath: string, targetPath: string, destinationPath: string): Promise<void> {
   const entries = await readdir(sourcePath, { withFileTypes: true })
 
   for (const entry of entries) {
     if (OPENCODE_STATE_DB_FILENAMES.has(entry.name)) {
+      continue
+    }
+
+    if (!shouldImportOpenCodeStateEntry(entry.name, sourcePath, destinationPath)) {
       continue
     }
 
@@ -139,7 +177,7 @@ export async function importOpenCodeStateDirectory(sourcePath: string, targetPat
   const stagedTargetPath = await mkdtemp(path.join(targetParentPath, `${targetDirectoryName}-import-`))
 
   try {
-    await copyOpenCodeStateFiles(resolvedSourcePath, stagedTargetPath)
+    await copyOpenCodeStateFiles(resolvedSourcePath, stagedTargetPath, resolvedTargetPath)
     snapshotOpenCodeDatabase(sourceDbPath, path.join(stagedTargetPath, 'opencode.db'))
 
     await rm(resolvedTargetPath, { recursive: true, force: true })

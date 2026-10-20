@@ -103,7 +103,7 @@ export function AssistantRedirect() {
             />
           )}
           <SourceControlPanel repoId={repoId} isOpen={!docked && sourceControlOpen} onClose={() => setSourceControlOpen(false)} currentBranch={repo?.currentBranch || repo?.branch || "main"} repoName="Assistant" />
-          <TerminalPanel repoId={0} directory={assistantDirectory} isOpen={!docked && terminalOpen} onClose={() => setTerminalOpen(false)} />
+          <TerminalPanel target={{ kind: 'repo', repoId: 0 }} directory={assistantDirectory} isOpen={!docked && terminalOpen} onClose={() => setTerminalOpen(false)} />
           <PreviewPanel isOpen={!docked && previewOpen} onClose={() => setPreviewOpen(false)} directory={assistantDirectory} />
           <ResetPermissionsDialog open={resetPermissionsOpen} onOpenChange={setResetPermissionsOpen} repoId={repoId} />
         </>

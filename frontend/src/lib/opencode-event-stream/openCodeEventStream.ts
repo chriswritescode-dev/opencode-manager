@@ -1,5 +1,5 @@
 import { DEFAULTS } from '@opencode-manager/shared/config'
-import type { SSEEventEnvelope } from '@opencode-manager/shared/schemas'
+import { LOCAL_OPENCODE_SERVER_ID, type SSEEventEnvelope } from '@opencode-manager/shared/schemas'
 import { createBrowserEventStreamTransport } from './browserTransport'
 import type {
   EventStreamHealthState,
@@ -76,7 +76,8 @@ export class OpenCodeEventStream {
     return {
       updateDirectories: (directories) => this.updateSubscriberDirectories(id, directories),
       reconnect: () => this.reconnect(),
-      reportVisibility: (visible, activeSessionId) => this.reportVisibility(visible, activeSessionId),
+      reportVisibility: (visible, activeSessionId, activeServerId) =>
+        this.reportVisibility(visible, activeSessionId, activeServerId),
       dispose: () => this.removeSubscriber(id),
     }
   }
@@ -479,13 +480,14 @@ export class OpenCodeEventStream {
     void this.subscribeToRemoteDirectories(directories)
   }
 
-  private reportVisibility(visible: boolean, activeSessionId?: string): void {
+  private reportVisibility(visible: boolean, activeSessionId?: string, activeServerId?: string): void {
     if (!this.clientId || !this.connected) return
 
     void this.transport.post('/api/sse/visibility', {
       clientId: this.clientId,
       visible,
       activeSessionId: activeSessionId ?? null,
+      activeServerId: activeServerId ?? LOCAL_OPENCODE_SERVER_ID,
     })
   }
 }

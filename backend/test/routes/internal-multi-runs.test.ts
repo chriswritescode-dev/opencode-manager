@@ -20,6 +20,8 @@ function createRun(overrides: Record<string, unknown> = {}) {
   return {
     id: 1,
     repoId: 1,
+    serverId: 'local',
+    directory: null,
     name: 'Sweep',
     prompt: 'go',
     isolated: true,
@@ -69,7 +71,7 @@ describe('internal-multi-runs routes', () => {
 
     expect(res.status).toBe(200)
     await expect(res.json()).resolves.toEqual({ runs: [] })
-    expect(multiRuns.list).toHaveBeenCalledWith(1)
+    expect(multiRuns.list).toHaveBeenCalledWith({ kind: 'repo', repoId: 1 })
   })
 
   it('POST /api/internal/multi-runs/3/entries/4/discard discards the entry', async () => {

@@ -250,7 +250,7 @@ describe('DesktopSidebar', () => {
     expect(screen.getByText('Logout')).toBeInTheDocument()
   })
 
-  it('hides the Servers group when no linked servers exist', () => {
+  it('hides the server switcher when no linked servers exist', () => {
     vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
     vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
     vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
@@ -261,7 +261,7 @@ describe('DesktopSidebar', () => {
 
     render(<DesktopSidebar />, { wrapper: createWrapper(['/']) })
 
-    expect(screen.queryByText('Servers')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Switch server/ })).toBeNull()
   })
   it('renders home, repos and account items and no session tree when collapsed', () => {
     vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)

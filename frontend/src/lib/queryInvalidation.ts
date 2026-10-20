@@ -1,4 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import type { GitStatusResponse } from '@/types/git'
 
 export function sessionTranscriptQueryKey(sessionID: string | null | undefined) {
@@ -182,11 +183,30 @@ export function invalidateSessionCaches(queryClient: QueryClient) {
   })
 }
 
+const SESSION_LIST_QUERY_GROUPS = new Set(['sessions', 'active-work-sessions'])
+
+/**
+ * Query key of one server's active-work session list: flat, newest-first, across all directories.
+ * It is distinct from the paged session-list keys so the two data shapes never share a cache entry.
+ */
+export function activeWorkSessionsQueryKey(serverId: string): readonly unknown[] {
+  return ['opencode', 'active-work-sessions', serverId]
+}
+
 export function invalidateSessionListCaches(queryClient: QueryClient) {
   queryClient.invalidateQueries({
     predicate: (query) =>
-      query.queryKey[0] === 'opencode' && query.queryKey[1] === 'sessions',
+      query.queryKey[0] === 'opencode' && SESSION_LIST_QUERY_GROUPS.has(String(query.queryKey[1])),
   })
+}
+
+/**
+ * The server a session-list query key belongs to: an active-work key carries it third, a paged
+ * session-list key appends it after its options, and an unscoped key is a local-server key.
+ */
+function sessionListQueryServerId(queryKey: readonly unknown[]): string {
+  if (queryKey[1] === 'active-work-sessions') return String(queryKey[2])
+  return typeof queryKey[4] === 'string' ? queryKey[4] : LOCAL_OPENCODE_SERVER_ID
 }
 
 interface SessionListInvalidationState {
@@ -195,10 +215,17 @@ interface SessionListInvalidationState {
   invalidateAll: boolean
 }
 
-const sessionListInvalidationStates = new WeakMap<QueryClient, SessionListInvalidationState>()
+const sessionListInvalidationStates = new WeakMap<QueryClient, Map<string, SessionListInvalidationState>>()
 
-function sessionListQueryMatchesDirectories(queryKey: readonly unknown[], directories: Set<string>) {
-  if (queryKey[0] !== 'opencode' || queryKey[1] !== 'sessions') return false
+function sessionListQueryMatchesDirectories(
+  queryKey: readonly unknown[],
+  directories: Set<string>,
+  serverId: string,
+) {
+  if (queryKey[0] !== 'opencode') return false
+  if (!SESSION_LIST_QUERY_GROUPS.has(String(queryKey[1]))) return false
+  if (sessionListQueryServerId(queryKey) !== serverId) return false
+  if (queryKey[1] === 'active-work-sessions') return true
   const directoryKey = queryKey[2]
   if (typeof directoryKey !== 'string') return false
   return directoryKey.split('|').some((directory) => directories.has(directory))
@@ -207,22 +234,30 @@ function sessionListQueryMatchesDirectories(queryKey: readonly unknown[], direct
 function flushSessionListInvalidation(
   queryClient: QueryClient,
   state: SessionListInvalidationState,
+  serverId: string,
 ) {
   if (state.invalidateAll) {
-    invalidateSessionListCaches(queryClient)
+    queryClient.invalidateQueries({
+      predicate: (query) =>
+        query.queryKey[0] === 'opencode' &&
+        SESSION_LIST_QUERY_GROUPS.has(String(query.queryKey[1])) &&
+        sessionListQueryServerId(query.queryKey) === serverId,
+    })
     return
   }
   queryClient.invalidateQueries({
-    predicate: (query) => sessionListQueryMatchesDirectories(query.queryKey, state.directories),
+    predicate: (query) => sessionListQueryMatchesDirectories(query.queryKey, state.directories, serverId),
   })
 }
 
 export function invalidateSessionListCachesDebounced(
   queryClient: QueryClient,
   directory?: string,
+  serverId: string = LOCAL_OPENCODE_SERVER_ID,
   delayMs = 200,
 ) {
-  const state = sessionListInvalidationStates.get(queryClient) ?? {
+  const states = sessionListInvalidationStates.get(queryClient) ?? new Map<string, SessionListInvalidationState>()
+  const state = states.get(serverId) ?? {
     timer: null,
     directories: new Set<string>(),
     invalidateAll: false,
@@ -233,10 +268,11 @@ export function invalidateSessionListCachesDebounced(
   } else {
     state.invalidateAll = true
   }
-  sessionListInvalidationStates.set(queryClient, state)
+  states.set(serverId, state)
+  sessionListInvalidationStates.set(queryClient, states)
   state.timer = setTimeout(() => {
-    sessionListInvalidationStates.delete(queryClient)
-    flushSessionListInvalidation(queryClient, state)
+    states.delete(serverId)
+    flushSessionListInvalidation(queryClient, state, serverId)
   }, delayMs)
 }
 

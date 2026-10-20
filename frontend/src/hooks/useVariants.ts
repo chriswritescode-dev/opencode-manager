@@ -1,7 +1,6 @@
 import { useCallback, useMemo } from 'react'
 import { useModelSelection, useModelStateMutation, type ModelSelectionSession } from './useModelSelection'
 import { useModelStore, type ModelSelection } from '@/stores/modelStore'
-import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { saveOpenCodeModelVariant } from '@/api/providers'
 import {
   cycleModelVariant,
@@ -28,8 +27,6 @@ export function useVariants(
   session?: ModelSelectionSession,
 ): UseVariantsResult {
   const { model, selection, info } = useModelSelection(directory, session)
-  const serverId = useOpenCodeServerId()
-  const isLocalServer = isLocalOpenCodeServer(serverId)
   const activeAgent = useModelStore((state) => state.activeAgent)
   const setSessionPick = useModelStore((state) => state.setSessionPick)
 
@@ -52,9 +49,9 @@ export function useVariants(
       if (session?.id && activeAgent?.id) {
         setSessionPick(session.id, activeAgent.id, { ...model, variant: normalizeModelVariant(variant) })
       }
-      if (isLocalServer) saveVariant.mutate({ model, value: variant })
+      saveVariant.mutate({ model, value: variant })
     },
-    [activeAgent?.id, isLocalServer, model, saveVariant, session?.id, setSessionPick],
+    [activeAgent?.id, model, saveVariant, session?.id, setSessionPick],
   )
 
   const cycleVariant = useCallback(

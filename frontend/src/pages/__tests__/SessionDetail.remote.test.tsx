@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, act } from '@testing-library/react'
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { FetchError } from '@/api/fetchWrapper'
 import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
+import { SwipeNavigationProvider, useSwipeNavigation } from '@/contexts/SwipeNavigationContext'
+import { getServerProjectPath } from '@/lib/navigation'
 import { LocationCatcher } from '@/test/test-utils'
 import { MessageThread } from '@/components/message/MessageThread'
 import { ContextUsageIndicator } from '@/components/session/ContextUsageIndicator'
@@ -31,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   getRepo: vi.fn(),
   useSessionStatus: vi.fn(),
   SourceControlPanel: vi.fn(() => null),
+  RemoteSourceControlPanel: vi.fn(() => null),
   TerminalPanel: vi.fn(() => null),
   PreviewPanel: vi.fn(() => null),
   FileBrowserSheet: vi.fn(() => null),
@@ -145,7 +149,10 @@ vi.mock('@/components/notifications/PendingActionsGroup', () => ({
 vi.mock('@/components/navigation/SessionMoreButton', () => ({ SessionMoreButton: mocks.SessionMoreButton }))
 vi.mock('@/components/navigation/ToolSidePanel', () => ({ ToolSidePanel: mocks.ToolSidePanel }))
 vi.mock('@/components/file-browser/FileBrowserSheet', () => ({ FileBrowserSheet: mocks.FileBrowserSheet }))
-vi.mock('@/components/source-control', () => ({ SourceControlPanel: mocks.SourceControlPanel }))
+vi.mock('@/components/source-control', () => ({
+  SourceControlPanel: mocks.SourceControlPanel,
+  RemoteSourceControlPanel: mocks.RemoteSourceControlPanel,
+}))
 vi.mock('@/components/terminal/TerminalPanel', () => ({ TerminalPanel: mocks.TerminalPanel }))
 vi.mock('@/components/preview/PreviewPanel', () => ({ PreviewPanel: mocks.PreviewPanel }))
 vi.mock('@/components/repo/ProjectActionsMenu', () => ({ ProjectActionsMenu: mocks.ProjectActionsMenu }))
@@ -179,23 +186,36 @@ function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } })
 }
 
+type SwipeNavigation = ReturnType<typeof useSwipeNavigation>
+
+function SwipeNavigationProbe({ captured }: { captured: { current: SwipeNavigation } }) {
+  captured.current = useSwipeNavigation()
+  return null
+}
+
 function renderRemoteSession(sessionId = 'ses_remote') {
   const capturedPathname = { current: '' }
   const capturedSearch = { current: '' }
+  const capturedSwipeNavigation = { current: null as SwipeNavigation }
   const rendered = render(
     <OpenCodeServerProvider serverId="srv_kitchen">
-      <QueryClientProvider client={createQueryClient()}>
-        <MemoryRouter initialEntries={[`/servers/srv_kitchen/sessions/${sessionId}`]}>
-          <LocationCatcher capturedSearch={capturedSearch} capturedPathname={capturedPathname} />
-          <Routes>
-            <Route path="/servers/:serverId/sessions/:sessionId" element={<SessionDetail />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>
+      <SwipeNavigationProvider>
+        <QueryClientProvider client={createQueryClient()}>
+          <MemoryRouter initialEntries={[`/servers/srv_kitchen/sessions/${sessionId}`]}>
+            <LocationCatcher capturedSearch={capturedSearch} capturedPathname={capturedPathname} />
+            <SwipeNavigationProbe captured={capturedSwipeNavigation} />
+            <Routes>
+              <Route path="/" element={null} />
+              <Route path="/servers/:serverId/projects" element={null} />
+              <Route path="/servers/:serverId/sessions/:sessionId" element={<SessionDetail />} />
+            </Routes>
+          </MemoryRouter>
+        </QueryClientProvider>
+      </SwipeNavigationProvider>
     </OpenCodeServerProvider>,
   )
 
-  return { ...rendered, capturedPathname }
+  return { ...rendered, capturedPathname, capturedSearch, capturedSwipeNavigation }
 }
 
 describe('SessionDetail remote server mode', () => {
@@ -231,7 +251,7 @@ describe('SessionDetail remote server mode', () => {
       preferences: { expandToolCalls: false },
       updateSettings: vi.fn(),
     })
-    mocks.useSettingsDialog.mockReturnValue({ open: vi.fn(), setActiveTab: vi.fn() })
+    mocks.useSettingsDialog.mockReturnValue({ open: vi.fn(), openTab: vi.fn() })
     mocks.useMobile.mockReturnValue(false)
     mocks.useVisualViewport.mockReturnValue({ keyboardHeight: 0 })
     mocks.useAutoScroll.mockReturnValue({ scrollToBottom: vi.fn(), scrollByUser: vi.fn() })
@@ -262,8 +282,50 @@ describe('SessionDetail remote server mode', () => {
     renderRemoteSession()
 
     await waitFor(() => {
-      expect(screen.getByText('Kitchen · app')).toBeInTheDocument()
+      expect(screen.getByText('Kitchen')).toHaveClass('text-info')
     })
+    expect(screen.getByText('Kitchen').parentElement).toHaveTextContent('Kitchen · app')
+  })
+
+  it('returns to the project page from the header back button', async () => {
+    const { capturedPathname, capturedSearch } = renderRemoteSession()
+
+    await waitFor(() => {
+      expect(screen.getByText('Kitchen').parentElement).toHaveTextContent('Kitchen · app')
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go back' }))
+
+    expect(capturedPathname.current).toBe('/servers/srv_kitchen/projects')
+    expect(capturedSearch.current).toBe('?directory=%2Fhome%2Fme%2Fapp')
+  })
+
+  it('registers the remote project page as the swipe-back target once the directory resolves', async () => {
+    const { capturedSwipeNavigation, unmount } = renderRemoteSession()
+
+    await waitFor(() => {
+      expect(capturedSwipeNavigation.current?.backTarget()).toBe(
+        getServerProjectPath('srv_kitchen', '/home/me/app'),
+      )
+    })
+
+    unmount()
+
+    expect(capturedSwipeNavigation.current?.backTarget()).toBeNull()
+  })
+
+  it('falls back to the projects list when the session is not found', async () => {
+    mocks.useSession.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new FetchError('Session not found', 404),
+    })
+
+    const { capturedPathname } = renderRemoteSession()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Back to projects' }))
+
+    expect(capturedPathname.current).toBe('/')
   })
 
   it('uses the session directory as the only directory source', async () => {
@@ -283,17 +345,61 @@ describe('SessionDetail remote server mode', () => {
     })
 
     expect(mocks.SourceControlPanel).not.toHaveBeenCalled()
-    expect(mocks.TerminalPanel).not.toHaveBeenCalled()
     expect(mocks.PreviewPanel).not.toHaveBeenCalled()
     expect(mocks.FileBrowserSheet).not.toHaveBeenCalled()
     expect(mocks.ProjectActionsMenu).not.toHaveBeenCalled()
     expect(mocks.RepoActionsDialog).not.toHaveBeenCalled()
     expect(mocks.ResetPermissionsDialog).not.toHaveBeenCalled()
     expect(mocks.ChangesWalkthroughSheet).not.toHaveBeenCalled()
-    expect(mocks.SessionGoalBar).not.toHaveBeenCalled()
-    expect(mocks.SessionMoreButton).not.toHaveBeenCalled()
+    expect(mocks.SessionMoreButton).toHaveBeenCalled()
     expect(vi.mocked(PendingActionsGroup).mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({ showScheduleReports: false }),
+    )
+  })
+
+  it('renders the More button so the drawer stays reachable on a remote session', async () => {
+    renderRemoteSession()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-thread')).toBeInTheDocument()
+    })
+
+    expect(mocks.SessionMoreButton).toHaveBeenCalled()
+  })
+
+  it('shows the session goal bar for a remote session', async () => {
+    renderRemoteSession()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-thread')).toBeInTheDocument()
+    })
+
+    expect(mocks.SessionGoalBar).toHaveBeenCalled()
+    expect(mocks.SessionGoalBar.mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ sessionID: 'ses_remote' }),
+    )
+  })
+
+  it('exposes terminals for the linked server', async () => {
+    renderRemoteSession()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-thread')).toBeInTheDocument()
+    })
+
+    expect(mocks.TerminalPanel.mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({
+        target: { kind: 'server', serverId: 'srv_kitchen' },
+        directory: '/home/me/app',
+        isOpen: false,
+      }),
+    )
+    expect(mocks.ToolSidePanel.mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({
+        repoId: undefined,
+        terminalTarget: { kind: 'server', serverId: 'srv_kitchen' },
+        directory: '/home/me/app',
+      }),
     )
   })
 
@@ -312,6 +418,23 @@ describe('SessionDetail remote server mode', () => {
     )
     expect(vi.mocked(mocks.ToolSidePanel).mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({ repoDirectory: '/home/me/app', sessionId: 'ses_remote' }),
+    )
+  })
+
+  it('opens the remote source control panel instead of the Manager one', async () => {
+    renderRemoteSession()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-thread')).toBeInTheDocument()
+    })
+
+    expect(mocks.SourceControlPanel).not.toHaveBeenCalled()
+    expect(mocks.RemoteSourceControlPanel.mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({
+        serverId: 'srv_kitchen',
+        directory: '/home/me/app',
+        isOpen: false,
+      }),
     )
   })
 

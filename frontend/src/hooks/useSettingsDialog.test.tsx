@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { act, render, screen } from '@testing-library/react'
-import { MemoryRouter, useNavigate } from 'react-router-dom'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { describe, it, expect } from 'vitest'
 import { useSettingsDialog } from './useSettingsDialog'
 import { renderHookWithRouter } from '@/test/test-utils'
@@ -161,6 +161,60 @@ describe('useSettingsDialog', () => {
       expect(screen.getByTestId('dialog-state').textContent).toBe('open')
 
       act(() => { screen.getByText('back').click() })
+      expect(screen.getByTestId('dialog-state').textContent).toBe('closed')
+    })
+
+    it('openTab pushes a settings entry, selects the tab, and drops the mobile sheet', () => {
+      function Harness() {
+        const { isOpen, activeTab, openTab } = useSettingsDialog()
+        const navigate = useNavigate()
+        const location = useLocation()
+        const [step, setStep] = useState<'start' | 'opened' | 'back'>('start')
+        const handled = useRef(false)
+
+        useEffect(() => {
+          if (handled.current) return
+          if (step === 'opened') {
+            handled.current = true
+            openTab('servers')
+          } else if (step === 'back') {
+            handled.current = true
+            navigate(-1)
+          }
+        }, [step, openTab, navigate])
+
+        return (
+          <div>
+            <span data-testid="dialog-state">{isOpen ? 'open' : 'closed'}</span>
+            <span data-testid="active-tab">{activeTab}</span>
+            <span data-testid="search">{location.search}</span>
+            <button onClick={() => { handled.current = false; setStep('opened') }}>
+              open
+            </button>
+            <button onClick={() => { handled.current = false; setStep('back') }}>
+              back
+            </button>
+          </div>
+        )
+      }
+
+      render(
+        <MemoryRouter initialEntries={['/?mobileTab=repos']}>
+          <Harness />
+        </MemoryRouter>,
+      )
+
+      expect(screen.getByTestId('dialog-state').textContent).toBe('closed')
+
+      act(() => { screen.getByText('open').click() })
+
+      expect(screen.getByTestId('search').textContent).toBe('?settings=open&settingsTab=servers')
+      expect(screen.getByTestId('dialog-state').textContent).toBe('open')
+      expect(screen.getByTestId('active-tab').textContent).toBe('servers')
+
+      act(() => { screen.getByText('back').click() })
+
+      expect(screen.getByTestId('search').textContent).toBe('?mobileTab=repos')
       expect(screen.getByTestId('dialog-state').textContent).toBe('closed')
     })
 

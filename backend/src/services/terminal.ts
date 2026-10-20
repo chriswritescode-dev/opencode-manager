@@ -23,6 +23,12 @@ export interface TerminalSize {
   rows: number
 }
 
+export interface TerminalTarget {
+  client: OpenCodeClient
+  baseUrl: () => string
+  includeLocalCredentials: boolean
+}
+
 export class TerminalNotFoundError extends Error {
   constructor(ptyID: string) {
     super(`Terminal not found: ${ptyID}`)
@@ -32,24 +38,30 @@ export class TerminalNotFoundError extends Error {
 
 export class TerminalService {
   constructor(
-    private readonly openCodeClient: OpenCodeClient,
+    private readonly target: TerminalTarget,
     private readonly credentialProvider: CredentialProvider,
-    private readonly upstreamBaseUrl: () => string,
     private readonly openSocket: (url: string) => WebSocket = (url) => new WebSocket(url),
   ) {}
 
+  forTarget(target: TerminalTarget): TerminalService {
+    return new TerminalService(target, this.credentialProvider, this.openSocket)
+  }
+
   async list(directory: string): Promise<TerminalInfo[]> {
-    const result = await this.openCodeClient.api.pty.list({ location: { directory } })
+    const result = await this.target.client.api.pty.list({ location: { directory } })
     return result.data.map((pty) => this.toTerminalInfo(pty))
   }
 
   async create(directory: string, input: CreateTerminalInput): Promise<TerminalInfo> {
-    const result = await this.openCodeClient.api.pty.create({
+    const result = await this.target.client.api.pty.create({
       location: { directory },
       title: formatTerminalTitle({ kind: input.kind, name: input.name, actionId: input.actionId }),
       ...(input.command !== undefined ? { command: input.command } : {}),
       ...(input.args !== undefined ? { args: input.args } : {}),
-      env: { ...this.credentialProvider.getGhCliEnv({ cwd: directory }), ...input.env },
+      env: {
+        ...(this.target.includeLocalCredentials ? this.credentialProvider.getGhCliEnv({ cwd: directory }) : {}),
+        ...input.env,
+      },
     })
     return this.toTerminalInfo(result.data)
   }
@@ -64,11 +76,11 @@ export class TerminalService {
   }
 
   async resize(directory: string, ptyID: string, size: TerminalSize): Promise<void> {
-    await this.openCodeClient.api.pty.update({ ptyID, location: { directory }, size })
+    await this.target.client.api.pty.update({ ptyID, location: { directory }, size })
   }
 
   async remove(directory: string, ptyID: string): Promise<void> {
-    await this.openCodeClient.api.pty.remove({ ptyID, location: { directory } })
+    await this.target.client.api.pty.remove({ ptyID, location: { directory } })
   }
 
   async removeAll(directory: string): Promise<void> {
@@ -92,13 +104,13 @@ export class TerminalService {
   ): Promise<WebSocketBridge> {
     await this.requireTerminal(directory, ptyID)
 
-    const result = await this.openCodeClient.api.pty.connect.token({
+    const result = await this.target.client.api.pty.connect.token({
       ptyID,
       location: { directory },
       'x-opencode-ticket': '1',
     })
 
-    const base = new URL(this.upstreamBaseUrl())
+    const base = new URL(this.target.baseUrl())
     if (!base.pathname.endsWith('/')) base.pathname += '/'
     const socketUrl = new URL(`api/pty/${encodeURIComponent(ptyID)}/connect`, base)
     socketUrl.searchParams.set('ticket', result.data.ticket)
@@ -111,7 +123,7 @@ export class TerminalService {
   private async removePersistentTerminals(directory: string): Promise<void> {
     let cursor: string | undefined
     do {
-      const page = await this.openCodeClient.api.session.list({ directory, cursor })
+      const page = await this.target.client.api.session.list({ directory, cursor })
       for (const session of page.data) {
         await this.removeSessionPersistentTerminals(session.id)
       }
@@ -122,7 +134,7 @@ export class TerminalService {
   private async removeSessionPersistentTerminals(sessionID: string): Promise<void> {
     let terminals: OpenCodePersistentPty[]
     try {
-      terminals = await this.openCodeClient.api.experimental.persistentPty.list({ sessionID })
+      terminals = await this.target.client.api.experimental.persistentPty.list({ sessionID })
     } catch (error: unknown) {
       if (openCodeErrorStatus(error) === 404) return
       throw error
@@ -130,7 +142,7 @@ export class TerminalService {
 
     for (const terminal of terminals) {
       try {
-        await this.openCodeClient.api.experimental.persistentPty.remove({ ptyID: terminal.id })
+        await this.target.client.api.experimental.persistentPty.remove({ ptyID: terminal.id })
       } catch (error: unknown) {
         if (openCodeErrorStatus(error) === 404) continue
         throw error

@@ -49,6 +49,7 @@ function getBaseItems(): MoreDrawerItem[] {
 
 const SESSION_DETAIL_PATH = /^\/repos\/(\d+)\/sessions\/[^/]+$/
 const SERVER_SESSION_DETAIL_PATH = /^\/servers\/[^/]+\/sessions\/[^/]+$/
+const SERVER_PROJECT_PATH = /^\/servers\/[^/]+\/projects$/
 
 export function isSessionDetailPath(pathname: string): boolean {
   return SESSION_DETAIL_PATH.test(pathname)
@@ -58,8 +59,6 @@ const NON_TOOL_ITEM_KEYS = new Set(['home', 'settings', 'logout'])
 
 const MANAGER_ONLY_ITEM_KEYS: ReadonlySet<string> = new Set([
   'files',
-  'source-control',
-  'terminal',
   'preview',
   'walkthrough',
   'actions',
@@ -87,12 +86,14 @@ export function toolKeyOf(item: MoreDrawerItem): string | null {
 function buildRouteNavModel(pathname: string): NavModel {
   const baseItems = getBaseItems()
 
-  if (SERVER_SESSION_DETAIL_PATH.test(pathname)) {
+  if (SERVER_SESSION_DETAIL_PATH.test(pathname) || SERVER_PROJECT_PATH.test(pathname)) {
     return {
       primary: [getAssistantNavItem()],
       items: [
         { key: 'mcp', label: 'MCP', icon: Plug, dialog: 'mcp' },
         { key: 'skills', label: 'Skills', icon: Sparkles, dialog: 'skills' },
+        { key: 'source-control', label: 'Source Control', icon: GitCommitHorizontal, dialog: 'sourceControl' },
+        { key: 'terminal', label: 'Terminal', icon: SquareTerminal, dialog: 'terminal' },
         ...baseItems,
       ],
     }

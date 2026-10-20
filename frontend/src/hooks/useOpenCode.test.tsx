@@ -466,6 +466,19 @@ describe('useCreateSession', () => {
 
     expect(mocks.createSession).toHaveBeenCalledWith({ directory: '/w/a', agent: undefined }, 'local')
   })
+
+  it('creates a session on an explicit server for a caller outside the server scope', async () => {
+    const queryClient = createQueryClient()
+    const { result } = renderHook(() => useCreateSession('/srv/kitchen', undefined, 'srv_kitchen'), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await act(async () => {
+      await result.current.mutateAsync({ agent: undefined })
+    })
+
+    expect(mocks.createSession).toHaveBeenCalledWith({ directory: '/srv/kitchen', agent: undefined }, 'srv_kitchen')
+  })
 })
 
 describe('useChildSessionReconciliation', () => {

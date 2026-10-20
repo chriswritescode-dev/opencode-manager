@@ -13,8 +13,10 @@ import userEvent from '@testing-library/user-event'
 import { describe, it, expect, beforeEach } from 'vitest'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { MobileTabBar } from './MobileTabBar'
 import { useMobile } from '@/hooks/useMobile'
+import { useSidebarServerStore } from '@/stores/sidebarServerStore'
 
 function LocationSpy() {
   const { pathname, search } = useLocation()
@@ -24,6 +26,8 @@ function LocationSpy() {
 describe('MobileTabBar', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
+    useSidebarServerStore.setState({ serverId: LOCAL_OPENCODE_SERVER_ID })
   })
 
   it('renders nothing when useMobile returns false', () => {
@@ -194,6 +198,94 @@ describe('MobileTabBar', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/assistant')
   })
 
+  it('hides the tab bar on a linked server page path', () => {
+    vi.mocked(useMobile).mockReturnValue(true)
+    const queryClient = new QueryClient()
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/servers/srv_kitchen']}>
+          <MobileTabBar />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    expect(container.firstChild).toBeNull()
+  })
+
+  it('renders global tabs with Git on a linked server project page', () => {
+    vi.mocked(useMobile).mockReturnValue(true)
+    const queryClient = new QueryClient()
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/servers/srv_kitchen/projects?directory=%2Fhome%2Fme%2Fapp']}>
+          <MobileTabBar />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    const labels = screen.getAllByRole('button').map((button) => button.textContent)
+    expect(labels).toEqual(['Repos', 'Git', 'Assistant', 'More'])
+    expect(screen.queryByText('Files')).not.toBeInTheDocument()
+    expect(screen.queryByText('Schedules')).not.toBeInTheDocument()
+  })
+
+  it('opens the remote source control dialog from the Git tab on a linked server project page', async () => {
+    vi.mocked(useMobile).mockReturnValue(true)
+    const queryClient = new QueryClient()
+    const user = userEvent.setup()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/servers/srv_kitchen/projects?directory=%2Fhome%2Fme%2Fapp']}>
+          <Routes>
+            <Route path="*" element={<>
+              <MobileTabBar />
+              <LocationSpy />
+            </>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Git' }))
+    expect(screen.getByTestId('location')).toHaveTextContent('/servers/srv_kitchen/projects')
+    expect(screen.getByTestId('location')).toHaveTextContent('directory=%2Fhome%2Fme%2Fapp')
+    expect(screen.getByTestId('location')).toHaveTextContent('dialog=sourceControl')
+  })
+
+  it('opens the repos sheet from the Repos tab on a linked server project page', async () => {
+    vi.mocked(useMobile).mockReturnValue(true)
+    const queryClient = new QueryClient()
+    const user = userEvent.setup()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/servers/srv_kitchen/projects?directory=%2Fhome%2Fme%2Fapp']}>
+          <Routes>
+            <Route path="*" element={<>
+              <MobileTabBar />
+              <LocationSpy />
+            </>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Repos' }))
+    expect(screen.getByTestId('location')).toHaveTextContent('mobileTab=repos')
+  })
+
+  it('does not render tab bar on a linked server session path', () => {
+    vi.mocked(useMobile).mockReturnValue(true)
+    const queryClient = new QueryClient()
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/servers/srv_kitchen/sessions/ses_remote']}>
+          <MobileTabBar />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    expect(container.firstChild).toBeNull()
+  })
+
   it('renders schedule tabs on /repos/:id/schedules path', () => {
     vi.mocked(useMobile).mockReturnValue(true)
     const queryClient = new QueryClient()
@@ -226,6 +318,22 @@ describe('MobileTabBar', () => {
     expect(screen.getByText('Schedules')).toBeInTheDocument()
     expect(screen.getByText('More')).toBeInTheDocument()
     expect(screen.queryByText('Git')).not.toBeInTheDocument()
+  })
+
+  it('hides the Files tab on the home page when a linked server is selected', () => {
+    vi.mocked(useMobile).mockReturnValue(true)
+    useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
+    const queryClient = new QueryClient()
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/']}>
+          <MobileTabBar />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    const labels = screen.getAllByRole('button').map((button) => button.textContent)
+    expect(labels).toEqual(['Repos', 'Assistant', 'Schedules', 'More'])
+    expect(screen.queryByText('Files')).not.toBeInTheDocument()
   })
 
   it('renders tab bar on /schedules path', () => {

@@ -56,6 +56,11 @@ export const workspaceModeOptions: Array<RadioOption<ScheduleWorkspaceMode>> = [
     label: 'Shared worktree',
     description: 'Every run reuses one worktree and branch, so work builds up from run to run.',
   },
+  {
+    value: 'in-place',
+    label: 'In place',
+    description: 'Runs directly in the target project directory. Used for projects on a linked server.',
+  },
 ]
 
 export function formatWorkspaceMode(mode: ScheduleWorkspaceMode): string {

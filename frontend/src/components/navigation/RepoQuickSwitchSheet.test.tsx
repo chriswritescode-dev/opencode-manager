@@ -1,11 +1,15 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RepoQuickSwitchSheet } from './RepoQuickSwitchSheet'
 import { getRepoSiblings, listRepos } from '@/api/repos'
+import { listProjects, type OpenCodeProject } from '@/api/opencode'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
+import { useSidebarServerStore } from '@/stores/sidebarServerStore'
 import type { ActiveWorkItem } from '@/lib/activeWork'
 
 type SessionFixture = {
@@ -38,13 +42,31 @@ const activityMocks = vi.hoisted(() => ({
   useActivityWindowMinutes: vi.fn(),
 }))
 
+const serverMocks = vi.hoisted(() => ({
+  useOpenCodeServers: vi.fn(),
+  useOpenCodeServerStatuses: vi.fn(),
+}))
+
+vi.mock('@/hooks/useOpenCodeServers', () => ({
+  useOpenCodeServers: serverMocks.useOpenCodeServers,
+  useOpenCodeServerStatuses: serverMocks.useOpenCodeServerStatuses,
+}))
+
 vi.mock('@/hooks/useActiveWork', () => ({
   useActiveWork: activityMocks.useActiveWork,
   useActivityWindowMinutes: activityMocks.useActivityWindowMinutes,
   useRepoActivityState: () => null,
+  useServerActivityState: () => null,
+  useLocalActivityState: () => null,
+  useProjectActivityState: () => null,
 }))
 
 vi.mock('@/api/repos')
+
+vi.mock('@/api/opencode', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/opencode')>()
+  return { ...actual, listProjects: vi.fn() }
+})
 
 vi.mock('@/contexts/EventContext', () => ({
   usePermissions: () => ({
@@ -132,6 +154,43 @@ function setActivityGroups(groups: {
   })
 }
 
+function createLinkedServer(id: string, name: string, enabled = true) {
+  return {
+    id,
+    name,
+    baseUrl: `https://${id}.example.com`,
+    username: 'opencode',
+    enabled,
+    hasPassword: true,
+    createdAt: 1,
+    updatedAt: 2,
+  }
+}
+
+function createProject(id: string, name: string, canonical: string): OpenCodeProject {
+  return {
+    id,
+    canonical,
+    name,
+    time: { created: 1, updated: 2 },
+    sandboxes: [],
+  } as OpenCodeProject
+}
+
+function setLinkedServers(servers: Array<ReturnType<typeof createLinkedServer>>) {
+  serverMocks.useOpenCodeServers.mockReturnValue({ servers, isLoading: false })
+  serverMocks.useOpenCodeServerStatuses.mockReturnValue({
+    statuses: [],
+    statusById: Object.fromEntries(
+      servers.map((server) => [
+        server.id,
+        { serverId: server.id, connected: true, version: null, error: null },
+      ]),
+    ),
+    isLoading: false,
+  })
+}
+
 function createWrapper() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -167,12 +226,16 @@ function MobileSheetHarness() {
 describe('RepoQuickSwitchSheet', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
+    useSidebarServerStore.setState({ serverId: LOCAL_OPENCODE_SERVER_ID })
     vi.mocked(getRepoSiblings).mockResolvedValue([])
+    vi.mocked(listProjects).mockResolvedValue([])
     sessionsData.splice(0, sessionsData.length)
     sessionsHookCalls.splice(0, sessionsHookCalls.length)
     permissionSessions.current.clear()
     activityMocks.useActivityWindowMinutes.mockReturnValue(30)
     setActivityGroups({})
+    setLinkedServers([])
   })
 
   it('renders with loading state', async () => {
@@ -925,6 +988,109 @@ describe('RepoQuickSwitchSheet', () => {
 
     expect(createSessionDirectories).toEqual(['/path/to/repo2'])
     expect(pathname).toBe('/repos/2/sessions/new-session')
+    expect(handleClose).toHaveBeenCalled()
+  })
+
+  it('renders the server switcher when enabled linked servers exist', async () => {
+    const user = userEvent.setup()
+    vi.mocked(listRepos).mockResolvedValue([createRepo(1, 'repo1', '/path/to/repo1')])
+    setLinkedServers([
+      createLinkedServer('srv_kitchen', 'Kitchen'),
+      createLinkedServer('srv_office', 'Office', false),
+    ])
+
+    render(<RepoQuickSwitchSheet isOpen onClose={vi.fn()} />, { wrapper: createWrapper() })
+
+    const trigger = await screen.findByRole('button', { name: 'Switch server, current: OC Manager' })
+    expect(trigger).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Servers' })).not.toBeInTheDocument()
+
+    await user.click(trigger)
+
+    expect(await screen.findByRole('menuitem', { name: /Kitchen/ })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /Office/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Connected' })).toBeInTheDocument()
+  })
+
+  it('hides the server switcher when no linked servers exist', async () => {
+    vi.mocked(listRepos).mockResolvedValue([createRepo(1, 'repo1', '/path/to/repo1')])
+
+    render(<RepoQuickSwitchSheet isOpen onClose={vi.fn()} />, { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(screen.getByText('repo1')).toBeInTheDocument()
+    })
+
+    expect(screen.queryByRole('button', { name: /Switch server/ })).toBeNull()
+  })
+
+  it('switches to a linked server without navigating or closing the sheet', async () => {
+    const user = userEvent.setup()
+    vi.mocked(listRepos).mockResolvedValue([createRepo(1, 'repo1', '/path/to/repo1')])
+    vi.mocked(listProjects).mockResolvedValue([createProject('p1', 'Alpha', '/projects/alpha')])
+    setLinkedServers([createLinkedServer('srv_kitchen', 'Kitchen')])
+    const handleClose = vi.fn()
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={['/repos/1']}>
+          <Routes>
+            <Route
+              path="*"
+              element={
+                <>
+                  <RepoQuickSwitchSheet isOpen onClose={handleClose} />
+                  <LocationSpy />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await user.click(await screen.findByRole('button', { name: 'Switch server, current: OC Manager' }))
+    await user.click(await screen.findByRole('menuitem', { name: /Kitchen/ }))
+
+    expect(await screen.findByText('Alpha')).toBeInTheDocument()
+    expect(screen.queryByText('repo1')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Add repository/ })).not.toBeInTheDocument()
+    expect(screen.getByTestId('location')).toHaveTextContent('/repos/1')
+    expect(handleClose).not.toHaveBeenCalled()
+  })
+
+  it('opens a remote project from the sheet and closes it', async () => {
+    const user = userEvent.setup()
+    vi.mocked(listRepos).mockResolvedValue([createRepo(1, 'repo1', '/path/to/repo1')])
+    vi.mocked(listProjects).mockResolvedValue([createProject('p1', 'Alpha', '/projects/alpha')])
+    setLinkedServers([createLinkedServer('srv_kitchen', 'Kitchen')])
+    const handleClose = vi.fn()
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={['/repos/1']}>
+          <Routes>
+            <Route
+              path="*"
+              element={
+                <>
+                  <RepoQuickSwitchSheet isOpen onClose={handleClose} />
+                  <LocationSpy />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await user.click(await screen.findByRole('button', { name: 'Switch server, current: OC Manager' }))
+    await user.click(await screen.findByRole('menuitem', { name: /Kitchen/ }))
+    await user.click(await screen.findByRole('button', { name: /^Alpha/ }))
+
+    expect(screen.getByTestId('location')).toHaveTextContent(
+      '/servers/srv_kitchen/projects?directory=%2Fprojects%2Falpha',
+    )
     expect(handleClose).toHaveBeenCalled()
   })
 })

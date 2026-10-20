@@ -311,6 +311,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const initialFetchDoneRef = useRef(false)
   const statusSyncVersionRef = useRef(0)
   const remoteStatusSyncVersionsRef = useRef(new Map<string, number>())
+  const streamConnectedRef = useRef(false)
+  const reconciledRemoteServerIdsRef = useRef(new Set<string>())
   const statusPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const subscriptionRef = useRef<ReturnType<typeof openCodeEventStream.subscribeGlobalMonitor> | null>(null)
   const reposRef = useRef<typeof repos>(null)
@@ -776,6 +778,24 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     }
   }, [resolveSessionAncestry])
 
+  const reconcileRemoteServersOnce = useCallback((serversToReconcile: Array<{ id: string }>) => {
+    const reconciled = reconciledRemoteServerIdsRef.current
+    for (const server of serversToReconcile) {
+      if (reconciled.has(server.id)) continue
+      reconciled.add(server.id)
+      void reconcileRemoteSessionStatuses(server.id)
+    }
+  }, [reconcileRemoteSessionStatuses])
+
+  useEffect(() => {
+    const enabledIds = new Set(enabledRemoteServers.map((server) => server.id))
+    for (const serverId of reconciledRemoteServerIdsRef.current) {
+      if (!enabledIds.has(serverId)) reconciledRemoteServerIdsRef.current.delete(serverId)
+    }
+    if (!streamConnectedRef.current) return
+    reconcileRemoteServersOnce(enabledRemoteServers)
+  }, [enabledRemoteServers, reconcileRemoteServersOnce])
+
   const stopStatusPoll = useCallback(() => {
     if (statusPollIntervalRef.current === null) return
     clearInterval(statusPollIntervalRef.current)
@@ -855,6 +875,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         }
         case 'session.idle': {
           useSessionStatus.getState().setSessionServer(event.data.sessionID, serverId)
+          rememberSessionDirectory(event.data.sessionID, event.directory, serverId)
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
           break
         }
@@ -869,7 +890,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           useSessionStatus.getState().setSessionServer(event.data.sessionID, serverId)
           useSessionStatus.getState().setOutcome(event.data.sessionID, 'succeeded')
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
-          invalidateSessionListCachesDebounced(queryClient, event.directory)
+          invalidateSessionListCachesDebounced(queryClient, event.directory, serverId)
           queryClient.invalidateQueries({ queryKey: changeWalkthroughQueryKey(event.data.sessionID) })
           break
         }
@@ -877,7 +898,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           useSessionStatus.getState().setSessionServer(event.data.sessionID, serverId)
           useSessionStatus.getState().setOutcome(event.data.sessionID, 'failed')
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
-          invalidateSessionListCachesDebounced(queryClient, event.directory)
+          invalidateSessionListCachesDebounced(queryClient, event.directory, serverId)
           queryClient.invalidateQueries({ queryKey: changeWalkthroughQueryKey(event.data.sessionID) })
           break
         }
@@ -885,18 +906,18 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           useSessionStatus.getState().setSessionServer(event.data.sessionID, serverId)
           useSessionStatus.getState().setOutcome(event.data.sessionID, 'interrupted')
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
-          invalidateSessionListCachesDebounced(queryClient, event.directory)
+          invalidateSessionListCachesDebounced(queryClient, event.directory, serverId)
           queryClient.invalidateQueries({ queryKey: changeWalkthroughQueryKey(event.data.sessionID) })
           break
         }
         case 'session.deleted': {
           useSessionStatus.getState().forgetSession(event.data.sessionID)
-          invalidateSessionListCachesDebounced(queryClient, event.directory)
+          invalidateSessionListCachesDebounced(queryClient, event.directory, serverId)
           break
         }
         case 'session.created': {
           useSessionStatus.getState().setSessionServer(event.data.sessionID, serverId)
-          invalidateSessionListCachesDebounced(queryClient, event.directory)
+          invalidateSessionListCachesDebounced(queryClient, event.directory, serverId)
           if (typeof event.data.parentID === 'string') {
             useSessionStatus.getState().setSessionParent(event.data.sessionID, event.data.parentID)
           }
@@ -906,7 +927,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         case 'session.renamed':
         case 'session.moved':
         case 'session.metadata.updated':
-          invalidateSessionListCachesDebounced(queryClient, event.directory)
+          invalidateSessionListCachesDebounced(queryClient, event.directory, serverId)
           break
         case 'shell.created': {
           const info = event.data.info
@@ -961,6 +982,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           setSSHHostKeyRequest(event.properties)
           break
         case 'vcs.branch.updated': {
+          if (!isLocalOpenCodeServer(serverId)) break
           const repo = reposRef.current?.find((candidate) => repoMatchesDirectory(candidate, event.directory))
           if (!repo) {
             queryClient.invalidateQueries({ queryKey: ['repo', 'siblings'] })
@@ -982,19 +1004,23 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
+    const reconciledRemoteServerIds = reconciledRemoteServerIdsRef.current
+
     const handleStatusChange = (connected: boolean) => {
       if (connected) {
+        streamConnectedRef.current = true
+        reconciledRemoteServerIdsRef.current.clear()
         initialFetchDoneRef.current = false
         fetchInitialPendingData()
         fetchInitialSessionStatuses()
-        for (const server of enabledRemoteServersRef.current) {
-          void reconcileRemoteSessionStatuses(server.id)
-        }
+        reconcileRemoteServersOnce(enabledRemoteServersRef.current)
         void syncRunningShells(collectTrackedDirectories())
         invalidateChildSessionCaches(queryClient)
         invalidateQueryKeysDebounced(queryClient, LOCATION_CATALOG_QUERY_KEYS)
         startStatusPoll()
       } else {
+        streamConnectedRef.current = false
+        reconciledRemoteServerIdsRef.current.clear()
         statusSyncVersionRef.current += 1
         invalidateRemoteStatusSyncs()
         stopStatusPoll()
@@ -1009,6 +1035,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         void reconcilePendingActionsForDirectories(directories)
         void reconcileRemoteSessionStatuses(serverId)
         void syncRunningShells(directories)
+        invalidateSessionListCachesDebounced(queryClient, undefined, serverId)
         invalidateQueryKeysDebounced(
           queryClient,
           LOCATION_CATALOG_QUERY_KEYS.map((key) => serverScopedKey(key, serverId)),
@@ -1038,13 +1065,15 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     subscriptionRef.current = subscription
     
     return () => {
+      streamConnectedRef.current = false
+      reconciledRemoteServerIds.clear()
       statusSyncVersionRef.current += 1
       invalidateRemoteStatusSyncs()
       stopStatusPoll()
       subscription.dispose()
       subscriptionRef.current = null
     }
-  }, [addPermission, removePermission, addForm, removeForm, rememberSessionDirectory, fetchInitialPendingData, fetchInitialSessionStatuses, startStatusPoll, stopStatusPoll, queryClient, handleHealthChange, reconcilePendingActionsForDirectories, collectTrackedDirectories, syncRunningShells, resolveSessionAncestry, reconcileRemoteSessionStatuses, invalidateRemoteStatusSyncs])
+  }, [addPermission, removePermission, addForm, removeForm, rememberSessionDirectory, fetchInitialPendingData, fetchInitialSessionStatuses, startStatusPoll, stopStatusPoll, queryClient, handleHealthChange, reconcilePendingActionsForDirectories, collectTrackedDirectories, syncRunningShells, resolveSessionAncestry, reconcileRemoteSessionStatuses, reconcileRemoteServersOnce, invalidateRemoteStatusSyncs])
 
   useEffect(() => {
     reposRef.current = repos

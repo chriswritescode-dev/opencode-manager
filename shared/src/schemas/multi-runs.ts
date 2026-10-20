@@ -62,9 +62,15 @@ export const MultiRunFusionSchema = z.object({
 
 export type MultiRunFusion = z.infer<typeof MultiRunFusionSchema>;
 
+export type MultiRunTarget =
+  | { kind: "repo"; repoId: number }
+  | { kind: "server"; serverId: string; directory: string };
+
 export const MultiRunSchema = z.object({
   id: z.number().int(),
-  repoId: z.number().int(),
+  repoId: z.number().int().nullable(),
+  serverId: z.string(),
+  directory: z.string().nullable(),
   name: z.string(),
   prompt: z.string(),
   isolated: z.boolean(),
@@ -76,19 +82,30 @@ export const MultiRunSchema = z.object({
 
 export type MultiRun = z.infer<typeof MultiRunSchema>;
 
-export const LaunchMultiRunRequestSchema = z.object({
-  repoId: z.number().int(),
-  name: z.string().trim().min(1).max(MULTI_RUN_NAME_MAX_LENGTH),
-  prompt: z.string().trim().min(1).max(SESSION_PROMPT_MAX_LENGTH),
-  models: z
-    .array(z.string().min(3))
-    .min(1)
-    .max(MULTI_RUN_MAX_MODELS)
-    .refine((models) => new Set(models).size === models.length, { message: "Models must be unique" }),
-  isolate: z.boolean(),
-  baseRef: z.string().trim().min(1).optional(),
-  agent: z.string().optional(),
-});
+export const LaunchMultiRunRequestSchema = z
+  .object({
+    repoId: z.number().int().optional(),
+    serverId: z.string().trim().min(1).optional(),
+    directory: z.string().trim().min(1).optional(),
+    name: z.string().trim().min(1).max(MULTI_RUN_NAME_MAX_LENGTH),
+    prompt: z.string().trim().min(1).max(SESSION_PROMPT_MAX_LENGTH),
+    models: z
+      .array(z.string().min(3))
+      .min(1)
+      .max(MULTI_RUN_MAX_MODELS)
+      .refine((models) => new Set(models).size === models.length, { message: "Models must be unique" }),
+    isolate: z.boolean(),
+    baseRef: z.string().trim().min(1).optional(),
+    agent: z.string().optional(),
+  })
+  .refine((data) => (data.repoId === undefined) !== (data.serverId === undefined), {
+    message: "Provide either repoId or serverId",
+    path: ["repoId"],
+  })
+  .refine((data) => (data.serverId === undefined) === (data.directory === undefined), {
+    message: "A server target needs a directory",
+    path: ["directory"],
+  });
 
 export type LaunchMultiRunRequest = z.infer<typeof LaunchMultiRunRequestSchema>;
 

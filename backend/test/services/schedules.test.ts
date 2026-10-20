@@ -3,6 +3,7 @@ import path from 'path'
 import type { ScheduleJob, ScheduleRun } from '@opencode-manager/shared/types'
 import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
 import { getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 
 const mocks = vi.hoisted(() => ({
   getRepoById: vi.fn(),
@@ -33,6 +34,7 @@ const mocks = vi.hoisted(() => ({
 
   resolveOpenCodeModel: vi.fn(),
   onEvent: vi.fn(),
+  onServerConnected: vi.fn(),
   loggerError: vi.fn(),
   updateScheduleRunWorktree: vi.fn(),
   stubWorktreeManager: {
@@ -86,6 +88,7 @@ vi.mock('../../src/services/opencode-models', () => ({
 vi.mock('../../src/services/sse-aggregator', () => ({
   sseAggregator: {
     onEvent: mocks.onEvent,
+    onServerConnected: mocks.onServerConnected,
   },
 }))
 
@@ -128,6 +131,15 @@ function sessionIdleEvent(directory: string, sessionID: string) {
 
 function captureEventListener(): (directory: string, event: unknown) => void {
   return mocks.onEvent.mock.calls[0]?.[0] as (directory: string, event: unknown) => void
+}
+
+function captureServerConnectedListener(): (serverId: string) => void {
+  return mocks.onServerConnected.mock.calls[0]?.[0] as (serverId: string) => void
+}
+
+function activeRunMonitor(jobId: number): { dispose(): void } | undefined {
+  const activeRuns = Reflect.get(ScheduleService, 'activeRuns') as Map<number, { sessionMonitor?: { dispose(): void } }>
+  return activeRuns.get(jobId)?.sessionMonitor
 }
 
 const repo = {
@@ -195,6 +207,7 @@ describe('ScheduleService', () => {
     mocks.createScheduleRun.mockReturnValue(baseRun)
     mocks.resolveOpenCodeModel.mockResolvedValue({ providerID: 'openai', id: 'gpt-5-mini', model: 'openai/gpt-5-mini' })
     mocks.onEvent.mockReturnValue(vi.fn())
+    mocks.onServerConnected.mockReturnValue(vi.fn())
     mocks.getScheduleRunById.mockReturnValue({
       ...baseRun,
       sessionId: 'ses-run-1',
@@ -251,6 +264,70 @@ describe('ScheduleService', () => {
       7,
       expect.objectContaining({ nextRunAt: job.nextRunAt }),
     )
+  })
+
+  it('completes a run after the server reconnects when the settle event was missed', async () => {
+    const stub = createStubScheduleApi({
+      active: { 'ses-run-1': { type: 'running' } },
+      messages: [assistantMessage('Recovered summary.', { completed: true })],
+    })
+    const service = makeService(stub.api)
+    const runWithSession: ScheduleRun = {
+      ...baseRun,
+      sessionId: 'ses-run-1',
+      sessionTitle: 'Scheduled: Weekly engineering summary',
+      logText: 'Run started. Waiting for assistant response...',
+    }
+
+    mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
+
+    await service.runJob(42, 7, 'manual')
+    await vi.waitFor(() => expect(stub.api.session.active).toHaveBeenCalled())
+    stub.state.active = {}
+
+    captureServerConnectedListener()(LOCAL_OPENCODE_SERVER_ID)
+
+    await vi.waitFor(() => {
+      expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+        expect.anything(),
+        42,
+        7,
+        5,
+        expect.objectContaining({
+          status: 'completed',
+          responseText: 'Recovered summary.',
+        }),
+      )
+    })
+  })
+
+  it('keeps waiting after the server reconnects while the session is still busy', async () => {
+    const stub = createStubScheduleApi({ active: { 'ses-run-1': { type: 'running' } } })
+    const service = makeService(stub.api)
+    const runWithSession: ScheduleRun = {
+      ...baseRun,
+      sessionId: 'ses-run-1',
+      sessionTitle: 'Scheduled: Weekly engineering summary',
+      logText: 'Run started. Waiting for assistant response...',
+    }
+
+    mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
+
+    await service.runJob(42, 7, 'manual')
+    await vi.waitFor(() => expect(stub.api.session.active).toHaveBeenCalled())
+    const activeChecks = vi.mocked(stub.api.session.active).mock.calls.length
+
+    captureServerConnectedListener()(LOCAL_OPENCODE_SERVER_ID)
+
+    await vi.waitFor(() => {
+      expect(vi.mocked(stub.api.session.active).mock.calls.length).toBeGreaterThan(activeChecks)
+    })
+    expect(mocks.updateScheduleRun).not.toHaveBeenCalled()
+
+    activeRunMonitor(7)?.dispose()
+    await vi.waitFor(() => {
+      expect(Reflect.get(ScheduleService, 'activeRuns').has(7)).toBe(false)
+    })
   })
 
   it('strips thinking blocks from the persisted assistant response while joining text items', async () => {
@@ -1263,6 +1340,7 @@ describe('ScheduleService startup cancellation', () => {
     mocks.createScheduleRun.mockReturnValue(baseRun)
     mocks.resolveOpenCodeModel.mockResolvedValue({ providerID: 'openai', id: 'gpt-5-mini', model: 'openai/gpt-5-mini' })
     mocks.onEvent.mockReturnValue(vi.fn())
+    mocks.onServerConnected.mockReturnValue(vi.fn())
     mocks.stubWorktreeManager.prepare.mockResolvedValue(null)
     mocks.stubWorktreeManager.finalize.mockResolvedValue({ commitHash: null })
   })
@@ -1525,6 +1603,7 @@ describe('ScheduleService monitor cancellation', () => {
     mocks.createScheduleRun.mockReturnValue(baseRun)
     mocks.resolveOpenCodeModel.mockResolvedValue({ providerID: 'openai', id: 'gpt-5-mini', model: 'openai/gpt-5-mini' })
     mocks.onEvent.mockReturnValue(vi.fn())
+    mocks.onServerConnected.mockReturnValue(vi.fn())
     mocks.stubWorktreeManager.prepare.mockResolvedValue(null)
     mocks.stubWorktreeManager.finalize.mockResolvedValue({ commitHash: null })
   })

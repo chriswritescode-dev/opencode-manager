@@ -89,24 +89,31 @@ export function DesktopSidebar() {
         )}
 
         {collapsed ? (
-          <div className="flex flex-col gap-1 p-2 pt-0">
-            {collapsedItems.map((item: MoreDrawerItem) => (
-              <SidebarItem
-                key={item.key}
-                icon={item.icon}
-                label={item.label}
-                collapsed={collapsed}
-                onClick={() => handleItemClick(item)}
-                danger={item.danger}
-              />
-            ))}
-          </div>
+          <>
+            <div className="flex flex-col gap-1 p-2 pt-0">
+              {collapsedItems.map((item: MoreDrawerItem) => (
+                <SidebarItem
+                  key={item.key}
+                  icon={item.icon}
+                  label={item.label}
+                  collapsed={collapsed}
+                  onClick={() => handleItemClick(item)}
+                  danger={item.danger}
+                />
+              ))}
+            </div>
+            <LinkedServersNav variant="rail" />
+          </>
         ) : (
           <>
-            <LinkedServersNav />
+            <div className="px-2 py-1">
+              <LinkedServersNav />
+            </div>
 
             <section aria-label="Sessions" className="flex min-h-0 flex-1 flex-col border-t border-border">
-              <h2 className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">Sessions</h2>
+              <h2 className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                Sessions
+              </h2>
               <DesktopSessionTree />
             </section>
 

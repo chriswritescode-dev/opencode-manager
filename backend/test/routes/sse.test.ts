@@ -240,7 +240,7 @@ describe('SSE Routes', () => {
 
       expect(res.status).toBe(200)
       await expect(res.json()).resolves.toEqual({ success: true })
-      expect(sseMocks.setClientVisibility).toHaveBeenCalledWith('client-1', true, 'session-9')
+      expect(sseMocks.setClientVisibility).toHaveBeenCalledWith('client-1', true, 'session-9', 'local')
     })
 
     it('defaults the active session id to null when omitted', async () => {
@@ -254,7 +254,20 @@ describe('SSE Routes', () => {
 
       expect(res.status).toBe(200)
       await expect(res.json()).resolves.toEqual({ success: true })
-      expect(sseMocks.setClientVisibility).toHaveBeenCalledWith('client-1', false, null)
+      expect(sseMocks.setClientVisibility).toHaveBeenCalledWith('client-1', false, null, 'local')
+    })
+
+    it('forwards an explicit active server id', async () => {
+      sseMocks.setClientVisibility.mockReturnValue(true)
+
+      const res = await app.fetch(new Request('http://localhost/visibility', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId: 'client-1', visible: true, activeSessionId: 'session-9', activeServerId: 'srv_a' }),
+      }))
+
+      expect(res.status).toBe(200)
+      expect(sseMocks.setClientVisibility).toHaveBeenCalledWith('client-1', true, 'session-9', 'srv_a')
     })
 
     it('returns 400 for an invalid visibility body', async () => {

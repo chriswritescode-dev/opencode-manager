@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useModelSelection, useOpenCodeDefaultModel } from './useModelSelection'
+import { modelStateQueryKey, useModelSelection, useOpenCodeDefaultModel } from './useModelSelection'
 import { useProviders } from './useProviders'
 import { locationAgentKey, useModelStore, type ModelSelection } from '@/stores/modelStore'
 import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
@@ -493,8 +493,7 @@ describe('useModelSelection', () => {
       models: [modelInfo('anthropic', 'claude-sonnet-4'), modelInfo('openai', 'gpt-4o')],
     }
 
-    const renderRemote = (directory = '/test') => {
-      const queryClient = createTestQueryClient()
+    const renderRemote = (directory = '/test', queryClient = createTestQueryClient()) => {
       return renderHook(
         () => useModelSelection(directory),
         {
@@ -531,11 +530,34 @@ describe('useModelSelection', () => {
       ).toBeUndefined()
     })
 
-    it('does not read or write the local model state', async () => {
+    it('reads the shared model state and writes favorites and recents on a remote server', async () => {
+      mockGetOpenCodeModelState.mockResolvedValue({
+        recent: [
+          { providerID: 'openai', modelID: 'gpt-4o' },
+          { providerID: 'ghost', modelID: 'gone' },
+        ],
+        favorite: [
+          { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
+          { providerID: 'ghost', modelID: 'gone' },
+        ],
+        variant: {},
+      })
+
       const { result } = renderRemote()
 
       await waitFor(() => {
         expect(result.current.isModelReady).toBe(true)
+      })
+
+      expect(mockGetOpenCodeModelState).toHaveBeenCalledTimes(1)
+      expect(result.current.modelState).toBeDefined()
+      await waitFor(() => {
+        expect(result.current.recentModels).toEqual([{ providerID: 'openai', modelID: 'gpt-4o' }])
+      })
+      await waitFor(() => {
+        expect(result.current.favoriteModels).toEqual([
+          { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
+        ])
       })
 
       act(() => {
@@ -544,29 +566,59 @@ describe('useModelSelection', () => {
         result.current.removeRecentModel({ providerID: 'openai', modelID: 'gpt-4o' })
       })
 
-      expect(mockGetOpenCodeModelState).not.toHaveBeenCalled()
-      expect(mockAddOpenCodeRecentModel).not.toHaveBeenCalled()
-      expect(mockToggleOpenCodeFavoriteModel).not.toHaveBeenCalled()
-      expect(mockRemoveOpenCodeRecentModel).not.toHaveBeenCalled()
-      expect(result.current.recentModels).toEqual([])
-      expect(result.current.favoriteModels).toEqual([])
-      expect(result.current.modelState).toBeUndefined()
+      await waitFor(() => {
+        expect(mockAddOpenCodeRecentModel).toHaveBeenCalledTimes(1)
+        expect(mockToggleOpenCodeFavoriteModel).toHaveBeenCalledTimes(1)
+        expect(mockRemoveOpenCodeRecentModel).toHaveBeenCalledTimes(1)
+      })
+      expect(mockAddOpenCodeRecentModel.mock.calls[0][0]).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
+      expect(mockToggleOpenCodeFavoriteModel.mock.calls[0][0]).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
+      expect(mockRemoveOpenCodeRecentModel.mock.calls[0][0]).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
     })
 
-    it('ignores local recents in the selection order', async () => {
-      mockGetOpenCodeConfiguredModel.mockResolvedValue('anthropic/claude-sonnet-4')
+    it('reads the model state a local server populated from the same cache entry', async () => {
+      const queryClient = createTestQueryClient()
+      queryClient.setQueryData(modelStateQueryKey(), {
+        recent: [{ providerID: 'openai', modelID: 'gpt-4o' }],
+        favorite: [{ providerID: 'anthropic', modelID: 'claude-sonnet-4' }],
+        variant: {},
+      })
+
+      const { result } = renderRemote('/test', queryClient)
+
+      await waitFor(() => {
+        expect(result.current.recentModels).toEqual([{ providerID: 'openai', modelID: 'gpt-4o' }])
+      })
+      expect(result.current.favoriteModels).toEqual([
+        { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
+      ])
+      expect(mockGetOpenCodeModelState).not.toHaveBeenCalled()
+    })
+
+    it('stays ready with empty preferences when the model state fails to load', async () => {
+      mockGetOpenCodeModelState.mockRejectedValue(new Error('offline'))
+      const { result } = renderRemote()
+
+      await waitFor(() => {
+        expect(result.current.isModelReady).toBe(true)
+      })
+      expect(result.current.favoriteModels).toEqual([])
+      expect(result.current.model).not.toBeNull()
+    })
+
+    it('uses the shared recents in the selection order', async () => {
       mockGetOpenCodeModelState.mockResolvedValue({
         recent: [{ providerID: 'openai', modelID: 'gpt-4o' }],
         favorite: [],
-        variant: { 'openai/gpt-4o': 'high' },
+        variant: {},
       })
 
       const { result } = renderRemote()
 
       await waitFor(() => {
-        expect(result.current.model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+        expect(result.current.model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
       })
-      expect(result.current.recentModels).toEqual([])
+      expect(result.current.recentModels).toEqual([{ providerID: 'openai', modelID: 'gpt-4o' }])
     })
 
     it('keeps the agent model ahead of the configured model', async () => {

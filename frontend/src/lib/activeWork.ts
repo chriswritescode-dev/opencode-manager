@@ -115,7 +115,7 @@ export function collectActiveRoots(input: {
   return { needsInput, running }
 }
 
-interface RepoActivityIndexInput {
+interface ActivityIndexInput {
   statuses: ReadonlyMap<string, SessionStatusType>
   parents: ReadonlyMap<string, string | null>
   runningShells: ReadonlyMap<string, { sessionID: string; directory: string }>
@@ -123,67 +123,182 @@ interface RepoActivityIndexInput {
   pendingInputSessionIDs: Iterable<string>
 }
 
-let cachedRepoActivityIndex: (RepoActivityIndexInput & {
-  index: Map<string, 'needs-input' | 'running'>
-}) | null = null
+interface ServerActivityIndexInput extends ActivityIndexInput {
+  sessionServers: ReadonlyMap<string, string>
+}
 
-function computeRepoActivityIndex(input: RepoActivityIndexInput): Map<string, 'needs-input' | 'running'> {
+type ActivityIndex = Map<string, 'needs-input' | 'running'>
+
+/** Caches one built value per input snapshot, matching the input fields the value depends on. */
+function cacheByInput<I, V>(
+  compute: (input: I) => V,
+  sameInput: (left: I, right: I) => boolean,
+): (input: I) => V {
+  let cached: { input: I; value: V } | null = null
+
+  return (input) => {
+    if (cached && sameInput(cached.input, input)) return cached.value
+    const value = compute(input)
+    cached = { input, value }
+    return value
+  }
+}
+
+function sameActivityInput<I extends ActivityIndexInput>(left: I, right: I): boolean {
+  return (
+    left.statuses === right.statuses &&
+    left.parents === right.parents &&
+    left.runningShells === right.runningShells &&
+    left.directories === right.directories &&
+    left.pendingInputSessionIDs === right.pendingInputSessionIDs
+  )
+}
+
+function sameServerActivityInput(
+  left: ServerActivityIndexInput,
+  right: ServerActivityIndexInput,
+): boolean {
+  return sameActivityInput(left, right) && left.sessionServers === right.sessionServers
+}
+
+/**
+ * Rolls every active or pending session onto the index key its directory resolves to. Pending
+ * input marks its own and its root's key as needs-input; non-idle sessions and running shells mark
+ * running unless needs-input already claimed the key.
+ */
+function computeActivityIndex(
+  input: ActivityIndexInput,
+  keyOf: (sessionID: string, directory: string | null | undefined) => string | null,
+): ActivityIndex {
   const { statuses, parents, runningShells, directories, pendingInputSessionIDs } = input
-  const index = new Map<string, 'needs-input' | 'running'>()
+  const index: ActivityIndex = new Map()
 
-  const markNeedsInput = (directory?: string | null): void => {
-    const normalized = normalizeDirectory(localDirectoryOf(directory))
-    if (normalized) index.set(normalized, 'needs-input')
+  const mark = (
+    state: 'needs-input' | 'running',
+    sessionID: string,
+    directory?: string | null,
+  ): void => {
+    const key = keyOf(sessionID, directory)
+    if (!key) return
+    if (state === 'running' && index.get(key) === 'needs-input') return
+    index.set(key, state)
   }
 
-  const markRunning = (directory?: string | null): void => {
-    const normalized = normalizeDirectory(localDirectoryOf(directory))
-    if (!normalized || index.get(normalized) === 'needs-input') return
-    index.set(normalized, 'running')
+  const markSession = (state: 'needs-input' | 'running', sessionID: string): void => {
+    mark(state, sessionID, directories.get(sessionID))
+    mark(state, sessionID, directories.get(rootSessionID(sessionID, parents)))
   }
 
   for (const sessionID of pendingInputSessionIDs) {
-    markNeedsInput(directories.get(sessionID))
-    markNeedsInput(directories.get(rootSessionID(sessionID, parents)))
+    markSession('needs-input', sessionID)
   }
 
   for (const [sessionID, status] of statuses) {
     if (status.type === 'idle') continue
-    markRunning(directories.get(sessionID))
-    markRunning(directories.get(rootSessionID(sessionID, parents)))
+    markSession('running', sessionID)
   }
 
   for (const shell of runningShells.values()) {
-    markRunning(shell.directory)
-    markRunning(directories.get(shell.sessionID))
-    markRunning(directories.get(rootSessionID(shell.sessionID, parents)))
+    mark('running', shell.sessionID, shell.directory)
+    markSession('running', shell.sessionID)
   }
 
   return index
 }
+
+function localActivityKey(_sessionID: string, directory?: string | null): string | null {
+  return normalizeDirectory(localDirectoryOf(directory))
+}
+
+const repoActivityIndex = cacheByInput<ActivityIndexInput, ActivityIndex>(
+  (input) => computeActivityIndex(input, localActivityKey),
+  sameActivityInput,
+)
 
 /**
  * Indexes active sessions by normalized directory for repo badges. Pending input marks its own and
  * its root's directory as needs-input; non-idle sessions and running shells mark running unless
  * needs-input already claimed the directory. Shared across rows per store snapshot by reference.
  */
-export function buildRepoActivityIndex(
-  input: RepoActivityIndexInput,
-): Map<string, 'needs-input' | 'running'> {
-  if (
-    cachedRepoActivityIndex &&
-    cachedRepoActivityIndex.statuses === input.statuses &&
-    cachedRepoActivityIndex.parents === input.parents &&
-    cachedRepoActivityIndex.runningShells === input.runningShells &&
-    cachedRepoActivityIndex.directories === input.directories &&
-    cachedRepoActivityIndex.pendingInputSessionIDs === input.pendingInputSessionIDs
-  ) {
-    return cachedRepoActivityIndex.index
+export function buildRepoActivityIndex(input: ActivityIndexInput): ActivityIndex {
+  return repoActivityIndex(input)
+}
+
+/** The server and plain directory named by a session-status directory value. */
+export interface SessionDirectoryScope {
+  serverId: string
+  directory: string | null
+}
+
+/**
+ * Resolves a session-status directory value to its owning server and plain directory. A
+ * server-keyed value names its owner, otherwise the session-server entry does; everything else
+ * belongs to the local server.
+ */
+export function sessionScopeOfDirectory(
+  directory: string | null | undefined,
+  sessionServerId?: string,
+): SessionDirectoryScope {
+  const parsed = directory ? parseServerDirectoryKey(directory) : null
+  const serverId =
+    parsed && parsed.serverId !== LOCAL_OPENCODE_SERVER_ID
+      ? parsed.serverId
+      : sessionServerId ?? LOCAL_OPENCODE_SERVER_ID
+  return { serverId, directory: parsed?.directory ?? null }
+}
+
+function serverIndexKey(serverId: string, directory?: string | null): string {
+  return `${serverId}|${normalizeDirectory(directory) ?? ''}`
+}
+
+const serverActivityIndex = cacheByInput<ServerActivityIndexInput, ActivityIndex>(
+  (input) =>
+    computeActivityIndex(input, (sessionID, directory) => {
+      const scope = sessionScopeOfDirectory(directory, input.sessionServers.get(sessionID))
+      if (scope.serverId === LOCAL_OPENCODE_SERVER_ID) return null
+      return serverIndexKey(scope.serverId, scope.directory)
+    }),
+  sameServerActivityInput,
+)
+
+/**
+ * Indexes active sessions by owning linked server and directory for server badges. A session
+ * belongs to the server named by its server-keyed directory, otherwise to its session-server entry;
+ * local sessions are never indexed. Keys are `<serverId>|<directory>`, with an empty directory when
+ * the session's directory is unknown.
+ */
+export function buildServerActivityIndex(input: ServerActivityIndexInput): ActivityIndex {
+  return serverActivityIndex(input)
+}
+
+/**
+ * A linked server's activity from a prebuilt server index. Needs-input outranks running.
+ */
+export function serverActivityFromIndex(
+  serverId: string,
+  index: ReadonlyMap<string, 'needs-input' | 'running'>,
+): 'needs-input' | 'running' | null {
+  const prefix = `${serverId}|`
+  let running = false
+
+  for (const [key, state] of index) {
+    if (!key.startsWith(prefix)) continue
+    if (state === 'needs-input') return 'needs-input'
+    if (state === 'running') running = true
   }
 
-  const index = computeRepoActivityIndex(input)
-  cachedRepoActivityIndex = { ...input, index }
-  return index
+  return running ? 'running' : null
+}
+
+/**
+ * A linked server project's activity from a prebuilt server index, keyed by server and directory.
+ */
+export function projectActivityFromIndex(
+  serverId: string,
+  directory: string,
+  index: ReadonlyMap<string, 'needs-input' | 'running'>,
+): 'needs-input' | 'running' | null {
+  return index.get(serverIndexKey(serverId, directory)) ?? null
 }
 
 /**
@@ -322,11 +437,11 @@ export function needsWorktreeLookup(input: {
 /**
  * Groups the given sessions into needs-input, running, and recent roots. A session appears in
  * exactly one group (needs-input over running over recent) and only when it resolves to a local
- * repo or to an owning linked server. A session owned by a linked server is only emitted while it
- * needs input or is running, so remote work never fills the recent window. A recent session in a
- * schedule worktree is omitted so schedules only surface while they need attention. The input may
- * mix roots and children; children never become items, but their latest update time rolls up into
- * the root's `updatedAt` and decides the recent window and ordering.
+ * repo or to an owning linked server. A session owned by a linked server keeps its own row in any
+ * state, opening on that server instead of a local repo. A recent session in a schedule worktree is
+ * omitted so schedules only surface while they need attention. The input may mix roots and children;
+ * children never become items, but their latest update time rolls up into the root's `updatedAt` and
+ * decides the recent window and ordering.
  */
 export function buildActiveWork(input: {
   now: number
@@ -380,7 +495,6 @@ export function buildActiveWork(input: {
 
     const serverId = sessionServers?.get(session.id) ?? null
     if (serverId) {
-      if (state === 'recent') continue
       seen.add(session.id)
       const item: ActiveWorkItem = {
         key: getSessionKey(session),
@@ -395,7 +509,8 @@ export function buildActiveWork(input: {
         path: getServerSessionPath(serverId, session.id),
       }
       if (state === 'needs-input') needsInput.push(item)
-      else running.push(item)
+      else if (state === 'running') running.push(item)
+      else recent.push(item)
       continue
     }
 

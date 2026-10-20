@@ -61,12 +61,12 @@ export function ProjectActionsMenu({ repoId, directory }: ProjectActionsMenuProp
   const openPreview = useOpenPreview()
   const openTerminal = useOpenTerminal()
   const configQuery = useProjectConfig(repoId, directory, menuOpen && !!directory)
-  const terminalsQuery = useTerminals(repoId, directory, {
+  const terminalsQuery = useTerminals({ kind: 'repo', repoId }, directory, {
     enabled: menuOpen && !!directory,
     refetchInterval: menuOpen ? 5000 : false,
   })
   const runAction = useRunProjectAction(repoId, directory)
-  const removeTerminal = useRemoveTerminal(repoId)
+  const removeTerminal = useRemoveTerminal({ kind: 'repo', repoId })
   const trustConfig = useTrustRepoConfig(repoId)
   const [pendingTrust, setPendingTrust] = useState<PendingTrust | null>(null)
   const scopeRef = useRef({ repoId, directory })

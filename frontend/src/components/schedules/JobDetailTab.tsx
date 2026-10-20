@@ -40,10 +40,13 @@ export function JobDetailTab({
   runningRun,
   isJobFetching,
 }: JobDetailTabProps) {
-  const { scheduleTarget } = useScheduleTarget(selectedJob?.repoId)
-  const { availableModels } = useScheduleModels(Boolean(selectedJob), scheduleTarget?.fullPath)
+  const repoId = selectedJob?.repoId ?? undefined
+  const isRemote = selectedJob?.repoId === null
+  const { scheduleTarget } = useScheduleTarget(repoId)
+  const modelDirectory = isRemote ? (selectedJob?.directory ?? undefined) : scheduleTarget?.fullPath
+  const { availableModels } = useScheduleModels(Boolean(selectedJob), modelDirectory, isRemote ? selectedJob?.serverId : undefined)
   const resolvedModel = resolveScheduleModel(selectedJob?.model, availableModels)
-  const { data: worktrees = [] } = useScheduleWorktrees(selectedJob?.repoId, selectedJob?.id ?? null)
+  const { data: worktrees = [] } = useScheduleWorktrees(repoId, selectedJob?.id ?? null)
   const removeWorktrees = useRemoveScheduleWorktrees()
   const idleWorktreeCount = worktrees.filter((worktree) => !worktree.inUse).length
 
@@ -119,7 +122,7 @@ export function JobDetailTab({
                 </section>
               )}
 
-              {worktrees.length > 0 && (
+              {!isRemote && worktrees.length > 0 && (
                 <section className="rounded-lg border border-border/60 bg-background/40 p-3 sm:p-4">
                   <div className="mb-3 flex items-start justify-between gap-3">
                     <div>
@@ -130,7 +133,7 @@ export function JobDetailTab({
                       variant="outline"
                       size="sm"
                       aria-label="Remove all worktrees"
-                      onClick={() => removeWorktrees.mutate({ repoId: selectedJob.repoId, jobId: selectedJob.id })}
+                      onClick={() => { if (repoId !== undefined) removeWorktrees.mutate({ repoId, jobId: selectedJob.id }) }}
                       disabled={removeWorktrees.isPending || idleWorktreeCount === 0}
                     >
                       {removeWorktrees.isPending ? <Loader2 className="h-4 w-4 sm:mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 sm:mr-2" />}
@@ -152,7 +155,7 @@ export function JobDetailTab({
                           size="sm"
                           aria-label={`Remove worktree ${worktree.branch}`}
                           title={worktree.inUse ? 'In use by a running run' : 'Remove worktree'}
-                          onClick={() => removeWorktrees.mutate({ repoId: selectedJob.repoId, jobId: selectedJob.id, worktreePath: worktree.worktreePath })}
+                          onClick={() => { if (repoId !== undefined) removeWorktrees.mutate({ repoId, jobId: selectedJob.id, worktreePath: worktree.worktreePath }) }}
                           disabled={worktree.inUse || removeWorktrees.isPending}
                         >
                           <Trash2 className="h-4 w-4" />
@@ -184,7 +187,7 @@ export function JobDetailTab({
                   <p className="text-muted-foreground">Model</p>
                   <p className="font-medium break-all">{resolvedModel ?? 'Workspace default'}</p>
                 </div>
-                {selectedJob.repoId !== ASSISTANT_REPO_ID && (
+                {(isRemote || selectedJob.repoId !== ASSISTANT_REPO_ID) && (
                   <div>
                     <p className="text-muted-foreground">Workspace</p>
                     <p className="font-medium">{formatWorkspaceMode(selectedJob.workspaceMode)}</p>

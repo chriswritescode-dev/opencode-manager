@@ -5,7 +5,7 @@ import { SideDrawer, SideDrawerContent, SideDrawerHeader } from '@/components/ui
 import { RunDetailPanel } from './RunDetailPanel'
 import { formatRunBranch, getRunRepoName, getRunStatusIcon, getRunStatusLabel, getRunTitle, type ScheduleRunRow } from './schedule-run-display'
 import { formatRunDuration } from './schedule-utils'
-import { useRepoScheduleRun } from '@/hooks/useSchedules'
+import { useScheduleRunDetail } from '@/hooks/useSchedules'
 
 interface ScheduleRunDrawerProps {
   run: ScheduleRunRow | null
@@ -36,7 +36,7 @@ export function ScheduleRunDrawer({
   onPrev,
   onNext,
 }: ScheduleRunDrawerProps) {
-  const { data: detail, isLoading } = useRepoScheduleRun(run?.repoId, run?.jobId ?? null, run?.id ?? null)
+  const { data: detail, isLoading } = useScheduleRunDetail(run)
   const activeRun = detail ?? run
 
   const title = run ? getRunTitle(run) : 'Run'
@@ -90,6 +90,7 @@ export function ScheduleRunDrawer({
         {activeRun ? (
           <RunDetailPanel
             repoId={activeRun.repoId}
+            serverId={activeRun.serverId}
             activeRun={activeRun}
             selectedRunLoading={isLoading && !detail}
             onCancelRun={onCancelRun}

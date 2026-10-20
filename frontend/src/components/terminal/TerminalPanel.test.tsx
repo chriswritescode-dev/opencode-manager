@@ -22,15 +22,23 @@ vi.mock('./TerminalView', async () => {
   const React = await import('react')
   return {
     TerminalView: React.forwardRef(function MockTerminalView(
-      props: { ptyID: string; active: boolean },
+      props: { ptyID: string; active: boolean; onExited: () => void },
       ref: React.Ref<unknown>,
     ) {
       React.useImperativeHandle(ref, () => ({ send: vi.fn() }))
-      return React.createElement('div', {
-        'data-testid': 'terminal-view',
-        'data-pty-id': props.ptyID,
-        'data-active': String(props.active),
-      })
+      return React.createElement(
+        'div',
+        {
+          'data-testid': 'terminal-view',
+          'data-pty-id': props.ptyID,
+          'data-active': String(props.active),
+        },
+        React.createElement(
+          'button',
+          { type: 'button', 'aria-label': `exit ${props.ptyID}`, onClick: props.onExited },
+          'exit',
+        ),
+      )
     }),
   }
 })
@@ -80,7 +88,7 @@ function mockTerminalHooks(
 function renderPanel(initialEntry = '/repos/1?dialog=terminal', onClose = vi.fn()) {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
-      <TerminalPanel repoId={1} directory="/repo" isOpen onClose={onClose} />
+      <TerminalPanel target={{ kind: 'repo', repoId: 1 }} directory="/repo" isOpen onClose={onClose} />
     </MemoryRouter>,
   )
 }
@@ -88,6 +96,10 @@ function renderPanel(initialEntry = '/repos/1?dialog=terminal', onClose = vi.fn(
 describe('TerminalPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    createMutate.mockReset()
+    removeMutate.mockReset()
+    refetch.mockReset()
+    refetch.mockResolvedValue({ data: [] })
     vi.mocked(useMobile).mockReturnValue(false)
     mockTerminalHooks([])
   })
@@ -123,7 +135,7 @@ describe('TerminalPanel', () => {
     mockTerminalHooks([], { isSuccess: true })
     rerender(
       <MemoryRouter initialEntries={['/repos/1?dialog=terminal']}>
-        <TerminalPanel repoId={1} directory="/repo" isOpen onClose={vi.fn()} />
+        <TerminalPanel target={{ kind: 'repo', repoId: 1 }} directory="/repo" isOpen onClose={vi.fn()} />
       </MemoryRouter>,
     )
 
@@ -147,7 +159,7 @@ describe('TerminalPanel', () => {
     mockTerminalHooks([{ ...runningTerminal, status: 'exited', exitCode: 0 }])
     rerender(
       <MemoryRouter initialEntries={['/repos/1?dialog=terminal']}>
-        <TerminalPanel repoId={1} directory="/repo" isOpen onClose={vi.fn()} />
+        <TerminalPanel target={{ kind: 'repo', repoId: 1 }} directory="/repo" isOpen onClose={vi.fn()} />
       </MemoryRouter>,
     )
 
@@ -183,7 +195,7 @@ describe('TerminalPanel', () => {
     const panel = (isOpen: boolean) => (
       <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={['/repos/1?dialog=terminal&terminal=t2']}>
-          <TerminalPanel repoId={1} directory="/repo" isOpen={isOpen} onClose={vi.fn()} />
+          <TerminalPanel target={{ kind: 'repo', repoId: 1 }} directory="/repo" isOpen={isOpen} onClose={vi.fn()} />
         </MemoryRouter>
       </QueryClientProvider>
     )
@@ -265,6 +277,73 @@ describe('TerminalPanel', () => {
 
     expect(screen.queryByText('Stop the running process?')).not.toBeInTheDocument()
     expect(removeMutate).toHaveBeenCalledWith({ ptyID: 't2', directory: '/repo' }, expect.any(Object))
+  })
+
+  it('removes a cleanly exited terminal, closes the panel when it was the last, and does not respawn', async () => {
+    mockTerminalHooks([runningTerminal])
+    refetch.mockResolvedValue({ data: [{ ...runningTerminal, status: 'exited', exitCode: 0 }] })
+    removeMutate.mockImplementation((_variables: unknown, options: { onSuccess?: () => void }) => {
+      options.onSuccess?.()
+    })
+    const onClose = vi.fn()
+    renderPanel('/repos/1?dialog=terminal&terminal=t1', onClose)
+    await screen.findAllByTestId('terminal-view')
+
+    fireEvent.click(screen.getByLabelText('exit t1'))
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+    expect(removeMutate).toHaveBeenCalledWith({ ptyID: 't1', directory: '/repo' }, expect.any(Object))
+    expect(screen.queryByLabelText('Close Terminal')).not.toBeInTheDocument()
+    expect(createMutate).not.toHaveBeenCalled()
+  })
+
+  it('keeps a terminal that exited with a non-zero code so the failure stays inspectable', async () => {
+    mockTerminalHooks([runningTerminal])
+    refetch.mockResolvedValue({ data: [{ ...runningTerminal, status: 'exited', exitCode: 2 }] })
+    const onClose = vi.fn()
+    const { rerender } = renderPanel('/repos/1?dialog=terminal&terminal=t1', onClose)
+    await screen.findAllByTestId('terminal-view')
+
+    fireEvent.click(screen.getByLabelText('exit t1'))
+
+    await waitFor(() => expect(refetch).toHaveBeenCalledTimes(1))
+    expect(removeMutate).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('Close Terminal')).toBeInTheDocument()
+
+    mockTerminalHooks([{ ...runningTerminal, status: 'exited', exitCode: 2 }])
+    rerender(
+      <MemoryRouter initialEntries={['/repos/1?dialog=terminal&terminal=t1']}>
+        <TerminalPanel target={{ kind: 'repo', repoId: 1 }} directory="/repo" isOpen onClose={onClose} />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('exited (2)')).toBeInTheDocument()
+  })
+
+  it('keeps the panel open and selects another running terminal when one exits cleanly', async () => {
+    const otherTerminal: TerminalInfo = { ...runningTerminal, id: 't3', title: 'Shell' }
+    mockTerminalHooks([runningTerminal, otherTerminal])
+    refetch.mockResolvedValue({
+      data: [runningTerminal, { ...otherTerminal, status: 'exited', exitCode: 0 }],
+    })
+    removeMutate.mockImplementation((_variables: unknown, options: { onSuccess?: () => void }) => {
+      options.onSuccess?.()
+    })
+    const onClose = vi.fn()
+    renderPanel('/repos/1?dialog=terminal&terminal=t3', onClose)
+
+    const views = await screen.findAllByTestId('terminal-view')
+    expect(views.find((view) => view.getAttribute('data-pty-id') === 't3')).toHaveAttribute('data-active', 'true')
+
+    fireEvent.click(screen.getByLabelText('exit t3'))
+
+    await waitFor(() => expect(screen.queryByLabelText('Close Shell')).not.toBeInTheDocument())
+    expect(removeMutate).toHaveBeenCalledWith({ ptyID: 't3', directory: '/repo' }, expect.any(Object))
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByTestId('terminal-view')).toHaveAttribute('data-pty-id', 't1')
+    expect(screen.getByTestId('terminal-view')).toHaveAttribute('data-active', 'true')
+    expect(createMutate).not.toHaveBeenCalled()
   })
 
   it('renders the key bar only on mobile', async () => {

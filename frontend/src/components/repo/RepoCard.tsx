@@ -5,6 +5,7 @@ import { getRepoDisplayName } from "@/lib/utils";
 import type { Repo } from "@/api/types";
 import type { GitStatusResponse } from "@/types/git"
 import { RepoActivityIndicator } from "@/components/activity/RepoActivityIndicator"
+import { RepoCardShell } from "./RepoCardShell"
 import { RepoRowActions } from "./RepoRowActions"
 
 interface RepoCardProps {
@@ -58,90 +59,65 @@ export function RepoCard({
     }
   };
 
+  const meta = isCloning ? (
+    <span className="flex items-center gap-1.5">
+      <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+      Cloning...
+    </span>
+  ) : (
+    <>
+      <span className={`flex items-center gap-1 shrink-0 ${repo.isWorktree ? 'text-primary' : ''}`}>
+        <GitBranch className="w-3.5 h-3.5 shrink-0" />
+        <span className="truncate max-w-[80px]">{branchToDisplay || "main"}</span>
+      </span>
+      {isDirty && (
+        <span className="flex items-center gap-1 text-highlight shrink-0">
+          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+          <span className="text-xs whitespace-nowrap">
+            {unstagedCount > 0 && unstagedCount}
+            {unstagedCount > 0 && stagedCount > 0 && "/"}
+            {stagedCount > 0 && `${stagedCount}s`}
+          </span>
+        </span>
+      )}
+      {(ahead > 0 || behind > 0) && (
+        <span className="flex items-center gap-1 text-info shrink-0">
+          <span className="text-xs whitespace-nowrap">
+            {ahead > 0 && `↑${ahead}`}
+            {behind > 0 && `↓${behind}`}
+          </span>
+        </span>
+      )}
+      {repo.isLocal && (
+        <span className="flex items-center gap-1 shrink-0">
+          <FolderOpen className="w-3.5 h-3.5 shrink-0" />
+        </span>
+      )}
+    </>
+  );
+
   return (
-    <div
+    <RepoCardShell
+      title={repoName}
+      statusDotClassName={isReady ? (isDirty ? 'bg-highlight' : 'bg-success') : undefined}
+      activity={<RepoActivityIndicator repo={repo} />}
+      actions={
+        !manageMode && !isSelected && !hasSelectedRepos ? (
+          <RepoRowActions
+            repo={repo}
+            gitStatus={gitStatus}
+            onDelete={onDelete}
+            isDeleting={isDeleting}
+            isMobile={isMobile}
+            onActionsOpenChange={setActionsOpen}
+          />
+        ) : undefined
+      }
+      meta={meta}
+      activityLabel={activityLabel}
+      isInteractive={isReady}
+      isSelected={isSelected}
       onClick={handleCardClick}
-      className={`relative border rounded-xl overflow-hidden transition-all duration-200 w-full ${
-        isReady ? "cursor-pointer active:scale-[0.98] hover:border-primary/50 hover:bg-accent/50 hover:shadow-md" : "cursor-default"
-      } ${
-        isSelected
-          ? "border-primary bg-primary/5"
-          : "border-border bg-card"
-      }`}
-    >
-      <div className="p-1.5">
-        <div>
-          <div className="flex items-start gap-2 mb-1">
-            <div className="flex items-center gap-2 min-w-0 flex-1">
-              <h3 className="font-semibold text-base text-foreground truncate">
-                {repoName}
-              </h3>
-              {isReady && (
-                <div className={`w-2 h-2 rounded-full shrink-0 ${isDirty ? 'bg-highlight' : 'bg-success'}`} />
-              )}
-              <RepoActivityIndicator repo={repo} />
-            </div>
-
-            {!manageMode && !isSelected && !hasSelectedRepos && (
-              <RepoRowActions
-                repo={repo}
-                gitStatus={gitStatus}
-                onDelete={onDelete}
-                isDeleting={isDeleting}
-                isMobile={isMobile}
-                onActionsOpenChange={setActionsOpen}
-              />
-            )}
-          </div>
-
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <div className="flex flex-1 items-center gap-2 min-w-0 overflow-hidden">
-              {isCloning ? (
-                <span className="flex items-center gap-1.5">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
-                  Cloning...
-                </span>
-              ) : (
-                <>
-                  <span className={`flex items-center gap-1 shrink-0 ${repo.isWorktree ? 'text-primary' : ''}`}>
-                    <GitBranch className="w-3.5 h-3.5 shrink-0" />
-                    <span className="truncate max-w-[80px]">{branchToDisplay || "main"}</span>
-                  </span>
-                  {isDirty && (
-                    <span className="flex items-center gap-1 text-highlight shrink-0">
-                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                      <span className="text-xs whitespace-nowrap">
-                        {unstagedCount > 0 && unstagedCount}
-                        {unstagedCount > 0 && stagedCount > 0 && "/"}
-                        {stagedCount > 0 && `${stagedCount}s`}
-                      </span>
-                    </span>
-                  )}
-                  {(ahead > 0 || behind > 0) && (
-                    <span className="flex items-center gap-1 text-info shrink-0">
-                      <span className="text-xs whitespace-nowrap">
-                        {ahead > 0 && `↑${ahead}`}
-                        {behind > 0 && `↓${behind}`}
-                      </span>
-                    </span>
-                  )}
-                  {repo.isLocal && (
-                    <span className="flex items-center gap-1 shrink-0">
-                      <FolderOpen className="w-3.5 h-3.5 shrink-0" />
-                    </span>
-                  )}
-                </>
-              )}
-            </div>
-
-            {activityLabel && (
-              <span className="text-xs text-muted-foreground/70 shrink-0">
-                {activityLabel}
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
+    />
   );
 }

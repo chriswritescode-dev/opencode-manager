@@ -1,4 +1,4 @@
-import { ASSISTANT_REPO_ID, buildSessionPath } from '@opencode-manager/shared/utils';
+import { ASSISTANT_REPO_ID, buildServerSessionPath, buildSessionPath } from '@opencode-manager/shared/utils';
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas';
 
 export function getAssistantPath(): string {
@@ -28,12 +28,24 @@ export function getSessionPath(repoId: number | string, sessionId: string, optio
   return buildSessionPath(repoId, sessionId, options);
 }
 
-export function getServerPath(serverId: string): string {
-  return `/servers/${encodeURIComponent(serverId)}`;
+export function getServerSessionPath(serverId: string, sessionId: string): string {
+  return buildServerSessionPath(serverId, sessionId);
 }
 
-export function getServerSessionPath(serverId: string, sessionId: string): string {
-  return `${getServerPath(serverId)}/sessions/${encodeURIComponent(sessionId)}`;
+export function getServerProjectPath(serverId: string, directory: string): string {
+  return `/servers/${encodeURIComponent(serverId)}/projects?directory=${encodeURIComponent(directory)}`;
+}
+
+export function parseServerProjectRoute(
+  pathname: string,
+  search: string,
+): { serverId: string; directory: string } | null {
+  const match = /^\/servers\/([^/]+)\/projects$/.exec(pathname);
+  if (!match) return null;
+  const directory = new URLSearchParams(search).get('directory');
+  const serverId = decodePathSegment(match[1]);
+  if (!directory || !serverId) return null;
+  return { serverId, directory };
 }
 
 function decodePathSegment(segment: string): string | null {
@@ -101,9 +113,14 @@ export function getReturnToPath(search: string, fallback: string): string {
 }
 
 export function getSwipeBackTarget(pathname: string, search = ''): string | null {
+  const serverProject = parseServerProjectRoute(pathname, search);
+  if (serverProject) {
+    return '/';
+  }
+
   const serverSession = parseServerSessionRoute(pathname);
   if (serverSession) {
-    return getServerPath(serverSession.serverId);
+    return '/';
   }
 
   if (/^\/servers\/[^/]+$/.test(pathname)) {

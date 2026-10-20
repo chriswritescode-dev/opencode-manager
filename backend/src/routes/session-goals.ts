@@ -3,7 +3,15 @@ import { StartSessionGoalRequestSchema } from '@opencode-manager/shared/schemas'
 import { SessionGoalError, type SessionGoalService } from '../services/session-goals'
 import { handleServiceError, parseId, parseJsonBody } from '../utils/route-helpers'
 
-export function createSessionGoalRoutes(service: SessionGoalService) {
+export interface SessionGoalRouteOptions {
+  serverScoped?: boolean
+}
+
+export function createSessionGoalRoutes(
+  service: SessionGoalService,
+  options: SessionGoalRouteOptions = {},
+) {
+  const serverScoped = options.serverScoped ?? true
   const app = new Hono()
 
   app.get('/', (c) => {
@@ -12,7 +20,8 @@ export function createSessionGoalRoutes(service: SessionGoalService) {
       if (!sessionId) {
         return c.json({ error: 'Invalid request' }, 400)
       }
-      return c.json({ goal: service.getLatest(sessionId) })
+      const serverId = serverScoped ? c.req.query('serverId') : undefined
+      return c.json({ goal: serverId ? service.getLatest(sessionId, serverId) : service.getLatest(sessionId) })
     } catch (error) {
       return handleServiceError(c, error, 'Failed to read session goal', SessionGoalError)
     }
@@ -25,7 +34,7 @@ export function createSessionGoalRoutes(service: SessionGoalService) {
     }
 
     try {
-      const goal = await service.start(parsed.data)
+      const goal = await service.start(serverScoped ? parsed.data : { ...parsed.data, serverId: undefined })
       return c.json({ goal }, 201)
     } catch (error) {
       return handleServiceError(c, error, 'Failed to start session goal', SessionGoalError)

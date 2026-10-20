@@ -122,11 +122,16 @@ vi.mock('../src/services/skills', () => ({
 
 const sseAggregatorMock = vi.hoisted(() => ({
   onEvent: vi.fn(),
+  onServerEvent: vi.fn(),
   onUpstreamConnected: vi.fn(),
+  onServerConnected: vi.fn(),
   setPendingActionsFetcher: vi.fn(),
   setPasswordResolver: vi.fn(),
   setScheduledSessionsResolver: vi.fn(),
   setRemoteReplayHandler: vi.fn(),
+  setRemoteSubagentResolver: vi.fn(),
+  notifyServerEvent: vi.fn(),
+  notifyServerConnected: vi.fn(),
   start: vi.fn(),
   shutdown: vi.fn(),
   reconnect: vi.fn(),

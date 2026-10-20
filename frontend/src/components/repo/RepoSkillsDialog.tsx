@@ -28,17 +28,17 @@ function toRemoteSkillFileInfo(skill: SkillInfo): SkillFileInfo {
 
 type RepoSkillsSessionProps =
   | { sessionId: string; directory?: string; onSkillLoaded?: (skill: SkillFileInfo) => void }
-  | { sessionId?: undefined; directory?: undefined; onSkillLoaded?: undefined }
+  | { sessionId?: undefined; directory?: string; onSkillLoaded?: undefined }
 
 type RepoSkillsDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
-  repoId: number
+  repoId?: number
 } & RepoSkillsSessionProps
 
 type RepoSkillsContentProps = {
   open: boolean
-  repoId: number
+  repoId?: number
   onDone: () => void
 } & RepoSkillsSessionProps
 
@@ -150,7 +150,7 @@ export function RepoSkillsContent({
 }
 
 export function RepoSkillsDialog({ onOpenChange, ...props }: RepoSkillsDialogProps) {
-  if (!props.repoId && !props.sessionId) {
+  if (!props.repoId && !props.sessionId && !props.directory) {
     return null
   }
 

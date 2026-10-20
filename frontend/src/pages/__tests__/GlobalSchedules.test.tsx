@@ -1,17 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { LocationCatcher } from '@/test/test-utils'
 import { GlobalSchedules } from '../GlobalSchedules'
 
 const mocks = vi.hoisted(() => ({
   useAllSchedules: vi.fn(),
   useAllScheduleRuns: vi.fn(),
   useCreateRepoSchedule: vi.fn(),
-  useUpdateRepoSchedule: vi.fn(),
-  useDeleteRepoSchedule: vi.fn(),
-  useRunRepoSchedule: vi.fn(),
-  useCancelRepoScheduleRun: vi.fn(),
+  useUpdateScheduleTarget: vi.fn(),
+  useDeleteScheduleTarget: vi.fn(),
+  useRunScheduleTarget: vi.fn(),
+  useCancelScheduleTargetRun: vi.fn(),
   useUnreadScheduleRuns: vi.fn(),
   useScheduleUrlState: vi.fn(),
   ScheduleJobsTable: vi.fn(() => null),
@@ -23,10 +24,10 @@ vi.mock('@/hooks/useSchedules', () => ({
   useAllSchedules: mocks.useAllSchedules,
   useAllScheduleRuns: mocks.useAllScheduleRuns,
   useCreateRepoSchedule: mocks.useCreateRepoSchedule,
-  useUpdateRepoSchedule: mocks.useUpdateRepoSchedule,
-  useDeleteRepoSchedule: mocks.useDeleteRepoSchedule,
-  useRunRepoSchedule: mocks.useRunRepoSchedule,
-  useCancelRepoScheduleRun: mocks.useCancelRepoScheduleRun,
+  useUpdateScheduleTarget: mocks.useUpdateScheduleTarget,
+  useDeleteScheduleTarget: mocks.useDeleteScheduleTarget,
+  useRunScheduleTarget: mocks.useRunScheduleTarget,
+  useCancelScheduleTargetRun: mocks.useCancelScheduleTargetRun,
   useUnreadScheduleRuns: mocks.useUnreadScheduleRuns,
 }))
 
@@ -153,6 +154,19 @@ const renderGlobalSchedules = () => {
   )
 }
 
+const renderGlobalSchedulesWithLocation = () => {
+  const capturedPathname = { current: '' }
+  const capturedSearch = { current: '' }
+  render(
+    <MemoryRouter initialEntries={['/schedules']}>
+      <LocationCatcher capturedSearch={capturedSearch} capturedPathname={capturedPathname} />
+      <GlobalSchedules />
+    </MemoryRouter>,
+    { wrapper: createWrapper() }
+  )
+  return { capturedPathname, capturedSearch }
+}
+
 const runsTableProps = () => mocks.ScheduleRunsTable.mock.calls.at(-1)?.[0] as {
   runs: Array<{ id: number }>
   selectedRunId: number | null
@@ -182,10 +196,10 @@ describe('GlobalSchedules run history', () => {
     )
     mocks.useAllSchedules.mockReturnValue({ data: [], isLoading: false, error: null })
     mocks.useCreateRepoSchedule.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useUpdateRepoSchedule.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useDeleteRepoSchedule.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useRunRepoSchedule.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useCancelRepoScheduleRun.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    mocks.useUpdateScheduleTarget.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    mocks.useDeleteScheduleTarget.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    mocks.useRunScheduleTarget.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    mocks.useCancelScheduleTargetRun.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useUnreadScheduleRuns.mockReturnValue({ data: { runs: [], total: 0, failed: 0 } })
     mocks.useScheduleUrlState.mockReturnValue(createMockScheduleUrlState())
   })
@@ -331,6 +345,23 @@ describe('GlobalSchedules run history', () => {
     jobsTableProps().onOpen(makeJob({ lastRun: { id: 5 } }))
 
     expect(selectRun).toHaveBeenCalledWith(5)
+  })
+
+  it('opens a linked-server job on its project page', async () => {
+    const job = makeJob({ repoId: null, serverId: 'srv_kitchen', directory: '/home/me/app', lastRun: null })
+    mocks.useAllSchedules.mockReturnValue({ data: [job], isLoading: false, error: null })
+    mocks.useScheduleUrlState.mockReturnValue(createMockScheduleUrlState({ scheduleTab: 'jobs', runId: null }))
+
+    const { capturedPathname, capturedSearch } = renderGlobalSchedulesWithLocation()
+
+    act(() => {
+      jobsTableProps().onOpen(job)
+    })
+
+    await waitFor(() => {
+      expect(capturedPathname.current).toBe('/servers/srv_kitchen/projects')
+    })
+    expect(capturedSearch.current).toBe('?directory=%2Fhome%2Fme%2Fapp')
   })
 
   it('keeps the jobs tab visible with the empty state when there are no jobs', () => {

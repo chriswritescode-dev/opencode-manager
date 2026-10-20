@@ -42,7 +42,7 @@ interface MultiRunCardProps {
   onExitSelection: () => void
   onToggleEntry: (entryId: number, checked: boolean) => void
   onOpenSession: (sessionId: string, isolated: boolean) => void
-  onWalkthrough: (sessionId: string) => void
+  onWalkthrough?: (sessionId: string) => void
   onDiscard: (entry: MultiRunEntry) => void
 }
 
@@ -278,7 +278,7 @@ interface EntryRowProps {
   unavailableReason: string | null
   onToggle: (checked: boolean) => void
   onOpenSession: (sessionId: string, isolated: boolean) => void
-  onWalkthrough: (sessionId: string) => void
+  onWalkthrough?: (sessionId: string) => void
   onDiscard: () => void
 }
 
@@ -344,7 +344,7 @@ function EntryRow({
         {sessionId ? (
           <RowAction icon={ArrowUpRight} label="Open" onClick={() => onOpenSession(sessionId, entry.isolated)} />
         ) : null}
-        {sessionId ? (
+        {sessionId && onWalkthrough ? (
           <RowAction icon={BookOpen} label="Walkthrough" onClick={() => onWalkthrough(sessionId)} />
         ) : null}
         {canDiscard ? (
@@ -375,7 +375,7 @@ function EntryRow({
 interface FusionRowProps {
   fusion: MultiRunFusion
   onOpenSession: (sessionId: string, isolated: boolean) => void
-  onWalkthrough: (sessionId: string) => void
+  onWalkthrough?: (sessionId: string) => void
 }
 
 function FusionRow({ fusion, onOpenSession, onWalkthrough }: FusionRowProps) {
@@ -403,7 +403,7 @@ function FusionRow({ fusion, onOpenSession, onWalkthrough }: FusionRowProps) {
       {sessionId ? (
         <div className="flex shrink-0 items-center gap-1">
           <RowAction icon={ArrowUpRight} label="Open" onClick={() => onOpenSession(sessionId, fusion.isolated)} />
-          <RowAction icon={BookOpen} label="Walkthrough" onClick={() => onWalkthrough(sessionId)} />
+          {onWalkthrough ? <RowAction icon={BookOpen} label="Walkthrough" onClick={() => onWalkthrough(sessionId)} /> : null}
         </div>
       ) : null}
     </li>

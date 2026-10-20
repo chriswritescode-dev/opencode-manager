@@ -12,6 +12,11 @@ export function isSettingsContentTab(value: string | null): value is SettingsCon
 interface UseSettingsDialogReturn {
   isOpen: boolean
   open: () => void
+  /**
+   * Opens the settings dialog on the given tab by pushing a new history entry, so Back closes
+   * settings instead of leaving the page, and clears the mobile sheet selection behind the dialog.
+   */
+  openTab: (tab: SettingsContentTab) => void
   close: () => void
   toggle: () => void
   activeTab: SettingsContentTab
@@ -30,13 +35,17 @@ export function useSettingsDialog(): UseSettingsDialogReturn {
   const activeTabRef = useRef(activeTab)
   activeTabRef.current = activeTab
 
-  const open = useCallback(() => {
+  const openTab = useCallback((tab: SettingsContentTab) => {
     updateParams((p) => {
       p.set('settings', 'open')
-      p.set('settingsTab', activeTabRef.current)
+      p.set('settingsTab', tab)
       p.delete('mobileTab')
     }, 'push')
   }, [updateParams])
+
+  const open = useCallback(() => {
+    openTab(activeTabRef.current)
+  }, [openTab])
 
   const close = useCallback(() => {
     updateParams((p) => {
@@ -64,6 +73,7 @@ export function useSettingsDialog(): UseSettingsDialogReturn {
   return {
     isOpen,
     open,
+    openTab,
     close,
     toggle,
     activeTab,

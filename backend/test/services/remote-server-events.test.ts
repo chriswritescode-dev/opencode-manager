@@ -238,7 +238,7 @@ describe('RemoteServerEventHub event delivery', () => {
     expect(sources.sources[1]?.init).toBeUndefined()
   })
 
-  it('delivers a located event only to clients subscribed to that server and directory, with a serverId envelope', () => {
+  it('broadcasts a located event to every client with a serverId envelope', () => {
     const remoteClient = createCapturingClient()
     const otherServerClient = createCapturingClient()
     const localClient = createCapturingClient()
@@ -256,7 +256,7 @@ describe('RemoteServerEventHub event delivery', () => {
 
     source.message(remoteEvent('session.idle', { sessionID: 'ses_1' }, '/repo'))
 
-    expect(remoteClient.frames.map(parseFrame)).toEqual([{
+    const envelope = {
       directory: '/repo',
       serverId: 'srv_a',
       payload: {
@@ -266,9 +266,10 @@ describe('RemoteServerEventHub event delivery', () => {
         location: { directory: '/repo' },
         data: { sessionID: 'ses_1' },
       },
-    }])
-    expect(otherServerClient.frames).toHaveLength(0)
-    expect(localClient.frames).toHaveLength(0)
+    }
+    expect(remoteClient.frames.map(parseFrame)).toEqual([envelope])
+    expect(otherServerClient.frames.map(parseFrame)).toEqual([envelope])
+    expect(localClient.frames.map(parseFrame)).toEqual([envelope])
     expect(listener).not.toHaveBeenCalled()
     expect(sseAggregator.getActiveSessions()).toEqual({})
   })
@@ -325,7 +326,7 @@ describe('RemoteServerEventHub event delivery', () => {
     }])
   })
 
-  it('falls back to every client holding any key of the server when the directory is unknown', () => {
+  it('broadcasts to every client when the directory is unknown', () => {
     const subscribedA = createCapturingClient()
     const otherDirectoryA = createCapturingClient()
     const subscribedB = createCapturingClient()
@@ -343,7 +344,7 @@ describe('RemoteServerEventHub event delivery', () => {
     }
     expect(subscribedA.frames.map(parseFrame)).toEqual([envelope])
     expect(otherDirectoryA.frames.map(parseFrame)).toEqual([envelope])
-    expect(subscribedB.frames).toHaveLength(0)
+    expect(subscribedB.frames.map(parseFrame)).toEqual([envelope])
   })
 
   it('keeps the raw upstream payload in the remote envelope and re-serializes multi-line payloads', () => {
@@ -374,6 +375,51 @@ describe('RemoteServerEventHub event delivery', () => {
     source.message(JSON.stringify({ id: 'evt', created: 1, data: {} }))
 
     expect(client.frames).toHaveLength(0)
+  })
+
+  it('notifies server event listeners with the remote server id and resolved directory', () => {
+    const seen: Array<{ serverId: string; directory: string | null; type: string }> = []
+    sseAggregator.onServerEvent((serverId, directory, event) => {
+      seen.push({ serverId, directory, type: event.type })
+    })
+
+    hub.start()
+    const source = sources.sources[0]!
+    source.message(remoteEvent('session.created', { sessionID: 'ses_1' }, '/repo'))
+    source.message(remoteEvent('session.execution.succeeded', { sessionID: 'ses_1' }))
+
+    expect(seen).toEqual([
+      { serverId: 'srv_a', directory: '/repo', type: 'session.created' },
+      { serverId: 'srv_a', directory: '/repo', type: 'session.execution.succeeded' },
+    ])
+    expect(sseAggregator.getActiveSessions()).toEqual({})
+  })
+
+  it('tracks remote subagent sessions per server', () => {
+    hub.start()
+    const source = sources.sources[0]!
+
+    source.message(remoteEvent('session.created', { sessionID: 'ses_sub', parentID: 'ses_root' }, '/repo'))
+
+    expect(hub.isSubagentSession('srv_a', 'ses_sub')).toBe(true)
+    expect(sseAggregator.isSubagentSession('ses_sub', 'srv_a')).toBe(true)
+    expect(sseAggregator.isSubagentSession('ses_sub')).toBe(false)
+    expect(sseAggregator.isSubagentSession('ses_sub', 'srv_b')).toBe(false)
+
+    source.message(remoteEvent('session.deleted', { sessionID: 'ses_sub' }))
+
+    expect(hub.isSubagentSession('srv_a', 'ses_sub')).toBe(false)
+    expect(sseAggregator.isSubagentSession('ses_sub', 'srv_a')).toBe(false)
+  })
+
+  it('notifies server connected listeners when a remote stream opens', () => {
+    const seen: string[] = []
+    sseAggregator.onServerConnected(serverId => { seen.push(serverId) })
+
+    hub.start()
+    sources.sources[1]!.open()
+
+    expect(seen).toEqual(['srv_b'])
   })
 })
 
