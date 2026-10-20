@@ -172,7 +172,7 @@ function withoutSessionKey<T>(bySession: Record<string, T[]>, sessionID: string)
  */
 function withoutMatchingItems<T>(
   bySession: Record<string, T[]>,
-  shouldRemove: (item: T) => boolean,
+  shouldRemove: (item: NoInfer<T>) => boolean,
 ): Record<string, T[]> {
   let changed = false
   const next: Record<string, T[]> = {}
@@ -744,7 +744,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     const unresolvedSessionIDs = new Set<string>()
     for (const bySession of [permissionsBySessionRef.current, formsBySessionRef.current]) {
       for (const [sessionID, items] of Object.entries(bySession)) {
-        if (!items.some((item) => item.serverId === serverId)) continue
+        if (!items.some((item: { serverId: string }) => item.serverId === serverId)) continue
         if (findSessionDirectoryKey(sessionID) !== null) continue
         unresolvedSessionIDs.add(sessionID)
       }
