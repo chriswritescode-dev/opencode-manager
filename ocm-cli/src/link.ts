@@ -1,6 +1,8 @@
 import { randomBytes } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { networkInterfaces, type NetworkInterfaceInfo } from 'node:os'
+import { homedir, networkInterfaces, type NetworkInterfaceInfo } from 'node:os'
+import { join } from 'node:path'
 import { renderUnicodeCompact } from 'uqr'
 import {
   buildOpenCodeBasicAuth,
@@ -13,6 +15,10 @@ import {
 import { trimUrlTrailingSlashes } from '@opencode-manager/shared/utils'
 
 const DEFAULT_OPENCODE_PORT = 4096
+const DEFAULT_SERVICE_PORT = process.platform === 'win32' ? 45278 : 49374
+const DEFAULT_SERVICE_HOSTNAME = '127.0.0.1'
+const WILDCARD_HOSTS = new Set(['0.0.0.0', '::', '[::]'])
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
 const REDEEM_PATH = '/redeem'
 const MAX_BODY_BYTES = 4096
 
@@ -46,18 +52,125 @@ export function generatePairingCode(): string {
   return randomBytes(32).toString('base64url')
 }
 
+/** Returns the first non-internal IPv4 address, or null when the machine exposes none. */
+export function resolveLanIPv4(
+  interfaces: NodeJS.Dict<NetworkInterfaceInfo[]> = networkInterfaces(),
+): string | null {
+  for (const entries of Object.values(interfaces)) {
+    for (const entry of entries ?? []) {
+      if (entry.family === 'IPv4' && !entry.internal) {
+        return entry.address
+      }
+    }
+  }
+  return null
+}
+
 /** Picks the OpenCode base URL from the first non-internal IPv4 interface, else loopback. */
 export function resolveDefaultBaseUrl(
   interfaces: NodeJS.Dict<NetworkInterfaceInfo[]> = networkInterfaces(),
 ): string {
-  for (const entries of Object.values(interfaces)) {
-    for (const entry of entries ?? []) {
-      if (entry.family === 'IPv4' && !entry.internal) {
-        return `http://${entry.address}:${DEFAULT_OPENCODE_PORT}`
-      }
+  const lanAddress = resolveLanIPv4(interfaces)
+  return `http://${lanAddress ?? '127.0.0.1'}:${DEFAULT_OPENCODE_PORT}`
+}
+
+export interface OpenCodeServiceDiscovery {
+  baseUrl: string
+  password: string | null
+  source: 'registration' | 'config'
+  loopbackOnly: boolean
+}
+
+export interface OpenCodeServiceDiscoveryOptions {
+  env?: NodeJS.ProcessEnv
+  home?: string
+  interfaces?: NodeJS.Dict<NetworkInterfaceInfo[]>
+}
+
+/**
+ * Reads the OpenCode background service registration, then its config, and resolves the URL a
+ * Manager should pair with. Never throws; returns null when neither file yields a usable service.
+ */
+export function discoverOpenCodeService(
+  options: OpenCodeServiceDiscoveryOptions = {},
+): OpenCodeServiceDiscovery | null {
+  const env = options.env ?? process.env
+  const home = options.home ?? homedir()
+  const registration = readServiceFile(join(resolveXdgDir(env.XDG_STATE_HOME, home, '.local', 'state'), 'opencode', 'service.json'))
+  const config = readServiceFile(join(resolveXdgDir(env.XDG_CONFIG_HOME, home, '.config'), 'opencode', 'service.json'))
+  const configPassword = readString(config?.password)
+
+  const registered = resolveServiceUrl(readString(registration?.url), options.interfaces)
+  if (registered) {
+    return {
+      ...registered,
+      password: readString(registration?.password) ?? configPassword ?? null,
+      source: 'registration',
     }
   }
-  return `http://127.0.0.1:${DEFAULT_OPENCODE_PORT}`
+
+  if (!config) return null
+
+  const hostname = readString(config.hostname)
+  const port = readPort(config.port)
+  if (hostname === null && port === null && configPassword === null) return null
+
+  const configured = resolveServiceUrl(
+    `http://${bracketHostname(hostname ?? DEFAULT_SERVICE_HOSTNAME)}:${port ?? DEFAULT_SERVICE_PORT}`,
+    options.interfaces,
+  )
+  if (!configured) return null
+
+  return { ...configured, password: configPassword, source: 'config' }
+}
+
+function bracketHostname(hostname: string): string {
+  return hostname.includes(':') && !hostname.startsWith('[') ? `[${hostname}]` : hostname
+}
+
+function resolveXdgDir(override: string | undefined, home: string, ...fallback: string[]): string {
+  const configured = override?.trim()
+  return configured || join(home, ...fallback)
+}
+
+function resolveServiceUrl(
+  rawUrl: string | null,
+  interfaces?: NodeJS.Dict<NetworkInterfaceInfo[]>,
+): { baseUrl: string; loopbackOnly: boolean } | null {
+  if (rawUrl === null) return null
+
+  let parsed: URL
+  try {
+    parsed = new URL(rawUrl)
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
+
+  if (WILDCARD_HOSTS.has(parsed.hostname)) {
+    parsed.hostname = resolveLanIPv4(interfaces) ?? '127.0.0.1'
+  }
+  const loopbackOnly = LOOPBACK_HOSTS.has(parsed.hostname)
+
+  return { baseUrl: trimUrlTrailingSlashes(parsed.href), loopbackOnly }
+}
+
+function readServiceFile(file: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'))
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
+    return parsed as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+function readPort(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 65535 ? value : null
 }
 
 /** Renders the pairing link as a half-block QR code for terminals. */

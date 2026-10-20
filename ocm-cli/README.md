@@ -163,17 +163,32 @@ Run `ocm link` on a machine that hosts a bare `opencode serve` to pair it with
 OpenCode Manager without copying the password by hand:
 
 ```bash
-OPENCODE_SERVER_PASSWORD=... ocm link
+ocm link
 ```
 
 It prints a terminal QR code and an `ocm://link` URL. Scanning or pasting that
 into the Manager adds the server with its name, base URL, username, and
 password.
 
+It auto-detects the OpenCode background service (`opencode serve --service`).
+The service registration in `$XDG_STATE_HOME/opencode/service.json` (default
+`~/.local/state/opencode/service.json`) is read first, then the `opencode
+service` config in `$XDG_CONFIG_HOME/opencode/service.json` (default
+`~/.config/opencode/service.json`), which provides the hostname (default
+`127.0.0.1`) and port (default `49374`, or `45278` on Windows). A wildcard host
+such as `0.0.0.0` is replaced with this machine's LAN IPv4 address, and the
+service password is used when none is passed. A service bound to loopback
+produces a warning because a remote Manager cannot reach it; run `opencode
+service set hostname 0.0.0.0` to expose it.
+
+An explicit `--url` or `$OPENCODE_SERVER_URL` skips service detection, so the
+detected service password is not reused; pass `--password` or set
+`$OPENCODE_SERVER_PASSWORD` in that case.
+
 | Flag | Default |
 |---|---|
-| `--url <url>` | `$OPENCODE_SERVER_URL`, else `http://<first non-internal IPv4>:4096` |
-| `--password <pw>` | `$OPENCODE_SERVER_PASSWORD` (required) |
+| `--url <url>` | `$OPENCODE_SERVER_URL`, else the detected OpenCode service URL, else `http://<first non-internal IPv4>:4096`; an explicit value skips service detection |
+| `--password <pw>` | `$OPENCODE_SERVER_PASSWORD`, else the detected OpenCode service password; an explicit URL needs one of the first two |
 | `--username <name>` | `$OPENCODE_SERVER_USERNAME`, else `opencode` |
 | `--name <name>` | the machine hostname |
 | `--pair-host <host>` | the host of `--url` |
