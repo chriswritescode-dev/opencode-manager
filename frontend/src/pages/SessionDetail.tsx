@@ -328,11 +328,17 @@ export function SessionDetail() {
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
   const { isEnabled: ttsEnabled } = useTTS();
   const { syncForSession: syncPermissionsForSession } = usePermissions();
-  const { getForSession: getFormForSession, reply: replyToForm, cancel: cancelForm, syncForSession: syncFormsForSession } = useForms();
+  const { getForSession: getFormForSession, reply: replyToForm, cancel: cancelForm, syncForSession: syncFormsForSession, forgetPendingActionsForSession } = useForms();
   const currentForm = sessionId ? getFormForSession(sessionId) : null;
   const minimizedForm = currentForm && currentForm.id === minimizedFormId ? currentForm : null;
   const isFormOpen = !!currentForm && !minimizedForm;
   const isFormSheetOpen = isMobile && isFormOpen;
+
+  useEffect(() => {
+    if (!sessionId) return;
+    if (!(sessionQueryError instanceof FetchError) || sessionQueryError.statusCode !== 404) return;
+    forgetPendingActionsForSession(sessionId);
+  }, [sessionId, sessionQueryError, forgetPendingActionsForSession]);
 
   const lastAssistantMessage = messages.filter(m => m.type === 'assistant').at(-1);
   const lastAssistantText = getAssistantText(lastAssistantMessage);

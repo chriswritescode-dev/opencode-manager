@@ -104,9 +104,10 @@ function isSessionWithinView(
 }
 
 /**
- * Pins the item currently on screen until it leaves `items`, then advances to the first item whose
- * session is the viewed session or one of its descendants, falling back to the first item.
- * The selection is derived during render so a newly arriving item never displaces the shown one.
+ * Selects the pinned item while it belongs to the viewed session or no session is viewed,
+ * otherwise the first item within the viewed session, otherwise the pinned item while it is still
+ * present, otherwise the first item. The selection is derived during render so a newly arriving
+ * item never displaces a shown item that is within the view.
  */
 function usePinnedViewedItem<T extends SessionScopedItem>(
   items: T[],
@@ -116,15 +117,15 @@ function usePinnedViewedItem<T extends SessionScopedItem>(
   const [pinnedId, setPinnedId] = useState<string | null>(null)
 
   const selected = useMemo(() => {
-    if (pinnedId) {
-      const pinned = items.find((item) => item.id === pinnedId)
-      if (pinned) return pinned
+    const pinned = pinnedId ? items.find((item) => item.id === pinnedId) ?? null : null
+    if (pinned && (viewedSessionId === null || isSessionWithinView(pinned.sessionID, viewedSessionId, parents))) {
+      return pinned
     }
 
     const forViewedSession = viewedSessionId
       ? items.find((item) => isSessionWithinView(item.sessionID, viewedSessionId, parents)) ?? null
       : null
-    return forViewedSession ?? items[0] ?? null
+    return forViewedSession ?? pinned ?? items[0] ?? null
   }, [items, viewedSessionId, parents, pinnedId])
 
   const selectedId = selected?.id ?? null
@@ -156,6 +157,33 @@ function reconcileBySessionForDirectory<T extends SessionScopedItem & { serverId
   }
 
   return next
+}
+
+function withoutSessionKey<T>(bySession: Record<string, T[]>, sessionID: string): Record<string, T[]> {
+  if (!(sessionID in bySession)) return bySession
+  const next = { ...bySession }
+  delete next[sessionID]
+  return next
+}
+
+function withoutItemsFromUnavailableServers<T extends SessionScopedItem & { serverId: string }>(
+  bySession: Record<string, T[]>,
+  isServerEnabled: (serverId: string) => boolean,
+): Record<string, T[]> {
+  let changed = false
+  const next: Record<string, T[]> = {}
+
+  for (const [sessionID, items] of Object.entries(bySession)) {
+    const kept = items.filter((item) => isLocalOpenCodeServer(item.serverId) || isServerEnabled(item.serverId))
+    if (kept.length === items.length) {
+      next[sessionID] = items
+      continue
+    }
+    changed = true
+    if (kept.length > 0) next[sessionID] = kept
+  }
+
+  return changed ? next : bySession
 }
 
 interface SSHHostKeyState {
@@ -226,6 +254,11 @@ interface EventContextValue {
     hasForSession: (sessionID: string) => boolean
     navigateToCurrent: () => void
     syncForSession: (directory: string, sessionID: string, serverId?: string) => Promise<void>
+    /**
+     * Drops every pending form and permission recorded for the session, used when the session no
+     * longer exists on its server.
+     */
+    forgetPendingActionsForSession: (sessionID: string) => void
   }
   sseHealth: SSEHealthState
   getRepoIdForSession: (sessionID: string) => number | null
@@ -324,7 +357,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   })
 
   const { isAuthenticated } = useAuth()
-  const { servers } = useOpenCodeServers({ enabled: isAuthenticated })
+  const { servers, isSuccess: serversLoaded } = useOpenCodeServers({ enabled: isAuthenticated })
   const enabledRemoteServers = useMemo(() => servers.filter((server) => server.enabled), [servers])
   const enabledRemoteServersRef = useRef(enabledRemoteServers)
   useEffect(() => {
@@ -354,6 +387,14 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
   const pendingPermissionSessionIDs = usePendingSessionIDs(permissionsBySession)
   const pendingFormSessionIDs = usePendingSessionIDs(formsBySession)
+
+  useEffect(() => {
+    if (!serversLoaded) return
+    const enabledServerIds = new Set(enabledRemoteServers.map((server) => server.id))
+    const isServerEnabled = (serverId: string) => enabledServerIds.has(serverId)
+    setPermissionsBySession((prev) => withoutItemsFromUnavailableServers(prev, isServerEnabled))
+    setFormsBySession((prev) => withoutItemsFromUnavailableServers(prev, isServerEnabled))
+  }, [enabledRemoteServers, serversLoaded])
 
   const viewedSessionId = useMemo(
     () => parseServerSessionRoute(location.pathname)?.sessionId ?? parseRepoRoute(location.pathname).sessionId,
@@ -466,6 +507,11 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
   const removeForm = useCallback((formID: string, sessionID?: string) => {
     removeFromSessionKeyedState(setFormsBySession, formID, sessionID)
+  }, [])
+
+  const forgetPendingActionsForSession = useCallback((sessionID: string) => {
+    setPermissionsBySession((prev) => withoutSessionKey(prev, sessionID))
+    setFormsBySession((prev) => withoutSessionKey(prev, sessionID))
   }, [])
 
   const reconcilePermissionsForDirectory = useCallback((
@@ -912,6 +958,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         }
         case 'session.deleted': {
           useSessionStatus.getState().forgetSession(event.data.sessionID)
+          forgetPendingActionsForSession(event.data.sessionID)
           invalidateSessionListCachesDebounced(queryClient, event.directory, serverId)
           break
         }
@@ -1011,7 +1058,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         streamConnectedRef.current = true
         reconciledRemoteServerIdsRef.current.clear()
         initialFetchDoneRef.current = false
-        fetchInitialPendingData()
+        void reconcilePendingActionsForDirectories(collectTrackedDirectories())
         fetchInitialSessionStatuses()
         reconcileRemoteServersOnce(enabledRemoteServersRef.current)
         void syncRunningShells(collectTrackedDirectories())
@@ -1073,7 +1120,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       subscription.dispose()
       subscriptionRef.current = null
     }
-  }, [addPermission, removePermission, addForm, removeForm, rememberSessionDirectory, fetchInitialPendingData, fetchInitialSessionStatuses, startStatusPoll, stopStatusPoll, queryClient, handleHealthChange, reconcilePendingActionsForDirectories, collectTrackedDirectories, syncRunningShells, resolveSessionAncestry, reconcileRemoteSessionStatuses, reconcileRemoteServersOnce, invalidateRemoteStatusSyncs])
+  }, [addPermission, removePermission, addForm, removeForm, forgetPendingActionsForSession, rememberSessionDirectory, fetchInitialPendingData, fetchInitialSessionStatuses, startStatusPoll, stopStatusPoll, queryClient, handleHealthChange, reconcilePendingActionsForDirectories, collectTrackedDirectories, syncRunningShells, resolveSessionAncestry, reconcileRemoteSessionStatuses, reconcileRemoteServersOnce, invalidateRemoteStatusSyncs])
 
   useEffect(() => {
     reposRef.current = repos
@@ -1127,6 +1174,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       hasForSession: hasFormsForSession,
       navigateToCurrent: navigateToCurrentForm,
       syncForSession: syncFormsForSession,
+      forgetPendingActionsForSession,
     },
     sseHealth,
     getRepoIdForSession,
@@ -1156,6 +1204,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     hasFormsForSession,
     navigateToCurrentForm,
     syncFormsForSession,
+    forgetPendingActionsForSession,
     sseHealth,
     getRepoIdForSession,
   ])
