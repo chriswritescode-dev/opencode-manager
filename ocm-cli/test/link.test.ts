@@ -1,15 +1,92 @@
-import { describe, it, expect } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir, type NetworkInterfaceInfo } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import {
   createOpenCodePairingNonce,
   createOpenCodePairingProof,
   decryptOpenCodePairingCredentials,
 } from '@opencode-manager/shared/opencode'
-import { generatePairingCode, resolveDefaultBaseUrl, startPairingServer } from '../src/link'
+import { discoverOpenCodeService, generatePairingCode, resolveDefaultBaseUrl, resolveLanIPv4, startPairingServer } from '../src/link'
 import type { PairingServerOptions } from '../src/link'
 import { buildOpenCodeServerLink, parseOpenCodeServerLink } from '@opencode-manager/shared/schemas'
 
 const CODE = 'test-pairing-code-0123456789abcdef'
 const CREDENTIALS = { username: 'opencode', password: 'secret-password' }
+
+const LAN_INTERFACES: NodeJS.Dict<NetworkInterfaceInfo[]> = {
+  lo: [{ address: '127.0.0.1', family: 'IPv4', internal: true, netmask: '255.0.0.0', mac: '00:00:00:00:00:00', cidr: '127.0.0.1/8' }],
+  eth0: [{ address: '192.168.1.20', family: 'IPv4', internal: false, netmask: '255.255.255.0', mac: '00:11:22:33:44:55', cidr: '192.168.1.20/24' }],
+}
+
+const INTERNAL_ONLY_INTERFACES: NodeJS.Dict<NetworkInterfaceInfo[]> = {
+  lo: [
+    { address: '127.0.0.1', family: 'IPv4', internal: true, netmask: '255.0.0.0', mac: '00:00:00:00:00:00', cidr: '127.0.0.1/8' },
+    { address: '::1', family: 'IPv6', internal: true, netmask: 'ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff', mac: '00:00:00:00:00:00', scopeid: 0, cidr: '::1/128' },
+  ],
+}
+
+const PLATFORM_SERVICE_PORT = process.platform === 'win32' ? 45278 : 49374
+
+interface ServiceHome {
+  home: string
+  state: string
+  config: string
+}
+
+const tempDirs: string[] = []
+
+afterEach(() => {
+  for (const directory of tempDirs.splice(0)) rmSync(directory, { recursive: true, force: true })
+})
+
+function createServiceHome(): ServiceHome {
+  const home = mkdtempSync(join(tmpdir(), 'ocm-service-'))
+  tempDirs.push(home)
+  const state = join(home, 'state')
+  const config = join(home, 'config')
+  mkdirSync(join(state, 'opencode'), { recursive: true })
+  mkdirSync(join(config, 'opencode'), { recursive: true })
+  return { home, state, config }
+}
+
+function discover(paths: ServiceHome, interfaces: NodeJS.Dict<NetworkInterfaceInfo[]> = LAN_INTERFACES) {
+  return discoverOpenCodeService({
+    env: { XDG_STATE_HOME: paths.state, XDG_CONFIG_HOME: paths.config },
+    home: paths.home,
+    interfaces,
+  })
+}
+
+async function discoverOnPlatform(
+  platform: NodeJS.Platform,
+  paths: ServiceHome,
+  interfaces: NodeJS.Dict<NetworkInterfaceInfo[]> = LAN_INTERFACES,
+) {
+  const originalPlatform = process.platform
+  Object.defineProperty(process, 'platform', { value: platform })
+  try {
+    vi.resetModules()
+    const { discoverOpenCodeService: discoverService } = await import('../src/link')
+    return discoverService({
+      env: { XDG_STATE_HOME: paths.state, XDG_CONFIG_HOME: paths.config },
+      home: paths.home,
+      interfaces,
+    })
+  } finally {
+    Object.defineProperty(process, 'platform', { value: originalPlatform })
+  }
+}
+
+function writeRegistration(paths: ServiceHome, content: unknown): void {
+  const file = join(paths.state, 'opencode', 'service.json')
+  writeFileSync(file, typeof content === 'string' ? content : JSON.stringify(content))
+}
+
+function writeServiceConfig(paths: ServiceHome, content: unknown): void {
+  const file = join(paths.config, 'opencode', 'service.json')
+  writeFileSync(file, typeof content === 'string' ? content : JSON.stringify(content))
+}
 
 function startPairing(overrides: Partial<PairingServerOptions> = {}) {
   return startPairingServer({
@@ -53,6 +130,162 @@ describe('resolveDefaultBaseUrl', () => {
 
   it('falls back to loopback when only internal interfaces exist', () => {
     expect(resolveDefaultBaseUrl({})).toBe('http://127.0.0.1:4096')
+  })
+})
+
+describe('resolveLanIPv4', () => {
+  it('returns null when no external IPv4 interface exists', () => {
+    expect(resolveLanIPv4(INTERNAL_ONLY_INTERFACES)).toBeNull()
+    expect(resolveLanIPv4({})).toBeNull()
+  })
+})
+
+describe('discoverOpenCodeService', () => {
+  it('substitutes the LAN address for a wildcard registration host and keeps the port', () => {
+    const paths = createServiceHome()
+    writeRegistration(paths, {
+      id: 'registration-id',
+      version: '2.0.32',
+      url: 'http://0.0.0.0:49374',
+      pid: 4242,
+      password: 'service-secret',
+    })
+
+    expect(discover(paths)).toEqual({
+      baseUrl: 'http://192.168.1.20:49374',
+      password: 'service-secret',
+      source: 'registration',
+      loopbackOnly: false,
+    })
+  })
+
+  it('falls back to the service config with the default hostname and port', () => {
+    const paths = createServiceHome()
+    writeServiceConfig(paths, { password: 'config-secret' })
+
+    expect(discover(paths)).toEqual({
+      baseUrl: `http://127.0.0.1:${PLATFORM_SERVICE_PORT}`,
+      password: 'config-secret',
+      source: 'config',
+      loopbackOnly: true,
+    })
+  })
+
+  it('uses the configured hostname and port when present', () => {
+    const paths = createServiceHome()
+    writeServiceConfig(paths, { hostname: '0.0.0.0', port: 5000 })
+
+    expect(discover(paths)).toEqual({
+      baseUrl: 'http://192.168.1.20:5000',
+      password: null,
+      source: 'config',
+      loopbackOnly: false,
+    })
+  })
+
+  it('brackets an IPv6 wildcard config hostname and substitutes the LAN address', () => {
+    const paths = createServiceHome()
+    writeServiceConfig(paths, { hostname: '::', port: 5000 })
+
+    expect(discover(paths)).toEqual({
+      baseUrl: 'http://192.168.1.20:5000',
+      password: null,
+      source: 'config',
+      loopbackOnly: false,
+    })
+  })
+
+  it('brackets an IPv6 loopback config hostname', () => {
+    const paths = createServiceHome()
+    writeServiceConfig(paths, { hostname: '::1' })
+
+    expect(discover(paths)).toEqual({
+      baseUrl: `http://[::1]:${PLATFORM_SERVICE_PORT}`,
+      password: null,
+      source: 'config',
+      loopbackOnly: true,
+    })
+  })
+
+  it('marks loopback registrations as loopback only', () => {
+    const cases = [
+      { host: '127.0.0.1', url: 'http://127.0.0.1:49374' },
+      { host: 'localhost', url: 'http://localhost:49374' },
+      { host: '::1', url: 'http://[::1]:49374' },
+    ]
+
+    for (const { host, url } of cases) {
+      const paths = createServiceHome()
+      writeRegistration(paths, { url, pid: 4242 })
+
+      expect(discover(paths), host).toEqual({
+        baseUrl: url,
+        password: null,
+        source: 'registration',
+        loopbackOnly: true,
+      })
+    }
+  })
+
+  it('returns null when neither the registration nor the config exists', () => {
+    expect(discover(createServiceHome())).toBeNull()
+  })
+
+  it('ignores a malformed registration and falls back to the config', () => {
+    const paths = createServiceHome()
+    writeRegistration(paths, '{ not json')
+    writeServiceConfig(paths, { hostname: '192.168.1.50', port: 5000, password: 'config-secret' })
+
+    expect(discover(paths)).toEqual({
+      baseUrl: 'http://192.168.1.50:5000',
+      password: 'config-secret',
+      source: 'config',
+      loopbackOnly: false,
+    })
+  })
+
+  it('marks a wildcard registration as loopback when no LAN address exists', () => {
+    const paths = createServiceHome()
+    writeRegistration(paths, { url: 'http://0.0.0.0:49374', password: 'service-secret' })
+
+    expect(discover(paths, INTERNAL_ONLY_INTERFACES)).toEqual({
+      baseUrl: 'http://127.0.0.1:49374',
+      password: 'service-secret',
+      source: 'registration',
+      loopbackOnly: true,
+    })
+  })
+
+  it('uses the config password when the registration URL is unusable', () => {
+    const paths = createServiceHome()
+    writeRegistration(paths, { url: 'not-a-url', password: 'stale-secret' })
+    writeServiceConfig(paths, { hostname: '192.168.1.50', port: 5000, password: 'config-secret' })
+
+    expect(discover(paths)).toEqual({
+      baseUrl: 'http://192.168.1.50:5000',
+      password: 'config-secret',
+      source: 'config',
+      loopbackOnly: false,
+    })
+  })
+
+  it('uses the platform default service port when the config omits one', async () => {
+    const cases: Array<{ platform: NodeJS.Platform; port: number }> = [
+      { platform: 'linux', port: 49374 },
+      { platform: 'win32', port: 45278 },
+    ]
+
+    for (const { platform, port } of cases) {
+      const paths = createServiceHome()
+      writeServiceConfig(paths, { password: 'config-secret' })
+
+      expect(await discoverOnPlatform(platform, paths), platform).toEqual({
+        baseUrl: `http://127.0.0.1:${port}`,
+        password: 'config-secret',
+        source: 'config',
+        loopbackOnly: true,
+      })
+    }
   })
 })
 

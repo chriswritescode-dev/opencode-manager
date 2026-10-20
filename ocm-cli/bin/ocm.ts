@@ -19,7 +19,7 @@ import { type ManagerRepo, fetchRepos, toRemoteRepoSummaries } from '../src/mana
 import { OCM_VERSION as VERSION, warmRepoProxy } from '../src/repo-proxy.js'
 import { resolveManagerAuth } from '../src/manager-auth.js'
 import type { ManagerAuthOk } from '../src/manager-auth.js'
-import { generatePairingCode, probeOpenCodeServer, renderPairingQr, resolveDefaultBaseUrl, startPairingServer } from '../src/link.js'
+import { discoverOpenCodeService, generatePairingCode, probeOpenCodeServer, renderPairingQr, resolveDefaultBaseUrl, startPairingServer } from '../src/link.js'
 
 const USAGE = `ocm v${VERSION} - OpenCode Manager workspace launcher
 
@@ -637,6 +637,8 @@ interface LinkCommandOptions {
   pairPort: number
   ttlMs: number
   showQr: boolean
+  serviceSource: 'registration' | 'config' | null
+  serviceLoopbackOnly: boolean
 }
 
 function parseLinkInteger(value: string, flag: string, min: number, max: number): number {
@@ -678,9 +680,13 @@ function parseLinkArgs(args: string[]): LinkCommandOptions {
     index++
   }
 
-  const baseUrl = normalizeLinkBaseUrl(values.url ?? process.env.OPENCODE_SERVER_URL ?? resolveDefaultBaseUrl())
-  const password = values.password ?? process.env.OPENCODE_SERVER_PASSWORD
-  if (!password) die('no OpenCode password: pass --password or set OPENCODE_SERVER_PASSWORD')
+  const explicitUrl = values.url ?? (process.env.OPENCODE_SERVER_URL || undefined)
+  const service = explicitUrl === undefined ? discoverOpenCodeService() : null
+  const baseUrl = normalizeLinkBaseUrl(explicitUrl ?? service?.baseUrl ?? resolveDefaultBaseUrl())
+  const password = values.password ?? (process.env.OPENCODE_SERVER_PASSWORD || undefined) ?? service?.password
+  if (!password) {
+    die('no OpenCode password: pass --password, set OPENCODE_SERVER_PASSWORD, or configure the OpenCode service')
+  }
 
   return {
     baseUrl,
@@ -691,6 +697,8 @@ function parseLinkArgs(args: string[]): LinkCommandOptions {
     pairPort: parseLinkInteger(values.pairPort ?? '0', '--pair-port', 0, 65535),
     ttlMs: parseLinkInteger(values.ttl ?? '300', '--ttl', 1, 86400) * 1000,
     showQr,
+    serviceSource: service?.source ?? null,
+    serviceLoopbackOnly: service?.loopbackOnly ?? false,
   }
 }
 
@@ -702,6 +710,13 @@ export async function cmdLink(args: string[]): Promise<void> {
 
   const options = parseLinkArgs(args)
   const credentials = { username: options.username, password: options.password }
+
+  if (options.serviceSource) {
+    info(`using the OpenCode service at ${options.baseUrl} (from ${options.serviceSource})`)
+    if (options.serviceLoopbackOnly) {
+      warn(`it only listens on loopback, so a remote Manager cannot reach ${options.baseUrl}; run \`opencode service set hostname 0.0.0.0\` to expose it on the LAN`)
+    }
+  }
 
   const probe = await probeOpenCodeServer(options.baseUrl, credentials)
   if (probe.status === 'unauthorized') {
