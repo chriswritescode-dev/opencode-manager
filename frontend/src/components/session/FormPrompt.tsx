@@ -328,10 +328,10 @@ export function FormPrompt({ form, onReply, onCancel, onMinimize, onAskSideQuest
 
   return (
     <div
-      className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-t-[22px] border-t border-primary/40 bg-background bg-gradient-to-b from-primary/15 to-card mb-1 md:flex-none md:rounded-xl md:border-2 md:border-primary/40 md:bg-gradient-to-br md:from-primary/10 md:to-primary/20 md:shadow-lg md:shadow-primary/20"
+      className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-t-[22px] border-t border-primary/40 bg-background bg-gradient-to-b from-primary/15 to-card mb-1 md:flex-initial md:rounded-xl md:border-2 md:border-primary/40 md:bg-gradient-to-br md:from-primary/10 md:to-primary/20 md:shadow-lg md:shadow-primary/20"
       style={isMobile ? swipeStyles : undefined}
     >
-      <div ref={mobileHeaderRef} className="shrink-0 md:hidden">
+      <div ref={mobileHeaderRef} className="shrink-0 border-b border-primary/25 bg-primary/10 md:hidden">
         <button
           type="button"
           onClick={handleMinimize}
@@ -349,7 +349,7 @@ export function FormPrompt({ form, onReply, onCancel, onMinimize, onAskSideQuest
           >
             Dismiss
           </button>
-          <span className="min-w-0 flex-1 truncate text-center text-[13px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <span className="min-w-0 flex-1 truncate text-center text-[13px] font-semibold uppercase tracking-wide text-primary">
             {form.title || 'Form'}
           </span>
           <button
@@ -387,7 +387,7 @@ export function FormPrompt({ form, onReply, onCancel, onMinimize, onAskSideQuest
       </div>
 
       {!isMinimized && (
-        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain px-4 pt-2 pb-6 space-y-7 md:flex-none md:p-3 md:max-h-[70vh] md:space-y-3 md:bg-background/60 dark:md:bg-background/30">
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain px-4 pt-4 pb-6 space-y-7 bg-background/60 dark:bg-background/30 md:flex-initial md:p-3 md:max-h-[70vh] md:space-y-3">
           {renderFields.map((field) =>
             field.type === 'external' ? (
               <ExternalFieldCard key={field.key} field={field} />
