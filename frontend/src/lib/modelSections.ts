@@ -1,6 +1,7 @@
 import { Clock, Star, type LucideIcon } from 'lucide-react'
 import type { ComboboxOption } from '@/components/ui/combobox'
 import {
+  mapModelInfo,
   formatModelName,
   formatProviderName,
   providerModelRef,
@@ -9,7 +10,7 @@ import {
   type OpenCodeModelState,
   type Provider,
 } from '@/api/providers'
-import { compareCatalogModels, parseOpenCodeModelRef } from '@opencode-manager/shared/opencode'
+import { compareCatalogModels, parseOpenCodeModelRef, type ModelInfo } from '@opencode-manager/shared/opencode'
 
 export interface ModelOption {
   value: string
@@ -47,6 +48,7 @@ export function buildModelSections(
   providers: Provider[],
   modelState: OpenCodeModelState | undefined,
   defaultModel?: string | null,
+  runtimeModels: ModelInfo[] = [],
 ): ModelSection[] {
   const optionsByValue = new Map<string, ModelOption>()
   const providerSections = providers.map((provider): ModelSection => {
@@ -57,6 +59,14 @@ export function buildModelSections(
     })
     return { key: `provider:${provider.id}`, providerID: provider.id, title: formatProviderName(provider), options }
   })
+
+  for (const info of runtimeModels) {
+    const provider = providers.find((entry) => entry.id === info.providerID)
+    if (!provider) continue
+    const model = mapModelInfo(info)
+    const value = providerModelRef(provider, model)
+    if (!optionsByValue.has(value)) optionsByValue.set(value, createOption(provider, model, value))
+  }
 
   const pinnedValues = new Set<string>()
 
@@ -75,7 +85,7 @@ export function buildModelSections(
     const parsed = parseOpenCodeModelRef(defaultModel)
     if (!parsed) return undefined
     const provider = providers.find((entry) => entry.id === parsed.providerID)
-    const model = provider?.models.find((entry) => (entry.key ?? entry.id) === parsed.id)
+    const model = optionsByValue.get(providerModelRef({ id: parsed.providerID }, { id: parsed.id }))?.model
     if (!provider || !model) return undefined
     if (!parsed.variant) pinnedValues.add(providerModelRef(provider, model))
     return createOption(provider, model, defaultModel)
@@ -111,8 +121,8 @@ function uniqueModelSections(sections: ModelSection[]): ModelSection[] {
 
 function compareSearchMatches(a: ModelOption, b: ModelOption): number {
   return compareCatalogModels(
-    { name: a.label, free: a.model.free, released: a.model.released },
-    { name: b.label, free: b.model.free, released: b.model.released },
+    { ...a.model, name: a.label },
+    { ...b.model, name: b.label },
   )
 }
 

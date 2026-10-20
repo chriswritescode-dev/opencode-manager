@@ -581,7 +581,7 @@ export function OpenCodeModelDialog({
                           }
                         }}
                         options={discoveredModelOptions}
-                        placeholder="e.g., MiniMax-M2.7"
+                        placeholder="e.g., MiniMax-M3.1-Flash"
                         disabled={isLoadingModels}
                         allowCustomValue={true}
                       />

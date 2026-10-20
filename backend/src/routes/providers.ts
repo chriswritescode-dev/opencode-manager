@@ -35,6 +35,10 @@ function credentialConnections(integration: IntegrationInfo) {
 export function createProvidersRoutes(openCodeClient: OpenCodeClient) {
   const app = new Hono()
 
+  app.get('/catalog-plugins', async (c) => {
+    return c.json(await openCodeClient.managedCatalogPlugins?.() ?? [])
+  })
+
   app.get('/model-state', async (c) => {
     try {
       const state = await readOpenCodeModelState()

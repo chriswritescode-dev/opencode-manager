@@ -2,6 +2,9 @@ import { API_BASE_URL } from "@/config";
 import { fetchWrapper } from "./fetchWrapper";
 import { callOpenCode } from "./opencodeApi";
 import {
+  applyMiniMaxCatalogPolicy,
+  miniMaxCatalogRank,
+  type ManagedCatalogPlugin,
   compareCatalogModels,
   formatOpenCodeModelRef,
   isActiveCatalogProvider,
@@ -16,9 +19,10 @@ import {
   type ModelPreferenceModel,
   type ModelRef,
 } from "@opencode-manager/shared/opencode";
-import type { CredentialListResponse, CredentialStatusResponse } from "@opencode-manager/shared/schemas";
+import { LOCAL_OPENCODE_SERVER_ID, type CredentialListResponse, type CredentialStatusResponse } from "@opencode-manager/shared/schemas";
 
 export interface Model {
+  miniMaxCatalogRank?: number;
   id: string;
   key?: string;
   name: string;
@@ -45,8 +49,9 @@ export type ModelSelection = ModelPreferenceModel
 
 export type OpenCodeModelState = ModelPreference
 
-function mapModelInfo(model: ModelInfo): Model {
+export function mapModelInfo(model: ModelInfo): Model {
   return {
+    miniMaxCatalogRank: miniMaxCatalogRank(model),
     id: model.modelID,
     key: model.id,
     name: model.name,
@@ -67,10 +72,27 @@ export async function getProviders(directory?: string, serverId?: string): Promi
       serverId,
     );
 
+    let catalogModels = modelResult.data;
+    try {
+      const [entries, plugins] = await callOpenCode(
+        (api) => Promise.all([api.config.get(location), api.plugin.list(location)]),
+        serverId,
+      );
+      if (providerResult.location.directory === modelResult.location.directory &&
+        plugins.location.directory === modelResult.location.directory &&
+        (!directory || directory === modelResult.location.directory)) {
+        const managed = (!serverId || serverId === LOCAL_OPENCODE_SERVER_ID)
+          ? await fetchWrapper<ManagedCatalogPlugin[]>(`${API_BASE_URL}/api/providers/catalog-plugins`).catch(() => [])
+          : [];
+        catalogModels = applyMiniMaxCatalogPolicy(modelResult.data, providerResult.data, entries, plugins.data, managed);
+      }
+    } catch {
+      catalogModels = modelResult.data;
+    }
     const activeProviders = providerResult.data.filter(isActiveCatalogProvider);
 
     const providers = activeProviders.map((provider): Provider => {
-      const models = modelResult.data
+      const models = catalogModels
         .filter((model) => model.providerID === provider.id && isSelectableCatalogModel(model))
         .map(mapModelInfo);
 
@@ -95,7 +117,7 @@ export async function getProviders(directory?: string, serverId?: string): Promi
       ),
     );
 
-    return { providers, models: modelResult.data };
+    return { providers, models: catalogModels };
   } catch {
     return { providers: [], models: [] };
   }

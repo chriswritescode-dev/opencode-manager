@@ -5,7 +5,7 @@ import { buildGhEnvPluginSource } from '../opencode-gh-env-plugin'
 import { buildManagerToolPluginSource } from '../opencode-manager-tool-plugin'
 import { buildSandboxPluginSource } from '../opencode-sandbox-plugin'
 import { getOpenCodeServiceSettingsPath } from '../opencode-service-mode'
-import { ensureSandboxShellShim } from '../sandbox/shell-shim'
+import { ensureSandboxShellShim, sandboxShellShimPath } from '../sandbox/shell-shim'
 
 const MANAGED_OPENCODE_PLUGIN_IDS = {
   ghEnv: 'ocm.gh-env',
@@ -39,6 +39,23 @@ const MANAGED_OPENCODE_PLUGINS: readonly ManagedOpenCodePlugin[] = [
 
 export function getOpenCodePluginDir(configHome: string): string {
   return join(configHome, 'opencode', 'plugins')
+}
+
+export async function verifiedManagedCatalogPlugins(configHome: string): Promise<Array<{ id: string; path: string }>> {
+  const verified = await Promise.all(MANAGED_OPENCODE_PLUGINS.map(async (plugin) => {
+    const path = join(getOpenCodePluginDir(configHome), plugin.filename)
+    try {
+      const source = plugin.buildSource({
+        id: plugin.id,
+        shellShimPath: sandboxShellShimPath(configHome),
+        serviceSettingsPath: getOpenCodeServiceSettingsPath(),
+      })
+      return await fs.readFile(path, 'utf8') === source ? { id: plugin.id, path } : undefined
+    } catch {
+      return undefined
+    }
+  }))
+  return verified.filter((plugin): plugin is { id: string; path: string } => plugin !== undefined)
 }
 
 export async function installManagedPlugins(configHome: string): Promise<void> {

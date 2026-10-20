@@ -1,5 +1,6 @@
 import type { ModelInfo, ModelRef } from '@opencode/client'
 import { isRecord } from '../utils/record'
+import { miniMaxCatalogRank, ordinaryModelFallback } from './minimaxCatalog'
 
 export type ModelPreferenceModel = {
   providerID: string
@@ -159,7 +160,7 @@ export function selectInteractiveModel(options: SelectInteractiveModelOptions): 
   )
   if (selected) return selected
 
-  const first = options.models[0]
+  const first = ordinaryModelFallback(options.models)
   return first ? { providerID: first.providerID, modelID: first.id } : undefined
 }
 
@@ -185,6 +186,7 @@ export function selectPreferredVariant(options: SelectPreferredVariantOptions): 
 }
 
 interface CatalogSortEntry {
+  miniMaxCatalogRank?: number
   providerID?: string
   providerName?: string
   name?: string
@@ -216,6 +218,9 @@ export function compareCatalogModels(a: CatalogSortEntry, b: CatalogSortEntry): 
   const providerName = (a.providerName ?? a.providerID ?? '').localeCompare(b.providerName ?? b.providerID ?? '')
   if (providerName !== 0) return providerName
 
+  const miniMax = (miniMaxCatalogRank(a) ?? 2) - (miniMaxCatalogRank(b) ?? 2)
+  if (miniMax !== 0) return miniMax
+
   const free = Number(catalogEntryFree(b)) - Number(catalogEntryFree(a))
   if (free !== 0) return free
 
@@ -229,8 +234,8 @@ export function isActiveCatalogProvider(provider: { activation?: string }): bool
   return provider.activation !== 'disabled'
 }
 
-export function isSelectableCatalogModel(model: { enabled: boolean; status: string }): boolean {
-  return model.enabled && model.status !== 'deprecated'
+export function isSelectableCatalogModel(model: { enabled: boolean; status: string; miniMaxCatalogRank?: number }): boolean {
+  return model.enabled && model.status !== 'deprecated' && miniMaxCatalogRank(model) !== -1
 }
 
 interface SelectEffectiveModelRefOptions {
@@ -246,8 +251,16 @@ export function selectEffectiveModelRef(options: SelectEffectiveModelRefOptions)
     if (candidate && findModelInfo(models, refSelection(candidate)) !== undefined) return candidate
   }
 
-  if (defaultModel && findModelInfo(models, refSelection(defaultModel)) !== undefined) return defaultModel
+  if (defaultModel) {
+    const info = findModelInfo(models, refSelection(defaultModel))
+    if (info) {
+      if (!defaultModel.variant && miniMaxCatalogRank(info) !== undefined) {
+        const preferred = ordinaryModelFallback(models.filter((model) => model.providerID === info.providerID))
+        if (preferred) return { providerID: preferred.providerID, id: preferred.id }
+      } else return defaultModel
+    }
+  }
 
-  const fallback = models.find((model) => model.enabled)
+  const fallback = ordinaryModelFallback(models)
   return fallback ? { providerID: fallback.providerID, id: fallback.id } : undefined
 }

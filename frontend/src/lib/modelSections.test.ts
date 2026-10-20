@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { buildModelSections, filterModelSections, toModelComboboxOptions } from './modelSections'
 import type { Model, Provider } from '@/api/providers'
+import type { ModelInfo } from '@opencode-manager/shared/opencode'
 
 function makeModel(id: string, overrides: Partial<Model> = {}): Model {
   return { id, key: id, name: id, released: 0, free: false, ...overrides }
@@ -28,6 +29,21 @@ function valuesOf(sections: ReturnType<typeof buildModelSections>, key: string):
 }
 
 describe('buildModelSections', () => {
+  it('retains saved legacy entries without returning them to ordinary provider sections', () => {
+    const provider = makeProvider('minimax', 'MiniMax', [makeModel('MiniMax-M3.1-Flash'), makeModel('MiniMax-M3')])
+    const runtime = ['MiniMax-M2.7', 'MiniMax-M2.5'].map((id) => ({
+      providerID: 'minimax', id, modelID: id, name: id, time: { released: 0 }, cost: [], limit: { context: 1, output: 1 },
+    })) as ModelInfo[]
+    const sections = buildModelSections([provider], {
+      favorite: [{ providerID: 'minimax', modelID: 'MiniMax-M2.7' }],
+      recent: [{ providerID: 'minimax', modelID: 'MiniMax-M2.5' }], variant: {},
+    }, 'minimax/MiniMax-M2.7#high', runtime)
+    expect(valuesOf(sections, 'default')).toEqual(['minimax/MiniMax-M2.7#high'])
+    expect(valuesOf(sections, 'favorites')).toEqual(['minimax/MiniMax-M2.7'])
+    expect(valuesOf(sections, 'recent')).toEqual(['minimax/MiniMax-M2.5'])
+    expect(valuesOf(sections, 'provider:minimax')).toEqual(['minimax/MiniMax-M3.1-Flash', 'minimax/MiniMax-M3'])
+  })
+
   it('orders default, favorites, recent, then providers', () => {
     const sections = buildModelSections(
       providers,

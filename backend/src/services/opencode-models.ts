@@ -1,5 +1,5 @@
 import type { ModelInfo, ModelRef } from '@opencode-manager/shared/opencode'
-import { findModelInfo, formatOpenCodeModelRef, openCodeLocation, parseOpenCodeModelRef, selectConfiguredModelRef, selectEffectiveModelRef } from '@opencode-manager/shared/opencode'
+import { applyMiniMaxCatalogPolicy, findModelInfo, formatOpenCodeModelRef, openCodeLocation, parseOpenCodeModelRef, selectConfiguredModelRef, selectEffectiveModelRef } from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from './opencode/client'
 
 export interface ResolvedOpenCodeModel {
@@ -176,6 +176,20 @@ export async function resolveOpenCodeModel(
 
       if (listResult.ok) {
         models = listResult.value.data
+        try {
+          const [entries, providers, plugins, managed] = await Promise.all([
+            client.api.config.get(location, { signal }),
+            client.api.provider.list(location, { signal }),
+            client.api.plugin.list(location, { signal }),
+            client.managedCatalogPlugins?.() ?? Promise.resolve([]),
+          ])
+          if (providers.location.directory === directory && plugins.location.directory === directory &&
+            listResult.value.location.directory === directory) {
+            models = applyMiniMaxCatalogPolicy(models, providers.data, entries, plugins.data, managed)
+          }
+        } catch {
+          external?.throwIfAborted()
+        }
       }
 
       if (defaultResult.ok) {

@@ -1,5 +1,6 @@
 import { logger } from '../../utils/logger'
-import { ENV } from '@opencode-manager/shared/config/env'
+import { ENV, getOpenCodeConfigHome } from '@opencode-manager/shared/config/env'
+import { verifiedManagedCatalogPlugins } from './plugin-registry'
 import { createOpenCodeApi, type OpenCodeApi } from '@opencode-manager/shared/opencode'
 import { filterProxyHeaders, NULL_BODY_STATUSES } from '../../utils/proxy-headers'
 import { getOpenCodeBasicAuthHeader, type OpenCodePasswordResolver } from './auth'
@@ -7,6 +8,7 @@ import { getOpenCodeUpstreamBaseUrl, withDefaultOpenCodeDirectory } from './upst
 
 export interface OpenCodeClient {
   readonly api: OpenCodeApi
+  managedCatalogPlugins?: () => Promise<Array<{ id: string; path: string }>>
   forwardRaw(request: Request): Promise<Response>
 }
 
@@ -143,5 +145,7 @@ export function createOpenCodeClient(
   const password = typeof passwordOverride === 'string' ? passwordOverride : ENV.OPENCODE.SERVER_PASSWORD
   const basicAuth = password ? getOpenCodeBasicAuthHeader(password) : null
 
-  return new FetchOpenCodeClient({ baseUrl, basicAuth, passwordResolver })
+  const client: OpenCodeClient = new FetchOpenCodeClient({ baseUrl, basicAuth, passwordResolver })
+  client.managedCatalogPlugins = () => verifiedManagedCatalogPlugins(getOpenCodeConfigHome())
+  return client
 }

@@ -10,12 +10,13 @@ import {
 } from './providers'
 import { API_BASE_URL } from '@/config'
 
-const { mockFetchWrapper, mockProviderList, mockModelList, mockModelDefault, mockConfigGet } = vi.hoisted(() => ({
+const { mockFetchWrapper, mockProviderList, mockModelList, mockModelDefault, mockConfigGet, mockPluginList } = vi.hoisted(() => ({
   mockFetchWrapper: vi.fn(),
   mockProviderList: vi.fn(),
   mockModelList: vi.fn(),
   mockModelDefault: vi.fn(),
   mockConfigGet: vi.fn(),
+  mockPluginList: vi.fn(),
 }))
 
 vi.mock('./fetchWrapper', () => ({
@@ -28,6 +29,7 @@ vi.mock('./opencodeApi', () => ({
       provider: { list: mockProviderList },
       model: { list: mockModelList, default: mockModelDefault },
       config: { get: mockConfigGet },
+      plugin: { list: mockPluginList },
     }),
 }))
 
@@ -53,6 +55,38 @@ describe('getProviders', () => {
     vi.clearAllMocks()
     mockProviderList.mockResolvedValue({ location: { directory: '/repo' }, data: [] })
     mockModelList.mockResolvedValue({ location: { directory: '/repo' }, data: [] })
+    mockConfigGet.mockResolvedValue([])
+    mockPluginList.mockResolvedValue({ location: { directory: '/repo' }, data: [] })
+    mockFetchWrapper.mockResolvedValue([])
+  })
+
+  it('filters ordinary MiniMax choices while preserving full runtime models and fails open on unknown provenance', async () => {
+    const models = ['MiniMax-M2.7', 'MiniMax-M3', 'MiniMax-M3.1-Flash'].map((id) =>
+      makeAnthropicModel({ id, modelID: id, name: id, providerID: 'minimax' }),
+    )
+    mockProviderList.mockResolvedValue({ location: { directory: '/repo' }, data: [{ id: 'minimax', name: 'MiniMax' }] })
+    mockModelList.mockResolvedValue({ location: { directory: '/repo' }, data: models })
+    const result = await getProviders('/repo')
+    expect(result.providers[0].models.map((model) => model.id)).toEqual(['MiniMax-M3.1-Flash', 'MiniMax-M3'])
+    expect(result.models.map((model) => model.id)).toEqual(models.map((model) => model.id))
+    expect(mockConfigGet).toHaveBeenCalledWith({ location: { directory: '/repo' } })
+    expect(mockPluginList).toHaveBeenCalledWith({ location: { directory: '/repo' } })
+    mockConfigGet.mockRejectedValueOnce(new Error('unavailable'))
+    expect((await getProviders('/repo')).providers[0].models).toHaveLength(3)
+    mockPluginList.mockResolvedValueOnce({ location: { directory: '/other' }, data: [] })
+    expect((await getProviders('/repo')).providers[0].models).toHaveLength(3)
+    mockConfigGet.mockResolvedValueOnce([{ type: 'document', info: { providers: { minimax: { models: { 'MiniMax-M2.7': {} } } } } }])
+    expect((await getProviders('/repo')).providers[0].models).toHaveLength(3)
+    mockPluginList.mockResolvedValueOnce({ location: { directory: '/repo' }, data: [{ source: { type: 'sdk' } }] })
+    expect((await getProviders('/repo')).providers[0].models).toHaveLength(3)
+  })
+
+  it('does not exempt local-looking plugins on remote servers', async () => {
+    mockProviderList.mockResolvedValue({ location: { directory: '/repo' }, data: [{ id: 'minimax', name: 'MiniMax' }] })
+    mockModelList.mockResolvedValue({ location: { directory: '/repo' }, data: [makeAnthropicModel({ id: 'MiniMax-M2.7', modelID: 'MiniMax-M2.7', providerID: 'minimax' })] })
+    mockPluginList.mockResolvedValue({ location: { directory: '/repo' }, data: [{ id: 'ocm.manager', source: { type: 'local', path: '/managed/ocm-manager.js' } }] })
+    expect((await getProviders('/repo', 'remote')).providers[0].models).toHaveLength(1)
+    expect(mockFetchWrapper).not.toHaveBeenCalled()
   })
 
   it('maps V2 providers and models into the UI shape', async () => {

@@ -26,8 +26,8 @@ export function useModelSections(
   const providers = catalog?.providers ?? EMPTY_PROVIDERS
 
   const sections = useMemo(
-    () => buildModelSections(providers, modelState, defaultModel),
-    [providers, modelState, defaultModel],
+    () => buildModelSections(providers, modelState, defaultModel, catalog?.models),
+    [providers, modelState, defaultModel, catalog?.models],
   )
 
   return {

@@ -1,4 +1,6 @@
 import { OpenCode } from '@opencode/client'
+export { applyMiniMaxCatalogPolicy, miniMaxCatalogRank } from './minimaxCatalog'
+export type { ManagedCatalogPlugin } from './minimaxCatalog'
 import { OPENCODE_SERVER_USERNAME } from '../schemas/opencode-servers'
 
 export { OPENCODE_SERVER_USERNAME }
