@@ -373,6 +373,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const subscriptionRef = useRef<ReturnType<typeof openCodeEventStream.subscribeGlobalMonitor> | null>(null)
   const reposRef = useRef<typeof repos>(null)
   const ancestryInFlightRef = useRef<Set<string>>(new Set())
+  const forgottenSessionIDsRef = useRef(new Set<string>())
 
   const { data: repos } = useQuery({
     queryKey: ['repos'],
@@ -386,6 +387,15 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     enabledRemoteServersRef.current = enabledRemoteServers
   }, [enabledRemoteServers])
+  const serversLoadedRef = useRef(serversLoaded)
+  useEffect(() => {
+    serversLoadedRef.current = serversLoaded
+  }, [serversLoaded])
+  const isRemoteServerDisabled = useCallback((serverId: string): boolean => {
+    return serversLoadedRef.current
+      && !isLocalOpenCodeServer(serverId)
+      && !enabledRemoteServersRef.current.some((server) => server.id === serverId)
+  }, [])
   const remoteProjectQueries = useQueries({
     queries: enabledRemoteServers.map((server) => ({
       queryKey: serverScopedKey(['opencode', 'projects'], server.id),
@@ -539,6 +549,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const forgetPendingActionsForSession = useCallback((sessionID: string) => {
+    forgottenSessionIDsRef.current.add(sessionID)
     setPermissionsBySession((prev) => withoutSessionKey(prev, sessionID))
     setFormsBySession((prev) => withoutSessionKey(prev, sessionID))
   }, [])
@@ -548,7 +559,11 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     permissions: PermissionRequest[],
     serverId: string,
   ) => {
-    permissions.forEach(permission => {
+    if (isRemoteServerDisabled(serverId)) return
+    const keptPermissions = permissions.filter(
+      (permission) => !forgottenSessionIDsRef.current.has(permission.sessionID),
+    )
+    keptPermissions.forEach(permission => {
       rememberSessionDirectory(permission.sessionID, directory, serverId)
     })
 
@@ -557,18 +572,20 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         prev,
         buildServerDirectoryKey(serverId, directory),
         serverId,
-        permissions.map(permission => ({ ...permission, serverId })),
+        keptPermissions.map(permission => ({ ...permission, serverId })),
         useSessionStatus.getState().directories,
       ),
     )
-  }, [rememberSessionDirectory])
+  }, [rememberSessionDirectory, isRemoteServerDisabled])
 
   const reconcileFormsForDirectory = useCallback((
     directory: string,
     forms: FormInfo[],
     serverId: string,
   ) => {
-    forms.forEach(form => {
+    if (isRemoteServerDisabled(serverId)) return
+    const keptForms = forms.filter((form) => !forgottenSessionIDsRef.current.has(form.sessionID))
+    keptForms.forEach(form => {
       rememberSessionDirectory(form.sessionID, directory, serverId)
     })
 
@@ -577,11 +594,11 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         prev,
         buildServerDirectoryKey(serverId, directory),
         serverId,
-        forms.map(form => ({ ...form, serverId })),
+        keptForms.map(form => ({ ...form, serverId })),
         useSessionStatus.getState().directories,
       ),
     )
-  }, [rememberSessionDirectory])
+  }, [rememberSessionDirectory, isRemoteServerDisabled])
 
   useEffect(() => {
     const permissionCount = allPermissions.length
@@ -741,7 +758,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           directoryKeys.add(buildServerDirectoryKey(serverId, session.location.directory))
         } catch (error) {
           if (error instanceof FetchError && error.statusCode === 404) {
-            prunePendingActions((item) => item.sessionID === sessionID && item.serverId === serverId)
+            forgetPendingActionsForSession(sessionID)
           }
         }
       }))
@@ -752,7 +769,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     collectTrackedDirectories,
     findSessionDirectoryKey,
     rememberSessionDirectory,
-    prunePendingActions,
+    forgetPendingActionsForSession,
     reconcilePendingActionsForDirectories,
   ])
 
