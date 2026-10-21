@@ -25,11 +25,10 @@ const ACTIVITY_PRESENTATION = {
 } as const satisfies Record<string, { label: string; tone: ScannerTone }>
 
 /**
- * Session activity scanner. On mobile it spans the full width of the bottom screen edge; from the
- * `md` breakpoint it is anchored in the gap below the composer frame. A fading lit window of 4x8px
- * segments sweeps across the strip. Renders nothing while the
- * session is idle and has no background activity; otherwise announces the current activity through
- * an indeterminate progressbar.
+ * Session activity scanner anchored in the gap below the composer frame. A fading lit window of
+ * 4x8px segments sweeps across the strip. Renders nothing while the session is idle and has no
+ * background activity; otherwise announces the current activity through an indeterminate
+ * progressbar.
  */
 export function ComposerActivityBar({ sessionID }: ComposerActivityBarProps) {
   const status = useSessionStatusForSession(sessionID)
@@ -52,7 +51,7 @@ export function ComposerActivityBar({ sessionID }: ComposerActivityBarProps) {
       aria-label={label}
       aria-valuemin={0}
       aria-valuemax={100}
-      className="pointer-events-none fixed inset-x-0 bottom-0 flex md:absolute md:inset-x-3 md:-bottom-[11px]"
+      className="pointer-events-none absolute inset-x-3 -bottom-[10px] flex md:-bottom-[11px]"
     >
       <ScannerBars tone={activity.tone} />
     </div>

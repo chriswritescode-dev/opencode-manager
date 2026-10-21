@@ -41,15 +41,15 @@ describe('ComposerActivityBar', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('pins a pointer-transparent progressbar across the screen bottom on mobile and below the composer on desktop', () => {
+  it('anchors a pointer-transparent progressbar in the gap below the composer', () => {
     useSessionStatus.getState().setStatus('session-a', { type: 'busy' })
 
     render(<ComposerActivityBar sessionID="session-a" />)
 
     const bar = screen.getByRole('progressbar', { name: 'Session working' })
     expect(bar).toHaveClass('pointer-events-none', 'flex')
-    expect(bar).toHaveClass('fixed', 'inset-x-0', 'bottom-0')
-    expect(bar).toHaveClass('md:absolute', 'md:inset-x-3', 'md:-bottom-[11px]')
+    expect(bar).toHaveClass('absolute', 'inset-x-3', '-bottom-[10px]', 'md:-bottom-[11px]')
+    expect(bar).not.toHaveClass('fixed')
   })
 
   it('renders a masked segment track with only the sweeping window', () => {
