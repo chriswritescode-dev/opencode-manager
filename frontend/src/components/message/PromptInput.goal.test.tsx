@@ -122,10 +122,6 @@ vi.mock('@/components/session/SessionSandboxMenu', () => ({
   SessionSandboxMenu: () => null,
 }))
 
-vi.mock('@/components/ui/session-status-indicator', () => ({
-  SessionStatusIndicator: () => <div>SessionStatus</div>,
-}))
-
 vi.mock('./PromptSuggestions', () => ({
   PromptSuggestions: () => null,
 }))

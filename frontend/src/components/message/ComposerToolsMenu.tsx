@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Mic, Paperclip, Plus, Shield, ShieldCheck, Target } from 'lucide-react'
+import { Paperclip, Plus, Shield, ShieldCheck, Target } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -13,6 +13,7 @@ import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeS
 import { usePermissionModeToggle } from '@/hooks/usePermissionModeToggle'
 import { useSandboxToggle } from '@/hooks/useSandboxToggle'
 import { shouldShowSandboxResources } from '@/lib/sandboxResources'
+import { cn } from '@/lib/utils'
 import { SandboxMenuItems } from './SandboxMenuItems'
 import { ToolMenuItemContent } from './ToolMenuItemContent'
 import { SessionSandboxResourcesDialog } from './SessionSandboxResourcesDialog'
@@ -25,9 +26,14 @@ interface ComposerToolsMenuProps {
   goalLabel: string
   onToggleGoal: () => void
   onAttachFile: () => void
-  onDictate?: () => void
 }
 
+/**
+ * Renders the mobile composer tools trigger: a dropdown for permission mode,
+ * sandboxing, goal mode, and file attachment.
+ *
+ * @param props Session context, goal state, and the attach handler.
+ */
 export function ComposerToolsMenu({
   sessionID,
   directory,
@@ -36,7 +42,6 @@ export function ComposerToolsMenu({
   goalLabel,
   onToggleGoal,
   onAttachFile,
-  onDictate,
 }: ComposerToolsMenuProps) {
   const isLocalServer = isLocalOpenCodeServer(useOpenCodeServerId())
   const permission = usePermissionModeToggle(sessionID, directory)
@@ -51,7 +56,7 @@ export function ComposerToolsMenu({
             type="button"
             aria-label="Composer options"
             title="Composer options"
-            className={`${getIconToggleButtonClassName(permission.isAuto || sandbox.isSandboxed || goalArmed)} flex items-center justify-center min-h-[44px] min-w-[44px]`}
+            className={cn(getIconToggleButtonClassName(permission.isAuto || sandbox.isSandboxed || goalArmed), 'flex items-center justify-center size-10 p-0')}
           >
             <Plus className="w-5 h-5" />
           </button>
@@ -82,11 +87,6 @@ export function ComposerToolsMenu({
           <DropdownMenuItem onSelect={onAttachFile} className="pl-8">
             <ToolMenuItemContent icon={<Paperclip className="h-4 w-4" />} title="Attach image or PDF" />
           </DropdownMenuItem>
-          {onDictate ? (
-            <DropdownMenuItem onSelect={onDictate} className="pl-8">
-              <ToolMenuItemContent icon={<Mic className="h-4 w-4" />} title="Dictate" />
-            </DropdownMenuItem>
-          ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
       {shouldShowSandboxResources(sandbox) ? (

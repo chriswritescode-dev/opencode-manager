@@ -103,10 +103,6 @@ vi.mock('@/hooks/useSessionPermissionMode', () => ({
   useSessionPermissionMode: () => ({ data: undefined }),
 }))
 
-vi.mock('@/components/ui/session-status-indicator', () => ({
-  SessionStatusIndicator: () => <div>SessionStatus</div>,
-}))
-
 vi.mock('./ComposerToolsMenu', () => ({
   ComposerToolsMenu: () => null,
 }))
@@ -272,6 +268,23 @@ describe('PromptInput command submission', () => {
     mocks.useHasBackgroundActivity.mockReturnValue(true)
     rerender(buildPrompt({}))
     expect(screen.getByRole('status')).toHaveTextContent('Background tasks running')
+  })
+
+  it('keeps the model picker visible while the session is active', async () => {
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData(['opencode', 'session', 'test-session', '/test'], sessionInfo())
+    const buildPrompt = (props: { isSessionActive?: boolean }) => (
+      <QueryClientProvider client={queryClient}>
+        <PromptInput {...defaultProps} {...props} />
+      </QueryClientProvider>
+    )
+
+    const { rerender } = render(buildPrompt({}))
+    await screen.findByPlaceholderText('Send a message...')
+    expect(screen.getByTestId('model-quick-select').querySelector('button')).not.toBeNull()
+
+    rerender(buildPrompt({ isSessionActive: true }))
+    expect(screen.getByTestId('model-quick-select').querySelector('button')).not.toBeNull()
   })
 
   it('disables submit and does not run a command while the model is not ready', async () => {
@@ -568,7 +581,7 @@ describe('PromptInput command submission', () => {
     renderComponent()
 
     const input = await screen.findByPlaceholderText('Send a message...')
-    const frame = input.parentElement as HTMLElement
+    const frame = input.closest('.isolate') as HTMLElement
     const tokens = frame.className.split(/\s+/)
 
     expect(tokens).not.toContain('transition-all')

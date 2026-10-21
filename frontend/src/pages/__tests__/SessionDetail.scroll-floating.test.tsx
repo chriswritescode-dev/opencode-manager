@@ -379,11 +379,12 @@ describe('SessionDetail scroll floating button', () => {
     })
   })
 
-  it('does NOT pass scroll button state when prompt has content', async () => {
+  it('passes scroll button state even when the prompt has content', async () => {
     renderWith({ mobile: true, showScrollButton: true, promptContent: true })
 
-    await waitFor(() => expect(screen.getByText('MockedPromptInput')).toBeInTheDocument())
-    expect(screen.queryByLabelText('Scroll to bottom')).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByLabelText('Scroll to bottom')).toBeInTheDocument()
+    })
   })
 
   it('shows clear button for prompt content only when session is idle', async () => {

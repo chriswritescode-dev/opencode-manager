@@ -249,27 +249,13 @@ describe('ComposerToolsMenu', () => {
     expect(props.onAttachFile).toHaveBeenCalledTimes(1)
   })
 
-  it('omits the dictate item when onDictate is not provided', async () => {
-    const user = userEvent.setup()
+  it('uses the 40px control size for the trigger', () => {
     mockPermissionMode()
     renderMenu()
 
-    await user.click(screen.getByRole('button', { name: 'Composer options' }))
-    await screen.findByRole('menuitem', { name: 'Attach image or PDF' })
-
-    expect(screen.queryByRole('menuitem', { name: 'Dictate' })).not.toBeInTheDocument()
-  })
-
-  it('starts dictation when onDictate is provided', async () => {
-    const user = userEvent.setup()
-    mockPermissionMode()
-    const onDictate = vi.fn()
-    renderMenu({ onDictate })
-
-    await user.click(screen.getByRole('button', { name: 'Composer options' }))
-    await user.click(await screen.findByRole('menuitem', { name: 'Dictate' }))
-
-    expect(onDictate).toHaveBeenCalledTimes(1)
+    const trigger = screen.getByRole('button', { name: 'Composer options' })
+    expect(trigger).toHaveClass('size-10', 'p-0')
+    expect(trigger).not.toHaveClass('p-2')
   })
 })
 

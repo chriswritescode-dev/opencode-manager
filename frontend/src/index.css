@@ -545,6 +545,40 @@ input:-webkit-autofill:active {
   animation: progress 2s ease-in-out infinite;
 }
 
+.scanner-track {
+  mask-image: repeating-linear-gradient(
+    90deg,
+    #000 0 4px,
+    transparent 4px 6px
+  );
+  -webkit-mask-image: repeating-linear-gradient(
+    90deg,
+    #000 0 4px,
+    transparent 4px 6px
+  );
+}
+
+@keyframes scanner-sweep {
+  from { left: -15%; }
+  to { left: 85%; }
+}
+
+.scanner-sweep {
+  left: -15%;
+  width: 30%;
+  background-image: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, currentColor 12%, transparent) 20%,
+    color-mix(in oklab, currentColor 40%, transparent) 35%,
+    currentColor 50%,
+    color-mix(in oklab, currentColor 40%, transparent) 65%,
+    color-mix(in oklab, currentColor 12%, transparent) 80%,
+    transparent
+  );
+  animation: scanner-sweep 2.8s ease-in-out infinite alternate;
+}
+
 :root [data-sonner-toaster][data-sonner-theme] {
   --normal-bg: var(--color-popover);
   --normal-bg-hover: var(--color-accent);
