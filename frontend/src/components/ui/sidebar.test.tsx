@@ -240,7 +240,7 @@ describe('SidebarItem', () => {
     expect(screen.getByRole('button')).toHaveClass('bg-accent')
   })
 
-  it('uses title attribute when collapsed', () => {
+  it('keeps the label as the accessible name without a native title when collapsed', () => {
     render(
       <TooltipProvider>
         <SidebarItem
@@ -251,7 +251,9 @@ describe('SidebarItem', () => {
       </TooltipProvider>
     )
 
-    expect(screen.getByRole('button')).toHaveAttribute('title', 'Test Item')
+    const button = screen.getByRole('button')
+    expect(button).not.toHaveAttribute('title')
+    expect(button).toHaveAccessibleName('Test Item')
   })
 })
 
