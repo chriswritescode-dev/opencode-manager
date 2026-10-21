@@ -295,6 +295,7 @@ describe('SessionDetail scroll floating button', () => {
     showScrollButton: boolean
     promptContent?: boolean
     sessionActive?: boolean
+    messagesLoading?: boolean
   }) => {
     mocks.useMobile.mockReturnValue(opts.mobile)
     mocks.useSessionStatusForSession.mockReturnValue({ type: opts.sessionActive ? 'busy' : 'idle' })
@@ -302,7 +303,7 @@ describe('SessionDetail scroll floating button', () => {
       messages: [],
       pending: [],
       status: opts.sessionActive ? 'busy' : 'idle',
-      isLoading: false,
+      isLoading: opts.messagesLoading ?? false,
       fetchOlder: vi.fn(),
       hasOlder: false,
     })
@@ -459,5 +460,27 @@ describe('SessionDetail scroll floating button', () => {
 
     reportObservedHeight(140)
     expect(paddingBottom()).toBe('156px')
+  })
+
+  it('marks the transcript content as not ready while messages load and ready afterwards', async () => {
+    const { buildTree, rerender } = renderWith({ mobile: true, showScrollButton: false, messagesLoading: true })
+
+    await waitFor(() => {
+      expect(mocks.useAutoScroll.mock.calls.at(-1)?.[0]).toMatchObject({ isContentReady: false })
+    })
+
+    mocks.useSessionTranscript.mockReturnValue({
+      messages: [],
+      pending: [],
+      status: 'idle',
+      isLoading: false,
+      fetchOlder: vi.fn(),
+      hasOlder: false,
+    })
+    rerender(buildTree())
+
+    await waitFor(() => {
+      expect(mocks.useAutoScroll.mock.calls.at(-1)?.[0]).toMatchObject({ isContentReady: true })
+    })
   })
 })

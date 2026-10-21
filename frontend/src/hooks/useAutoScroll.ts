@@ -7,10 +7,11 @@ const SHOW_SCROLL_BUTTON_THRESHOLD_PX = 120
 const SCROLL_TO_BOTTOM_FRAME_COUNT = 2
 
 interface UseAutoScrollOptions {
-  containerRef?: React.RefObject<HTMLDivElement | null>
+  container?: HTMLDivElement | null
   messages?: SessionMessageInfo[]
   sessionId?: string
   contentVersion?: number
+  isContentReady: boolean
   onScrollStateChange?: (isScrolledUp: boolean) => void
 }
 
@@ -20,10 +21,11 @@ interface UseAutoScrollReturn {
 }
 
 export function useAutoScroll({
-  containerRef,
+  container,
   messages,
   sessionId,
   contentVersion,
+  isContentReady,
   onScrollStateChange
 }: UseAutoScrollOptions): UseAutoScrollReturn {
   const lastMessageCountRef = useRef(0)
@@ -42,7 +44,7 @@ export function useAutoScroll({
   onScrollStateChangeRef.current = onScrollStateChange
 
   const scrollToBottom = useCallback(() => {
-    if (!containerRef?.current) return
+    if (!container) return
     userScrolledAtRef.current = 0
     userDisengagedRef.current = false
     isScrollButtonVisibleRef.current = false
@@ -52,8 +54,7 @@ export function useAutoScroll({
     let frameCount = 0
     const scrollAfterLayout = () => {
       if (scrollRequestIdRef.current !== scrollRequestId) return
-      if (!containerRef?.current) return
-      containerRef.current.scrollTop = containerRef.current.scrollHeight
+      container.scrollTop = container.scrollHeight
       frameCount += 1
       if (frameCount < SCROLL_TO_BOTTOM_FRAME_COUNT) {
         requestAnimationFrame(scrollAfterLayout)
@@ -61,10 +62,9 @@ export function useAutoScroll({
     }
     requestAnimationFrame(scrollAfterLayout)
     onScrollStateChangeRef.current?.(false)
-  }, [containerRef])
+  }, [container])
 
   const markDisengaged = useCallback(() => {
-    const container = containerRef?.current
     if (!container) return
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
     userScrolledAtRef.current = Date.now()
@@ -74,16 +74,15 @@ export function useAutoScroll({
       onScrollStateChangeRef.current?.(true)
     }
     userDisengagedRef.current = true
-  }, [containerRef])
+  }, [container])
 
   const scrollByUser = useCallback((delta: number) => {
-    const container = containerRef?.current
     if (!container) return
     if (delta < 0) {
       markDisengaged()
     }
     container.scrollBy({ top: delta })
-  }, [containerRef, markDisengaged])
+  }, [container, markDisengaged])
 
   useEffect(() => {
     lastMessageCountRef.current = 0
@@ -96,12 +95,10 @@ export function useAutoScroll({
   }, [sessionId])
 
   useEffect(() => {
-    const container = containerRef?.current
     if (!container) return
     
     const updateScrollButtonVisibility = () => {
-      const container = containerRef?.current
-      if (!container || !userDisengagedRef.current || isScrollButtonVisibleRef.current) return
+      if (!userDisengagedRef.current || isScrollButtonVisibleRef.current) return
       const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
       if (distanceFromBottom > SHOW_SCROLL_BUTTON_THRESHOLD_PX) {
         isScrollButtonVisibleRef.current = true
@@ -206,10 +203,10 @@ export function useAutoScroll({
       container.removeEventListener('keydown', handleKeyDown)
       container.removeEventListener('scroll', handleScroll)
     }
-  }, [containerRef, sessionId, messages, markDisengaged])
+  }, [container, sessionId, messages, markDisengaged])
 
   useEffect(() => {
-    if (!containerRef?.current || !messages) return
+    if (!container || !messages) return
 
     const currentCount = messages.length
     const prevCount = lastMessageCountRef.current
@@ -218,6 +215,8 @@ export function useAutoScroll({
     const lastMessage = messages[currentCount - 1]
     const previousLastMessageId = lastMessageIdRef.current
     lastMessageIdRef.current = lastMessage?.id
+
+    if (!isContentReady) return
 
     if (!hasInitialScrolledRef.current && currentCount > 0) {
       hasInitialScrolledRef.current = true
@@ -238,7 +237,7 @@ export function useAutoScroll({
     const recentlyScrolled = timeSinceUserScroll < SCROLL_LOCK_MS
     
     if (userDisengagedRef.current) {
-      const distanceFromBottom = containerRef.current.scrollHeight - containerRef.current.scrollTop - containerRef.current.clientHeight
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
       if (!isScrollButtonVisibleRef.current && distanceFromBottom > SHOW_SCROLL_BUTTON_THRESHOLD_PX) {
         isScrollButtonVisibleRef.current = true
         onScrollStateChangeRef.current?.(true)
@@ -251,7 +250,7 @@ export function useAutoScroll({
     }
 
     scrollToBottom()
-  }, [messages, containerRef, scrollToBottom, contentVersion])
+  }, [messages, container, isContentReady, scrollToBottom, contentVersion])
 
   return { scrollToBottom, scrollByUser }
 }

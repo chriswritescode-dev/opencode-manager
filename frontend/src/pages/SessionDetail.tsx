@@ -136,6 +136,7 @@ export function SessionDetail() {
   const { preferences, updateSettings } = useSettings();
   const { open: openSettings, openTab: openSettingsTab } = useSettingsDialog();
   const messageContainerRef = useRef<HTMLDivElement>(null);
+  const [messageContainer, setMessageContainer] = useState<HTMLDivElement | null>(null);
   const promptInputRef = useRef<PromptInputHandle>(null);
   const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false);
   const [fileBrowserOpen, setFileBrowserOpen] = useDialogParam('files');
@@ -302,12 +303,19 @@ export function SessionDetail() {
   }, [messagePickerMode, sessionId, revertMessageID, serverId]);
 
   const messagesContentVersion = useMemo(() => getMessagesContentVersion(messages), [messages]);
+  const isTranscriptLoading = repoLoading || sessionLoading || messagesLoading;
+
+  const attachMessageContainer = useCallback((element: HTMLDivElement | null) => {
+    messageContainerRef.current = element;
+    setMessageContainer(element);
+  }, []);
 
   const { scrollToBottom, scrollByUser } = useAutoScroll({
-    containerRef: messageContainerRef,
+    container: messageContainer,
     messages,
     sessionId,
     contentVersion: messagesContentVersion,
+    isContentReady: !isTranscriptLoading,
     onScrollStateChange: setShowScrollButton
   });
 
@@ -861,8 +869,8 @@ export function SessionDetail() {
 
       <div className="flex flex-1 min-h-0">
       <div className="relative flex-1 min-w-0 overflow-hidden flex flex-col">
-        <div key={sessionId} data-testid="session-message-scroll" ref={messageContainerRef} onScroll={handleMessageScroll} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + PROMPT_OVERLAY_CLEARANCE_PX }}>
-          {repoLoading || sessionLoading || messagesLoading ? (
+        <div key={sessionId} data-testid="session-message-scroll" ref={attachMessageContainer} onScroll={handleMessageScroll} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + PROMPT_OVERLAY_CLEARANCE_PX }}>
+          {isTranscriptLoading ? (
             <MessageSkeleton />
           ) : sessionDirectory ? (
             <MessageThread 

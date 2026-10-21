@@ -76,29 +76,29 @@ describe('useAutoScroll', () => {
     time: { created: Date.now() },
   } as SessionMessageInfo)
 
-  const setupHook = (messages: SessionMessageInfo[], sessionId = 'session-1') => {
+  const setupHook = (
+    messages: SessionMessageInfo[],
+    options: {
+      sessionId?: string
+      isContentReady?: boolean
+      container?: HTMLDivElement | null
+    } = {}
+  ) => {
     containerHarness = createScrollContainer()
-    const containerRef = { current: containerHarness.div }
     const onScrollStateChange = vi.fn()
 
+    const initialProps = {
+      container: options.container === undefined ? containerHarness.div : options.container,
+      messages,
+      sessionId: options.sessionId ?? 'session-1',
+      contentVersion: messages.length,
+      isContentReady: options.isContentReady ?? true,
+      onScrollStateChange,
+    }
+
     const renderResult = renderHook(
-      (props) =>
-        useAutoScroll({
-          containerRef: props.containerRef,
-          messages: props.messages,
-          sessionId: props.sessionId,
-          contentVersion: props.contentVersion,
-          onScrollStateChange: props.onScrollStateChange,
-        }),
-      {
-        initialProps: {
-          containerRef,
-          messages,
-          sessionId,
-          contentVersion: messages.length,
-          onScrollStateChange,
-        },
-      }
+      (props: typeof initialProps) => useAutoScroll(props),
+      { initialProps }
     )
 
     return { renderResult, containerHarness, onScrollStateChange }
@@ -131,7 +131,8 @@ describe('useAutoScroll', () => {
 
     act(() => {
       renderResult.rerender({
-        containerRef: { current: containerHarness.div },
+        container: containerHarness.div,
+        isContentReady: true,
         messages: newMessages,
         sessionId: 'session-1',
         contentVersion: newMessages.length,
@@ -165,7 +166,8 @@ describe('useAutoScroll', () => {
 
     act(() => {
       renderResult.rerender({
-        containerRef: { current: containerHarness.div },
+        container: containerHarness.div,
+        isContentReady: true,
         messages,
         sessionId: 'session-1',
         contentVersion: messages.length + 1,
@@ -362,7 +364,8 @@ describe('useAutoScroll', () => {
 
     act(() => {
       renderResult.rerender({
-        containerRef: { current: containerHarness.div },
+        container: containerHarness.div,
+        isContentReady: true,
         messages,
         sessionId: 'session-1',
         contentVersion: messages.length + 1,
@@ -401,7 +404,8 @@ describe('useAutoScroll', () => {
 
     act(() => {
       renderResult.rerender({
-        containerRef: { current: containerHarness.div },
+        container: containerHarness.div,
+        isContentReady: true,
         messages,
         sessionId: 'session-1',
         contentVersion: messages.length + 1,
@@ -436,7 +440,8 @@ describe('useAutoScroll', () => {
 
     act(() => {
       renderResult.rerender({
-        containerRef: { current: containerHarness.div },
+        container: containerHarness.div,
+        isContentReady: true,
         messages,
         sessionId: 'session-1',
         contentVersion: messages.length + 1,
@@ -495,7 +500,8 @@ describe('useAutoScroll', () => {
 
     act(() => {
       renderResult.rerender({
-        containerRef: { current: containerHarness.div },
+        container: containerHarness.div,
+        isContentReady: true,
         messages: newMessages,
         sessionId: 'session-1',
         contentVersion: newMessages.length,
@@ -537,7 +543,8 @@ describe('useAutoScroll', () => {
 
     act(() => {
       renderResult.rerender({
-        containerRef: { current: containerHarness.div },
+        container: containerHarness.div,
+        isContentReady: true,
         messages: olderPage,
         sessionId: 'session-1',
         contentVersion: olderPage.length,
@@ -576,7 +583,8 @@ describe('useAutoScroll', () => {
 
     act(() => {
       renderResult.rerender({
-        containerRef: { current: containerHarness.div },
+        container: containerHarness.div,
+        isContentReady: true,
         messages: appended,
         sessionId: 'session-1',
         contentVersion: appended.length,
@@ -593,7 +601,7 @@ describe('useAutoScroll', () => {
 
   it('resets state when sessionId changes', () => {
     const messages = [createMessage('1', 'user')]
-    const { renderResult, containerHarness } = setupHook(messages, 'session-1')
+    const { renderResult, containerHarness } = setupHook(messages, { sessionId: 'session-1' })
 
     act(() => {
       containerHarness.div.dispatchEvent(
@@ -608,11 +616,80 @@ describe('useAutoScroll', () => {
 
     act(() => {
       renderResult.rerender({
-        containerRef: { current: containerHarness.div },
+        container: containerHarness.div,
+        isContentReady: true,
         messages: newMessages,
         sessionId: 'session-2',
         contentVersion: newMessages.length,
         onScrollStateChange: vi.fn(),
+      })
+    })
+
+    act(() => {
+      vi.advanceTimersByTime(100)
+    })
+
+    expect(containerHarness.getScrollTop()).toBe(containerHarness.div.scrollHeight - containerHarness.div.clientHeight)
+  })
+
+  it('scrolls to bottom and tracks user scroll once the container mounts after messages arrive', () => {
+    const messages = [createMessage('1', 'user'), createMessage('2', 'assistant')]
+    const { renderResult, containerHarness, onScrollStateChange } = setupHook(messages, { container: null })
+
+    act(() => {
+      vi.advanceTimersByTime(100)
+    })
+
+    expect(containerHarness.getScrollTop()).toBe(0)
+
+    act(() => {
+      renderResult.rerender({
+        container: containerHarness.div,
+        isContentReady: true,
+        messages,
+        sessionId: 'session-1',
+        contentVersion: messages.length,
+        onScrollStateChange,
+      })
+    })
+
+    act(() => {
+      vi.advanceTimersByTime(100)
+    })
+
+    expect(containerHarness.getScrollTop()).toBe(containerHarness.div.scrollHeight - containerHarness.div.clientHeight)
+
+    act(() => {
+      containerHarness.setScrollTop(100)
+      containerHarness.div.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY: -50,
+          bubbles: true,
+        })
+      )
+    })
+
+    expect(onScrollStateChange).toHaveBeenCalledWith(true)
+  })
+
+  it('waits for ready content before the initial scroll', () => {
+    const messages = [createMessage('1', 'user'), createMessage('2', 'assistant')]
+    const { renderResult, containerHarness, onScrollStateChange } = setupHook(messages, { isContentReady: false })
+
+    act(() => {
+      vi.advanceTimersByTime(100)
+    })
+
+    expect(containerHarness.getScrollTop()).toBe(0)
+
+    act(() => {
+      renderResult.rerender({
+        container: containerHarness.div,
+        isContentReady: true,
+        messages,
+        sessionId: 'session-1',
+        contentVersion: messages.length,
+        onScrollStateChange,
       })
     })
 
