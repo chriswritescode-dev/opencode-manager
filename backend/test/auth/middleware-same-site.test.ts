@@ -147,6 +147,17 @@ describe('createAuthMiddleware same-site guard', () => {
     expect(res.status).toBe(403)
     expect(getSession).not.toHaveBeenCalled()
   })
+
+  it('does not log cookie names or values during the auth check', async () => {
+    const app = createApp(getSession)
+
+    const res = await app.request('/', { headers: { cookie: 'opencode.session=secret-token' } })
+
+    expect(res.status).toBe(200)
+    const debugMessages = loggerMock.debug.mock.calls.flat().join(' ')
+    expect(debugMessages).not.toContain('opencode.session')
+    expect(debugMessages).not.toContain('secret-token')
+  })
 })
 
 describe('getTrustedOrigins', () => {

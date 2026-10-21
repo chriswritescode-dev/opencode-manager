@@ -69,7 +69,7 @@ export function createAuth(db: Database) {
         origin: ENV.AUTH.PASSKEY_ORIGIN,
         authenticatorSelection: {
           residentKey: 'required',
-          userVerification: 'preferred',
+          userVerification: 'required',
         },
       }),
     ],

@@ -52,7 +52,7 @@ export function createRepoTerminalSocketRoutes(
     upgradeWebSocket((c) => {
       const directory = c.get('terminalDirectory')
       const cursor = c.get('terminalCursor')
-      const ptyID = c.req.param('ptyID')
+      const ptyID = c.req.param('ptyID') ?? ''
 
       return createBridgedSocketEvents((peer) => terminalService.connect(directory, ptyID, cursor, peer))
     }),

@@ -41,7 +41,7 @@ export function createRepoGitRoutes(
     logMessage: string,
     handler: (repo: Repo, id: number) => Promise<Response>,
   ): Promise<Response> {
-    const id = parseInt(c.req.param('id'))
+    const id = Number.parseInt(c.req.param('id') ?? '', 10)
     const repo = getRepoById(database, id)
 
     if (!repo) {

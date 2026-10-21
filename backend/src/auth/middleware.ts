@@ -16,7 +16,6 @@ export function createAuthMiddleware(
       user: Session['user']
     }
   }>(async (c, next) => {
-    const cookies = c.req.header('cookie')
     const origin = c.req.header('origin')
 
     const fetchSite = c.req.header('sec-fetch-site')
@@ -30,11 +29,7 @@ export function createAuthMiddleware(
       return c.json({ error: 'Cross-site request rejected' }, 403)
     }
     
-    logger.debug(`Auth check - Path: ${c.req.path}, Origin: ${origin}, Has cookies: ${!!cookies}`)
-    if (cookies) {
-      const cookieNames = cookies.split(';').map(c => c.trim().split('=')[0]).join(', ')
-      logger.debug(`Cookie names: ${cookieNames}`)
-    }
+    logger.debug(`Auth check - Path: ${c.req.path}, Origin: ${origin}`)
     
     let session
     try {

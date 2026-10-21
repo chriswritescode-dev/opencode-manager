@@ -72,6 +72,17 @@ function insertCredentialAccount(db: ReturnType<typeof createTestDb>, id: string
   ).run(id, userId, 'credential', userId, password, Date.now(), Date.now())
 }
 
+function insertSession(db: ReturnType<typeof createTestDb>, id: string, userId: string, token: string): void {
+  db.prepare(
+    'INSERT INTO "session" (id, expiresAt, token, createdAt, updatedAt, userId) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(id, Date.now() + 86_400_000, token, Date.now(), Date.now(), userId)
+}
+
+function listSessionIds(db: ReturnType<typeof createTestDb>, userId: string): string[] {
+  const rows = db.prepare('SELECT id FROM "session" WHERE "userId" = ? ORDER BY id').all(userId) as { id: string }[]
+  return rows.map((row) => row.id)
+}
+
 function createSession(): Session {
   return {
     session: {
@@ -127,7 +138,7 @@ describe('createAuthRoutes', () => {
     expect(await res.text()).toBe('created')
   })
 
-  it('logs sign-in responses when a set-cookie header is present', async () => {
+  it('does not log sign-in response headers', async () => {
     const handler = vi.fn(async () => new Response('ok', {
       status: 200,
       headers: { 'set-cookie': 'opencode.session=abc; Path=/; HttpOnly' },
@@ -135,30 +146,6 @@ describe('createAuthRoutes', () => {
     const app = createAuthRoutes({ handler } as unknown as AuthInstance)
 
     await app.fetch(new Request('http://localhost/api/auth/sign-in/email', { method: 'POST', body: '{}' }))
-
-    expect(mockLoggerInfo).toHaveBeenCalledWith(expect.stringContaining('Sign-in response'))
-    expect(mockLoggerInfo).toHaveBeenCalledWith(expect.stringContaining('present'))
-    expect(mockLoggerDebug).toHaveBeenCalledWith(expect.stringContaining('Set-Cookie header'))
-  })
-
-  it('logs sign-in responses when no set-cookie header is present', async () => {
-    const handler = vi.fn(async () => new Response('unauthorized', { status: 401 }))
-    const app = createAuthRoutes({ handler } as unknown as AuthInstance)
-
-    await app.fetch(new Request('http://localhost/api/auth/sign-in/email', { method: 'POST', body: '{}' }))
-
-    expect(mockLoggerInfo).toHaveBeenCalledWith(expect.stringContaining('missing'))
-    expect(mockLoggerDebug).not.toHaveBeenCalled()
-  })
-
-  it('does not log for non sign-in paths', async () => {
-    const handler = vi.fn(async () => new Response('ok', {
-      status: 200,
-      headers: { 'set-cookie': 'opencode.session=abc' },
-    }))
-    const app = createAuthRoutes({ handler } as unknown as AuthInstance)
-
-    await app.fetch(new Request('http://localhost/api/auth/get-session'))
 
     expect(mockLoggerInfo).not.toHaveBeenCalled()
     expect(mockLoggerDebug).not.toHaveBeenCalled()
@@ -204,6 +191,7 @@ describe('syncAdminFromEnv', () => {
     ENV.AUTH.ADMIN_PASSWORD = 'admin-password'
     insertUser(db, 'user-1', 'admin@example.com')
     insertCredentialAccount(db, 'account-1', 'user-1', 'old-hash')
+    insertSession(db, 'session-1', 'user-1', 'token-1')
     const auth = { api: { signUpEmail } } as unknown as AuthInstance
 
     await syncAdminFromEnv(auth, db)
@@ -212,6 +200,19 @@ describe('syncAdminFromEnv', () => {
     expect(hashPasswordMock).not.toHaveBeenCalled()
     const account = db.prepare('SELECT password FROM "account" WHERE "userId" = ?').get('user-1') as { password: string }
     expect(account.password).toBe('old-hash')
+    expect(listSessionIds(db, 'user-1')).toEqual(['session-1'])
+  })
+
+  it('finds the existing admin user when ADMIN_EMAIL differs only by case', async () => {
+    ENV.AUTH.ADMIN_EMAIL = 'Admin@Example.com'
+    ENV.AUTH.ADMIN_PASSWORD = 'admin-password'
+    insertUser(db, 'user-1', 'admin@example.com')
+    const auth = { api: { signUpEmail } } as unknown as AuthInstance
+
+    await syncAdminFromEnv(auth, db)
+
+    expect(signUpEmail).not.toHaveBeenCalled()
+    expect(db.prepare('SELECT COUNT(*) AS count FROM "user"').get()).toEqual({ count: 1 })
   })
 
   it('resets the credential account password for an existing user', async () => {
@@ -230,6 +231,39 @@ describe('syncAdminFromEnv', () => {
     expect(account.password).toBe('hashed:new-password')
     expect(mockLoggerInfo).toHaveBeenCalledWith(expect.stringContaining('Admin password reset'))
     expect(mockLoggerWarn).toHaveBeenCalledWith(expect.stringContaining('ADMIN_PASSWORD_RESET'))
+  })
+
+  it('revokes the existing sessions of the admin whose password was reset', async () => {
+    ENV.AUTH.ADMIN_EMAIL = 'admin@example.com'
+    ENV.AUTH.ADMIN_PASSWORD = 'new-password'
+    ENV.AUTH.ADMIN_PASSWORD_RESET = true
+    insertUser(db, 'user-1', 'admin@example.com')
+    insertUser(db, 'user-2', 'other@example.com')
+    insertCredentialAccount(db, 'account-1', 'user-1', 'old-hash')
+    insertSession(db, 'session-1', 'user-1', 'token-1')
+    insertSession(db, 'session-2', 'user-1', 'token-2')
+    insertSession(db, 'session-3', 'user-2', 'token-3')
+    const auth = { api: { signUpEmail } } as unknown as AuthInstance
+
+    await syncAdminFromEnv(auth, db)
+
+    expect(listSessionIds(db, 'user-1')).toEqual([])
+    expect(listSessionIds(db, 'user-2')).toEqual(['session-3'])
+  })
+
+  it('rolls back the password reset when revoking the sessions fails', async () => {
+    ENV.AUTH.ADMIN_EMAIL = 'admin@example.com'
+    ENV.AUTH.ADMIN_PASSWORD = 'new-password'
+    ENV.AUTH.ADMIN_PASSWORD_RESET = true
+    insertUser(db, 'user-1', 'admin@example.com')
+    insertCredentialAccount(db, 'account-1', 'user-1', 'old-hash')
+    db.exec('DROP TABLE "session"')
+    const auth = { api: { signUpEmail } } as unknown as AuthInstance
+
+    await expect(syncAdminFromEnv(auth, db)).rejects.toThrow()
+
+    const account = db.prepare('SELECT password FROM "account" WHERE "userId" = ?').get('user-1') as { password: string }
+    expect(account.password).toBe('old-hash')
   })
 
   it('creates a new admin user when none exists', async () => {
