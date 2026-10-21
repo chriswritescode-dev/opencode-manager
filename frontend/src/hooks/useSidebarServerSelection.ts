@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useLocation, useMatch } from 'react-router-dom'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
+import { useAuth } from '@/hooks/useAuth'
 import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
 import { isAssistantPath, parseRepoRoute } from '@/lib/navigation'
 import { useSidebarServerStore } from '@/stores/sidebarServerStore'
@@ -13,12 +14,14 @@ function isLocalRoute(pathname: string): boolean {
  * Keeps the sidebar server selection in step with the location and the linked server list: a linked
  * server route selects that server, a local repo or assistant route selects local, and a selected
  * server that is missing or disabled in a successfully loaded list falls back to local. Mounted once
- * by the app shell so the selection follows the route even when no sidebar consumer is rendered.
+ * inside `AuthProvider` by the app shell so the selection follows the route even when no sidebar
+ * consumer is rendered; the server list is only loaded once authenticated.
  */
 export function useSidebarServerRouteSync(): void {
   const { pathname } = useLocation()
   const routeServerId = useMatch('/servers/:serverId/*')?.params.serverId
-  const { servers, isSuccess } = useOpenCodeServers()
+  const { isAuthenticated } = useAuth()
+  const { servers, isSuccess } = useOpenCodeServers({ enabled: isAuthenticated })
   const serverId = useSidebarServerStore((state) => state.serverId)
   const selectServer = useSidebarServerStore((state) => state.selectServer)
 

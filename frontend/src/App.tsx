@@ -149,6 +149,11 @@ function GlobalShortcuts() {
   return null
 }
 
+function SidebarServerRouteSync() {
+  useSidebarServerRouteSync()
+  return null
+}
+
 function ServerScope({ children }: { children: ReactNode }) {
   const { serverId } = useParams<{ serverId: string }>()
 
@@ -164,8 +169,6 @@ function AppShell() {
   const location = useLocation()
   const rootRef = useRef<HTMLDivElement>(null)
   const { openSheet, open } = useMobileTabBar()
-
-  useSidebarServerRouteSync()
 
   const swipeNav = useSwipeNavigation()
 
@@ -236,6 +239,7 @@ function AppShell() {
           <RepoWorktreesProvider>
             <KeyboardShortcutsProvider>
               <GlobalShortcuts />
+              <SidebarServerRouteSync />
               <div className="flex h-dvh w-full min-w-0 flex-col">
                 <PwaUpdatePrompt />
                 <div ref={rootRef} className="flex flex-1 min-h-0 w-full min-w-0">

@@ -12,11 +12,16 @@ const mocks = vi.hoisted(() => ({
   useOpenCodeServerStatuses: vi.fn(),
   useServerActivityState: vi.fn(),
   useLocalActivityState: vi.fn(),
+  useAuth: vi.fn(),
 }))
 
 vi.mock('@/hooks/useOpenCodeServers', () => ({
   useOpenCodeServers: mocks.useOpenCodeServers,
   useOpenCodeServerStatuses: mocks.useOpenCodeServerStatuses,
+}))
+
+vi.mock('@/hooks/useAuth', () => ({
+  useAuth: mocks.useAuth,
 }))
 
 vi.mock('@/hooks/useActiveWork', () => ({
@@ -71,6 +76,7 @@ describe('LinkedServersNav', () => {
     localStorage.clear()
     useSidebarServerStore.setState({ serverId: LOCAL_OPENCODE_SERVER_ID })
     setServers([])
+    mocks.useAuth.mockReturnValue({ isAuthenticated: true })
     mocks.useServerActivityState.mockReturnValue(null)
     mocks.useLocalActivityState.mockReturnValue(null)
     mocks.useOpenCodeServerStatuses.mockReturnValue({
