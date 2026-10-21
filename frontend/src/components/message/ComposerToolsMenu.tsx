@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Mic, Paperclip, Plus, Shield, ShieldCheck, Target } from 'lucide-react'
+import { Paperclip, Plus, Shield, ShieldCheck, Target } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -25,9 +25,17 @@ interface ComposerToolsMenuProps {
   goalLabel: string
   onToggleGoal: () => void
   onAttachFile: () => void
-  onDictate?: () => void
+  /** Uses the 36px control size for the trigger while the prompt is focused. */
+  compact?: boolean
 }
 
+/**
+ * Renders the mobile composer tools trigger: a dropdown for permission mode,
+ * sandboxing, goal mode, and file attachment.
+ *
+ * @param props Session context, goal state, the attach handler, and whether the
+ * trigger uses the compact 36px control size while the prompt is focused.
+ */
 export function ComposerToolsMenu({
   sessionID,
   directory,
@@ -36,7 +44,7 @@ export function ComposerToolsMenu({
   goalLabel,
   onToggleGoal,
   onAttachFile,
-  onDictate,
+  compact = false,
 }: ComposerToolsMenuProps) {
   const isLocalServer = isLocalOpenCodeServer(useOpenCodeServerId())
   const permission = usePermissionModeToggle(sessionID, directory)
@@ -51,7 +59,7 @@ export function ComposerToolsMenu({
             type="button"
             aria-label="Composer options"
             title="Composer options"
-            className={`${getIconToggleButtonClassName(permission.isAuto || sandbox.isSandboxed || goalArmed)} flex items-center justify-center min-h-[44px] min-w-[44px]`}
+            className={`${getIconToggleButtonClassName(permission.isAuto || sandbox.isSandboxed || goalArmed)} flex items-center justify-center ${compact ? 'min-h-9 min-w-9' : 'min-h-[44px] min-w-[44px]'}`}
           >
             <Plus className="w-5 h-5" />
           </button>
@@ -82,11 +90,6 @@ export function ComposerToolsMenu({
           <DropdownMenuItem onSelect={onAttachFile} className="pl-8">
             <ToolMenuItemContent icon={<Paperclip className="h-4 w-4" />} title="Attach image or PDF" />
           </DropdownMenuItem>
-          {onDictate ? (
-            <DropdownMenuItem onSelect={onDictate} className="pl-8">
-              <ToolMenuItemContent icon={<Mic className="h-4 w-4" />} title="Dictate" />
-            </DropdownMenuItem>
-          ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
       {shouldShowSandboxResources(sandbox) ? (

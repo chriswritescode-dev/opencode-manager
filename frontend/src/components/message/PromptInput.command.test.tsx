@@ -581,7 +581,7 @@ describe('PromptInput command submission', () => {
     renderComponent()
 
     const input = await screen.findByPlaceholderText('Send a message...')
-    const frame = input.parentElement as HTMLElement
+    const frame = input.closest('.isolate') as HTMLElement
     const tokens = frame.className.split(/\s+/)
 
     expect(tokens).not.toContain('transition-all')

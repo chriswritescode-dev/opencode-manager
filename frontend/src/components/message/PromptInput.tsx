@@ -1340,7 +1340,6 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   const composerModeStyle = composerMode ? COMPOSER_MODE_STYLES[composerMode] : null
   const isTakeoverOpen = isMobile && (isCommandListOpen || isMentionListOpen)
   const showStopButton = isSessionActive
-  const hideSecondaryButtons = isMobile && isSessionActive
   const showMobileScrollButton = isMobile && showScrollButton
   const hasOpenGoal = isOpenSessionGoal(sessionGoal)
   const lockedReason = permissionMode?.lockedReason ?? null
@@ -1371,7 +1370,8 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   const showVoiceFeedback = voiceFeedbackState !== null
   const hasPromptContent = prompt.trim().length > 0 || imageAttachments.length > 0
   const canUseMobileVoice = isMobile && sttEnabled && sttSupported && !hasPendingPermissionForSession
-  const showMobileVoiceButton = canUseMobileVoice && (!hasPromptContent || showVoiceFeedback)
+  const compactControls = isMobile && isPromptFocused
+  const showMobileKeys = isMobile && isPromptFocused && !hasPendingPermissionForSession
   const voiceFeedbackLabel = voiceFeedbackState === 'starting'
     ? 'Starting microphone...'
     : voiceFeedbackState === 'sending'
@@ -1414,13 +1414,13 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
           ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground border-destructive/60 animate-pulse'
           : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border'
       }`
-      : `px-4 min-h-[44px] min-w-[56px] rounded-lg transition-all duration-150 flex items-center justify-center border touch-none select-none ${
+      : `${compactControls ? 'min-h-9 min-w-9 px-0' : 'min-h-[44px] min-w-[44px] px-0'} rounded-lg transition-all duration-150 flex items-center justify-center border touch-none select-none ${
         isBusy
           ? 'bg-success text-success-foreground border-success/70 shadow-lg shadow-success/40'
           : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border active:bg-muted-foreground/30 active:scale-95'
       }`
 
-    const containerClassName = isDesktop ? 'relative hidden md:block' : 'relative flex w-full justify-end touch-none select-none'
+    const containerClassName = isDesktop ? 'relative hidden md:block' : 'relative flex touch-none select-none'
 
     return (
       <div
@@ -1453,6 +1453,41 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
       </div>
     )
   }
+
+  const renderMobileKeys = () => (
+    <div role="toolbar" aria-label="Insert" className="flex flex-nowrap items-center gap-1.5 min-w-0">
+      {KEYBAR_KEYS.map((key) => {
+        const isActive = key.id === 'command'
+          ? showSuggestions
+          : key.id === 'mention'
+            ? showMentionSuggestions
+            : isBashMode
+        const isDisabled = key.id === 'bash' ? !isBashKeyEnabled : isBashMode
+        return (
+          <button
+            key={key.id}
+            type="button"
+            aria-pressed={isActive}
+            aria-label={`${key.label} ${key.symbol}`}
+            disabled={isDisabled}
+            onMouseDown={(e) => e.preventDefault()}
+            onTouchStart={keybarTouch.onTouchStart}
+            onTouchMove={keybarTouch.onTouchMove}
+            onTouchEnd={(e) => keybarTouch.onTouchEnd(e, key.id)}
+            onClick={() => keybarTouch.onClick(key.id)}
+            className={`flex items-center gap-1 min-w-0 rounded-lg border font-mono text-base font-bold transition-colors disabled:opacity-30 ${
+              compactControls ? 'min-h-9 px-2' : 'min-h-[44px] px-3'
+            } ${
+              isActive ? COMPOSER_MODE_STYLES[key.id].key : 'bg-muted border-border text-foreground active:bg-muted-foreground/20'
+            }`}
+          >
+            {key.symbol}
+            <span className="truncate font-sans text-[11px] font-medium opacity-80">{key.label}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
 
   
 
@@ -1501,30 +1536,47 @@ return (
           {composerModeStyle.label}
         </span>
       )}
-      <textarea
-        ref={textareaRef}
-        data-prompt-input
-        value={prompt}
-        onChange={handleInput}
-        onFocus={handlePromptFocus}
-        onBlur={handlePromptBlur}
-        onKeyDown={handleKeyDown}
-        onPaste={handlePaste}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        placeholder={
-          isBashMode
-            ? "Enter bash command..."
-            : "Send a message..."
-        }
-        className={`w-full bg-muted/50 pl-2 md:pl-3 pr-3 py-2 text-[16px] text-foreground placeholder-muted-foreground focus:outline-none focus:bg-muted/70 resize-none min-h-[40px] max-h-[120px] disabled:opacity-50 disabled:cursor-not-allowed md:text-sm rounded-lg [field-sizing:content] ${
-          isBashMode
-            ? 'border-warning/50 bg-warning/5 focus:bg-warning/10'
-            : isDragging ? 'border-info/50 border-dashed bg-info/5' : ''
-        }`}
-        rows={1}
-      />
+      <div className="flex items-end gap-1.5 md:gap-2">
+        <textarea
+          ref={textareaRef}
+          data-prompt-input
+          value={prompt}
+          onChange={handleInput}
+          onFocus={handlePromptFocus}
+          onBlur={handlePromptBlur}
+          onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          placeholder={
+            isBashMode
+              ? "Enter bash command..."
+              : "Send a message..."
+          }
+          className={`flex-1 min-w-0 bg-muted/50 pl-2 md:pl-3 pr-3 py-2 text-[16px] text-foreground placeholder-muted-foreground focus:outline-none focus:bg-muted/70 resize-none min-h-[40px] max-h-[120px] disabled:opacity-50 disabled:cursor-not-allowed md:text-sm rounded-lg [field-sizing:content] ${
+            isBashMode
+              ? 'border-warning/50 bg-warning/5 focus:bg-warning/10'
+              : isDragging ? 'border-info/50 border-dashed bg-info/5' : ''
+          }`}
+          rows={1}
+        />
+        {(hasPendingPermissionForSession || hasPromptContent) && (
+          <button
+            data-submit-prompt
+            onClick={hasPendingPermissionForSession ? () => setShowDialog(true) : handleSubmit}
+            disabled={hasPendingPermissionForSession ? false : (!isModelReady || !hasPromptContent || (isPromptSubmitPending && !isStreamingResponse))}
+            className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors dark:border flex-shrink-0 min-w-[52px] flex items-center justify-center min-h-[44px] md:min-h-0 ${
+              hasPendingPermissionForSession
+                ? 'bg-highlight hover:bg-highlight/90 border-highlight text-highlight-foreground ring-highlight/20'
+                : 'bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground border-border/30'
+            }`}
+            title={hasPendingPermissionForSession ? 'View pending permission' : (isStreamingResponse ? 'Queue message' : 'Send')}
+          >
+            <span className="whitespace-nowrap">{hasPendingPermissionForSession ? 'View' : (isStreamingResponse ? 'Queue' : 'Send')}</span>
+          </button>
+        )}
+      </div>
 
       {imageAttachments.length > 0 && (
         <div className="flex flex-wrap gap-2 px-2 py-2 mb-2">
@@ -1546,14 +1598,14 @@ return (
         </div>
       )}
 
-      <div className="flex gap-1.5 md:gap-2 items-center justify-between">
+      <div data-testid="composer-controls-row" className="flex gap-1.5 md:gap-2 items-center justify-between">
         <div className="flex flex-1 md:flex-initial gap-1.5 md:gap-2 items-center min-w-0">
-          {showMobileScrollButton ? (
+          {showMobileKeys ? renderMobileKeys() : showMobileScrollButton ? (
             <>
               <button
                 type="button"
                 onClick={onScrollToBottom}
-                className="flex items-center gap-1.5 px-3 min-h-[44px] rounded-lg text-xs font-medium border bg-background/80 hover:bg-accent/90 text-primary hover:text-primary-hover border-primary/20 shadow-md backdrop-blur-md transition-all duration-200 active:scale-95 ring-1 ring-primary/15"
+                className={`flex items-center gap-1.5 px-3 rounded-lg text-xs font-medium border bg-background/80 hover:bg-accent/90 text-primary hover:text-primary-hover border-primary/20 shadow-md backdrop-blur-md transition-all duration-200 active:scale-95 ring-1 ring-primary/15 ${compactControls ? 'min-h-9' : 'min-h-[44px]'}`}
                 title="Scroll to bottom"
                 aria-label="Scroll to bottom"
               >
@@ -1595,21 +1647,19 @@ return (
                 onOpenChange={setIsModelPickerOpen}
                 session={modelSelectionSession}
               >
-                {!hideSecondaryButtons && (
-                  <button
-                    className="px-2.5 py-0.5 md:px-3 min-h-[44px] md:min-h-[36px] min-w-0 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer flex-1 md:flex-initial md:w-auto md:max-w-[220px] dark:border-border/30 flex flex-col items-start justify-center overflow-hidden"
-                  >
-                    <span className="truncate w-full text-left">{displayModelName || 'Select model'}</span>
-                    {hasVariants && currentVariant && (
-                      <span className="text-[10px] text-highlight truncate w-full text-left capitalize">{currentVariant}</span>
-                    )}
-                  </button>
-                )}
+                <button
+                  className="px-2.5 py-0.5 md:px-3 min-h-[44px] md:min-h-[36px] min-w-0 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer flex-1 md:flex-initial md:w-auto md:max-w-[220px] dark:border-border/30 flex flex-col items-start justify-center overflow-hidden"
+                >
+                  <span className="truncate w-full text-left">{displayModelName || 'Select model'}</span>
+                  {hasVariants && currentVariant && (
+                    <span className="text-[10px] text-highlight truncate w-full text-left capitalize">{currentVariant}</span>
+                  )}
+                </button>
               </ModelQuickSelect>
             </>
           )}
         </div>
-<div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
+        <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
             {!isMobile && (
               <button
                 onClick={onScrollToBottom}
@@ -1643,7 +1693,7 @@ return (
           >
             <Upload className="w-5 h-5" />
           </button>
-          {showMobileVoiceButton && (
+          {canUseMobileVoice && (
             renderVoiceButton('mobile')
           )}
           {isMobile && directory && (
@@ -1655,62 +1705,14 @@ return (
               goalLabel={goalButtonLabel}
               onToggleGoal={toggleGoalArmed}
               onAttachFile={openFilePicker}
-              onDictate={canUseMobileVoice && hasPromptContent && !showVoiceFeedback ? () => void startVoiceRecording() : undefined}
+              compact={compactControls}
             />
           )}
           {!isMobile && sttEnabled && sttSupported && (
             renderVoiceButton('desktop')
           )}
-          {!showMobileVoiceButton && (
-            <button
-              data-submit-prompt
-              onClick={hasPendingPermissionForSession ? () => setShowDialog(true) : handleSubmit}
-              disabled={hasPendingPermissionForSession ? false : (!isModelReady || !hasPromptContent || (isPromptSubmitPending && !isStreamingResponse))}
-              className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors dark:border flex-shrink-0 min-w-[52px] flex items-center justify-center min-h-[44px] md:min-h-0 ${
-                hasPendingPermissionForSession
-                  ? 'bg-highlight hover:bg-highlight/90 border-highlight text-highlight-foreground ring-highlight/20'
-                  : 'bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground border-border/30'
-              }`}
-              title={hasPendingPermissionForSession ? 'View pending permission' : (isStreamingResponse ? 'Queue message' : 'Send')}
-            >
-              <span className="whitespace-nowrap">{hasPendingPermissionForSession ? 'View' : (isStreamingResponse ? 'Queue' : 'Send')}</span>
-            </button>
-          )}
         </div>
       </div>
-
-      {isMobile && isPromptFocused && !hasPendingPermissionForSession && (
-        <div role="toolbar" aria-label="Insert" className="flex items-center gap-1.5 mt-2 pt-2 border-t border-border/50">
-          {KEYBAR_KEYS.map((key) => {
-            const isActive = key.id === 'command'
-              ? showSuggestions
-              : key.id === 'mention'
-                ? showMentionSuggestions
-                : isBashMode
-            const isDisabled = key.id === 'bash' ? !isBashKeyEnabled : isBashMode
-            return (
-              <button
-                key={key.id}
-                type="button"
-                aria-pressed={isActive}
-                aria-label={`${key.label} ${key.symbol}`}
-                disabled={isDisabled}
-                onMouseDown={(e) => e.preventDefault()}
-                onTouchStart={keybarTouch.onTouchStart}
-                onTouchMove={keybarTouch.onTouchMove}
-                onTouchEnd={(e) => keybarTouch.onTouchEnd(e, key.id)}
-                onClick={() => keybarTouch.onClick(key.id)}
-                className={`flex items-center gap-1 min-h-[44px] px-3 rounded-lg border font-mono text-base font-bold transition-colors disabled:opacity-30 ${
-                  isActive ? COMPOSER_MODE_STYLES[key.id].key : 'bg-muted border-border text-foreground active:bg-muted-foreground/20'
-                }`}
-              >
-                {key.symbol}
-                <span className="font-sans text-[11px] font-medium opacity-80">{key.label}</span>
-              </button>
-            )
-          })}
-        </div>
-      )}
 
       <PromptSuggestions
         isOpen={showSuggestions}

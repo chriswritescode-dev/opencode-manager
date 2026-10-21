@@ -571,13 +571,13 @@ describe('PromptInput STT Gesture Tests', () => {
       expect(screen.queryByTitle('Send')).not.toBeInTheDocument()
     })
 
-    it('shows the submit button and hides the mobile mic once the prompt has content', () => {
+    it('shows the submit button and keeps the mobile mic once the prompt has content', () => {
       renderComponent()
 
       fireEvent.change(screen.getByPlaceholderText('Send a message...'), { target: { value: 'hello' } })
 
       expect(screen.getByTitle('Send')).toBeInTheDocument()
-      expect(queryMobileVoiceButton()).toBeNull()
+      expect(queryMobileVoiceButton()).not.toBeNull()
     })
 
     it('keeps the mobile mic visible while recording even with prompt content', () => {
