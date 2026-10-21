@@ -786,6 +786,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
     if (wasCancelArmed) {
       cancelVoiceInput()
+      ignoreVoiceClickUntilRef.current = Date.now() + VOICE_CLICK_SUPPRESSION_MS
       return
     }
 

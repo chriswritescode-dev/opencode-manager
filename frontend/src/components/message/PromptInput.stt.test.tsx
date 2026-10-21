@@ -730,6 +730,39 @@ describe('PromptInput STT Gesture Tests', () => {
       expect(mockStopRecording).not.toHaveBeenCalled()
     })
 
+    it('does not restart recording when the mic is tapped right after a drag-to-discard release', async () => {
+      const view = renderRecorder({ isRecording: true })
+      mockAbortRecording.mockClear()
+      mockStartRecording.mockClear()
+
+      const container = getMobileVoiceButtonContainer()
+
+      await act(async () => {
+        fireEvent.pointerDown(container, { clientX: 200 })
+        fireEvent.pointerMove(container, { clientX: 100 })
+      })
+
+      expect(screen.getByText('Release to discard')).toBeInTheDocument()
+
+      await act(async () => {
+        fireEvent.pointerUp(container, { clientX: 100 })
+      })
+
+      expect(mockAbortRecording).toHaveBeenCalledTimes(1)
+
+      view.rerender({ isRecording: false })
+
+      expect(screen.queryByRole('button', { name: 'Discard recording' })).not.toBeInTheDocument()
+
+      await act(async () => {
+        fireEvent.click(getMobileVoiceButton())
+        await new Promise(resolve => setTimeout(resolve, 10))
+      })
+
+      expect(mockStartRecording).not.toHaveBeenCalled()
+      expect(screen.queryByRole('button', { name: 'Discard recording' })).not.toBeInTheDocument()
+    })
+
     it('leaves the desktop composer without the recorder row', () => {
       mocks.useMobile.mockReturnValue(false)
 
