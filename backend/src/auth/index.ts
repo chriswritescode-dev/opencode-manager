@@ -69,17 +69,13 @@ export function createAuth(db: Database) {
         origin: ENV.AUTH.PASSKEY_ORIGIN,
         authenticatorSelection: {
           residentKey: 'required',
-          userVerification: 'preferred',
+          userVerification: 'required',
         },
       }),
     ],
     session: {
       expiresIn: 60 * 60 * 24 * 7,
       updateAge: 60 * 60 * 24,
-      cookieCache: {
-        enabled: true,
-        maxAge: 60 * 5,
-      },
     },
     user: {
       additionalFields: {

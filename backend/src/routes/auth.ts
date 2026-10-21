@@ -8,19 +8,7 @@ import { hashPassword } from 'better-auth/crypto'
 export function createAuthRoutes(auth: AuthInstance): Hono {
   const app = new Hono()
 
-  app.all('/*', async (c) => {
-    const response = await auth.handler(c.req.raw)
-    
-    const setCookie = response.headers.get('set-cookie')
-    if (c.req.path.includes('sign-in')) {
-      logger.info(`Sign-in response - Status: ${response.status}, Set-Cookie: ${setCookie ? 'present' : 'missing'}`)
-      if (setCookie) {
-        logger.debug(`Set-Cookie header: ${setCookie.substring(0, 100)}...`)
-      }
-    }
-    
-    return response
-  })
+  app.all('/*', (c) => auth.handler(c.req.raw))
 
   return app
 }
@@ -31,16 +19,20 @@ export async function syncAdminFromEnv(auth: AuthInstance, db: Database): Promis
   const adminEmail = ENV.AUTH.ADMIN_EMAIL!
   const adminPassword = ENV.AUTH.ADMIN_PASSWORD!
 
-  const existingUser = db.prepare('SELECT id, email FROM "user" WHERE email = ?').get(adminEmail) as { id: string; email: string } | undefined
+  const existingUser = db.prepare('SELECT id, email FROM "user" WHERE lower(email) = lower(?)').get(adminEmail) as { id: string; email: string } | undefined
 
   if (existingUser) {
     if (ENV.AUTH.ADMIN_PASSWORD_RESET) {
       const hashedPassword = await hashPassword(adminPassword)
-      db.prepare('UPDATE "account" SET password = ? WHERE "userId" = ? AND "providerId" = ?').run(
-        hashedPassword,
-        existingUser.id,
-        'credential'
-      )
+      const resetAdminCredentials = db.transaction(() => {
+        db.prepare('UPDATE "account" SET password = ? WHERE "userId" = ? AND "providerId" = ?').run(
+          hashedPassword,
+          existingUser.id,
+          'credential'
+        )
+        db.prepare('DELETE FROM "session" WHERE "userId" = ?').run(existingUser.id)
+      })
+      resetAdminCredentials()
       logger.info(`Admin password reset from environment for ${adminEmail}`)
       logger.warn('Remove ADMIN_PASSWORD_RESET=true from environment after password reset')
     }

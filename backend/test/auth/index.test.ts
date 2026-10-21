@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { createTestDb } from '../helpers/assistant-workspace'
 import { createAuth } from '../../src/auth'
 import { DatabaseSync } from 'node:sqlite'
 import type { Database } from 'bun:sqlite'
@@ -120,8 +119,36 @@ describe('createAuth', () => {
     }
   })
 
+  it('rejects a session cookie immediately after its session row is deleted', async () => {
+    const db = createAuthDatabase()
+    const auth = createAuth(db)
+
+    try {
+      const signUpResponse = await auth.handler(new Request('http://localhost:5173/api/auth/sign-up/email', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: 'http://localhost:5173' },
+        body: JSON.stringify({ email: 'revoked@example.com', password: 'test-password', name: 'Revoked' }),
+      }))
+      expect(signUpResponse.status).toBe(200)
+
+      const setCookies = signUpResponse.headers.getSetCookie()
+      expect(setCookies.length).toBeGreaterThan(0)
+      const headers = new Headers({ cookie: setCookies.map((cookie) => cookie.split(';')[0]).join('; ') })
+
+      const session = await auth.api.getSession({ headers })
+      expect(session?.user.email).toBe('revoked@example.com')
+
+      db.prepare('DELETE FROM "session" WHERE "userId" = ?').run(session!.user.id)
+      expect(db.prepare('SELECT COUNT(*) AS count FROM "session"').get()).toEqual({ count: 0 })
+
+      expect(await auth.api.getSession({ headers })).toBeNull()
+    } finally {
+      db.close()
+    }
+  }, 30000)
+
   it('creates an auth instance without social providers and responds to requests', async () => {
-    const db = createTestDb()
+    const db = createAuthDatabase()
     const auth = createAuth(db)
 
     expect(typeof auth.api.getSession).toBe('function')
@@ -141,7 +168,7 @@ describe('createAuth', () => {
     ENV.AUTH.DISCORD_CLIENT_ID = 'discord-id'
     ENV.AUTH.DISCORD_CLIENT_SECRET = 'discord-secret'
 
-    const db = createTestDb()
+    const db = createAuthDatabase()
     const auth = createAuth(db)
 
     expect(typeof auth.api.getSession).toBe('function')
@@ -157,7 +184,7 @@ describe('createAuth', () => {
     ENV.AUTH.GOOGLE_CLIENT_SECRET = 'google-secret'
     ENV.AUTH.DISCORD_CLIENT_ID = 'discord-id'
 
-    const db = createTestDb()
+    const db = createAuthDatabase()
     const auth = createAuth(db)
 
     const res = await auth.handler(new Request('http://localhost/api/auth/ok'))
@@ -171,7 +198,7 @@ describe('createAuth', () => {
     ENV.SERVER.PORT = 4321
     ENV.AUTH.SECURE_COOKIES = true
 
-    const db = createTestDb()
+    const db = createAuthDatabase()
     const auth = createAuth(db)
 
     const res = await auth.handler(new Request('http://localhost/api/auth/ok'))
@@ -183,7 +210,7 @@ describe('createAuth', () => {
   it('uses the first trusted origin as the base URL', async () => {
     ENV.AUTH.TRUSTED_ORIGINS = ' http://example.test ,http://localhost:5003'
 
-    const db = createTestDb()
+    const db = createAuthDatabase()
     const auth = createAuth(db)
 
     const res = await auth.handler(new Request('http://example.test/api/auth/ok'))
