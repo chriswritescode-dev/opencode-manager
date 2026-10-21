@@ -1413,7 +1413,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
           ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground border-destructive/60 animate-pulse'
           : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border'
       }`
-      : `min-h-9 min-w-9 px-0 rounded-lg transition-all duration-150 flex items-center justify-center border touch-none select-none ${
+      : `min-h-10 min-w-10 px-0 rounded-lg transition-all duration-150 flex items-center justify-center border touch-none select-none ${
         isBusy
           ? 'bg-success text-success-foreground border-success/70 shadow-lg shadow-success/40'
           : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border active:bg-muted-foreground/30 active:scale-95'
@@ -1520,7 +1520,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
       : ''
 
 return (
-    <div className={`relative isolate border border-border dark:border-border/30 rounded-xl p-2 md:p-3 mb-4 md:mb-3 w-full before:pointer-events-none before:absolute before:-inset-px before:-z-10 before:rounded-xl before:bg-background/95 before:backdrop-blur-md before:content-[''] ${hasPendingPermissionForSession ? 'border-highlight/50 ring-1 ring-highlight/30' : composerModeStyle?.frame ?? ''} ${isTakeoverOpen ? 'z-[60]' : ''}`}>
+    <div className={`relative isolate border-t md:border border-border dark:border-border/30 rounded-t-xl md:rounded-xl p-2 pb-4 md:p-3 md:mb-3 w-full before:pointer-events-none before:absolute before:-inset-px before:-z-10 before:rounded-t-xl md:before:rounded-xl before:bg-background md:before:bg-background/95 before:backdrop-blur-md before:content-[''] ${hasPendingPermissionForSession ? 'border-highlight/50 ring-1 ring-highlight/30' : composerModeStyle?.frame ?? ''} ${isTakeoverOpen ? 'z-[60]' : ''}`}>
       <div role="status" aria-live="polite" className="sr-only">
         {sessionActivityAnnouncement}
       </div>
@@ -1681,7 +1681,7 @@ return (
               title="Scroll to bottom"
               onMouseDown={(e) => e.preventDefault()}
               onClick={onScrollToBottom}
-              className={cn(getIconToggleButtonClassName(false), 'flex items-center justify-center size-9 p-0')}
+              className={cn(getIconToggleButtonClassName(false), 'flex items-center justify-center size-10 p-0')}
             >
               <ArrowDown className="w-5 h-5" />
             </button>

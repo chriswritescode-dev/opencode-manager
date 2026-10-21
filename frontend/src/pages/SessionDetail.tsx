@@ -896,11 +896,11 @@ export function SessionDetail() {
                 "relative pointer-events-auto",
                 isFormSheetOpen
                   ? "flex w-full flex-1 min-h-0 flex-col"
-                  : cn("w-[94%] md:max-w-4xl", isFormOpen && "flex max-h-full min-h-0 flex-col"),
+                  : cn("w-full md:w-[94%] md:max-w-4xl", isFormOpen && "flex max-h-full min-h-0 flex-col"),
               )}
             >
               {!isFormSheetOpen && (
-                <div className="absolute bottom-full right-0 mb-2 z-50 flex flex-col items-end gap-2">
+                <div className="absolute bottom-full right-[3%] md:right-0 mb-2 z-50 flex flex-col items-end gap-2">
                   {ttsEnabled && !hasPromptContent && !isSessionActive && latestPlayableAssistant && (
                     <FloatingTTSButton
                       messageId={latestPlayableAssistant.messageId}
@@ -955,15 +955,17 @@ export function SessionDetail() {
                 />
               )}
               <div className={cn(isFormSheetOpen && "shrink-0 bg-background px-[3%]")}>
-                <SessionSendErrorBanner sessionId={sessionId} isConnected={streamConnected} isReconnecting={streamReconnecting} />
-                <SessionGoalBar sessionID={sessionId} />
-                <BackgroundWorkBar
-                  sessionID={sessionId}
-                  directory={sessionDirectory}
-                  messages={messages}
-                  isSessionActive={isSessionActive}
-                  onChildSessionClick={handleChildSessionClick}
-                />
+                <div className={cn(!isFormSheetOpen && "px-[3%] md:px-0")}>
+                  <SessionSendErrorBanner sessionId={sessionId} isConnected={streamConnected} isReconnecting={streamReconnecting} />
+                  <SessionGoalBar sessionID={sessionId} />
+                  <BackgroundWorkBar
+                    sessionID={sessionId}
+                    directory={sessionDirectory}
+                    messages={messages}
+                    isSessionActive={isSessionActive}
+                    onChildSessionClick={handleChildSessionClick}
+                  />
+                </div>
                 <PromptInput
                   ref={promptInputRef}
                   directory={sessionDirectory}

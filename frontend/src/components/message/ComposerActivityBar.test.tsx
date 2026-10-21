@@ -41,14 +41,14 @@ describe('ComposerActivityBar', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('anchors a pointer-transparent progressbar in the gap below the composer', () => {
+  it('sits inside the docked composer on mobile and below the composer on desktop', () => {
     useSessionStatus.getState().setStatus('session-a', { type: 'busy' })
 
     render(<ComposerActivityBar sessionID="session-a" />)
 
     const bar = screen.getByRole('progressbar', { name: 'Session working' })
     expect(bar).toHaveClass('pointer-events-none', 'flex')
-    expect(bar).toHaveClass('absolute', 'inset-x-3', '-bottom-[10px]', 'md:-bottom-[11px]')
+    expect(bar).toHaveClass('absolute', 'inset-x-3', 'bottom-1', 'md:-bottom-[11px]')
     expect(bar).not.toHaveClass('fixed')
   })
 
