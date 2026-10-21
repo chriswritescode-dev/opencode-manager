@@ -6,7 +6,7 @@ import {
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
 } from '@/hooks/useSidebarWidth'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Tooltip, TooltipContent, TooltipTrigger, TOOLTIP_OPEN_DELAY_MS } from '@/components/ui/tooltip'
 
 export interface SidebarProps {
   collapsed: boolean
@@ -204,7 +204,6 @@ export function SidebarItem({
       type="button"
       className={baseClasses}
       onClick={onClick}
-      title={collapsed ? label : undefined}
     >
       <Icon className={cn(dense ? 'h-4 w-4' : 'h-5 w-5', 'flex-shrink-0')} />
       {!collapsed && <span className="truncate">{label}</span>}
@@ -214,7 +213,7 @@ export function SidebarItem({
 
   if (collapsed) {
     return (
-      <Tooltip delayDuration={0}>
+      <Tooltip delayDuration={TOOLTIP_OPEN_DELAY_MS}>
         <TooltipTrigger asChild>{content}</TooltipTrigger>
         <TooltipContent side="right" align="center">
           {label}

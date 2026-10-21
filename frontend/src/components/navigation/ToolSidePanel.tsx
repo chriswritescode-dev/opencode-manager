@@ -30,7 +30,7 @@ import { withQueryParam } from '@/lib/navigation'
 import type { TerminalTarget } from '@/lib/terminal-target'
 import { useActiveWorkCounts, useActivityWindowMinutes } from '@/hooks/useActiveWork'
 import { formatActivityWindow } from '@/lib/activeWork'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, TOOLTIP_OPEN_DELAY_MS } from '@/components/ui/tooltip'
 import { restoreOverlayFocus } from '@/lib/overlayFocus'
 import { cn } from '@/lib/utils'
 import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
@@ -113,7 +113,7 @@ interface RailButtonProps {
 function RailButton({ item, active, onClick, indicator }: RailButtonProps) {
   const Icon = item.icon
   return (
-    <Tooltip delayDuration={0}>
+    <Tooltip delayDuration={TOOLTIP_OPEN_DELAY_MS}>
       <TooltipTrigger asChild>
         <button
           type="button"
