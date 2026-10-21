@@ -7,11 +7,16 @@ import { SIDEBAR_SERVER_STORAGE_KEY, useSidebarServerStore } from '@/stores/side
 
 const mocks = vi.hoisted(() => ({
   useOpenCodeServers: vi.fn(),
+  useAuth: vi.fn(),
 }))
 
 vi.mock('@/hooks/useOpenCodeServers', () => ({
   useOpenCodeServers: mocks.useOpenCodeServers,
   useOpenCodeServerStatuses: () => ({ statuses: [], statusById: {}, isLoading: false }),
+}))
+
+vi.mock('@/hooks/useAuth', () => ({
+  useAuth: mocks.useAuth,
 }))
 
 const kitchen = {
@@ -85,6 +90,7 @@ function renderHarness(initialEntry = '/', options?: { syncRoute?: boolean }) {
 function resetSelection() {
   localStorage.clear()
   useSidebarServerStore.setState({ serverId: LOCAL_OPENCODE_SERVER_ID })
+  mocks.useAuth.mockReturnValue({ isAuthenticated: true })
   mocks.useOpenCodeServers.mockReturnValue({
     servers: [kitchen, office],
     isLoading: false,
@@ -213,6 +219,14 @@ describe('useSidebarServerRouteSync', () => {
     expect(JSON.parse(localStorage.getItem(SIDEBAR_SERVER_STORAGE_KEY) ?? 'null')).toBe(
       LOCAL_OPENCODE_SERVER_ID,
     )
+  })
+
+  it('does not load the server list while unauthenticated', () => {
+    mocks.useAuth.mockReturnValue({ isAuthenticated: false })
+
+    renderHarness('/')
+
+    expect(mocks.useOpenCodeServers).toHaveBeenCalledWith({ enabled: false })
   })
 
   it('follows a linked server route with no sidebar consumer mounted', async () => {

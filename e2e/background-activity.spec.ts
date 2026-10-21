@@ -76,9 +76,10 @@ function createUnregisteredDirectory(name: string): string {
   return directory
 }
 
-function waitForDirectorySubscription(page: Page, directory: string, endpoint = '/api/sse/subscribe') {
-  return page.waitForResponse((response) =>
-    response.url().includes(endpoint) && (response.request().postData() ?? '').includes(directory),
+function waitForDirectorySubscription(page: Page, directory: string) {
+  return page.waitForResponse(
+    (response) =>
+      response.url().includes('/api/sse/subscribe') && (response.request().postData() ?? '').includes(directory),
   )
 }
 
@@ -195,7 +196,7 @@ test.describe('session background activity', () => {
     await expect(backgroundIndicator(page)).toBeHidden()
   })
 
-  test('clears the indicator for a shell that exits while an unregistered session directory is unsubscribed', async ({
+  test('keeps an unregistered session directory subscribed while its shell runs and clears the indicator after it exits elsewhere', async ({
     page,
     request,
     repo,
@@ -213,15 +214,20 @@ test.describe('session background activity', () => {
 
     await expect(backgroundIndicator(page)).toBeVisible()
 
-    const unsubscribed = waitForDirectorySubscription(page, directory, '/api/sse/unsubscribe')
+    const unsubscribes: string[] = []
+    page.on('request', (outgoing) => {
+      if (outgoing.url().includes('/api/sse/unsubscribe') && (outgoing.postData() ?? '').includes(directory)) {
+        unsubscribes.push(outgoing.url())
+      }
+    })
+
     await navigateWithinApp(page, '/')
-    expect((await unsubscribed).ok()).toBe(true)
     await removeShell(request, directory, shellId)
-    await page.waitForTimeout(3_000)
     await navigateWithinApp(page, `/repos/${repo.id}/sessions/${sessionId}`)
 
     await expect(page.getByPlaceholder('Send a message...')).toBeVisible()
     await expect(backgroundIndicator(page)).toBeHidden({ timeout: 20_000 })
+    expect(unsubscribes).toEqual([])
   })
 
   test('follows a session moved to another directory without a reload', async ({ page, request, repo }) => {
