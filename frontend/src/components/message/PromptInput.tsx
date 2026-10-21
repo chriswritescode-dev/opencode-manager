@@ -1484,7 +1484,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
           ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground border-destructive/60 animate-pulse'
           : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border'
       }`
-      : `min-h-10 min-w-10 px-0 rounded-lg transition-all duration-150 flex items-center justify-center border touch-none select-none ${
+      : `min-h-11 min-w-11 px-0 rounded-lg transition-all duration-150 flex items-center justify-center border touch-none select-none ${
         isBusy
           ? 'bg-success text-success-foreground border-success/70 shadow-lg shadow-success/40'
           : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border active:bg-muted-foreground/30 active:scale-95'
@@ -1674,7 +1674,7 @@ return (
                 onClick={cancelVoiceInput}
                 className={cn(
                   getIconToggleButtonClassName(false),
-                  'flex items-center justify-center size-10 p-0 flex-shrink-0',
+                  'flex items-center justify-center size-11 p-0 flex-shrink-0',
                   isVoiceCancelArmed && 'bg-destructive hover:bg-destructive/90 text-destructive-foreground border-destructive',
                 )}
               >
@@ -1711,7 +1711,7 @@ return (
                 session={modelSelectionSession}
               >
                 <button
-                  className="px-2.5 py-0.5 md:px-3 min-h-10 md:min-h-9 min-w-0 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer flex-1 md:flex-initial md:w-auto md:max-w-[220px] dark:border-border/30 flex flex-col items-start justify-center overflow-hidden"
+                  className="px-2.5 py-0.5 md:px-3 min-h-11 md:min-h-9 min-w-0 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer flex-1 md:flex-initial md:w-auto md:max-w-[220px] dark:border-border/30 flex flex-col items-start justify-center overflow-hidden"
                 >
                   <span className="truncate w-full text-left">{displayModelName || 'Select model'}</span>
                   {hasVariants && currentVariant && (
@@ -1769,7 +1769,7 @@ return (
               onClick={handleSendVoiceRecording}
               className={cn(
                 getIconToggleButtonClassName(false),
-                'flex items-center justify-center size-10 p-0 flex-shrink-0',
+                'flex items-center justify-center size-11 p-0 flex-shrink-0',
                 isVoiceSendArmed && 'bg-success hover:bg-success/90 text-success-foreground border-success',
               )}
             >
@@ -1786,7 +1786,7 @@ return (
               title="Scroll to bottom"
               onMouseDown={(e) => e.preventDefault()}
               onClick={onScrollToBottom}
-              className={cn(getIconToggleButtonClassName(false), 'flex items-center justify-center size-10 p-0')}
+              className={cn(getIconToggleButtonClassName(false), 'flex items-center justify-center size-11 p-0')}
             >
               <ArrowDown className="w-5 h-5" />
             </button>

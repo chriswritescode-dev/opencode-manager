@@ -291,7 +291,7 @@ describe('PromptInput composer layout', () => {
       renderComponent({ showScrollButton: true, onScrollToBottom })
 
       const arrow = screen.getByRole('button', { name: 'Scroll to bottom' })
-      expect(arrow).toHaveClass('size-10', 'p-0')
+      expect(arrow).toHaveClass('size-11', 'p-0')
 
       fireEvent.click(arrow)
 
@@ -359,18 +359,18 @@ describe('PromptInput composer layout', () => {
   })
 
   describe('control sizing', () => {
-    it('keeps the mic at 40px before and after the prompt gains focus on mobile', () => {
+    it('keeps the mic at 44px before and after the prompt gains focus on mobile', () => {
       mocks.useMobile.mockReturnValue(true)
       renderComponent()
 
       const micBeforeFocus = mobileVoiceButton() as HTMLElement
-      expect(micBeforeFocus).toHaveClass('min-h-10', 'min-w-10')
+      expect(micBeforeFocus).toHaveClass('min-h-11', 'min-w-11')
       expect(micBeforeFocus).not.toHaveClass('min-h-[44px]')
 
       fireEvent.focus(promptInput())
 
       const micAfterFocus = mobileVoiceButton() as HTMLElement
-      expect(micAfterFocus).toHaveClass('min-h-10', 'min-w-10')
+      expect(micAfterFocus).toHaveClass('min-h-11', 'min-w-11')
       expect(micAfterFocus).not.toHaveClass('min-h-[44px]')
     })
 

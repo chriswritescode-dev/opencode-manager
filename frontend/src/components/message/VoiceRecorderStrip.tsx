@@ -67,7 +67,7 @@ export function VoiceRecorderStrip({ state, startedAt }: VoiceRecorderStripProps
       role="status"
       aria-live="polite"
       className={cn(
-        'flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-lg border px-2.5 text-xs font-medium',
+        'flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg border px-2.5 text-xs font-medium',
         STRIP_TONES[state],
       )}
     >
