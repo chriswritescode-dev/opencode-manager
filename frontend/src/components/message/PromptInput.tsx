@@ -19,7 +19,7 @@ import { FINE_POINTER_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
 
 import { usePermissions } from '@/contexts/EventContext'
 import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
-import { ArrowDown, Upload, X, Mic, MicOff, Target } from 'lucide-react'
+import { ArrowDown, ArrowUp, Upload, X, Mic, MicOff, Target } from 'lucide-react'
 
 import { SquareFill } from '@/components/ui/square-fill'
 import { IconToggleButton, getIconToggleButtonClassName } from '@/components/ui/icon-toggle-button'
@@ -28,7 +28,7 @@ import { PromptSuggestions, type PromptSuggestion } from './PromptSuggestions'
 import { ComposerActivityBar } from './ComposerActivityBar'
 import { ModelQuickSelect } from '@/components/model/ModelQuickSelect'
 import { AgentQuickSelect } from '@/components/agent/AgentQuickSelect'
-import { VoiceStatusOverlay, type VoiceStatusOverlayState } from './VoiceStatusOverlay'
+import { VoiceRecorderStrip, type VoiceRecorderStripState } from './VoiceRecorderStrip'
 import { PermissionModeToggle } from '@/components/session/PermissionModeToggle'
 import { SessionSandboxMenu } from '@/components/session/SessionSandboxMenu'
 import { ComposerToolsMenu } from './ComposerToolsMenu'
@@ -104,8 +104,11 @@ const COMPOSER_MODE_STYLES: Record<ComposerMode, { label: string, frame: string,
 const shiftRanges = (ranges: MatchRange[], offset: number): MatchRange[] =>
   ranges.map(([start, end]) => [start + offset, end + offset])
 
-const VOICE_SEND_SWIPE_ARM_THRESHOLD = 24
-const VOICE_SEND_SWIPE_DISARM_THRESHOLD = 8
+const VOICE_SEND_DRAG_ARM_THRESHOLD = 24
+const VOICE_SEND_DRAG_DISARM_THRESHOLD = 8
+const VOICE_CANCEL_DRAG_ARM_THRESHOLD = 96
+const VOICE_CANCEL_DRAG_DISARM_THRESHOLD = VOICE_CANCEL_DRAG_ARM_THRESHOLD - 8
+const VOICE_CLICK_SUPPRESSION_MS = 400
 type VoiceButtonVariant = 'desktop' | 'mobile'
 
 
@@ -156,15 +159,18 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0)
   const [localMode, setLocalMode] = useState<string | null>(null)
   const [isTogglingRecording, setIsTogglingRecording] = useState(false)
-  const [isVoiceSwipeArmed, setIsVoiceSwipeArmed] = useState(false)
+  const [isVoiceSendArmed, setIsVoiceSendArmed] = useState(false)
+  const [isVoiceCancelArmed, setIsVoiceCancelArmed] = useState(false)
   const [isVoiceAutoSendPending, setIsVoiceAutoSendPending] = useState(false)
   const [isVoiceAutoSendWaitingForTranscript, setIsVoiceAutoSendWaitingForTranscript] = useState(false)
+  const [voiceRecordingStartedAt, setVoiceRecordingStartedAt] = useState<number | null>(null)
   const [isPromptFocused, setIsPromptFocused] = useState(false)
   const promptBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingCommandSubmitRef = useRef(false)
   const lastAddedTranscriptRef = useRef('')
-  const voiceGestureStartYRef = useRef<number | null>(null)
-  const voiceSwipeArmedRef = useRef(false)
+  const voiceGestureStartXRef = useRef<number | null>(null)
+  const voiceSendArmedRef = useRef(false)
+  const voiceCancelArmedRef = useRef(false)
   const pendingVoiceAutoSubmitRef = useRef(false)
   const ignoreVoiceClickUntilRef = useRef(0)
   const voiceStartRequestRef = useRef(0)
@@ -189,7 +195,9 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const voiceButtonContainerRef = useRef<HTMLDivElement | null>(null)
+  const composerControlsRowRef = useRef<HTMLDivElement | null>(null)
   const hasFinePointer = useMediaQuery(FINE_POINTER_MEDIA_QUERY)
+  const isMobile = useMobile()
 
   useEffect(() => {
     if (!hasFinePointer) return
@@ -199,11 +207,13 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   }, [hasFinePointer, sessionID])
 
   const resetVoiceGestureState = useCallback(() => {
-    voiceGestureStartYRef.current = null
-    voiceSwipeArmedRef.current = false
+    voiceGestureStartXRef.current = null
+    voiceSendArmedRef.current = false
+    voiceCancelArmedRef.current = false
     pendingVoiceAutoSubmitRef.current = false
     ignoreVoiceClickUntilRef.current = 0
-    setIsVoiceSwipeArmed(false)
+    setIsVoiceSendArmed(false)
+    setIsVoiceCancelArmed(false)
     setIsVoiceAutoSendPending(false)
     setIsVoiceAutoSendWaitingForTranscript(false)
   }, [])
@@ -617,8 +627,10 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     pendingVoiceAutoSubmitRef.current = false
     setIsVoiceAutoSendPending(false)
     setIsVoiceAutoSendWaitingForTranscript(false)
-    setIsVoiceSwipeArmed(false)
-    voiceSwipeArmedRef.current = false
+    setIsVoiceSendArmed(false)
+    voiceSendArmedRef.current = false
+    setIsVoiceCancelArmed(false)
+    voiceCancelArmedRef.current = false
     setIsTogglingRecording(true)
 
     const started = await startRecording()
@@ -650,86 +662,15 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       pendingVoiceAutoSubmitRef.current = false
       setIsVoiceAutoSendPending(false)
       setIsVoiceAutoSendWaitingForTranscript(false)
-      setIsVoiceSwipeArmed(false)
-      voiceSwipeArmedRef.current = false
+      setIsVoiceSendArmed(false)
+      voiceSendArmedRef.current = false
+      setIsVoiceCancelArmed(false)
+      voiceCancelArmedRef.current = false
       stopRecording()
       return
     }
 
     await startVoiceRecording()
-  }
-
-  const handleVoicePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if ((event.pointerType === 'mouse' && event.button !== 0) || isProcessing || !isRecording) {
-      return
-    }
-
-    event.preventDefault()
-    voiceGestureStartYRef.current = event.clientY
-    voiceSwipeArmedRef.current = false
-    setIsVoiceSwipeArmed(false)
-
-    if (event.currentTarget.setPointerCapture) {
-      event.currentTarget.setPointerCapture(event.pointerId)
-    }
-  }
-
-  const handleVoicePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!isRecording || voiceGestureStartYRef.current === null) {
-      return
-    }
-
-    event.preventDefault()
-    const deltaY = voiceGestureStartYRef.current - event.clientY
-    const nextIsSwipeArmed = voiceSwipeArmedRef.current
-      ? deltaY >= VOICE_SEND_SWIPE_DISARM_THRESHOLD
-      : deltaY >= VOICE_SEND_SWIPE_ARM_THRESHOLD
-
-    if (nextIsSwipeArmed !== voiceSwipeArmedRef.current) {
-      voiceSwipeArmedRef.current = nextIsSwipeArmed
-      setIsVoiceSwipeArmed(nextIsSwipeArmed)
-
-      if (nextIsSwipeArmed && typeof navigator !== 'undefined' && navigator.vibrate) {
-        navigator.vibrate(10)
-      }
-    }
-  }
-
-  const handleVoicePointerEnd = (event: ReactPointerEvent<HTMLDivElement>, canceled = false) => {
-    if (event.currentTarget.releasePointerCapture && event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId)
-    }
-
-    if (voiceGestureStartYRef.current === null) {
-      return
-    }
-
-    event.preventDefault()
-    voiceGestureStartYRef.current = null
-
-    if (canceled || !voiceSwipeArmedRef.current) {
-      ignoreVoiceClickUntilRef.current = Date.now() + 400
-      voiceSwipeArmedRef.current = false
-      setIsVoiceSwipeArmed(false)
-      pendingVoiceAutoSubmitRef.current = false
-      setIsVoiceAutoSendPending(false)
-      setIsVoiceAutoSendWaitingForTranscript(false)
-      stopRecording()
-      return
-    }
-
-    ignoreVoiceClickUntilRef.current = Date.now() + 400
-    voiceSwipeArmedRef.current = false
-    setIsVoiceSwipeArmed(false)
-    pendingVoiceAutoSubmitRef.current = true
-    setIsVoiceAutoSendPending(true)
-    setIsVoiceAutoSendWaitingForTranscript(true)
-
-    if (typeof navigator !== 'undefined' && navigator.vibrate) {
-      navigator.vibrate([10, 20, 10])
-    }
-
-    stopRecording()
   }
 
   const cancelVoiceInput = useCallback(() => {
@@ -741,6 +682,115 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       abortRecording()
     }
   }, [abortRecording, isProcessing, isRecording, isTogglingRecording, resetVoiceGestureState])
+
+  const clearVoiceGestureArmedState = useCallback(() => {
+    ignoreVoiceClickUntilRef.current = Date.now() + VOICE_CLICK_SUPPRESSION_MS
+    voiceSendArmedRef.current = false
+    voiceCancelArmedRef.current = false
+    setIsVoiceSendArmed(false)
+    setIsVoiceCancelArmed(false)
+  }, [])
+
+  const armVoiceAutoSend = useCallback(() => {
+    pendingVoiceAutoSubmitRef.current = true
+    setIsVoiceAutoSendPending(true)
+    setIsVoiceAutoSendWaitingForTranscript(true)
+
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      navigator.vibrate([10, 20, 10])
+    }
+  }, [])
+
+  const handleVoiceSendRequest = useCallback(() => {
+    clearVoiceGestureArmedState()
+    armVoiceAutoSend()
+
+    if (isRecording) {
+      stopRecording()
+    }
+  }, [armVoiceAutoSend, clearVoiceGestureArmedState, isRecording, stopRecording])
+
+  const handleVoicePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if ((event.pointerType === 'mouse' && event.button !== 0) || isProcessing || !isRecording) {
+      return
+    }
+
+    event.preventDefault()
+    voiceGestureStartXRef.current = event.clientX
+    voiceSendArmedRef.current = false
+    voiceCancelArmedRef.current = false
+    setIsVoiceSendArmed(false)
+    setIsVoiceCancelArmed(false)
+
+    if (event.currentTarget.setPointerCapture) {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    }
+  }
+
+  const handleVoicePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!isRecording || voiceGestureStartXRef.current === null) {
+      return
+    }
+
+    event.preventDefault()
+    const deltaX = event.clientX - voiceGestureStartXRef.current
+    const nextIsSendArmed = voiceSendArmedRef.current
+      ? deltaX >= VOICE_SEND_DRAG_DISARM_THRESHOLD
+      : deltaX >= VOICE_SEND_DRAG_ARM_THRESHOLD
+    const nextIsCancelArmed = !nextIsSendArmed && (voiceCancelArmedRef.current
+      ? deltaX <= -VOICE_CANCEL_DRAG_DISARM_THRESHOLD
+      : deltaX <= -VOICE_CANCEL_DRAG_ARM_THRESHOLD)
+
+    if (nextIsSendArmed !== voiceSendArmedRef.current) {
+      voiceSendArmedRef.current = nextIsSendArmed
+      setIsVoiceSendArmed(nextIsSendArmed)
+
+      if (nextIsSendArmed && typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate(10)
+      }
+    }
+
+    if (nextIsCancelArmed !== voiceCancelArmedRef.current) {
+      voiceCancelArmedRef.current = nextIsCancelArmed
+      setIsVoiceCancelArmed(nextIsCancelArmed)
+
+      if (nextIsCancelArmed && typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate(10)
+      }
+    }
+  }
+
+  const handleVoicePointerEnd = (event: ReactPointerEvent<HTMLDivElement>, canceled = false) => {
+    if (event.currentTarget.releasePointerCapture && event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+
+    if (voiceGestureStartXRef.current === null) {
+      return
+    }
+
+    event.preventDefault()
+    voiceGestureStartXRef.current = null
+
+    const wasSendArmed = voiceSendArmedRef.current
+    const wasCancelArmed = voiceCancelArmedRef.current
+    clearVoiceGestureArmedState()
+
+    if (canceled || (!wasSendArmed && !wasCancelArmed)) {
+      pendingVoiceAutoSubmitRef.current = false
+      setIsVoiceAutoSendPending(false)
+      setIsVoiceAutoSendWaitingForTranscript(false)
+      stopRecording()
+      return
+    }
+
+    if (wasCancelArmed) {
+      cancelVoiceInput()
+      return
+    }
+
+    handleVoiceSendRequest()
+  }
 
   useEffect(() => {
     const isVoiceFeedbackVisible = isRecording || isTogglingRecording || isProcessing || isVoiceAutoSendPending
@@ -760,11 +810,17 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
         return
       }
 
+      if (isMobile && composerControlsRowRef.current?.contains(target)) {
+        return
+      }
+
       if (isRecording) {
-        voiceGestureStartYRef.current = null
-        voiceSwipeArmedRef.current = false
+        voiceGestureStartXRef.current = null
+        voiceSendArmedRef.current = false
+        voiceCancelArmedRef.current = false
         pendingVoiceAutoSubmitRef.current = false
-        setIsVoiceSwipeArmed(false)
+        setIsVoiceSendArmed(false)
+        setIsVoiceCancelArmed(false)
         setIsVoiceAutoSendPending(false)
         setIsVoiceAutoSendWaitingForTranscript(false)
         stopRecording()
@@ -786,7 +842,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     return () => {
       document.removeEventListener('pointerdown', handleOutsidePointerDown, true)
     }
-  }, [cancelVoiceInput, isProcessing, isRecording, isTogglingRecording, isVoiceAutoSendPending, stopRecording])
+  }, [cancelVoiceInput, isMobile, isProcessing, isRecording, isTogglingRecording, isVoiceAutoSendPending, stopRecording])
 
   useEffect(() => {
     const textToUse = transcript || interimTranscript
@@ -822,6 +878,10 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   }, [isTogglingRecording])
 
   useEffect(() => {
+    setVoiceRecordingStartedAt(isRecording ? Date.now() : null)
+  }, [isRecording])
+
+  useEffect(() => {
     if (!pendingVoiceAutoSubmitRef.current || isVoiceAutoSendWaitingForTranscript || isRecording || isProcessing || !prompt.trim()) {
       return
     }
@@ -831,6 +891,14 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     setIsVoiceAutoSendWaitingForTranscript(false)
     handleSubmitRef.current()
   }, [prompt, isRecording, isProcessing, isVoiceAutoSendWaitingForTranscript])
+
+  useEffect(() => {
+    if (!isVoiceAutoSendWaitingForTranscript || isRecording || isProcessing || !transcript.trim()) {
+      return
+    }
+
+    setIsVoiceAutoSendWaitingForTranscript(false)
+  }, [isRecording, isProcessing, transcript, isVoiceAutoSendWaitingForTranscript])
 
   useEffect(() => {
     if (pendingVoiceAutoSubmitRef.current && !isRecording && !isProcessing && !transcript.trim() && !interimTranscript.trim()) {
@@ -1255,7 +1323,6 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
 
     return info?.name || model.modelID || currentModel
   }, [currentModel, model, providersData])
-  const isMobile = useMobile()
   const { setShowDialog, hasForSession: hasPermissionsForSession } = usePermissions()
   const hasPendingPermissionForSession = hasPermissionsForSession(sessionID)
   const { hasVariants, currentVariant, cycleVariant } = useVariants(directory, modelSelectionSession)
@@ -1354,34 +1421,25 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
           : 'Goal mode: the next message becomes the objective'
   const isGoalModeDisabled = lockedReason !== null || hasOpenGoal || isBashMode || startGoal.isPending
   const toggleGoalArmed = () => setIsGoalArmed((value) => !value)
-  const voiceFeedbackState: VoiceStatusOverlayState | null = isTogglingRecording
+  const voiceFeedbackState: VoiceRecorderStripState | null = isTogglingRecording
     ? 'starting'
     : isProcessing
       ? isVoiceAutoSendPending
         ? 'sending'
         : 'processing'
       : isRecording
-        ? isVoiceSwipeArmed
-          ? 'readyToSend'
-          : 'recording'
+        ? isVoiceCancelArmed
+          ? 'cancelArmed'
+          : isVoiceSendArmed
+            ? 'readyToSend'
+            : 'recording'
         : isVoiceAutoSendPending
           ? 'sending'
           : null
-  const showVoiceFeedback = voiceFeedbackState !== null
+  const mobileVoiceRecorderState = isMobile ? voiceFeedbackState : null
   const hasPromptContent = prompt.trim().length > 0 || imageAttachments.length > 0
   const canUseMobileVoice = isMobile && sttEnabled && sttSupported && !hasPendingPermissionForSession
-  const showMobileKeys = isMobile && isPromptFocused && !hasPendingPermissionForSession
-  const voiceFeedbackLabel = voiceFeedbackState === 'starting'
-    ? 'Starting microphone...'
-    : voiceFeedbackState === 'sending'
-      ? 'Transcribing and sending...'
-      : voiceFeedbackState === 'processing'
-        ? 'Transcribing...'
-        : voiceFeedbackState === 'readyToSend'
-          ? 'Release to send'
-          : voiceFeedbackState === 'recording'
-            ? 'Recording... swipe up to send'
-            : null
+  const showMobileKeys = isMobile && isPromptFocused && !hasPendingPermissionForSession && mobileVoiceRecorderState === null
   const voiceButtonTitle = voiceFeedbackState === 'starting'
     ? 'Starting microphone'
     : voiceFeedbackState === 'sending'
@@ -1390,9 +1448,22 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
         ? 'Transcribing speech'
         : voiceFeedbackState === 'readyToSend'
           ? 'Release to send'
-          : voiceFeedbackState === 'recording'
-            ? 'Tap to transcribe'
-            : 'Tap to speak'
+          : voiceFeedbackState === 'cancelArmed'
+            ? 'Release to discard'
+            : voiceFeedbackState === 'recording'
+              ? 'Tap to transcribe'
+              : 'Tap to speak'
+
+  const handleSendVoiceRecording = () => {
+    if (isRecording) {
+      handleVoiceSendRequest()
+      return
+    }
+
+    if (isProcessing && !isVoiceAutoSendPending) {
+      armVoiceAutoSend()
+    }
+  }
 
 
 
@@ -1427,10 +1498,6 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
         className={containerClassName}
         {...voiceGestureHandlers}
       >
-        {!isDesktop && showVoiceFeedback && (
-          <div aria-hidden="true" className="absolute inset-x-0 bottom-full z-20 h-44 touch-none" />
-        )}
-        <VoiceStatusOverlay show={!isDesktop && showVoiceFeedback} label={voiceFeedbackLabel} state={voiceFeedbackState} />
         <button
           type="button"
           data-voice-variant={variant}
@@ -1595,9 +1662,27 @@ return (
         </div>
       )}
 
-      <div data-testid="composer-controls-row" className="flex gap-1.5 md:gap-2 items-center justify-between">
+      <div ref={composerControlsRowRef} data-testid="composer-controls-row" className="flex gap-1.5 md:gap-2 items-center justify-between">
         <div className="flex flex-1 md:flex-initial gap-1.5 md:gap-2 items-center min-w-0">
-          {showMobileKeys ? renderMobileKeys() : (
+          {mobileVoiceRecorderState ? (
+            <>
+              <button
+                type="button"
+                aria-label="Discard recording"
+                title="Discard recording"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={cancelVoiceInput}
+                className={cn(
+                  getIconToggleButtonClassName(false),
+                  'flex items-center justify-center size-10 p-0 flex-shrink-0',
+                  isVoiceCancelArmed && 'bg-destructive hover:bg-destructive/90 text-destructive-foreground border-destructive',
+                )}
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <VoiceRecorderStrip state={mobileVoiceRecorderState} startedAt={voiceRecordingStartedAt} />
+            </>
+          ) : showMobileKeys ? renderMobileKeys() : (
             <>
               <AgentQuickSelect
                 directory={directory}
@@ -1674,7 +1759,27 @@ return (
           {canUseMobileVoice && (
             renderVoiceButton('mobile')
           )}
-          {showMobileScrollButton ? (
+          {mobileVoiceRecorderState ? (
+            <button
+              type="button"
+              aria-label="Send recording"
+              title="Send recording"
+              disabled={mobileVoiceRecorderState === 'starting'}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleSendVoiceRecording}
+              className={cn(
+                getIconToggleButtonClassName(false),
+                'flex items-center justify-center size-10 p-0 flex-shrink-0',
+                isVoiceSendArmed && 'bg-success hover:bg-success/90 text-success-foreground border-success',
+              )}
+            >
+              {mobileVoiceRecorderState === 'sending' ? (
+                <div className="w-5 h-5 animate-spin rounded-full border-2 border-foreground border-t-transparent" />
+              ) : (
+                <ArrowUp className="w-5 h-5" />
+              )}
+            </button>
+          ) : showMobileScrollButton ? (
             <button
               type="button"
               aria-label="Scroll to bottom"

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, act, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput } from './PromptInput'
 import { createCommandActionsMock } from '@/test/test-utils'
@@ -466,7 +466,7 @@ describe('PromptInput STT Gesture Tests', () => {
       })
     })
 
-    it('pointer down while recording sets up swipe gesture', async () => {
+    it('pointer down while recording starts a drag gesture', async () => {
       renderComponent({ isRecording: true })
 
       const container = getMobileVoiceButtonContainer()
@@ -586,6 +586,159 @@ describe('PromptInput STT Gesture Tests', () => {
       fireEvent.change(screen.getByPlaceholderText('Send a message...'), { target: { value: 'hello' } })
 
       expect(queryMobileVoiceButton()).not.toBeNull()
+    })
+  })
+
+  describe('in-row mobile voice recorder', () => {
+    const renderRecorder = (sttOverrides: Partial<MockSTTReturn> = {}) => {
+      const queryClient = createTestQueryClient()
+      const buildTree = (overrides: Partial<MockSTTReturn>) => {
+        mocks.useSTT.mockReturnValue({
+          isRecording: false,
+          isProcessing: false,
+          isSupported: true,
+          isEnabled: true,
+          interimTranscript: '',
+          transcript: '',
+          startRecording: mockStartRecording,
+          stopRecording: mockStopRecording,
+          abortRecording: mockAbortRecording,
+          reset: mockReset,
+          clear: mockClear,
+          ...overrides,
+        } as unknown as MockSTTReturn)
+        return (
+          <QueryClientProvider client={queryClient}>
+            <PromptInput {...defaultProps} onPromptChange={(hasContent) => defaultProps.onPromptChange(hasContent)} />
+          </QueryClientProvider>
+        )
+      }
+
+      const view = render(buildTree(sttOverrides))
+      return { rerender: (overrides: Partial<MockSTTReturn>) => view.rerender(buildTree(overrides)) }
+    }
+
+    const getControlsRow = () => screen.getByTestId('composer-controls-row')
+
+    it('swaps the controls row for discard, strip, mic and send while recording', () => {
+      renderComponent({ isRecording: true })
+
+      const row = getControlsRow()
+
+      expect(within(row).getByRole('button', { name: 'Discard recording' })).toBeInTheDocument()
+      expect(within(row).getByRole('button', { name: 'Send recording' })).toBeInTheDocument()
+      expect(within(row).getByText('0:00')).toBeInTheDocument()
+      expect(within(row).getByRole('status')).toHaveTextContent('‹ discard · send ›')
+    })
+
+    it('hides the mobile insert keys and renders nothing above the mic', () => {
+      renderComponent({ isRecording: true })
+
+      fireEvent.focus(screen.getByPlaceholderText('Send a message...'))
+
+      expect(screen.queryByRole('toolbar', { name: 'Insert' })).not.toBeInTheDocument()
+      expect(getMobileVoiceButtonContainer().children).toHaveLength(1)
+    })
+
+    it('stops recording and marks the transcript for auto-send when send is tapped', async () => {
+      const view = renderRecorder({ isRecording: true })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Send recording' }))
+
+      expect(mockStopRecording).toHaveBeenCalledTimes(1)
+
+      view.rerender({ isRecording: false, isProcessing: true })
+
+      expect(screen.getByText('Transcribing & sending…')).toBeInTheDocument()
+
+      view.rerender({ isRecording: false, isProcessing: false, transcript: 'hello there' })
+
+      await waitFor(() => {
+        const [variables] = mocks.useSendPromptMutate.mock.calls[0] as [{ text: string }]
+        expect(variables.text).toBe('hello there')
+      })
+    })
+
+    it('upgrades a transcription in progress to send when send is tapped', async () => {
+      const view = renderRecorder({ isRecording: false, isProcessing: true })
+
+      expect(screen.getByText('Transcribing…')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Send recording' }))
+
+      expect(mockStopRecording).not.toHaveBeenCalled()
+
+      view.rerender({ isRecording: false, isProcessing: false, transcript: 'upgraded text' })
+
+      await waitFor(() => {
+        const [variables] = mocks.useSendPromptMutate.mock.calls[0] as [{ text: string }]
+        expect(variables.text).toBe('upgraded text')
+      })
+    })
+
+    it('aborts recording when discard is tapped', () => {
+      renderComponent({ isRecording: true })
+      mockAbortRecording.mockClear()
+
+      const discardButton = screen.getByRole('button', { name: 'Discard recording' })
+
+      fireEvent.pointerDown(discardButton)
+      fireEvent.click(discardButton)
+
+      expect(mockAbortRecording).toHaveBeenCalledTimes(1)
+      expect(mockStopRecording).not.toHaveBeenCalled()
+    })
+
+    it('arms send on a right drag and sends on release', async () => {
+      renderComponent({ isRecording: true })
+
+      const container = getMobileVoiceButtonContainer()
+
+      await act(async () => {
+        fireEvent.pointerDown(container, { clientX: 100 })
+        fireEvent.pointerMove(container, { clientX: 130 })
+      })
+
+      expect(screen.getByText('Release to send')).toBeInTheDocument()
+      expect(mockStopRecording).not.toHaveBeenCalled()
+
+      await act(async () => {
+        fireEvent.pointerUp(container, { clientX: 130 })
+      })
+
+      expect(mockStopRecording).toHaveBeenCalledTimes(1)
+    })
+
+    it('arms discard on a left drag past the threshold and aborts on release', async () => {
+      renderComponent({ isRecording: true })
+      mockAbortRecording.mockClear()
+
+      const container = getMobileVoiceButtonContainer()
+
+      await act(async () => {
+        fireEvent.pointerDown(container, { clientX: 200 })
+        fireEvent.pointerMove(container, { clientX: 100 })
+      })
+
+      expect(screen.getByText('Release to discard')).toBeInTheDocument()
+
+      await act(async () => {
+        fireEvent.pointerUp(container, { clientX: 100 })
+      })
+
+      expect(mockAbortRecording).toHaveBeenCalledTimes(1)
+      expect(mockStopRecording).not.toHaveBeenCalled()
+    })
+
+    it('leaves the desktop composer without the recorder row', () => {
+      mocks.useMobile.mockReturnValue(false)
+
+      renderComponent({ isRecording: true })
+
+      expect(screen.queryByRole('button', { name: 'Discard recording' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Send recording' })).not.toBeInTheDocument()
+      expect(screen.queryByText('Release to send')).not.toBeInTheDocument()
+      expect(document.querySelector('[data-voice-variant="desktop"]')).not.toBeNull()
     })
   })
 })
