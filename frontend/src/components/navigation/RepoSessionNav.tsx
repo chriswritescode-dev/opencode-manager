@@ -145,7 +145,7 @@ export function SessionNavRow({ item, isCurrent, onSelect, repoLabel }: SessionN
           {item.worktreeBranch}
         </span>
       )}
-      <SessionStatusIndicator sessionID={item.session.id} size="sm" />
+      <SessionStatusIndicator sessionID={item.session.id} />
       {hasPermission(item.session.id) && (
         <Bell className="h-3 w-3 shrink-0 text-highlight" aria-label="Pending permission" />
       )}

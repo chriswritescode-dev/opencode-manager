@@ -121,10 +121,6 @@ vi.mock('@/hooks/useSessionPermissionMode', () => ({
   useSessionPermissionMode: () => ({ data: undefined }),
 }))
 
-vi.mock('@/components/ui/session-status-indicator', () => ({
-  SessionStatusIndicator: () => <div>SessionStatus</div>,
-}))
-
 vi.mock('./PromptSuggestions', () => ({
   PromptSuggestions: () => null,
 }))

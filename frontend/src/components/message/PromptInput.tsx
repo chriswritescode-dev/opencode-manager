@@ -25,7 +25,7 @@ import { SquareFill } from '@/components/ui/square-fill'
 import { IconToggleButton } from '@/components/ui/icon-toggle-button'
 
 import { PromptSuggestions, type PromptSuggestion } from './PromptSuggestions'
-import { SessionStatusIndicator } from '@/components/ui/session-status-indicator'
+import { ComposerActivityBar } from './ComposerActivityBar'
 import { ModelQuickSelect } from '@/components/model/ModelQuickSelect'
 import { AgentQuickSelect } from '@/components/agent/AgentQuickSelect'
 import { VoiceStatusOverlay, type VoiceStatusOverlayState } from './VoiceStatusOverlay'
@@ -1488,10 +1488,11 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
       : ''
 
 return (
-    <div className={`relative isolate border border-border dark:border-border/30 rounded-xl p-2 md:p-3 mb-4 md:mb-1 w-full before:pointer-events-none before:absolute before:-inset-px before:-z-10 before:rounded-xl before:bg-background/95 before:backdrop-blur-md before:content-[''] ${hasPendingPermissionForSession ? 'border-highlight/50 ring-1 ring-highlight/30' : composerModeStyle?.frame ?? ''} ${isTakeoverOpen ? 'z-[60]' : ''}`}>
+    <div className={`relative isolate border border-border dark:border-border/30 rounded-xl p-2 md:p-3 mb-4 md:mb-3 w-full before:pointer-events-none before:absolute before:-inset-px before:-z-10 before:rounded-xl before:bg-background/95 before:backdrop-blur-md before:content-[''] ${hasPendingPermissionForSession ? 'border-highlight/50 ring-1 ring-highlight/30' : composerModeStyle?.frame ?? ''} ${isTakeoverOpen ? 'z-[60]' : ''}`}>
       <div role="status" aria-live="polite" className="sr-only">
         {sessionActivityAnnouncement}
       </div>
+      <ComposerActivityBar sessionID={sessionID} />
       {composerModeStyle && (
         <span
           data-testid="composer-mode-badge"
@@ -1559,11 +1560,6 @@ return (
                 <ArrowDown className="w-4 h-4" />
                 <span>Latest</span>
               </button>
-              {(isSessionActive || hasBackgroundActivity) && (
-                <div className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground max-w-[120px]">
-                  <SessionStatusIndicator sessionID={sessionID} showLabel />
-                </div>
-              )}
               <ModelQuickSelect
                 directory={directory}
                 open={isModelPickerOpen}
@@ -1593,18 +1589,13 @@ return (
                   </IconToggleButton>
                 </>
               ) : null}
-              {(isSessionActive || hasBackgroundActivity) && (
-                <div className="px-2.5 py-1.5 md:px-3 md:py-2 rounded-lg text-xs md:text-sm font-medium text-muted-foreground max-w-[120px] md:max-w-[180px]">
-                  <SessionStatusIndicator sessionID={sessionID} showLabel />
-                </div>
-              )}
               <ModelQuickSelect
                 directory={directory}
                 open={isModelPickerOpen}
                 onOpenChange={setIsModelPickerOpen}
                 session={modelSelectionSession}
               >
-                {!isSessionActive && !hideSecondaryButtons && (
+                {!hideSecondaryButtons && (
                   <button
                     className="px-2.5 py-0.5 md:px-3 min-h-[44px] md:min-h-[36px] min-w-0 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer flex-1 md:flex-initial md:w-auto md:max-w-[220px] dark:border-border/30 flex flex-col items-start justify-center overflow-hidden"
                   >

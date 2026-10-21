@@ -181,7 +181,7 @@ function SessionPickerGutter({ sessionID, isActive }: { sessionID: string; isAct
   const status = useSessionStatusForSession(sessionID)
   if (status.type !== 'idle') {
     return (
-      <SessionStatusIndicator sessionID={sessionID} size="sm" />
+      <SessionStatusIndicator sessionID={sessionID} />
     )
   }
   if (isActive) {

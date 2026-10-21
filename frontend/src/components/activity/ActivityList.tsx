@@ -64,7 +64,7 @@ function ActivityStateIcon({ item, iconClassName }: { item: ActiveWorkItem; icon
     return <CircleAlert className={cn(iconClassName, 'text-warning')} aria-hidden="true" />
   }
   if (item.state === 'running') {
-    return <SessionStatusIndicator sessionID={item.session.id} size="sm" />
+    return <SessionStatusIndicator sessionID={item.session.id} />
   }
   if (item.outcome === 'failed') {
     return <CircleX className={cn(iconClassName, 'text-destructive')} aria-hidden="true" />

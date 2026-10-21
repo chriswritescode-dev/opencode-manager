@@ -329,7 +329,7 @@ function EntryRow({
           <p className="truncate text-sm font-medium">{entry.model}</p>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <StatusPill label={readiness.label} tone={readiness.tone} />
-            {readiness.label === 'Running' && sessionId ? <SessionStatusIndicator sessionID={sessionId} size="sm" /> : null}
+            {readiness.label === 'Running' && sessionId ? <SessionStatusIndicator sessionID={sessionId} /> : null}
             <span className="text-xs text-muted-foreground">{isolationLabel}</span>
           </div>
           {detail ? (
@@ -389,7 +389,7 @@ function FusionRow({ fusion, onOpenSession, onWalkthrough }: FusionRowProps) {
         <p className="truncate text-sm font-medium">{fusion.model}</p>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <StatusPill label={status.label} tone={status.tone} />
-          {fusion.status === 'started' && sessionId ? <SessionStatusIndicator sessionID={sessionId} size="sm" /> : null}
+          {fusion.status === 'started' && sessionId ? <SessionStatusIndicator sessionID={sessionId} /> : null}
           <span className="text-xs text-muted-foreground">
             <span>
               from {fusion.sources.length} source{fusion.sources.length === 1 ? '' : 's'}

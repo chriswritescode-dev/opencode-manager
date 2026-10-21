@@ -95,7 +95,7 @@ export const SessionCard = ({
                       }}
                       className="w-5 h-5 flex-shrink-0"
                     />
-                    <SessionStatusIndicator sessionID={session.id} size="sm" />
+                    <SessionStatusIndicator sessionID={session.id} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1">
@@ -130,7 +130,7 @@ export const SessionCard = ({
                         addSuffix: true,
                       })}
                     </span>
-                    <SessionStatusIndicator sessionID={session.id} size="sm" />
+                    <SessionStatusIndicator sessionID={session.id} />
                   </div>
                 </div>
                 {onTogglePin && (
