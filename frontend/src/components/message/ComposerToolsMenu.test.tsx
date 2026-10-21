@@ -249,22 +249,13 @@ describe('ComposerToolsMenu', () => {
     expect(props.onAttachFile).toHaveBeenCalledTimes(1)
   })
 
-  it('uses the default control size for the trigger', () => {
+  it('uses the 36px control size for the trigger', () => {
     mockPermissionMode()
     renderMenu()
 
     const trigger = screen.getByRole('button', { name: 'Composer options' })
-    expect(trigger).toHaveClass('min-h-[44px]', 'min-w-[44px]')
-    expect(trigger).not.toHaveClass('min-h-9')
-  })
-
-  it('uses the compact control size for the trigger while the composer is focused', () => {
-    mockPermissionMode()
-    renderMenu({ compact: true })
-
-    const trigger = screen.getByRole('button', { name: 'Composer options' })
-    expect(trigger).toHaveClass('min-h-9', 'min-w-9')
-    expect(trigger).not.toHaveClass('min-h-[44px]')
+    expect(trigger).toHaveClass('size-9', 'p-0')
+    expect(trigger).not.toHaveClass('p-2')
   })
 })
 

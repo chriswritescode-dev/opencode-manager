@@ -13,6 +13,7 @@ import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeS
 import { usePermissionModeToggle } from '@/hooks/usePermissionModeToggle'
 import { useSandboxToggle } from '@/hooks/useSandboxToggle'
 import { shouldShowSandboxResources } from '@/lib/sandboxResources'
+import { cn } from '@/lib/utils'
 import { SandboxMenuItems } from './SandboxMenuItems'
 import { ToolMenuItemContent } from './ToolMenuItemContent'
 import { SessionSandboxResourcesDialog } from './SessionSandboxResourcesDialog'
@@ -25,16 +26,13 @@ interface ComposerToolsMenuProps {
   goalLabel: string
   onToggleGoal: () => void
   onAttachFile: () => void
-  /** Uses the 36px control size for the trigger while the prompt is focused. */
-  compact?: boolean
 }
 
 /**
  * Renders the mobile composer tools trigger: a dropdown for permission mode,
  * sandboxing, goal mode, and file attachment.
  *
- * @param props Session context, goal state, the attach handler, and whether the
- * trigger uses the compact 36px control size while the prompt is focused.
+ * @param props Session context, goal state, and the attach handler.
  */
 export function ComposerToolsMenu({
   sessionID,
@@ -44,7 +42,6 @@ export function ComposerToolsMenu({
   goalLabel,
   onToggleGoal,
   onAttachFile,
-  compact = false,
 }: ComposerToolsMenuProps) {
   const isLocalServer = isLocalOpenCodeServer(useOpenCodeServerId())
   const permission = usePermissionModeToggle(sessionID, directory)
@@ -59,7 +56,7 @@ export function ComposerToolsMenu({
             type="button"
             aria-label="Composer options"
             title="Composer options"
-            className={`${getIconToggleButtonClassName(permission.isAuto || sandbox.isSandboxed || goalArmed)} flex items-center justify-center ${compact ? 'min-h-9 min-w-9' : 'min-h-[44px] min-w-[44px]'}`}
+            className={cn(getIconToggleButtonClassName(permission.isAuto || sandbox.isSandboxed || goalArmed), 'flex items-center justify-center size-9 p-0')}
           >
             <Plus className="w-5 h-5" />
           </button>

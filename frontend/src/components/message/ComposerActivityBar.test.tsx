@@ -1,35 +1,10 @@
-import { act, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ComposerActivityBar } from './ComposerActivityBar'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 import { stubMatchMedia } from '@/test/test-utils'
 
 const originalMatchMedia = window.matchMedia
-const originalResizeObserver = global.ResizeObserver
-
-class MockResizeObserver {
-  static instances: MockResizeObserver[] = []
-
-  readonly callback: ResizeObserverCallback
-
-  constructor(callback: ResizeObserverCallback) {
-    this.callback = callback
-    MockResizeObserver.instances.push(this)
-  }
-
-  observe() {}
-
-  unobserve() {}
-
-  disconnect() {}
-
-  trigger(width: number) {
-    this.callback(
-      [{ contentRect: { width } } as ResizeObserverEntry],
-      this as unknown as ResizeObserver,
-    )
-  }
-}
 
 const resetStore = () => {
   useSessionStatus.setState({
@@ -45,25 +20,14 @@ const resetStore = () => {
   })
 }
 
-const segmentsOf = (bar: HTMLElement) =>
-  Array.from(bar.firstElementChild?.children ?? []) as HTMLElement[]
-
-const measureWidth = (width: number) => {
-  act(() => {
-    MockResizeObserver.instances.forEach((instance) => instance.trigger(width))
-  })
-}
+const trackOf = (bar: HTMLElement) => bar.firstElementChild as HTMLElement
 
 describe('ComposerActivityBar', () => {
   beforeEach(() => {
     resetStore()
-    MockResizeObserver.instances = []
-    global.ResizeObserver = MockResizeObserver as unknown as typeof ResizeObserver
   })
 
   afterEach(() => {
-    vi.useRealTimers()
-    global.ResizeObserver = originalResizeObserver
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
       writable: true,
@@ -77,83 +41,49 @@ describe('ComposerActivityBar', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('anchors a pointer-transparent progressbar in the gap below the composer', () => {
+  it('pins a pointer-transparent progressbar across the screen bottom on mobile and below the composer on desktop', () => {
     useSessionStatus.getState().setStatus('session-a', { type: 'busy' })
 
     render(<ComposerActivityBar sessionID="session-a" />)
 
     const bar = screen.getByRole('progressbar', { name: 'Session working' })
-    expect(bar).toHaveClass('pointer-events-none')
-    expect(bar).toHaveClass('absolute')
-    expect(bar).toHaveClass('inset-x-3')
-    expect(bar).toHaveClass('-bottom-[13px]')
-    expect(bar).toHaveClass('md:-bottom-[11px]')
-    expect(bar).toHaveClass('flex')
+    expect(bar).toHaveClass('pointer-events-none', 'flex')
+    expect(bar).toHaveClass('fixed', 'inset-x-0', 'bottom-0')
+    expect(bar).toHaveClass('md:absolute', 'md:inset-x-3', 'md:-bottom-[11px]')
   })
 
-  it('fills the measured width with 4x8 segments', () => {
+  it('renders a masked segment track with only the sweeping window', () => {
     useSessionStatus.getState().setStatus('session-a', { type: 'busy' })
 
     render(<ComposerActivityBar sessionID="session-a" />)
 
-    const bar = screen.getByRole('progressbar', { name: 'Session working' })
-    expect(bar.firstElementChild).toHaveClass('gap-0.5')
+    const track = trackOf(screen.getByRole('progressbar', { name: 'Session working' }))
+    expect(track).toHaveClass('scanner-track', 'relative', 'h-2', 'w-full')
 
-    measureWidth(602)
-
-    const segments = segmentsOf(bar)
-    expect(segments).toHaveLength(100)
-    expect(segments[0]).toHaveClass('w-1')
-    expect(segments[0]).toHaveClass('h-2')
-    expect(segments[0]).toHaveClass('rounded-[1px]')
-    expect(segments[0]).toHaveClass('transition-colors')
-    expect(segments[0]).toHaveClass('duration-75')
-    expect(segments[0]).not.toHaveClass('flex-1')
+    const children = Array.from(track.children) as HTMLElement[]
+    expect(children).toHaveLength(1)
+    expect(children[0]).toHaveClass('scanner-sweep')
   })
 
-  it('keeps the minimum segment count for narrow containers', () => {
+  it('tints the track with the info tone while the session is busy', () => {
     useSessionStatus.getState().setStatus('session-a', { type: 'busy' })
 
     render(<ComposerActivityBar sessionID="session-a" />)
 
-    const bar = screen.getByRole('progressbar', { name: 'Session working' })
-    measureWidth(20)
-
-    expect(segmentsOf(bar)).toHaveLength(12)
+    const track = trackOf(screen.getByRole('progressbar', { name: 'Session working' }))
+    expect(track).toHaveClass('text-info')
   })
 
-  it('lights the info tiers around the scanner window', () => {
-    useSessionStatus.getState().setStatus('session-a', { type: 'busy' })
-
-    render(<ComposerActivityBar sessionID="session-a" />)
-
-    measureWidth(602)
-
-    const segments = segmentsOf(screen.getByRole('progressbar', { name: 'Session working' }))
-    expect(segments[3]).toHaveClass('bg-info')
-    expect(segments[4]).toHaveClass('bg-info/70')
-    expect(segments[6]).toHaveClass('bg-info/40')
-    expect(segments[7]).toHaveClass('bg-info/20')
-    expect(segments[8]).toHaveClass('bg-muted/20')
-    expect(segments[99]).toHaveClass('bg-muted/20')
-  })
-
-  it('renders the compacting state with primary colors', () => {
+  it('tints the track with the primary tone while compacting', () => {
     useSessionStatus.getState().setStatus('session-a', { type: 'compact' })
 
     render(<ComposerActivityBar sessionID="session-a" />)
 
-    measureWidth(602)
-
-    const segments = segmentsOf(screen.getByRole('progressbar', { name: 'Compacting' }))
-    expect(segments[3]).toHaveClass('bg-primary')
-    expect(segments[4]).toHaveClass('bg-primary/70')
-    expect(segments[6]).toHaveClass('bg-primary/40')
-    expect(segments[7]).toHaveClass('bg-primary/20')
-    expect(segments[8]).toHaveClass('bg-muted/20')
+    const track = trackOf(screen.getByRole('progressbar', { name: 'Compacting' }))
+    expect(track).toHaveClass('text-primary')
   })
 
-  it('reports the retry attempt in the label with warning colors', () => {
+  it('reports the retry attempt in the label with the warning tone', () => {
     useSessionStatus.getState().setStatus('session-a', {
       type: 'retry',
       attempt: 2,
@@ -163,66 +93,26 @@ describe('ComposerActivityBar', () => {
 
     render(<ComposerActivityBar sessionID="session-a" />)
 
-    measureWidth(602)
-
-    const segments = segmentsOf(screen.getByRole('progressbar', { name: 'Retrying (Retry #2)' }))
-    expect(segments[3]).toHaveClass('bg-warning')
-    expect(segments[4]).toHaveClass('bg-warning/70')
-    expect(segments[6]).toHaveClass('bg-warning/40')
-    expect(segments[7]).toHaveClass('bg-warning/20')
-    expect(segments[8]).toHaveClass('bg-muted/20')
+    const track = trackOf(screen.getByRole('progressbar', { name: 'Retrying (Retry #2)' }))
+    expect(track).toHaveClass('text-warning')
   })
 
-  it('renders the muted background activity state when idle with a running shell', () => {
+  it('tints the track with the muted foreground tone for background activity', () => {
     useSessionStatus.getState().setShellRunning('shell-1', 'session-a', '/repo')
 
     render(<ComposerActivityBar sessionID="session-a" />)
 
-    measureWidth(602)
-
-    const segments = segmentsOf(screen.getByRole('progressbar', { name: 'Background tasks running' }))
-    expect(segments[3]).toHaveClass('bg-muted-foreground')
-    expect(segments[4]).toHaveClass('bg-muted-foreground/70')
-    expect(segments[6]).toHaveClass('bg-muted-foreground/40')
-    expect(segments[7]).toHaveClass('bg-muted-foreground/20')
-    expect(segments[8]).toHaveClass('bg-muted/20')
+    const track = trackOf(screen.getByRole('progressbar', { name: 'Background tasks running' }))
+    expect(track).toHaveClass('text-muted-foreground')
   })
 
-  it('sweeps the lit window on the step interval', () => {
-    vi.useFakeTimers()
-    useSessionStatus.getState().setStatus('session-a', { type: 'busy' })
-
-    render(<ComposerActivityBar sessionID="session-a" />)
-
-    const bar = screen.getByRole('progressbar', { name: 'Session working' })
-    measureWidth(602)
-    expect(segmentsOf(bar)[3]).toHaveClass('bg-info')
-
-    act(() => {
-      vi.advanceTimersByTime(120)
-    })
-
-    const segments = segmentsOf(bar)
-    expect(segments[7]).toHaveClass('bg-info')
-    expect(segments[4]).toHaveClass('bg-info/40')
-  })
-
-  it('renders every segment statically when reduced motion is requested', () => {
-    vi.useFakeTimers()
+  it('keeps sweeping when reduced motion is requested', () => {
     stubMatchMedia(true)
     useSessionStatus.getState().setStatus('session-a', { type: 'busy' })
 
     render(<ComposerActivityBar sessionID="session-a" />)
 
-    const bar = screen.getByRole('progressbar', { name: 'Session working' })
-    measureWidth(602)
-    act(() => {
-      vi.advanceTimersByTime(600)
-    })
-
-    const segments = segmentsOf(bar)
-    expect(segments).toHaveLength(100)
-    expect(segments.every((segment) => segment.classList.contains('bg-info/60'))).toBe(true)
-    expect(segments.some((segment) => segment.classList.contains('bg-muted/20'))).toBe(false)
+    const track = trackOf(screen.getByRole('progressbar', { name: 'Session working' }))
+    expect(track.querySelector('.scanner-sweep')).not.toBeNull()
   })
 })

@@ -968,7 +968,7 @@ export function SessionDetail() {
                   ref={promptInputRef}
                   directory={sessionDirectory}
                   sessionID={sessionId}
-                  showScrollButton={showScrollButton && !hasPromptContent}
+                  showScrollButton={showScrollButton}
                   isSessionActive={isSessionActive}
                   isStreamingResponse={isStreamingResponse}
                   onScrollToBottom={scrollToBottom}

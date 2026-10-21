@@ -541,7 +541,7 @@ describe('PromptInput STT Gesture Tests', () => {
       expect(voiceButtons.length).toBeGreaterThan(0)
     })
 
-    it('renders mobile in-row Latest button when showScrollButton is true', async () => {
+    it('renders the mobile scroll-to-bottom button when showScrollButton is true', async () => {
       mocks.useMobile.mockReturnValue(true)
 
       render(
@@ -550,8 +550,8 @@ describe('PromptInput STT Gesture Tests', () => {
         </QueryClientProvider>
       )
 
-      expect(screen.getByTitle('Scroll to bottom')).toBeInTheDocument()
-      expect(screen.getByText('Latest')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Scroll to bottom' })).toBeInTheDocument()
+      expect(screen.queryByText('Latest')).not.toBeInTheDocument()
     })
   })
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput } from './PromptInput'
 import { createCommandActionsMock } from '@/test/test-utils'
@@ -71,9 +71,7 @@ vi.mock('@/components/model/ModelQuickSelect', () => ({
 vi.mock('@/components/session/PermissionModeToggle', () => ({ PermissionModeToggle: () => null }))
 vi.mock('@/components/session/SessionSandboxMenu', () => ({ SessionSandboxMenu: () => null }))
 vi.mock('./ComposerToolsMenu', () => ({
-  ComposerToolsMenu: ({ compact }: { compact?: boolean }) => (
-    <div data-testid="composer-tools-menu" data-compact={compact ? 'true' : 'false'} />
-  ),
+  ComposerToolsMenu: () => <div data-testid="composer-tools-menu" />,
 }))
 vi.mock('./PromptSuggestions', () => ({ PromptSuggestions: () => null }))
 vi.mock('@/hooks/useSessionGoals', () => ({
@@ -256,15 +254,55 @@ describe('PromptInput composer layout', () => {
       expect(screen.getByTestId('model-quick-select')).toBeInTheDocument()
     })
 
-    it('replaces the mobile Latest button with keys while focused', () => {
+    it('swaps the composer tools button for a scroll-to-bottom arrow while scrolled up', () => {
       renderComponent({ showScrollButton: true })
 
-      expect(screen.getByText('Latest')).toBeInTheDocument()
+      const actions = controlsRow().lastElementChild as HTMLElement
+      expect(within(actions).getByRole('button', { name: 'Scroll to bottom' })).toBeInTheDocument()
+      expect(screen.queryByTestId('composer-tools-menu')).not.toBeInTheDocument()
+      expect(within(controlsRow().firstElementChild as HTMLElement).getByTestId('agent-quick-select')).toBeInTheDocument()
+      expect(within(controlsRow().firstElementChild as HTMLElement).getByTestId('model-quick-select')).toBeInTheDocument()
+      expect(screen.queryByText('Latest')).not.toBeInTheDocument()
+    })
+
+    it('keeps the scroll-to-bottom arrow on the right while the prompt is focused', () => {
+      renderComponent({ showScrollButton: true })
 
       fireEvent.focus(promptInput())
 
-      expect(screen.queryByText('Latest')).not.toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'cmd /' })).toBeInTheDocument()
+      const keys = screen.getByRole('toolbar', { name: 'Insert' })
+      expect(within(keys).getByRole('button', { name: 'bash !' })).toBeInTheDocument()
+
+      const actions = controlsRow().lastElementChild as HTMLElement
+      expect(within(actions).getByRole('button', { name: 'Scroll to bottom' })).toBeInTheDocument()
+      expect(screen.queryByTestId('composer-tools-menu')).not.toBeInTheDocument()
+    })
+
+    it('keeps the scroll-to-bottom arrow while the prompt has text', () => {
+      renderComponent({ showScrollButton: true })
+
+      fireEvent.change(promptInput(), { target: { value: 'hello' } })
+
+      expect(screen.getByRole('button', { name: 'Scroll to bottom' })).toBeInTheDocument()
+    })
+
+    it('scrolls to the bottom from the swapped arrow and keeps the composer tools box size', () => {
+      const onScrollToBottom = vi.fn()
+      renderComponent({ showScrollButton: true, onScrollToBottom })
+
+      const arrow = screen.getByRole('button', { name: 'Scroll to bottom' })
+      expect(arrow).toHaveClass('size-9', 'p-0')
+
+      fireEvent.click(arrow)
+
+      expect(onScrollToBottom).toHaveBeenCalledTimes(1)
+    })
+
+    it('keeps the composer tools button while at the bottom of the transcript', () => {
+      renderComponent({ showScrollButton: false })
+
+      expect(screen.getByTestId('composer-tools-menu')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Scroll to bottom' })).not.toBeInTheDocument()
     })
 
     it('keeps the voice button and composer tools on the right side of the controls row', () => {
@@ -275,6 +313,24 @@ describe('PromptInput composer layout', () => {
       const actions = controlsRow().lastElementChild as HTMLElement
       expect(actions).toContainElement(mobileVoiceButton() as HTMLElement)
       expect(actions).toContainElement(screen.getByTestId('composer-tools-menu'))
+    })
+  })
+
+  describe('desktop scroll button visibility', () => {
+    const desktopScrollButton = () => screen.getByTitle('Scroll to bottom')
+
+    it('hides the desktop scroll arrow once the prompt has text', () => {
+      renderComponent({ showScrollButton: true })
+
+      fireEvent.change(promptInput(), { target: { value: 'hello' } })
+
+      expect(desktopScrollButton()).toHaveClass('invisible')
+    })
+
+    it('shows the desktop scroll arrow while the prompt is empty', () => {
+      renderComponent({ showScrollButton: true })
+
+      expect(desktopScrollButton()).toHaveClass('visible')
     })
   })
 
@@ -302,8 +358,23 @@ describe('PromptInput composer layout', () => {
     })
   })
 
-  describe('compact controls', () => {
-    it('uses compact sizing for the key buttons and mic while focused on mobile', () => {
+  describe('control sizing', () => {
+    it('keeps the mic at 36px before and after the prompt gains focus on mobile', () => {
+      mocks.useMobile.mockReturnValue(true)
+      renderComponent()
+
+      const micBeforeFocus = mobileVoiceButton() as HTMLElement
+      expect(micBeforeFocus).toHaveClass('min-h-9', 'min-w-9')
+      expect(micBeforeFocus).not.toHaveClass('min-h-[44px]')
+
+      fireEvent.focus(promptInput())
+
+      const micAfterFocus = mobileVoiceButton() as HTMLElement
+      expect(micAfterFocus).toHaveClass('min-h-9', 'min-w-9')
+      expect(micAfterFocus).not.toHaveClass('min-h-[44px]')
+    })
+
+    it('keeps the key buttons at 36px after the prompt gains focus on mobile', () => {
       mocks.useMobile.mockReturnValue(true)
       renderComponent()
 
@@ -312,20 +383,17 @@ describe('PromptInput composer layout', () => {
       const commandKey = screen.getByRole('button', { name: 'cmd /' })
       expect(commandKey).toHaveClass('min-h-9')
       expect(commandKey).not.toHaveClass('min-h-[44px]')
-
-      const mic = mobileVoiceButton() as HTMLElement
-      expect(mic).toHaveClass('min-h-9', 'min-w-9')
-      expect(mic).not.toHaveClass('min-h-[44px]')
-      expect(screen.getByTestId('composer-tools-menu')).toHaveAttribute('data-compact', 'true')
     })
 
-    it('uses the default sizing while the prompt is not focused', () => {
+    it('sizes the submit button at 36px on mobile', () => {
       mocks.useMobile.mockReturnValue(true)
       renderComponent()
 
-      const mic = mobileVoiceButton() as HTMLElement
-      expect(mic).toHaveClass('min-h-[44px]', 'min-w-[44px]')
-      expect(screen.getByTestId('composer-tools-menu')).toHaveAttribute('data-compact', 'false')
+      fireEvent.change(promptInput(), { target: { value: 'hello' } })
+
+      const send = submitButton() as HTMLElement
+      expect(send).toHaveClass('h-9')
+      expect(send).not.toHaveClass('min-h-[44px]')
     })
   })
 })

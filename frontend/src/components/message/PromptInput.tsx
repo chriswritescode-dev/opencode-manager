@@ -22,7 +22,7 @@ import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeS
 import { ArrowDown, Upload, X, Mic, MicOff, Target } from 'lucide-react'
 
 import { SquareFill } from '@/components/ui/square-fill'
-import { IconToggleButton } from '@/components/ui/icon-toggle-button'
+import { IconToggleButton, getIconToggleButtonClassName } from '@/components/ui/icon-toggle-button'
 
 import { PromptSuggestions, type PromptSuggestion } from './PromptSuggestions'
 import { ComposerActivityBar } from './ComposerActivityBar'
@@ -38,7 +38,7 @@ import { detectMentionTrigger, parsePromptToInput, getFilename, getDirectory, ty
 import { matchText, rankByMatch, type MatchRange } from '@/lib/fuzzyMatch'
 import { getNextPrimaryAgentId } from '@/lib/primaryAgents'
 import { getNextFavoriteModel } from '@/lib/favoriteModels'
-import { randomId } from '@/lib/utils'
+import { cn, randomId } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
 import { findModelInfo, isSameModelSelection } from '@opencode-manager/shared/opencode'
 import { isOpenSessionGoal } from '@opencode-manager/shared/schemas'
@@ -1370,7 +1370,6 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   const showVoiceFeedback = voiceFeedbackState !== null
   const hasPromptContent = prompt.trim().length > 0 || imageAttachments.length > 0
   const canUseMobileVoice = isMobile && sttEnabled && sttSupported && !hasPendingPermissionForSession
-  const compactControls = isMobile && isPromptFocused
   const showMobileKeys = isMobile && isPromptFocused && !hasPendingPermissionForSession
   const voiceFeedbackLabel = voiceFeedbackState === 'starting'
     ? 'Starting microphone...'
@@ -1414,7 +1413,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
           ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground border-destructive/60 animate-pulse'
           : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border'
       }`
-      : `${compactControls ? 'min-h-9 min-w-9 px-0' : 'min-h-[44px] min-w-[44px] px-0'} rounded-lg transition-all duration-150 flex items-center justify-center border touch-none select-none ${
+      : `min-h-9 min-w-9 px-0 rounded-lg transition-all duration-150 flex items-center justify-center border touch-none select-none ${
         isBusy
           ? 'bg-success text-success-foreground border-success/70 shadow-lg shadow-success/40'
           : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border active:bg-muted-foreground/30 active:scale-95'
@@ -1475,9 +1474,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
             onTouchMove={keybarTouch.onTouchMove}
             onTouchEnd={(e) => keybarTouch.onTouchEnd(e, key.id)}
             onClick={() => keybarTouch.onClick(key.id)}
-            className={`flex items-center gap-1 min-w-0 rounded-lg border font-mono text-base font-bold transition-colors disabled:opacity-30 ${
-              compactControls ? 'min-h-9 px-2' : 'min-h-[44px] px-3'
-            } ${
+            className={`flex items-center gap-1 min-w-0 rounded-lg border font-mono text-base font-bold transition-colors disabled:opacity-30 min-h-9 px-2 ${
               isActive ? COMPOSER_MODE_STYLES[key.id].key : 'bg-muted border-border text-foreground active:bg-muted-foreground/20'
             }`}
           >
@@ -1536,7 +1533,7 @@ return (
           {composerModeStyle.label}
         </span>
       )}
-      <div className="flex items-end gap-1.5 md:gap-2">
+      <div className="flex items-end gap-1.5 md:gap-2 mb-1.5 md:mb-2">
         <textarea
           ref={textareaRef}
           data-prompt-input
@@ -1566,7 +1563,7 @@ return (
             data-submit-prompt
             onClick={hasPendingPermissionForSession ? () => setShowDialog(true) : handleSubmit}
             disabled={hasPendingPermissionForSession ? false : (!isModelReady || !hasPromptContent || (isPromptSubmitPending && !isStreamingResponse))}
-            className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors dark:border flex-shrink-0 min-w-[52px] flex items-center justify-center min-h-[44px] md:min-h-0 ${
+            className={`px-4 md:px-5 h-9 md:h-auto md:py-2 rounded-lg text-sm font-medium transition-colors dark:border flex-shrink-0 min-w-[52px] flex items-center justify-center ${
               hasPendingPermissionForSession
                 ? 'bg-highlight hover:bg-highlight/90 border-highlight text-highlight-foreground ring-highlight/20'
                 : 'bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground border-border/30'
@@ -1600,26 +1597,7 @@ return (
 
       <div data-testid="composer-controls-row" className="flex gap-1.5 md:gap-2 items-center justify-between">
         <div className="flex flex-1 md:flex-initial gap-1.5 md:gap-2 items-center min-w-0">
-          {showMobileKeys ? renderMobileKeys() : showMobileScrollButton ? (
-            <>
-              <button
-                type="button"
-                onClick={onScrollToBottom}
-                className={`flex items-center gap-1.5 px-3 rounded-lg text-xs font-medium border bg-background/80 hover:bg-accent/90 text-primary hover:text-primary-hover border-primary/20 shadow-md backdrop-blur-md transition-all duration-200 active:scale-95 ring-1 ring-primary/15 ${compactControls ? 'min-h-9' : 'min-h-[44px]'}`}
-                title="Scroll to bottom"
-                aria-label="Scroll to bottom"
-              >
-                <ArrowDown className="w-4 h-4" />
-                <span>Latest</span>
-              </button>
-              <ModelQuickSelect
-                directory={directory}
-                open={isModelPickerOpen}
-                onOpenChange={setIsModelPickerOpen}
-                session={modelSelectionSession}
-              />
-            </>
-          ) : (
+          {showMobileKeys ? renderMobileKeys() : (
             <>
               <AgentQuickSelect
                 directory={directory}
@@ -1648,7 +1626,7 @@ return (
                 session={modelSelectionSession}
               >
                 <button
-                  className="px-2.5 py-0.5 md:px-3 min-h-[44px] md:min-h-[36px] min-w-0 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer flex-1 md:flex-initial md:w-auto md:max-w-[220px] dark:border-border/30 flex flex-col items-start justify-center overflow-hidden"
+                  className="px-2.5 py-0.5 md:px-3 min-h-9 min-w-0 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer flex-1 md:flex-initial md:w-auto md:max-w-[220px] dark:border-border/30 flex flex-col items-start justify-center overflow-hidden"
                 >
                   <span className="truncate w-full text-left">{displayModelName || 'Select model'}</span>
                   {hasVariants && currentVariant && (
@@ -1663,7 +1641,7 @@ return (
             {!isMobile && (
               <button
                 onClick={onScrollToBottom}
-                className={`p-2 rounded-lg bg-background/80 hover:bg-accent/90 text-primary hover:text-primary-hover transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border border-primary/20 backdrop-blur-md ring-1 ring-primary/15 ${showScrollButton ? 'visible' : 'invisible'}`}
+                className={`p-2 rounded-lg bg-background/80 hover:bg-accent/90 text-primary hover:text-primary-hover transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border border-primary/20 backdrop-blur-md ring-1 ring-primary/15 ${showScrollButton && !hasPromptContent ? 'visible' : 'invisible'}`}
                 title="Scroll to bottom"
               >
                 <ArrowDown className="w-6 h-6" />
@@ -1696,7 +1674,18 @@ return (
           {canUseMobileVoice && (
             renderVoiceButton('mobile')
           )}
-          {isMobile && directory && (
+          {showMobileScrollButton ? (
+            <button
+              type="button"
+              aria-label="Scroll to bottom"
+              title="Scroll to bottom"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={onScrollToBottom}
+              className={cn(getIconToggleButtonClassName(false), 'flex items-center justify-center size-9 p-0')}
+            >
+              <ArrowDown className="w-5 h-5" />
+            </button>
+          ) : isMobile && directory && (
             <ComposerToolsMenu
               sessionID={sessionID}
               directory={directory}
@@ -1705,7 +1694,6 @@ return (
               goalLabel={goalButtonLabel}
               onToggleGoal={toggleGoalArmed}
               onAttachFile={openFilePicker}
-              compact={compactControls}
             />
           )}
           {!isMobile && sttEnabled && sttSupported && (
