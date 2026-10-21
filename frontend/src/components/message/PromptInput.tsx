@@ -1520,7 +1520,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
       : ''
 
 return (
-    <div className={`relative isolate border-t md:border border-border dark:border-border/30 rounded-t-xl md:rounded-xl p-2 pb-4 md:p-3 md:mb-3 w-full before:pointer-events-none before:absolute before:-inset-px before:-z-10 before:rounded-t-xl md:before:rounded-xl before:bg-background md:before:bg-background/95 before:backdrop-blur-md before:content-[''] ${hasPendingPermissionForSession ? 'border-highlight/50 ring-1 ring-highlight/30' : composerModeStyle?.frame ?? ''} ${isTakeoverOpen ? 'z-[60]' : ''}`}>
+    <div className={`relative isolate border-t md:border border-border dark:border-border/30 rounded-t-xl md:rounded-xl p-2 pb-7 md:p-3 md:mb-3 w-full before:pointer-events-none before:absolute before:-inset-px before:-z-10 before:rounded-t-xl md:before:rounded-xl before:bg-background md:before:bg-background/95 before:backdrop-blur-md before:content-[''] ${hasPendingPermissionForSession ? 'border-highlight/50 ring-1 ring-highlight/30' : composerModeStyle?.frame ?? ''} ${isTakeoverOpen ? 'z-[60]' : ''}`}>
       <div role="status" aria-live="polite" className="sr-only">
         {sessionActivityAnnouncement}
       </div>
@@ -1626,7 +1626,7 @@ return (
                 session={modelSelectionSession}
               >
                 <button
-                  className="px-2.5 py-0.5 md:px-3 min-h-9 min-w-0 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer flex-1 md:flex-initial md:w-auto md:max-w-[220px] dark:border-border/30 flex flex-col items-start justify-center overflow-hidden"
+                  className="px-2.5 py-0.5 md:px-3 min-h-10 md:min-h-9 min-w-0 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer flex-1 md:flex-initial md:w-auto md:max-w-[220px] dark:border-border/30 flex flex-col items-start justify-center overflow-hidden"
                 >
                   <span className="truncate w-full text-left">{displayModelName || 'Select model'}</span>
                   {hasVariants && currentVariant && (

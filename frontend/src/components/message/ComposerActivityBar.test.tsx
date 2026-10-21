@@ -48,7 +48,7 @@ describe('ComposerActivityBar', () => {
 
     const bar = screen.getByRole('progressbar', { name: 'Session working' })
     expect(bar).toHaveClass('pointer-events-none', 'flex')
-    expect(bar).toHaveClass('absolute', 'inset-x-3', 'bottom-1', 'md:-bottom-[11px]')
+    expect(bar).toHaveClass('absolute', 'inset-x-3', 'bottom-4', 'md:-bottom-[11px]')
     expect(bar).not.toHaveClass('fixed')
   })
 

@@ -52,7 +52,7 @@ export function ComposerActivityBar({ sessionID }: ComposerActivityBarProps) {
       aria-label={label}
       aria-valuemin={0}
       aria-valuemax={100}
-      className="pointer-events-none absolute inset-x-3 bottom-1 flex md:-bottom-[11px]"
+      className="pointer-events-none absolute inset-x-3 bottom-4 flex md:-bottom-[11px]"
     >
       <ScannerBars tone={activity.tone} />
     </div>
