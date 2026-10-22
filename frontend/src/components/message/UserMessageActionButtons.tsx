@@ -34,7 +34,7 @@ export const UserMessageActionButtons = memo(function UserMessageActionButtons({
   }
 
   return (
-    <div className={`flex items-center gap-1 ${isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
+    <div className={`flex items-center gap-1 ${isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'} transition-opacity`}>
       <button
         onClick={handleUndo}
         disabled={undoMessage.isPending}

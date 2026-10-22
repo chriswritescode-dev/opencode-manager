@@ -30,7 +30,7 @@ export default defineConfig([
     },
   },
   {
-    files: ['src/components/ui/**/*.{ts,tsx}', 'src/components/message/FileToolRender.tsx'],
+    files: ['src/components/ui/**/*.{ts,tsx}', 'src/components/message/FileToolRender.tsx', 'src/components/message/CodePreview.tsx', 'src/components/message/ToolDetails.tsx'],
     rules: {
       'react-refresh/only-export-components': 'off',
     },

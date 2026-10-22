@@ -1592,7 +1592,6 @@ return (
       <div role="status" aria-live="polite" className="sr-only">
         {sessionActivityAnnouncement}
       </div>
-      <ComposerActivityBar sessionID={sessionID} />
       {composerModeStyle && (
         <span
           data-testid="composer-mode-badge"
@@ -1663,7 +1662,8 @@ return (
         </div>
       )}
 
-      <div ref={composerControlsRowRef} data-testid="composer-controls-row" className="flex gap-1.5 md:gap-2 items-center justify-between">
+      <div ref={composerControlsRowRef} data-testid="composer-controls-row" className="relative flex gap-1.5 md:gap-2 items-center justify-between">
+        <ComposerActivityBar sessionID={sessionID} />
         <div className="flex flex-1 md:flex-initial gap-1.5 md:gap-2 items-center min-w-0">
           {mobileVoiceRecorderState ? (
             <>

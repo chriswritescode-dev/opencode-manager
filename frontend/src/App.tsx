@@ -35,7 +35,7 @@ import { SwipeNavigationProvider, useSwipeNavigation } from '@/contexts/SwipeNav
 import { PermissionRequestDialog } from './components/session/PermissionRequestDialog'
 import { SSHHostKeyDialog } from './components/ssh/SSHHostKeyDialog'
 import { loginLoader, setupLoader, registerLoader, protectedLoader } from './lib/auth-loaders'
-import { getSwipeBackTarget } from '@/lib/navigation'
+import { getSwipeBackTarget, isSessionDetailRoute } from '@/lib/navigation'
 import { onNotificationClick } from '@/lib/serviceWorker'
 import { useAuth } from '@/hooks/useAuth'
 import { useOpenCodeFailureToast } from '@/hooks/useOpenCodeFailureToast'
@@ -198,7 +198,7 @@ function AppShell() {
   )
 
   const canOpenMoreWithSwipe = () => {
-    return /^\/repos\/[^/]+\/sessions\/[^/]+$/.test(location.pathname) && !openSheet
+    return isSessionDetailRoute(location.pathname) && !openSheet
   }
 
   const { bind: bindMoreSwipe } = useRightEdgeSwipe(

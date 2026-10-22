@@ -15,7 +15,8 @@ function extractFileFromPath(path: string): string {
   return parts[parts.length - 1] || path
 }
 
-function detectLanguage(fileName: string): string {
+/** Maps a file name to the lowlight language name used for previews. */
+export function detectLanguage(fileName: string): string {
   const ext = fileName.split('.').pop()?.toLowerCase()
 
   const langMap: Record<string, string> = {

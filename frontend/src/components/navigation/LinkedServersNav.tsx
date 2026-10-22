@@ -20,10 +20,10 @@ import { cn } from '@/lib/utils'
 
 const LOCAL_SERVER_LABEL = 'OC Manager'
 
-export type LinkedServersVariant = 'sidebar' | 'rail' | 'sheet'
+export type LinkedServersVariant = 'sidebar' | 'rail' | 'sheet' | 'header'
 
 interface LinkedServersNavProps {
-  /** `sidebar` renders the full-width trigger row, `rail` the collapsed icon button, `sheet` the mobile sheet row. */
+  /** `sidebar` renders the full-width trigger row, `rail` the collapsed icon button, `sheet` the mobile sheet row, `header` a compact page-header trigger. */
   variant?: LinkedServersVariant
 }
 
@@ -218,7 +218,9 @@ export function LinkedServersNav({ variant = 'sidebar' }: LinkedServersNavProps)
             'flex items-center rounded-md text-sm text-foreground transition-colors duration-150',
             'hover:bg-accent/50',
             'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-            isRail ? 'mx-auto h-9 w-9 justify-center' : 'h-9 w-full gap-2 px-2',
+            isRail && 'mx-auto h-9 w-9 justify-center',
+            variant === 'header' && 'h-8 min-w-0 max-w-[45vw] gap-2 px-2 sm:max-w-xs',
+            (variant === 'sidebar' || variant === 'sheet') && 'h-9 w-full gap-2 px-2',
           )}
         >
           <span className="relative flex shrink-0">

@@ -2,6 +2,7 @@ import cronstrue from 'cronstrue'
 import { formatDistanceToNow } from 'date-fns'
 import type { CreateScheduleJobRequest, ScheduleJob, ScheduleRun, ScheduleWorkspaceMode, UpdateScheduleJobRequest } from '@opencode-manager/shared/types'
 import type { RadioOption } from '@/components/ui/radio-option-group'
+import { formatDuration } from '@/lib/utils'
 
 export const intervalOptions = [
   { label: '15m', value: 15 },
@@ -350,14 +351,7 @@ export function formatTimestamp(value: number | null): string {
 }
 
 export function formatRunDuration(run: Pick<ScheduleRun, 'startedAt' | 'finishedAt'>, now: number = Date.now()): string {
-  const totalSeconds = Math.max(0, Math.round(((run.finishedAt ?? now) - run.startedAt) / 1000))
-  const hours = Math.floor(totalSeconds / 3600)
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-  const seconds = totalSeconds % 60
-
-  if (hours > 0) return `${hours}h ${minutes}m`
-  if (minutes > 0) return `${minutes}m ${seconds}s`
-  return `${seconds}s`
+  return formatDuration((run.finishedAt ?? now) - run.startedAt)
 }
 
 export function getJobStatusTone(job: ScheduleJob): string {

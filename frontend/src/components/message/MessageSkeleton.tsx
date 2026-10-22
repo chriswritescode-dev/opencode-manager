@@ -1,103 +1,76 @@
+import { cn } from '@/lib/utils'
 
+function Bar({ className }: { className: string }) {
+  return <div className={cn('animate-pulse rounded', className)} />
+}
 
+function UserTurnSkeleton({ widths }: { widths: string[] }) {
+  return (
+    <div className="py-2">
+      <div className="border-l-[3px] border-primary/40 bg-muted px-4 py-3">
+        <div className="space-y-2">
+          {widths.map((width, index) => (
+            <Bar key={index} className={cn('h-4 bg-accent', width)} />
+          ))}
+        </div>
+        <Bar className="mt-3 h-3 w-16 bg-accent" />
+      </div>
+    </div>
+  )
+}
+
+function TurnFooterSkeleton() {
+  return (
+    <div className="mt-3 flex items-center gap-2">
+      <Bar className="h-3 w-10 bg-primary/30" />
+      <Bar className="h-3 w-24 bg-muted" />
+      <Bar className="h-3 w-12 bg-muted" />
+    </div>
+  )
+}
+
+function AssistantTurnSkeleton() {
+  return (
+    <div className="py-2">
+      <div className="space-y-2">
+        <Bar className="h-4 w-full bg-muted" />
+        <Bar className="h-4 w-5/6 bg-muted" />
+        <div className="flex items-center gap-2 py-0.5">
+          <Bar className="h-3 w-3 bg-muted" />
+          <Bar className="h-3 w-40 bg-muted" />
+        </div>
+        <div className="space-y-1.5 bg-muted px-3 py-2 md:px-4 md:py-3">
+          <Bar className="h-3 w-1/2 bg-accent" />
+          <Bar className="h-3 w-3/4 bg-accent" />
+          <Bar className="h-3 w-2/3 bg-accent" />
+        </div>
+        <Bar className="h-4 w-2/3 bg-muted" />
+      </div>
+      <TurnFooterSkeleton />
+    </div>
+  )
+}
+
+/** Placeholder transcript shown while a session loads, mirroring the CLI-style turn layout. */
 export function MessageSkeleton() {
   return (
-    <div className="flex flex-col space-y-2 p-2 overflow-x-hidden">
-      {/* User message skeleton */}
-      <div className="flex flex-col">
-        <div className="w-full rounded-lg p-1.5 bg-primary/20 border border-primary/30">
-          <div className="flex items-center gap-2 mb-1">
-            <div className="h-3 w-12 bg-muted animate-pulse rounded" />
-            <div className="h-3 w-16 bg-muted animate-pulse rounded" />
-          </div>
-          <div className="space-y-2">
-            <div className="h-4 bg-muted animate-pulse rounded w-3/4" />
-            <div className="h-4 bg-muted animate-pulse rounded w-1/2" />
-          </div>
+    <div className="flex flex-col overflow-x-hidden p-2" aria-hidden="true">
+      <UserTurnSkeleton widths={['w-3/4', 'w-1/2']} />
+      <AssistantTurnSkeleton />
+      <UserTurnSkeleton widths={['w-4/5']} />
+      <AssistantTurnSkeleton />
+      <UserTurnSkeleton widths={['w-2/3']} />
+      <div className="py-2">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <span className="animate-pulse">▋</span>
+          <Bar className="h-4 w-20 bg-muted" />
         </div>
-      </div>
-
-      {/* Assistant message skeleton */}
-      <div className="flex flex-col">
-        <div className="w-full rounded-lg p-1.5 bg-card/50 border border-border">
-          <div className="flex items-center gap-2 mb-1">
-            <div className="h-3 w-16 bg-muted animate-pulse rounded" />
-            <div className="h-3 w-16 bg-muted animate-pulse rounded" />
-            <div className="flex items-center gap-1">
-              <div className="h-3 w-20 bg-primary/20 animate-pulse rounded" />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <div className="h-4 bg-muted animate-pulse rounded w-full" />
-            <div className="h-4 bg-muted animate-pulse rounded w-5/6" />
-            <div className="h-4 bg-muted animate-pulse rounded w-2/3" />
-            <div className="h-20 bg-muted/50 animate-pulse rounded mt-3" />
-          </div>
-        </div>
-      </div>
-      <div className="flex flex-col">
-        <div className="w-full rounded-lg p-1.5 bg-primary/20 border border-primary/30">
-          <div className="flex items-center gap-2 mb-1">
-            <div className="h-3 w-12 bg-muted animate-pulse rounded" />
-            <div className="h-3 w-16 bg-muted animate-pulse rounded" />
-          </div>
-          <div className="space-y-2">
-            <div className="h-4 bg-muted animate-pulse rounded w-3/4" />
-            <div className="h-4 bg-muted animate-pulse rounded w-1/2" />
-          </div>
-        </div>
-      </div>
-
-      {/* Assistant message skeleton */}
-      <div className="flex flex-col">
-        <div className="w-full rounded-lg p-1.5 bg-card/50 border border-border">
-          <div className="flex items-center gap-2 mb-1">
-            <div className="h-3 w-16 bg-muted animate-pulse rounded" />
-            <div className="h-3 w-16 bg-muted animate-pulse rounded" />
-            <div className="flex items-center gap-1">
-              <div className="h-3 w-20 bg-primary/20 animate-pulse rounded" />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <div className="h-4 bg-muted animate-pulse rounded w-full" />
-            <div className="h-4 bg-muted animate-pulse rounded w-5/6" />
-            <div className="h-4 bg-muted animate-pulse rounded w-2/3" />
-            <div className="h-20 bg-muted/50 animate-pulse rounded mt-3" />
-          </div>
-        </div>
-      </div>
-
-      {/* Second user message skeleton */}
-      <div className="flex flex-col">
-        <div className="w-full rounded-lg p-1.5 bg-primary/20 border border-primary/30">
-          <div className="flex items-center gap-2 mb-1">
-            <div className="h-3 w-12 bg-muted animate-pulse rounded" />
-            <div className="h-3 w-16 bg-muted animate-pulse rounded" />
-          </div>
-          <div className="space-y-2">
-            <div className="h-4 bg-muted animate-pulse rounded w-4/5" />
-          </div>
-        </div>
-      </div>
-
-      {/* Loading assistant message */}
-      <div className="flex flex-col">
-        <div className="w-full rounded-lg p-1.5 bg-card/50 border border-border animate-pulse-subtle">
-          <div className="flex items-center gap-2 mb-1">
-            <div className="h-3 w-16 bg-muted animate-pulse rounded" />
-            <div className="h-3 w-16 bg-muted animate-pulse rounded" />
-            <div className="flex items-center gap-1">
-              <span className="animate-pulse">●</span>
-              <div className="h-3 w-24 bg-primary/20 animate-pulse rounded" />
-            </div>
-          </div>
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <span className="animate-pulse">▋</span>
-            <div className="h-4 w-20 bg-muted animate-pulse rounded" />
-          </div>
+        <div className="mt-3 flex items-center gap-2">
+          <Bar className="h-3 w-10 bg-primary/30" />
+          <Bar className="h-3 w-24 bg-muted" />
+          <span className="animate-pulse-subtle text-xs text-info">streaming</span>
         </div>
       </div>
     </div>
-  );
+  )
 }
-

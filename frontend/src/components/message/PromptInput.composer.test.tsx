@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput } from './PromptInput'
+import { useSessionStatus } from '@/stores/sessionStatusStore'
 import { createCommandActionsMock } from '@/test/test-utils'
 
 const mocks = vi.hoisted(() => ({
@@ -144,6 +145,22 @@ describe('PromptInput composer layout', () => {
     mocks.useSessionAgentStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ setAgent: vi.fn() }))
     mocks.useSendErrorStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ errors: {} }))
     mocks.useHasBackgroundActivity.mockReturnValue(false)
+  })
+
+  it('anchors the activity bar in the gap above the controls row', () => {
+    useSessionStatus.getState().setStatus('test-session', { type: 'busy' })
+
+    renderComponent()
+
+    const bar = screen.getByRole('progressbar', { name: 'Session working' })
+    expect(controlsRow()).toContainElement(bar)
+    expect(controlsRow().firstElementChild).toBe(bar)
+    expect(bar).toHaveClass('absolute', 'bottom-full')
+    expect(promptInput().compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    act(() => {
+      useSessionStatus.getState().clearStatus('test-session')
+    })
   })
 
   describe('primary action placement', () => {

@@ -1,40 +1,20 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, FolderOpen, CalendarClock, Settings } from "lucide-react";
+import { Plus, FolderOpen, CalendarClock } from "lucide-react";
 import { LOCAL_OPENCODE_SERVER_ID } from "@opencode-manager/shared/schemas";
 import { RepoList } from "@/components/repo/RepoList";
 import { AddRepoDialog } from "@/components/repo/AddRepoDialog";
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { RemoteProjectList } from "@/components/servers/RemoteProjectList";
-import { ConnectionStatus } from "@/components/servers/ConnectionStatus";
 import { Header } from "@/components/ui/header";
 import { Button } from "@/components/ui/button";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
+import { LinkedServersNav } from "@/components/navigation/LinkedServersNav";
 import { ToolSidePanel } from "@/components/navigation/ToolSidePanel";
 import { useDialogParam } from "@/hooks/useDialogParam";
 import { useMobile } from "@/hooks/useMobile";
-import { useOpenCodeServerStatuses } from "@/hooks/useOpenCodeServers";
-import { useSettingsDialog } from "@/hooks/useSettingsDialog";
 import { useSidebarServerSelection } from "@/hooks/useSidebarServerSelection";
 import { useToolPanel } from "@/hooks/useToolPanel";
-
-function LinkedServerHeaderActions({ serverId }: { serverId: string }) {
-  const { statusById, isLoading } = useOpenCodeServerStatuses();
-  const { openTab } = useSettingsDialog();
-  const status = statusById[serverId];
-
-  return (
-    <>
-      <span className="flex max-w-[45vw] items-center overflow-hidden sm:max-w-none">
-        <ConnectionStatus status={status} isLoading={isLoading && !status} />
-      </span>
-      <Button variant="outline" size="sm" className="hidden sm:flex" onClick={() => openTab('servers')}>
-        <Settings className="mr-1 h-4 w-4" />
-        Manage servers
-      </Button>
-    </>
-  );
-}
 
 export function Repos() {
   const navigate = useNavigate();
@@ -60,7 +40,7 @@ export function Repos() {
           <div className="flex items-center gap-1">
             <PendingActionsGroup />
           </div>
-          {isLocalServer ? (
+          {isLocalServer && (
             <Button
               variant="ghost"
               size="icon"
@@ -70,9 +50,8 @@ export function Repos() {
             >
               <FolderOpen className="w-4 h-4" />
             </Button>
-          ) : (
-            <LinkedServerHeaderActions serverId={selectedServerId} />
           )}
+          <LinkedServersNav variant="header" />
           <Button
             variant="outline"
             onClick={() => navigate('/schedules')}

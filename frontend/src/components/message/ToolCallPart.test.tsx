@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
@@ -361,6 +361,39 @@ describe('ToolCallPart execute renderer', () => {
     expect(gutters[0].style.width).toBe(gutters[1].style.width)
   })
 
+  it('caps the collapsed child call preview and reports the hidden count', () => {
+    const manyCalls = Array.from({ length: 8 }, (_, index) => ({
+      tool: `cua-driver.call_${index}`,
+      status: 'completed',
+      input: { index },
+    }))
+
+    renderWithProviders(<ToolCallPart part={completedExecute({ toolCalls: manyCalls })} messageID="msg_1" />)
+
+    expect(screen.getAllByRole('button', { name: /cua-driver\.call_/ })).toHaveLength(5)
+    expect(screen.getByText('(3 more calls)')).toBeInTheDocument()
+    expect(screen.queryByText('Code')).not.toBeInTheDocument()
+    expect(screen.queryByText('cua-driver.call_5 [index=5]')).not.toBeInTheDocument()
+  })
+
+  it('reveals the code and output detail from the header on desktop', () => {
+    const manyCalls = Array.from({ length: 8 }, (_, index) => ({
+      tool: `cua-driver.call_${index}`,
+      status: 'completed',
+      input: { index },
+    }))
+
+    renderWithProviders(<ToolCallPart part={completedExecute({ toolCalls: manyCalls })} messageID="msg_1" />)
+
+    fireEvent.click(screen.getByRole('button', { name: /execute/ }))
+
+    expect(screen.getByText('Code')).toBeInTheDocument()
+    expect(screen.getByText('Output')).toBeInTheDocument()
+    expect(screen.queryByText('(3 more calls)')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /cua-driver\.call_/ })).toHaveLength(8)
+    expect(screen.getByText('cua-driver.call_5 [index=5]')).toBeInTheDocument()
+  })
+
   it('reports a completed script that failed at runtime', () => {
     renderWithProviders(
       <ToolCallPart
@@ -625,6 +658,106 @@ describe('ToolCallPart open walkthrough action', () => {
     renderWithProviders(<ToolCallPart part={otherAction} messageID="msg_1" onOpenWalkthrough={vi.fn()} />)
 
     expect(screen.queryByRole('button', { name: 'Open walkthrough' })).not.toBeInTheDocument()
+  })
+})
+
+describe('ToolCallPart shell preview', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useSettings.mockReturnValue({
+      preferences: { expandToolCalls: false },
+      isLoading: false,
+      updateSettings: vi.fn(),
+      isUpdating: false,
+    })
+    mocks.useToolCallPermission.mockReturnValue(null)
+  })
+
+  it('shows only the tail of a long shell output until the details are opened', () => {
+    const lines = Array.from({ length: 25 }, (_, index) => `line ${index + 1}`)
+
+    renderWithProviders(
+      <ToolCallPart
+        part={{
+          type: 'tool',
+          id: 'call_lines',
+          name: 'shell',
+          time: { created: 1, ran: 2, completed: 3 },
+          state: {
+            status: 'completed',
+            input: { command: 'seq 25' },
+            content: [{ type: 'text', text: lines.join('\n') }],
+            metadata: {},
+          },
+        }}
+        messageID="msg_1"
+      />,
+    )
+
+    const preview = screen.getByRole('button', { name: 'Show shell details' })
+    expect(within(preview).getByText('(15 earlier lines)')).toBeInTheDocument()
+    expect(preview.textContent).toMatch(/\bline 25\b/)
+    expect(preview.textContent).not.toMatch(/\bline 1\b/)
+  })
+})
+
+describe('ToolCallPart shell details scrolling', () => {
+  const originalScrollIntoView = Element.prototype.scrollIntoView
+  const scrollIntoView = vi.fn()
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useSettings.mockReturnValue({
+      preferences: { expandToolCalls: false },
+      isLoading: false,
+      updateSettings: vi.fn(),
+      isUpdating: false,
+    })
+    mocks.useToolCallPermission.mockReturnValue(null)
+    Element.prototype.scrollIntoView = scrollIntoView
+  })
+
+  afterEach(() => {
+    Element.prototype.scrollIntoView = originalScrollIntoView
+  })
+
+  const completedShell = (): SessionMessageAssistantTool => ({
+    type: 'tool',
+    id: 'call_scroll',
+    name: 'shell',
+    time: { created: 1, ran: 2, completed: 3 },
+    state: {
+      status: 'completed',
+      input: { command: 'seq 25' },
+      content: [{ type: 'text', text: 'line 24\nline 25' }],
+      metadata: {},
+    },
+  })
+
+  it('does not scroll when the shell details open from the preference', () => {
+    mocks.useSettings.mockReturnValue({
+      preferences: { expandToolCalls: true },
+      isLoading: false,
+      updateSettings: vi.fn(),
+      isUpdating: false,
+    })
+
+    renderWithProviders(<ToolCallPart part={completedShell()} messageID="msg_1" />)
+
+    expect(screen.getByText('Command:')).toBeInTheDocument()
+    expect(scrollIntoView).not.toHaveBeenCalled()
+  })
+
+  it('scrolls once when the user opens the shell details', () => {
+    renderWithProviders(<ToolCallPart part={completedShell()} messageID="msg_1" />)
+
+    expect(screen.queryByText('Command:')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show shell details' }))
+
+    expect(screen.getByText('Command:')).toBeInTheDocument()
+    expect(scrollIntoView).toHaveBeenCalledTimes(1)
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'nearest' })
   })
 })
 

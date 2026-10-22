@@ -3,12 +3,19 @@ import ReactMarkdown from 'react-markdown'
 import { Loader2 } from 'lucide-react'
 import { toolContentText, type SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
 import { useSettings } from '@/hooks/useSettings'
+import { useMobile } from '@/hooks/useMobile'
 import { toolMetadata } from '@/lib/backgroundWork'
 import { clampDisplayText } from '@/lib/clampDisplayText'
+import { cn } from '@/lib/utils'
 import { markdownRehypePlugins } from '@/lib/markdownRehypePlugins'
 import { CopyButton } from '@/components/ui/copy-button'
 import { FileReferenceText } from './FileReferenceText'
 import { ToolContentFiles } from './ToolContentFiles'
+import { ToolDetails, useToolDetailsState } from './ToolDetails'
+import { TRANSCRIPT_DETAIL_CLASS, TRANSCRIPT_ROW_CLASS } from './transcriptStyles'
+
+const PREVIEW_CALL_LIMIT = 5
+const MOBILE_PREVIEW_CALL_LIMIT = 3
 
 type ExecuteCallStatus = 'running' | 'completed' | 'error'
 
@@ -152,7 +159,7 @@ function ExecuteCallRow({ call, onFileClick }: { call: ExecuteCall; onFileClick?
   )
 
   return (
-    <div className="pl-3">
+    <div>
       {expandable ? (
         <button
           type="button"
@@ -187,7 +194,8 @@ function ExecuteCallRow({ call, onFileClick }: { call: ExecuteCall; onFileClick?
 
 export function ExecuteToolPart({ part, isWaitingPermission, onFileClick }: ExecuteToolPartProps) {
   const { preferences } = useSettings()
-  const [expanded, setExpanded] = useState(preferences?.expandToolCalls ?? false)
+  const [detailsOpen, setDetailsOpen] = useToolDetailsState(preferences?.expandToolCalls ?? false)
+  const previewCallLimit = useMobile() ? MOBILE_PREVIEW_CALL_LIMIT : PREVIEW_CALL_LIMIT
   const metadata = toolMetadata(part)
   const calls = executeCalls(metadata.toolCalls)
   const code = executeCode(part)
@@ -230,48 +238,39 @@ export function ExecuteToolPart({ part, isWaitingPermission, onFileClick }: Exec
     return <span>○</span>
   })()
 
-  const borderStyle = status === 'running'
-    ? isWaitingPermission
-      ? 'border-highlight/50 shadow-sm shadow-highlight/20'
-      : 'border-warning/50 shadow-sm shadow-warning/10'
-    : status === 'streaming'
-      ? 'border-primary/30'
-      : failed
-        ? 'border-destructive/30'
-        : 'border-border'
-
   const digits = String(Math.max(lineCount(code), lineCount(parsedOutput?.json), 1)).length
   const errorPreview = failed && output ? output.split('\n').slice(0, 4) : []
 
   return (
-    <div className={`border rounded-lg overflow-hidden my-2 transition-all ${borderStyle}`}>
-      <div className="flex items-center bg-card">
-        <button
-          type="button"
-          onClick={() => setExpanded(!expanded)}
-          aria-expanded={expanded}
-          className="min-w-0 flex-1 px-4 py-2 hover:bg-card-hover text-left flex items-center gap-2 text-sm"
-        >
-          <span className={statusColor}>{statusIcon}</span>
-          <span className="font-medium">execute</span>
-          <span className={`text-xs ml-auto ${failed ? 'text-destructive' : 'text-muted-foreground'}`}>
-            {statusLabel}
-          </span>
-        </button>
-      </div>
+    <div className={cn('my-1', isWaitingPermission && 'border-l-2 border-highlight pl-2')}>
+      <button
+        type="button"
+        onClick={() => setDetailsOpen(!detailsOpen)}
+        aria-expanded={detailsOpen}
+        className={cn(TRANSCRIPT_ROW_CLASS, 'group hover:text-foreground transition-colors')}
+      >
+        <span className={cn('shrink-0', statusColor)}>{statusIcon}</span>
+        <span className="shrink-0 font-medium text-foreground">execute</span>
+        <span className={cn('ml-auto shrink-0 text-xs', failed && 'text-destructive')}>
+          {statusLabel}
+        </span>
+      </button>
 
-      {calls.length > 0 && (
-        <div className="px-4 pb-2 space-y-0.5">
-          {calls.map((call, index) => (
+      {!detailsOpen && calls.length > 0 && (
+        <div className={cn(TRANSCRIPT_DETAIL_CLASS, 'space-y-0.5')}>
+          {calls.slice(0, previewCallLimit).map((call, index) => (
             <ExecuteCallRow key={`${call.tool}-${index}`} call={call} onFileClick={onFileClick} />
           ))}
+          {calls.length > previewCallLimit && (
+            <div className="text-xs text-muted-foreground">({calls.length - previewCallLimit} more calls)</div>
+          )}
         </div>
       )}
 
-      <ToolContentFiles part={part} className="px-4 pb-2" />
+      <ToolContentFiles part={part} className={TRANSCRIPT_DETAIL_CLASS} />
 
-      {!expanded && errorPreview.length > 0 && (
-        <div className="px-4 pb-2 font-mono text-xs text-destructive">
+      {!detailsOpen && errorPreview.length > 0 && (
+        <div className={cn(TRANSCRIPT_DETAIL_CLASS, 'font-mono text-xs text-destructive')}>
           {errorPreview.map((line, index) => (
             <div key={index} className="whitespace-pre-wrap break-words">
               {index === 0 ? `↳ ${line}` : `  ${line}`}
@@ -280,57 +279,63 @@ export function ExecuteToolPart({ part, isWaitingPermission, onFileClick }: Exec
         </div>
       )}
 
-      {expanded && (
-        <div className="bg-card space-y-3 p-3">
-          <div className="text-sm">
-            <div className="text-muted-foreground mb-1">Code</div>
-            {code ? (
-              <HighlightedCode content={code} language="ts" digits={digits} />
-            ) : (
-              <div className="text-xs text-muted-foreground">Waiting for code…</div>
-            )}
+      <ToolDetails open={detailsOpen} onOpenChange={setDetailsOpen} title="execute">
+        {calls.length > 0 && (
+          <div className="space-y-0.5">
+            {calls.map((call, index) => (
+              <ExecuteCallRow key={`${call.tool}-${index}`} call={call} onFileClick={onFileClick} />
+            ))}
           </div>
+        )}
 
-          <div className="text-sm">
-            <div className="text-muted-foreground mb-1">Output</div>
-            {parsedOutput ? (
-              <>
-                <HighlightedCode content={parsedOutput.json} language="json" digits={digits} />
-                {parsedOutput.rest && (
-                  <pre className="mt-1 whitespace-pre-wrap break-words text-xs text-foreground">
-                    {parsedOutput.rest}
-                  </pre>
-                )}
-              </>
-            ) : displayOutput ? (
-              <pre
-                className={`whitespace-pre-wrap break-words text-xs ${failed ? 'text-destructive' : 'text-foreground'}`}
-              >
-                {displayOutput}
-              </pre>
-            ) : (
-              <div className="text-xs text-muted-foreground">
-                {status === 'completed' ? 'No output' : 'Waiting for output…'}
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center gap-4">
-            {code && (
-              <div className="flex items-center gap-1">
-                <CopyButton content={code} title="Copy code" />
-                <span className="text-xs text-muted-foreground">Copy code</span>
-              </div>
-            )}
-            {output && (
-              <div className="flex items-center gap-1">
-                <CopyButton content={output} title="Copy output" />
-                <span className="text-xs text-muted-foreground">Copy output</span>
-              </div>
-            )}
-          </div>
+        <div className="text-sm">
+          <div className="text-muted-foreground mb-1">Code</div>
+          {code ? (
+            <HighlightedCode content={code} language="ts" digits={digits} />
+          ) : (
+            <div className="text-xs text-muted-foreground">Waiting for code…</div>
+          )}
         </div>
-      )}
+
+        <div className="text-sm">
+          <div className="text-muted-foreground mb-1">Output</div>
+          {parsedOutput ? (
+            <>
+              <HighlightedCode content={parsedOutput.json} language="json" digits={digits} />
+              {parsedOutput.rest && (
+                <pre className="mt-1 whitespace-pre-wrap break-words text-xs text-foreground">
+                  {parsedOutput.rest}
+                </pre>
+              )}
+            </>
+          ) : displayOutput ? (
+            <pre
+              className={`whitespace-pre-wrap break-words text-xs ${failed ? 'text-destructive' : 'text-foreground'}`}
+            >
+              {displayOutput}
+            </pre>
+          ) : (
+            <div className="text-xs text-muted-foreground">
+              {status === 'completed' ? 'No output' : 'Waiting for output…'}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-4">
+          {code && (
+            <div className="flex items-center gap-1">
+              <CopyButton content={code} title="Copy code" />
+              <span className="text-xs text-muted-foreground">Copy code</span>
+            </div>
+          )}
+          {output && (
+            <div className="flex items-center gap-1">
+              <CopyButton content={output} title="Copy output" />
+              <span className="text-xs text-muted-foreground">Copy output</span>
+            </div>
+          )}
+        </div>
+      </ToolDetails>
     </div>
   )
 }

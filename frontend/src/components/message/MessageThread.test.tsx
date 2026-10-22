@@ -24,10 +24,16 @@ const mocks = vi.hoisted(() => ({
   useSettings: vi.fn(),
   useRefreshMessage: vi.fn(),
   useSessionAgent: vi.fn(),
+  useMobile: vi.fn(),
 }))
 
 vi.mock('@/hooks/useSettings', () => ({
   useSettings: mocks.useSettings,
+}))
+
+vi.mock('@/hooks/useMobile', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/useMobile')>()),
+  useMobile: mocks.useMobile,
 }))
 
 vi.mock('@/hooks/useRemoveMessage', () => ({
@@ -147,6 +153,7 @@ describe('MessageThread', () => {
       mutate: vi.fn(),
     })
     mocks.useSessionAgent.mockReturnValue({ agent: 'test-agent' })
+    mocks.useMobile.mockReturnValue(false)
     useUIState.getState().setIsEditingMessage(false)
   })
 
@@ -474,7 +481,28 @@ describe('MessageThread', () => {
     )
 
     expect(screen.getByText('Hello')).toBeInTheDocument()
-    expect(screen.getByText('You')).toBeInTheDocument()
+    expect(screen.queryByText('You')).not.toBeInTheDocument()
+  })
+
+  it('renders the assistant footer with agent, model, and duration', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: false })
+
+    render(
+      <MessageThread
+        sessionID="test-session"
+        messages={[
+          assistantMessage('2', [textPart('Done')], {
+            agent: 'build',
+            time: { created: 0, completed: 93_000 },
+          }),
+        ]}
+        pending={[]}
+      />,
+    )
+
+    expect(screen.getByText('Build')).toBeInTheDocument()
+    expect(screen.getByText('test-model')).toBeInTheDocument()
+    expect(screen.getByText('1m 33s')).toBeInTheDocument()
   })
 
   it('exposes the message id on a rendered user message', () => {
@@ -528,6 +556,36 @@ describe('MessageThread', () => {
 
     expect(screen.getByText('bun test')).toBeInTheDocument()
     expect(screen.getByText('12 tests passed')).toBeInTheDocument()
+  })
+
+  it('collapses a long shell output behind the preview and reveals it on click', () => {
+    setupSettings({ simpleChatMode: false, showReasoning: false })
+
+    const lines = Array.from({ length: 25 }, (_, index) => `line-${String(index + 1).padStart(2, '0')}`)
+    const output = lines.join('\n')
+    const messages: SessionMessageInfo[] = [
+      {
+        id: 'shell-long',
+        type: 'shell',
+        shellID: 'sh_long',
+        command: 'seq 25',
+        status: 'exited',
+        exit: 0,
+        output: { output, cursor: output.length, size: output.length, truncated: false },
+        time: { created: Date.now() },
+      },
+    ]
+
+    render(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
+
+    expect(screen.getByText('(15 earlier lines)')).toBeInTheDocument()
+    expect(screen.getByText(/line-25/)).toBeInTheDocument()
+    expect(screen.queryByText(/line-01/)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show shell details' }))
+
+    expect(screen.getByText(/line-01/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Copy output' })).toBeInTheDocument()
   })
 
   it('renders a projected compaction banner from the fixtures', () => {
@@ -624,6 +682,26 @@ describe('MessageThread', () => {
     )
 
     expect(screen.queryByText(/File Changes/)).not.toBeInTheDocument()
+  })
+
+  it('omits the agent name from the assistant footer in simple chat mode', () => {
+    const messages = [assistantMessage('2', [textPart('Updated files')], { agent: 'build' })]
+
+    setupSettings({ simpleChatMode: true, showReasoning: false })
+    const simple = render(
+      <MessageThread sessionID="test-session" messages={messages} pending={[]} />,
+    )
+
+    expect(screen.queryByText('Build')).not.toBeInTheDocument()
+    expect(screen.getByText('test-model')).toBeInTheDocument()
+
+    simple.unmount()
+
+    setupSettings({ simpleChatMode: false, showReasoning: false })
+    render(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
+
+    expect(screen.getByText('Build')).toBeInTheDocument()
+    expect(screen.getByText('test-model')).toBeInTheDocument()
   })
 
   it('shows the empty state when there are no messages or pending prompts', () => {
