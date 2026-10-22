@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getSessionListPath, getSwipeBackTarget, getAssistantPath, getAssistantSessionListPath, isAssistantPath, getPathWithReturnTo, getReturnToPath, getRepoPath, getServerProjectPath, getServerSessionPath, getSessionPath, parseRepoRoute, parseServerProjectRoute, parseServerSessionRoute } from './navigation';
+import { getSessionListPath, getSwipeBackTarget, getAssistantPath, getAssistantSessionListPath, isAssistantPath, getPathWithReturnTo, getReturnToPath, getRepoPath, getServerProjectPath, getServerSessionPath, getSessionPath, isSessionDetailRoute, parseRepoRoute, parseServerProjectRoute, parseServerSessionRoute } from './navigation';
 
 describe('getAssistantPath', () => {
   it('returns /assistant', () => {
@@ -203,6 +203,26 @@ describe('return target helpers', () => {
       '/repos/5/sessions/abc?assistant=1'
     );
     expect(getReturnToPath('?returnTo=https%3A%2F%2Fexample.com', '/repos/5')).toBe('/repos/5');
+  });
+});
+
+describe('isSessionDetailRoute', () => {
+  it('matches local session detail routes', () => {
+    expect(isSessionDetailRoute('/repos/42/sessions/abc')).toBe(true);
+    expect(isSessionDetailRoute('/repos/0/sessions/ses_assistant')).toBe(true);
+  });
+
+  it('matches linked server session detail routes', () => {
+    expect(isSessionDetailRoute('/servers/srv_kitchen/sessions/ses_abc')).toBe(true);
+    expect(isSessionDetailRoute('/servers/https%3A%2F%2Fhost/sessions/ses_abc')).toBe(true);
+  });
+
+  it('rejects everything else', () => {
+    expect(isSessionDetailRoute('/')).toBe(false);
+    expect(isSessionDetailRoute('/repos/42')).toBe(false);
+    expect(isSessionDetailRoute('/servers/srv_kitchen/projects')).toBe(false);
+    expect(isSessionDetailRoute('/servers/srv_kitchen/sessions')).toBe(false);
+    expect(isSessionDetailRoute('/assistant')).toBe(false);
   });
 });
 

@@ -65,6 +65,10 @@ export function parseServerSessionRoute(pathname: string): { serverId: string; s
   return { serverId, sessionId };
 }
 
+export function isSessionDetailRoute(pathname: string): boolean {
+  return /^\/repos\/[^/]+\/sessions\/[^/]+$/.test(pathname) || parseServerSessionRoute(pathname) !== null;
+}
+
 export function parseRepoRoute(pathname: string): { repoId: number | null; section: string | null; sessionId: string | null } {
   const match = /^\/repos\/(\d+)(?:\/([^/]+)(?:\/([^/]+))?)?/.exec(pathname);
   if (!match) {
