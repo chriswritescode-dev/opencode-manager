@@ -163,10 +163,12 @@ describe('Repos', () => {
     expect(within(switcher).getByRole('img', { name: 'Connected' })).toBeInTheDocument()
   })
 
-  it('does not show the server switcher in the header for the local server', () => {
+  it('shows the server switcher on the local server and keeps local-only actions', () => {
     renderRepos()
 
-    expect(screen.queryByRole('button', { name: /Switch server/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Switch server, current: OC Manager' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Repo' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open files' })).toBeInTheDocument()
   })
 
   it('switches servers and opens server settings from the header dropdown', async () => {

@@ -31,7 +31,7 @@ export const RetryPart = memo(function RetryPart({ retry }: RetryPartProps) {
   }, [nextTimestamp])
 
   return (
-    <div className="my-1 flex min-w-0 items-center gap-2 text-xs">
+    <div className="my-1 flex min-w-0 flex-wrap items-center gap-2 text-xs">
       <RefreshCw
         className="w-3.5 h-3.5 flex-shrink-0 text-warning animate-spin"
         style={{ animationDuration: '2s' }}
@@ -43,7 +43,7 @@ export const RetryPart = memo(function RetryPart({ retry }: RetryPartProps) {
         <span className="text-warning/80">(retrying...)</span>
       )}
       <span aria-hidden="true" className="text-muted-foreground">·</span>
-      <span className="min-w-0 truncate text-muted-foreground">{retry.error.message}</span>
+      <span className="min-w-0 break-words text-muted-foreground">{retry.error.message}</span>
     </div>
   )
 })

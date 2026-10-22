@@ -40,7 +40,7 @@ export function Repos() {
           <div className="flex items-center gap-1">
             <PendingActionsGroup />
           </div>
-          {isLocalServer ? (
+          {isLocalServer && (
             <Button
               variant="ghost"
               size="icon"
@@ -50,9 +50,8 @@ export function Repos() {
             >
               <FolderOpen className="w-4 h-4" />
             </Button>
-          ) : (
-            <LinkedServersNav variant="header" />
           )}
+          <LinkedServersNav variant="header" />
           <Button
             variant="outline"
             onClick={() => navigate('/schedules')}

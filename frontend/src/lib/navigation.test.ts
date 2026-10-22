@@ -217,6 +217,11 @@ describe('isSessionDetailRoute', () => {
     expect(isSessionDetailRoute('/servers/https%3A%2F%2Fhost/sessions/ses_abc')).toBe(true);
   });
 
+  it('matches trailing-slash session detail routes', () => {
+    expect(isSessionDetailRoute('/repos/42/sessions/abc/')).toBe(true);
+    expect(isSessionDetailRoute('/servers/srv_kitchen/sessions/ses_abc/')).toBe(true);
+  });
+
   it('rejects everything else', () => {
     expect(isSessionDetailRoute('/')).toBe(false);
     expect(isSessionDetailRoute('/repos/42')).toBe(false);
