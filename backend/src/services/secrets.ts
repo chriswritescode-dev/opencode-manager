@@ -52,7 +52,7 @@ export class SecretsService {
       .prepare(
         `INSERT INTO secrets (kind, repo_id, environment, name, value, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+         ON CONFLICT(kind, COALESCE(repo_id, 0), environment, name) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
       )
       .run(kind, repoId, normalizedEnvironment, name, storedValue, now, now)
   }
