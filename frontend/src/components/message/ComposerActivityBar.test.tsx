@@ -41,15 +41,15 @@ describe('ComposerActivityBar', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('sits inside the docked composer on mobile and below the composer on desktop', () => {
+  it('fills the gap above the controls row without taking layout height', () => {
     useSessionStatus.getState().setStatus('session-a', { type: 'busy' })
 
     render(<ComposerActivityBar sessionID="session-a" />)
 
     const bar = screen.getByRole('progressbar', { name: 'Session working' })
-    expect(bar).toHaveClass('pointer-events-none', 'flex')
-    expect(bar).toHaveClass('absolute', 'inset-x-3', 'bottom-4', 'md:-bottom-[11px]')
+    expect(bar).toHaveClass('pointer-events-none', 'flex', 'absolute', 'inset-x-0', 'bottom-full')
     expect(bar).not.toHaveClass('fixed')
+    expect(bar).not.toHaveClass('pb-1.5')
   })
 
   it('renders a masked segment track with only the sweeping window', () => {
@@ -58,7 +58,7 @@ describe('ComposerActivityBar', () => {
     render(<ComposerActivityBar sessionID="session-a" />)
 
     const track = trackOf(screen.getByRole('progressbar', { name: 'Session working' }))
-    expect(track).toHaveClass('scanner-track', 'relative', 'h-2', 'w-full')
+    expect(track).toHaveClass('scanner-track', 'relative', 'h-1.5', 'md:h-2', 'w-full')
 
     const children = Array.from(track.children) as HTMLElement[]
     expect(children).toHaveLength(1)

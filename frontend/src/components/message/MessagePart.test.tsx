@@ -15,10 +15,16 @@ import type {
 
 const mocks = vi.hoisted(() => ({
   useSettings: vi.fn(),
+  useMobile: vi.fn(),
 }))
 
 vi.mock('@/hooks/useSettings', () => ({
   useSettings: mocks.useSettings,
+}))
+
+vi.mock('@/hooks/useMobile', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/useMobile')>()),
+  useMobile: mocks.useMobile,
 }))
 
 interface MockSettingsReturn {
@@ -79,6 +85,7 @@ const completedShell = (
 describe('MessagePart', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.useMobile.mockReturnValue(false)
     setupSettings({
       simpleChatMode: false,
       showReasoning: false,
@@ -240,12 +247,13 @@ describe('MessagePart', () => {
     it('renders a completed shell tool with its output', () => {
       renderWithProviders(<MessagePart part={completedShell({ command: 'git status' }, 'clean tree')} />)
 
-      expect(screen.getByText('shell')).toBeInTheDocument()
+      const preview = screen.getByRole('button', { name: 'Show shell details' })
       expect(screen.getByText('git status')).toBeInTheDocument()
 
-      fireEvent.click(screen.getByRole('button'))
+      fireEvent.click(preview)
 
-      expect(screen.getByText('clean tree')).toBeInTheDocument()
+      expect(screen.getByText('Output:')).toBeInTheDocument()
+      expect(document.querySelector('pre')?.textContent).toBe('clean tree')
     })
 
     it('renders a running shell tool with its command', () => {
@@ -261,7 +269,9 @@ describe('MessagePart', () => {
     it('renders a streaming tool with a preparing state', () => {
       renderWithProviders(<MessagePart part={toolPart('shell', { status: 'streaming', input: '' })} />)
 
-      expect(screen.getByText('shell')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Show shell details' }))
+
+      expect(screen.getByText('Preparing tool call...')).toBeInTheDocument()
     })
 
     it('renders an error tool with the error message', () => {
@@ -291,12 +301,12 @@ describe('MessagePart', () => {
 
       renderWithProviders(<MessagePart part={projected!} />)
 
-      expect(screen.getByText('shell')).toBeInTheDocument()
+      const preview = screen.getByRole('button', { name: 'Show shell details' })
       expect(screen.getByText('bun test')).toBeInTheDocument()
 
-      fireEvent.click(screen.getByRole('button'))
+      fireEvent.click(preview)
 
-      expect(screen.getByText('12 tests passed')).toBeInTheDocument()
+      expect(document.querySelector('pre')?.textContent).toBe('12 tests passed')
     })
 
     it('renders null for a non-subagent tool in simpleChatMode', () => {
@@ -562,9 +572,65 @@ describe('MessagePart', () => {
         />,
       )
 
+      const header = screen.getByRole('button', { name: /Edit \/test\/file\.txt/ })
+      expect(within(header).getByText('←')).toBeInTheDocument()
       expect(screen.getByText('/test/file.txt')).toBeInTheDocument()
       expect(screen.getByText('+1')).toBeInTheDocument()
       expect(screen.getByText('-1')).toBeInTheDocument()
+      expect(screen.getByText('old')).toBeInTheDocument()
+      expect(screen.getByText('new')).toBeInTheDocument()
+    })
+
+    it('previews the first changed lines of a long patch until the diff is opened', () => {
+      setupSettings({
+        simpleChatMode: false,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: false,
+      })
+
+      const changedLines = Array.from({ length: 20 }, (_, index) => `+line ${index + 1}`).join('\n')
+
+      renderWithProviders(
+        <MessagePart
+          part={toolPart('edit', {
+            status: 'completed',
+            input: { path: '/test/file.txt' },
+            content: [{ type: 'text', text: 'edited' }],
+            metadata: {
+              files: [
+                {
+                  file: '/test/file.txt',
+                  patch: `diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1,20 @@\n${changedLines}`,
+                  additions: 20,
+                  deletions: 0,
+                  status: 'modified',
+                },
+              ],
+            },
+          })}
+        />,
+      )
+
+      const header = screen.getByRole('button', { name: /Edit \/test\/file\.txt/ })
+      expect(within(header).getByText('←')).toBeInTheDocument()
+
+      const preview = screen.getByRole('button', { name: 'Show diff for /test/file.txt' })
+      expect(within(preview).getByText('line 1')).toBeInTheDocument()
+      expect(within(preview).getByText('line 8')).toBeInTheDocument()
+      expect(within(preview).queryByText('line 9')).toBeNull()
+      expect(within(preview).getByText('1')).toBeInTheDocument()
+      expect(within(preview).getByText('8')).toBeInTheDocument()
+      expect(within(preview).queryByText('9')).toBeNull()
+      expect(screen.getByText('(12 more lines)')).toBeInTheDocument()
+      expect(screen.queryByText('line 20')).toBeNull()
+
+      fireEvent.click(preview)
+
+      expect(screen.queryByRole('button', { name: 'Show diff for /test/file.txt' })).toBeNull()
+      expect(screen.getByText('line 9')).toBeInTheDocument()
+      expect(screen.getByText('line 20')).toBeInTheDocument()
+      expect(screen.getByText('20')).toBeInTheDocument()
     })
 
     it('renders a write tool with its file path', () => {
@@ -631,6 +697,13 @@ describe('MessagePart', () => {
     })
 
     it('renders every file of a multi-file patch with per-file links', () => {
+      setupSettings({
+        simpleChatMode: false,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+      })
+
       const onFileClick = vi.fn()
       renderWithProviders(
         <MessagePart
@@ -649,21 +722,47 @@ describe('MessagePart', () => {
         />,
       )
 
-      expect(screen.getByText('src/a.ts')).toBeInTheDocument()
-      expect(screen.getByText('src/b.ts')).toBeInTheDocument()
-
-      const buttons = screen.getAllByRole('button')
-      expect(buttons).toHaveLength(2)
-      fireEvent.click(buttons[0])
-      fireEvent.click(buttons[1])
-
-      expect(screen.getByText('+new-a')).toBeInTheDocument()
-      expect(screen.getByText('+new-b')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Patch src\/a\.ts/ })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Patch src\/b\.ts/ })).toBeInTheDocument()
+      expect(screen.getByText('old-a')).toBeInTheDocument()
+      expect(screen.getByText('old-b')).toBeInTheDocument()
 
       fireEvent.click(screen.getByText('src/a.ts'))
       expect(onFileClick).toHaveBeenCalledWith('src/a.ts')
       fireEvent.click(screen.getByText('src/b.ts'))
       expect(onFileClick).toHaveBeenCalledWith('src/b.ts')
+
+      fireEvent.click(screen.getByRole('button', { name: /Patch src\/a\.ts/ }))
+
+      expect(screen.getByRole('button', { name: 'Show diff for src/a.ts' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Show diff for src/b.ts' })).toBeNull()
+    })
+
+    it('syntax highlights added rows with the themed diff tints', () => {
+      const { container } = renderWithProviders(
+        <MessagePart
+          part={toolPart('edit', {
+            status: 'completed',
+            input: { path: '/test/file.ts' },
+            content: [{ type: 'text', text: 'edited' }],
+            metadata: {
+              files: [
+                {
+                  file: '/test/file.ts',
+                  patch: '@@ -1 +1,2 @@\n const value = 1\n+const added = 2',
+                  additions: 1,
+                  deletions: 0,
+                  status: 'modified',
+                },
+              ],
+            },
+          })}
+        />,
+      )
+
+      const addedRow = container.querySelector('[class*="bg-diff-add/15"]')
+      expect(addedRow).not.toBeNull()
+      expect(addedRow?.querySelector('.hljs-keyword')?.textContent).toBe('const')
     })
 
     it('falls back to the generic tool output when a patch has no diff metadata', () => {

@@ -1,10 +1,16 @@
-import React, { useState } from 'react'
+import React, { useMemo } from 'react'
 import type { FileDiffInfo, SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
 import { useSettings } from '@/hooks/useSettings'
+import { useMobile } from '@/hooks/useMobile'
 import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { DiffStats } from './DiffStats'
-import { CodePreview } from './CodePreview'
+import { CodePreview, detectLanguage } from './CodePreview'
+import { DiffLines } from './DiffLines'
 import { ToolContentFiles } from './ToolContentFiles'
+import { ToolDetails, useToolDetailsState } from './ToolDetails'
+import { TRANSCRIPT_DETAIL_CLASS, TRANSCRIPT_ROW_CLASS } from './transcriptStyles'
+import { parseUnifiedDiff } from '@/lib/diffLines'
+import { cn } from '@/lib/utils'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 
 function isFileDiff(data: unknown): data is FileDiffInfo {
@@ -42,26 +48,8 @@ export function getRelativePath(filePath: string): string {
   return filePath
 }
 
-function PatchViewer({ patch }: { patch: string }) {
-  const lines = patch.split('\n')
-
-  return (
-    <pre className="bg-accent p-2 text-xs overflow-x-auto">
-      {lines.map((line, index) => {
-        const tone = line.startsWith('@@')
-          ? 'text-info'
-          : line.startsWith('+++') || line.startsWith('---')
-            ? 'text-muted-foreground'
-            : line.startsWith('+')
-              ? 'text-diff-add'
-              : line.startsWith('-')
-                ? 'text-diff-delete'
-                : 'text-muted-foreground'
-        return <div key={index} className={tone}>{line || ' '}</div>
-      })}
-    </pre>
-  )
-}
+const PATCH_PREVIEW_LINE_COUNT = 8
+const MOBILE_PATCH_PREVIEW_LINE_COUNT = 4
 
 interface FileToolRenderProps {
   part: SessionMessageAssistantTool
@@ -74,18 +62,24 @@ interface FileToolRenderProps {
 
 function FileToolRender({ part, filediff, filePath, content, toolName, onFileClick }: FileToolRenderProps) {
   const { preferences } = useSettings()
+  const isMobile = useMobile()
   const isRemoteServer = !isLocalOpenCodeServer(useOpenCodeServerId())
   const isReadTool = toolName === 'Read'
-  const isEditTool = toolName === 'Edit'
-  const isWriteTool = toolName === 'Write'
+  const hasDiff = Boolean(filediff)
   const hasExpandableContent = !isReadTool && (filediff || content)
   const isFileLink = Boolean(onFileClick) && !isRemoteServer
-  
-  const isFileMutatingTool = isEditTool || isWriteTool
-  const defaultExpanded = isFileMutatingTool
+
+  const defaultExpanded = hasDiff
     ? (preferences?.expandDiffs ?? true)
     : (preferences?.expandToolCalls ?? false)
-  const [expanded, setExpanded] = useState(defaultExpanded)
+  const [detailsOpen, setDetailsOpen] = useToolDetailsState(defaultExpanded)
+  const relativePath = filePath ? getRelativePath(filePath) : undefined
+  const detailsTitle = relativePath ? `${toolName} ${relativePath}` : toolName
+  const diffRows = useMemo(() => (filediff ? parseUnifiedDiff(filediff.patch) : []), [filediff])
+  const language = useMemo(() => detectLanguage(filePath ?? ''), [filePath])
+  const previewLineCount = isMobile ? MOBILE_PATCH_PREVIEW_LINE_COUNT : PATCH_PREVIEW_LINE_COUNT
+  const previewRows = diffRows.slice(0, previewLineCount)
+  const hiddenLineCount = diffRows.length - previewRows.length
 
   const getDuration = () => {
     if (part.time.ran === undefined || part.time.completed === undefined) return ''
@@ -99,44 +93,102 @@ function FileToolRender({ part, filediff, filePath, content, toolName, onFileCli
     }
   }
 
-  return (
-    <div className="border border-border rounded-lg overflow-hidden my-2">
-      <button
-        onClick={() => hasExpandableContent && setExpanded(!expanded)}
-        className="w-full px-3 py-1.5 bg-card hover:bg-card-hover text-left flex items-center justify-between text-sm gap-2"
+  const pathLabel = relativePath && (
+    isFileLink ? (
+      <span
+        onClick={handleFileClick}
+        className="min-w-0 truncate text-primary text-xs hover:underline cursor-pointer"
       >
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-success flex-shrink-0">✓</span>
-          <span className="font-medium flex-shrink-0">{toolName}</span>
-          {filePath && (
-            isFileLink ? (
-              <span
-                onClick={handleFileClick}
-                className="text-primary text-xs truncate hover:underline cursor-pointer"
+        {relativePath}
+      </span>
+    ) : (
+      <span className="min-w-0 truncate text-muted-foreground text-xs">{relativePath}</span>
+    )
+  )
+
+  if (filediff) {
+    return (
+      <>
+        <div className="my-1 w-full bg-muted px-3 py-2 md:px-4 md:py-3">
+          <button
+            type="button"
+            onClick={() => hasExpandableContent && setDetailsOpen(!detailsOpen)}
+            aria-label={relativePath ? `${toolName} ${relativePath}` : toolName}
+            className="flex w-full min-w-0 items-center gap-2 font-mono text-xs text-muted-foreground text-left transition-colors hover:text-foreground"
+          >
+            <span className="flex-shrink-0">←</span>
+            <span className="flex-shrink-0 font-medium text-foreground">{toolName}</span>
+            {pathLabel}
+            <span className="ml-auto flex flex-shrink-0 items-center gap-2">
+              <DiffStats additions={filediff.additions} deletions={filediff.deletions} />
+              <span className="text-muted-foreground text-xs">{getDuration()}</span>
+              {detailsOpen ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+            </span>
+          </button>
+
+          {!detailsOpen && previewRows.length > 0 && (
+            <div className="mt-1">
+              <button
+                type="button"
+                onClick={() => setDetailsOpen(true)}
+                aria-label={`Show diff for ${relativePath ?? toolName}`}
+                className="block w-full text-left"
               >
-                {getRelativePath(filePath)}
-              </span>
-            ) : (
-              <span className="text-muted-foreground text-xs truncate">{getRelativePath(filePath)}</span>
-            )
+                <DiffLines rows={previewRows} language={language} />
+              </button>
+              {hiddenLineCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setDetailsOpen(true)}
+                  className="text-muted-foreground text-xs transition-colors hover:text-foreground"
+                >
+                  ({hiddenLineCount} more lines)
+                </button>
+              )}
+            </div>
+          )}
+
+          {detailsOpen && !isMobile && (
+            <div className="mt-1">
+              <DiffLines rows={diffRows} language={language} />
+            </div>
+          )}
+
+          {isMobile && (
+            <ToolDetails open={detailsOpen} onOpenChange={setDetailsOpen} title={detailsTitle}>
+              <DiffLines rows={diffRows} language={language} />
+            </ToolDetails>
           )}
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {filediff && <DiffStats additions={filediff.additions} deletions={filediff.deletions} />}
+
+        <ToolContentFiles part={part} className={TRANSCRIPT_DETAIL_CLASS} />
+      </>
+    )
+  }
+
+  return (
+    <div className="my-1">
+      <button
+        onClick={() => hasExpandableContent && setDetailsOpen(!detailsOpen)}
+        className={cn(TRANSCRIPT_ROW_CLASS, 'group hover:text-foreground transition-colors')}
+      >
+        <span className="flex-shrink-0 text-success">✓</span>
+        <span className="flex-shrink-0 font-medium text-foreground">{toolName}</span>
+        {pathLabel}
+        <span className="ml-auto flex flex-shrink-0 items-center gap-2">
           <span className="text-muted-foreground text-xs">{getDuration()}</span>
           {hasExpandableContent && (
-            expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />
+            detailsOpen ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />
           )}
-        </div>
+        </span>
       </button>
 
-      <ToolContentFiles part={part} className="px-3 pb-2 bg-card" />
+      <ToolContentFiles part={part} className={TRANSCRIPT_DETAIL_CLASS} />
 
-      {expanded && hasExpandableContent && (
-        <div className="bg-card p-0">
-          {filediff && <PatchViewer patch={filediff.patch} />}
-          {content && !filediff && <CodePreview fileName={filePath || ''} content={content} />}
-        </div>
+      {hasExpandableContent && (
+        <ToolDetails open={detailsOpen} onOpenChange={setDetailsOpen} title={detailsTitle}>
+          {content && <CodePreview fileName={filePath || ''} content={content} />}
+        </ToolDetails>
       )}
     </div>
   )

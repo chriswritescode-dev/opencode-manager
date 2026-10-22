@@ -4,6 +4,8 @@ import { TextPart } from './TextPart'
 import { ToolCallPart } from './ToolCallPart'
 import { readShowArtifactCall } from '@/lib/artifactTool'
 import { useSettings } from '@/hooks/useSettings'
+import { cn } from '@/lib/utils'
+import { TRANSCRIPT_DETAIL_CLASS } from './transcriptStyles'
 import type { ShellNoticeOutcome } from '@/lib/backgroundWork'
 import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
 
@@ -33,11 +35,11 @@ export const MessagePart = memo(function MessagePart({ part, messageID, director
       if (simpleChatMode || !showReasoning) return null
       if (!part.text.trim()) return null
       return (
-        <details className="border border-border rounded-lg my-2">
-          <summary className="px-4 py-2 bg-muted hover:bg-accent cursor-pointer text-sm font-medium">
+        <details className="my-1">
+          <summary className="cursor-pointer py-0.5 text-sm text-muted-foreground hover:text-foreground">
             Reasoning
           </summary>
-          <div className="p-4 bg-card text-sm text-muted-foreground whitespace-pre-wrap">
+          <div className={cn(TRANSCRIPT_DETAIL_CLASS, 'text-sm text-muted-foreground whitespace-pre-wrap')}>
             {part.text}
           </div>
         </details>

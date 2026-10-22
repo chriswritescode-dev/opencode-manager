@@ -28,6 +28,9 @@ import { readShowArtifactCall } from '@/lib/artifactTool'
 import { groupExplorationParts, type AssistantContentItem } from '@/lib/explorationGroups'
 import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
 import { ExplorationGroup } from './ExplorationGroup'
+import { ShellPreview, ToolDetails, useToolDetailsState } from './ToolDetails'
+import { cn, formatDuration } from '@/lib/utils'
+import { getAgentStyleVars } from '@/lib/agent-colors'
 
 function getMessageText(message: SessionMessageInfo): string {
   switch (message.type) {
@@ -169,7 +172,7 @@ function UserAttachments({ files: attachedFiles, agents: attachedAgents, skills:
 
 function MessageDivider({ label }: { label: string }) {
   return (
-    <div className="flex items-center gap-2 my-1 text-xs text-muted-foreground">
+    <div className="flex items-center gap-2 my-2 text-xs text-muted-foreground">
       <span className="h-px flex-1 bg-border" />
       <span className="shrink-0">{label}</span>
       <span className="h-px flex-1 bg-border" />
@@ -224,7 +227,7 @@ function SessionNotice({
   const { text, completion } = sessionNoticeContent(message)
 
   if (!completion) {
-    return <div className="my-1 px-3 py-1 text-xs text-muted-foreground truncate">◈ {text}</div>
+    return <div className="my-2 px-3 py-1 text-xs text-muted-foreground truncate">◈ {text}</div>
   }
 
   const tone = completion.state === 'error'
@@ -246,17 +249,18 @@ function SessionNotice({
         type="button"
         onClick={() => onChildSessionClick(childID)}
         aria-live="polite"
-        className="my-1 block w-full px-3 py-1 text-left text-xs truncate hover:underline"
+        className="my-2 block w-full px-3 py-1 text-left text-xs truncate hover:underline"
       >
         {content}
       </button>
     )
   }
 
-  return <div aria-live="polite" className="my-1 px-3 py-1 text-xs truncate">{content}</div>
+  return <div aria-live="polite" className="my-2 px-3 py-1 text-xs truncate">{content}</div>
 }
 
 function ShellMessage({ message }: { message: SessionMessageShell }) {
+  const [detailsOpen, setDetailsOpen] = useToolDetailsState(false)
   const output = message.output?.output ?? ''
   const statusLabel = message.status === 'running'
     ? 'running'
@@ -265,26 +269,33 @@ function ShellMessage({ message }: { message: SessionMessageShell }) {
       : `${message.status} (exit ${message.exit})`
 
   return (
-    <div className="rounded-lg border border-border bg-card/50 p-2 my-1">
-      <div className="flex items-center gap-2 text-sm min-w-0">
-        <span className="text-success shrink-0">$</span>
-        <span className="text-foreground truncate">{message.command}</span>
-        <span className="text-muted-foreground text-xs ml-auto shrink-0">{statusLabel}</span>
-      </div>
+    <>
+      <ShellPreview
+        command={message.command}
+        output={output}
+        onClick={() => setDetailsOpen(!detailsOpen)}
+        status={<span className="ml-auto shrink-0 text-xs text-muted-foreground">{statusLabel}</span>}
+      />
       {output && (
-        <div className="relative mt-1">
-          <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap">{output}</pre>
-          <CopyButton content={output} title="Copy output" className="absolute top-1 right-1" iconSize="sm" />
-        </div>
+        <ToolDetails
+          open={detailsOpen}
+          onOpenChange={setDetailsOpen}
+          title={`$ ${message.command}`}
+        >
+          <div className="relative">
+            <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap">{output}</pre>
+            <CopyButton content={output} title="Copy output" className="absolute top-1 right-1" iconSize="sm" />
+          </div>
+        </ToolDetails>
       )}
-    </div>
+    </>
   )
 }
 
 function CompactionBanner({ message }: { message: SessionMessageCompaction }) {
   if (message.status === 'running') {
     return (
-      <div className="flex items-center gap-2 my-1 text-xs text-muted-foreground">
+      <div className="flex items-center gap-2 my-2 text-xs text-muted-foreground">
         <Loader2 className="w-3.5 h-3.5 animate-spin" />
         <span>Compacting session...</span>
       </div>
@@ -293,38 +304,41 @@ function CompactionBanner({ message }: { message: SessionMessageCompaction }) {
 
   if (message.status === 'failed') {
     return (
-      <div className="my-1 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
-        Compaction failed: {message.error.message}
+      <div className="my-2 border-l-2 border-destructive pl-2 text-xs text-destructive">
+        ✗ Compaction failed: {message.error.message}
       </div>
     )
   }
 
   return (
-    <div className="my-1 rounded-lg border border-border bg-card/50 px-3 py-1.5 text-xs text-muted-foreground">
-      <span className="font-medium">Session compacted</span>
-      {message.summary && <p className="mt-0.5 whitespace-pre-wrap">{message.summary}</p>}
-    </div>
+    <>
+      <MessageDivider label="Session compacted" />
+      {message.summary && (
+        <p className="mt-0.5 text-xs text-muted-foreground whitespace-pre-wrap text-center">
+          {message.summary}
+        </p>
+      )}
+    </>
   )
 }
 
 function QueuedPromptRow({ item }: { item: SessionInboxUser }) {
   return (
-    <div className="w-full rounded-lg p-1.5 bg-warning/10 border border-warning/30">
-      <div className="flex items-center gap-2 mb-1">
-        <span className="text-xs font-medium text-muted-foreground">You</span>
-        <span className="text-xs text-muted-foreground">
-          {new Date(item.time.created).toLocaleTimeString()}
-        </span>
-        <span className="text-xs font-semibold bg-warning text-warning-foreground px-1.5 py-0.5 rounded">
-          {item.delivery === 'queue' ? 'QUEUED' : 'STEERING'}
-        </span>
+    <div className="py-2">
+      <div className="border-l-[3px] border-dashed border-muted-foreground bg-muted/60 px-4 py-3 text-muted-foreground">
+        <ClickableUserMessage content={item.payload.text} onClick={() => {}} isEditable={false} />
+        <UserAttachments
+          files={item.payload.files}
+          agents={item.payload.agents}
+          skills={item.payload.skills}
+        />
+        <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+          <span>{new Date(item.time.created).toLocaleTimeString()}</span>
+          <span className="font-mono text-[11px] font-semibold tracking-wider text-warning">
+            {item.delivery === 'queue' ? 'QUEUED' : 'STEERING'}
+          </span>
+        </div>
       </div>
-      <ClickableUserMessage content={item.payload.text} onClick={() => {}} isEditable={false} />
-      <UserAttachments
-        files={item.payload.files}
-        agents={item.payload.agents}
-        skills={item.payload.skills}
-      />
     </div>
   )
 }
@@ -386,70 +400,73 @@ const MessageRow = memo(function MessageRow({
     if (!hasRenderableContent(message, simpleChatMode, showReasoning)) return null
 
     return (
-      <div className="flex flex-col group" data-message-id={message.id}>
+      <div
+        className="group py-2"
+        data-message-id={message.id}
+      >
         <div
-          className={`w-full rounded-lg p-1.5 ${
-            isEditingThisMessage
-              ? 'bg-primary/30 border border-primary/50'
-              : 'bg-primary/20 border border-primary/30'
-          }`}
+          className={cn(
+            'border-l-[3px] bg-muted px-4 py-3',
+            isEditingThisMessage ? 'border-info' : 'border-primary',
+          )}
         >
-          <div className="flex items-center justify-between gap-2 mb-1">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-medium text-muted-foreground">You</span>
-              <span className="text-xs text-muted-foreground">
-                {new Date(message.time.created).toLocaleTimeString()}
-              </span>
-              {canEditUserMessage && nextAssistantMessageId && (
-                <button
-                  onClick={() => handleStartEditUserMessage(message.id, nextAssistantMessageId)}
-                  className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-                  title="Edit message"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            {canUndoUserMessage && (
-              <UserMessageActionButtons
+          <div className="text-foreground">
+            {isEditingThisMessage && nextAssistantMessageId ? (
+              <EditableUserMessage
                 sessionId={sessionID}
                 directory={directory}
-                userMessageId={message.id}
-                userMessageContent={messageTextContent}
-                onUndo={onUndoMessage}
+                content={messageTextContent}
+                assistantMessageId={nextAssistantMessageId}
+                onCancel={handleCancelEdit}
+                model={model}
+              />
+            ) : simpleChatMode ? (
+              <ClickableUserMessage
+                content={messageTextContent}
+                onClick={() => {}}
+                isEditable={false}
+              />
+            ) : (
+              <ClickableUserMessage
+                content={messageTextContent}
+                onClick={() => handleStartEditUserMessage(message.id, nextAssistantMessageId ?? '')}
+                isEditable={false}
               />
             )}
           </div>
-
-          {isEditingThisMessage && nextAssistantMessageId ? (
-            <EditableUserMessage
-              sessionId={sessionID}
-              directory={directory}
-              content={messageTextContent}
-              assistantMessageId={nextAssistantMessageId}
-              onCancel={handleCancelEdit}
-              model={model}
-            />
-          ) : simpleChatMode ? (
-            <ClickableUserMessage
-              content={messageTextContent}
-              onClick={() => {}}
-              isEditable={false}
-            />
-          ) : (
-            <ClickableUserMessage
-              content={messageTextContent}
-              onClick={() => handleStartEditUserMessage(message.id, nextAssistantMessageId ?? '')}
-              isEditable={false}
-            />
-          )}
 
           <UserAttachments
             files={message.files}
             agents={message.agents}
             skills={message.skills}
           />
+
+          <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+            <span>{new Date(message.time.created).toLocaleTimeString()}</span>
+            {((canEditUserMessage && nextAssistantMessageId) || canUndoUserMessage) ? (
+              <span className="flex items-center gap-1 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
+                {canEditUserMessage && nextAssistantMessageId && (
+                  <button
+                    onClick={() => handleStartEditUserMessage(message.id, nextAssistantMessageId)}
+                    className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                    title="Edit message"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                )}
+
+                {canUndoUserMessage && (
+                  <UserMessageActionButtons
+                    sessionId={sessionID}
+                    directory={directory}
+                    userMessageId={message.id}
+                    userMessageContent={messageTextContent}
+                    onUndo={onUndoMessage}
+                  />
+                )}
+              </span>
+            ) : null}
+          </div>
         </div>
       </div>
     )
@@ -496,66 +513,77 @@ const MessageRow = memo(function MessageRow({
       : 0
 
     return (
-      <div className="flex flex-col group" data-message-id={message.id}>
-        <div
-          className={`w-full rounded-lg p-1.5 bg-card/50 border border-border ${streaming ? 'animate-pulse-subtle' : ''}`}
-        >
-          <div className="flex items-center justify-between gap-2 mb-1">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-medium text-muted-foreground">
-                {message.model.id}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {new Date(message.time.created).toLocaleTimeString()}
-              </span>
+      <div
+        className="group py-2"
+        data-message-id={message.id}
+      >
+        <div className="space-y-2">
+          {contentItems.map((item, itemIndex) => (
+            <div key={`${message.id}-${item.type === 'exploration' ? `exploration-${item.parts[0].id}` : `${item.part.type}-${itemIndex}`}`}>
+              {item.type === 'exploration' ? (
+                <ExplorationGroup
+                  parts={item.parts}
+                  messageID={message.id}
+                  directory={directory}
+                  repoFullPath={repoFullPath}
+                  repoLocalPath={repoLocalPath}
+                  onFileClick={onFileClick}
+                  onChildSessionClick={onChildSessionClick}
+                  onOpenWalkthrough={onOpenWalkthrough}
+                />
+              ) : (
+                <MessagePart
+                  part={item.part}
+                  messageID={message.id}
+                  directory={directory}
+                  repoFullPath={repoFullPath}
+                  repoLocalPath={repoLocalPath}
+                  shellOutcome={shellOutcomeFor(item.part)}
+                  onFileClick={onFileClick}
+                  onChildSessionClick={onChildSessionClick}
+                  onOpenWalkthrough={onOpenWalkthrough}
+                />
+              )}
             </div>
-          </div>
+          ))}
+          {!simpleChatMode && message.snapshot?.files && (
+            <StepFileChanges
+              files={message.snapshot.files}
+              snapshot={message.snapshot.end}
+              onFileClick={onFileClick}
+            />
+          )}
+          {message.retry && <RetryPart retry={message.retry} />}
+          {message.error && <MessageError error={message.error} />}
+        </div>
 
-          <div className="space-y-2">
-            {contentItems.map((item, itemIndex) => (
-              <div key={`${message.id}-${item.type === 'exploration' ? `exploration-${item.parts[0].id}` : `${item.part.type}-${itemIndex}`}`}>
-                {item.type === 'exploration' ? (
-                  <ExplorationGroup
-                    parts={item.parts}
-                    messageID={message.id}
-                    directory={directory}
-                    repoFullPath={repoFullPath}
-                    repoLocalPath={repoLocalPath}
-                    onFileClick={onFileClick}
-                    onChildSessionClick={onChildSessionClick}
-                    onOpenWalkthrough={onOpenWalkthrough}
-                  />
-                ) : (
-                  <MessagePart
-                    part={item.part}
-                    messageID={message.id}
-                    directory={directory}
-                    repoFullPath={repoFullPath}
-                    repoLocalPath={repoLocalPath}
-                    shellOutcome={shellOutcomeFor(item.part)}
-                    onFileClick={onFileClick}
-                    onChildSessionClick={onChildSessionClick}
-                    onOpenWalkthrough={onOpenWalkthrough}
-                  />
-                )}
-              </div>
-            ))}
-            {!simpleChatMode && message.snapshot?.files && (
-              <StepFileChanges
-                files={message.snapshot.files}
-                snapshot={message.snapshot.end}
-                onFileClick={onFileClick}
-              />
-            )}
-            {message.retry && <RetryPart retry={message.retry} />}
-            {message.error && <MessageError error={message.error} />}
-          </div>
-
-          <div className="text-xs text-muted-foreground my-1 flex items-center gap-2">
-            {!(isFree) && <span>${(message.cost ?? 0).toFixed(4)} • {totalTokens} tokens</span>}
+        <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          <span style={getAgentStyleVars(message.agent)} className="font-medium text-[var(--agent-color)]">
+            {message.agent.charAt(0).toUpperCase() + message.agent.slice(1)}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span className="text-foreground">{message.model.id}</span>
+          {message.time.completed !== undefined ? (
+            <>
+              <span aria-hidden="true">·</span>
+              <span>{formatDuration(message.time.completed - message.time.created)}</span>
+            </>
+          ) : streaming ? (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="animate-pulse-subtle text-info">streaming</span>
+            </>
+          ) : null}
+          {!(isFree) && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span>${(message.cost ?? 0).toFixed(4)} • {totalTokens} tokens</span>
+            </>
+          )}
+          <span className="flex items-center gap-1 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
             <CopyButton content={messageTextContent} title="Copy message" />
             {messageTextContent && <TTSButton messageId={message.id} content={messageTextContent} />}
-          </div>
+          </span>
         </div>
       </div>
     )
@@ -583,8 +611,8 @@ const MessageRow = memo(function MessageRow({
 
   if (message.type === 'skill') {
     return (
-      <div className="my-1 rounded-lg border border-info/20 bg-info/5 px-3 py-1.5 text-xs text-muted-foreground">
-        Skill loaded: <span className="font-medium text-foreground">{message.name}</span>
+      <div className="my-2 text-xs text-muted-foreground">
+        ◈ Skill loaded: <span className="font-medium text-foreground">{message.name}</span>
       </div>
     )
   }

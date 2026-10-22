@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { getRelativePath } from './FileToolRender'
+import { TRANSCRIPT_DETAIL_CLASS, TRANSCRIPT_ROW_CLASS } from './transcriptStyles'
 
 interface StepFileChangesProps {
   files: string[]
@@ -24,22 +26,23 @@ export function StepFileChanges({ files, snapshot, onFileClick }: StepFileChange
   const hiddenCount = files.length - INITIAL_FILES_SHOWN
 
   return (
-    <div className="border border-border rounded-lg overflow-hidden my-2">
+    <div className="my-1">
       <button
         type="button"
         onClick={() => hasMoreFiles && setExpanded(!expanded)}
-        className="w-full px-3 py-1.5 bg-card hover:bg-card-hover text-left flex items-center justify-between text-sm gap-2"
+        className={cn(TRANSCRIPT_ROW_CLASS, 'hover:text-foreground transition-colors')}
       >
-        <span className="font-medium">File Changes ({files.length} {fileNoun(files.length)})</span>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {snapshot && <span className="text-muted-foreground text-xs font-mono">{snapshot.slice(0, 8)}</span>}
+        <span aria-hidden="true">±</span>
+        <span className="font-medium text-foreground">File Changes ({files.length} {fileNoun(files.length)})</span>
+        <span className="ml-auto flex flex-shrink-0 items-center gap-2">
+          {snapshot && <span className="text-xs text-muted-foreground">{snapshot.slice(0, 8)}</span>}
           {hasMoreFiles && (
-            expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />
+            expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />
           )}
-        </div>
+        </span>
       </button>
 
-      <div className="bg-card px-3 py-2 space-y-1">
+      <div className={cn(TRANSCRIPT_DETAIL_CLASS, 'space-y-0.5')}>
         {displayedFiles.map((file) => (
           <button
             key={file}
@@ -56,7 +59,7 @@ export function StepFileChanges({ files, snapshot, onFileClick }: StepFileChange
           <button
             type="button"
             onClick={() => setExpanded(!expanded)}
-            className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 mt-1"
+            className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
           >
             {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
             {expanded ? 'Show less' : `+${hiddenCount} more ${fileNoun(hiddenCount)}`}

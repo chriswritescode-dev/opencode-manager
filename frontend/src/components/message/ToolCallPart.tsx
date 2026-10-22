@@ -1,13 +1,14 @@
-import { useState, useRef, useEffect, useMemo, memo } from 'react'
+import { useRef, useEffect, useMemo, memo } from 'react'
 import { unwrapSandboxExecCommand } from '@opencode-manager/shared/utils'
 import { toolContentText, type SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
 import { useSettings } from '@/hooks/useSettings'
-import { useUserBash } from '@/stores/userBashStore'
 import { useChildLifecycleForSession } from '@/stores/sessionStatusStore'
 import { useToolCallPermission } from '@/contexts/EventContext'
 import { useChildSessionReconciliation } from '@/hooks/useOpenCode'
 import { useShell } from '@/hooks/useSessionShells'
+import { useMobile } from '@/hooks/useMobile'
 import { clampDisplayText } from '@/lib/clampDisplayText'
+import { cn } from '@/lib/utils'
 import { ExternalLink, Loader2, Shield } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -34,7 +35,9 @@ import { getFileApiUrl } from '@/api/files'
 import { ArtifactPart } from './ArtifactPart'
 import { ExecuteToolPart } from './ExecuteToolPart'
 import { FileReferenceText } from './FileReferenceText'
+import { ShellPreview, ToolDetails, useToolDetailsState } from './ToolDetails'
 import { ToolContentFiles } from './ToolContentFiles'
+import { TRANSCRIPT_DETAIL_CLASS, TRANSCRIPT_ROW_CLASS } from './transcriptStyles'
 import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
 
 function BoundedPre({ content, className }: { content: string; className: string }) {
@@ -76,7 +79,7 @@ function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (fi
 
 export const ToolCallPart = memo(function ToolCallPart({ part, messageID, directory, repoFullPath, repoLocalPath, shellOutcome, onFileClick, onChildSessionClick, onOpenWalkthrough }: ToolCallPartProps) {
   const { preferences } = useSettings()
-  const { userBashCommands } = useUserBash()
+  const isMobile = useMobile()
   const isSubagent = part.name === 'subagent'
   const subagentSessionId = isSubagent ? subagentSessionID(part) : undefined
   const backgroundSubagent = isSubagent ? backgroundChildSessionID(part) : undefined
@@ -117,16 +120,14 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
     return typeof provider === 'string' ? provider : undefined
   })()
   const sandboxProviderLabel = sandboxProvider !== undefined && sandboxProvider !== 'ocm' ? sandboxProvider : undefined
-  const isUserBashCommand = part.state.status === 'completed' &&
-    typeof displayCommand === 'string' &&
-    userBashCommands.has(displayCommand)
-  const [expanded, setExpanded] = useState(isUserBashCommand || (preferences?.expandToolCalls ?? false))
+  const [detailsOpen, setDetailsOpen] = useToolDetailsState(preferences?.expandToolCalls ?? false)
 
   useEffect(() => {
-    if (part.name === 'shell' && expanded && outputRef.current) {
+    if (isMobile) return
+    if (part.name === 'shell' && detailsOpen && outputRef.current) {
       outputRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     }
-  }, [expanded, part.name])
+  }, [detailsOpen, isMobile, part.name])
 
   const getStatusColor = () => {
     if (isBackgroundShell) return backgroundTaskStatusColor(shellStatus)
@@ -263,7 +264,7 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
       return (
         <button
           onClick={() => onChildSessionClick?.(subagentSessionId)}
-          className="my-1 w-full rounded-lg border border-info/20 bg-info/5 px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-info/10 hover:border-info/30 transition-all duration-200 shadow-sm shadow-info/5"
+          className="my-1 flex w-full min-w-0 items-center gap-2 py-0.5 text-left text-xs text-muted-foreground hover:text-foreground transition-colors"
           title="View subagent session"
         >
           {content}
@@ -272,7 +273,7 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
     }
 
     return (
-      <div className="my-1 rounded-lg border border-info/20 bg-info/5 px-3 py-1.5 text-xs text-muted-foreground shadow-sm shadow-info/5">
+      <div className="my-1 flex w-full min-w-0 items-center gap-2 py-0.5 text-left text-xs text-muted-foreground">
         {content}
       </div>
     )
@@ -287,60 +288,129 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
     return toolSpecificRender
   }
 
-  if (isUserBashCommand) {
-    const command = displayCommand ?? ''
-    const output = toolOutputText(part)
-    const ran = part.state.status === 'streaming' ? undefined : part.state.status === 'running' ? undefined : part.time.ran
-    const completed = part.state.status === 'streaming' ? undefined : part.state.status === 'running' ? undefined : part.time.completed
-    return (
-      <div className="my-2">
-        <div className="flex items-center gap-2 text-sm mb-2">
-          {isBackgroundShell ? renderShellLifecycleIcon(shellStatus) : <span className="text-success">✓</span>}
-          <span className="font-medium">$</span>
-          <span className="text-foreground">{command}</span>
-          {sandboxIndicator}
-          {backgroundIndicator}
-          {ran !== undefined && completed !== undefined && (
-            <span className="text-muted-foreground text-xs ml-auto">
-              {((completed - ran) / 1000).toFixed(2)}s
-            </span>
+  const output = toolOutputText(part)
+  const statusLabel = isWaitingPermission
+    ? 'awaiting permission'
+    : isBackgroundShell
+      ? lifecycleLabel(shellStatus)
+      : part.state.status
+  const commandBlock = (
+    <div className="text-sm">
+      <div className="flex items-center gap-2 mb-1">
+        <div className="text-muted-foreground">Command:</div>
+        <CopyButton content={displayCommand ?? ''} title="Copy command" />
+      </div>
+      <div className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">
+        <span className="text-success">$</span> {displayCommand ?? ''}
+      </div>
+    </div>
+  )
+
+  const detailContent = (
+    <>
+      {part.state.status === 'streaming' && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <div className="flex gap-0.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '0ms' }} />
+            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '150ms' }} />
+            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '300ms' }} />
+          </div>
+          <span>Preparing tool call...</span>
+        </div>
+      )}
+
+      {part.state.status === 'running' && (
+        <div className="text-sm">
+          {part.name === 'shell' ? commandBlock : (
+            <>
+              <div className="text-muted-foreground mb-1">Input:</div>
+              <ClickableJson json={part.state.input} onFileClick={onFileClick} />
+            </>
           )}
+          <div className={`flex items-center gap-2 mt-2 text-xs ${isWaitingPermission ? 'text-highlight' : 'text-warning'}`}>
+            <Loader2 className="w-3 h-3 animate-spin" />
+            <span>{isWaitingPermission ? 'Waiting for permission...' : 'Running...'}</span>
+          </div>
         </div>
-        <div className="relative">
-          <BoundedPre content={output} className="bg-accent p-3 rounded text-xs overflow-x-auto whitespace-pre-wrap" />
-          <CopyButton content={output} title="Copy output" className="absolute top-2 right-2" />
+      )}
+
+      {part.state.status === 'completed' && (
+        <>
+          {part.name === 'shell' ? commandBlock : (
+            <div className="text-sm">
+              <div className="text-muted-foreground mb-1">Input:</div>
+              <ClickableJson json={part.state.input} onFileClick={onFileClick} />
+            </div>
+          )}
+          {output && (
+            <div className="text-sm">
+              <div className="text-muted-foreground mb-1">Output:</div>
+              <div className="relative">
+                <BoundedPre
+                  content={output}
+                  className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all"
+                />
+                <CopyButton content={output} title="Copy output" className="absolute top-1 right-1" iconSize="sm" />
+              </div>
+            </div>
+          )}
+          {part.time.ran !== undefined && part.time.completed !== undefined && (
+            <div className="text-xs text-muted-foreground">
+              Duration: {((part.time.completed - part.time.ran) / 1000).toFixed(2)}s
+            </div>
+          )}
+        </>
+      )}
+
+      {part.state.status === 'error' && (
+        <div className="text-sm">
+          <div className="text-destructive mb-1">Error:</div>
+          <BoundedPre
+            content={part.state.error.message}
+            className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words text-destructive"
+          />
         </div>
+      )}
+    </>
+  )
+
+  if (part.name === 'shell') {
+    return (
+      <div ref={outputRef} className={cn('my-1', isWaitingPermission && 'border-l-2 border-highlight pl-2')}>
+        <ShellPreview
+          command={displayCommand ?? ''}
+          output={output}
+          onClick={() => setDetailsOpen(!detailsOpen)}
+          status={
+            <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+              <span className={getStatusColor()}>{getStatusIcon()}</span>
+              <span>{statusLabel}</span>
+              {sandboxIndicator}
+              {backgroundIndicator}
+            </span>
+          }
+        />
+        <ToolContentFiles part={part} className={TRANSCRIPT_DETAIL_CLASS} />
+        <ToolDetails
+          open={detailsOpen}
+          onOpenChange={setDetailsOpen}
+          title={`$ ${displayCommand ?? ''}`}
+        >
+          {detailContent}
+        </ToolDetails>
       </div>
     )
   }
 
-  const getBorderStyle = () => {
-    switch (part.state.status) {
-      case 'running':
-        if (isWaitingPermission) return 'border-highlight/50 shadow-sm shadow-highlight/20'
-        return 'border-warning/50 shadow-sm shadow-warning/10'
-      case 'streaming':
-        return 'border-primary/30'
-      case 'error':
-        return 'border-destructive/30'
-      case 'completed':
-        return 'border-border'
-      default:
-        return 'border-border'
-    }
-  }
-
-  const output = toolOutputText(part)
-
   return (
-    <div ref={outputRef} className={`border rounded-lg overflow-hidden my-2 transition-all ${getBorderStyle()}`}>
-      <div className="flex items-center bg-card">
+    <div ref={outputRef} className={cn('my-1', isWaitingPermission && 'border-l-2 border-highlight pl-2')}>
+      <div className="flex items-center gap-2">
         <button
-          onClick={() => setExpanded(!expanded)}
-          className="min-w-0 flex-1 px-4 py-2 hover:bg-card-hover text-left flex items-center gap-2 text-sm"
+          onClick={() => setDetailsOpen(!detailsOpen)}
+          className={cn(TRANSCRIPT_ROW_CLASS, 'group hover:text-foreground transition-colors')}
         >
-          <span className={getStatusColor()}>{getStatusIcon()}</span>
-          <span className="font-medium">{part.name}</span>
+          <span className={cn('shrink-0', getStatusColor())}>{getStatusIcon()}</span>
+          <span className="shrink-0 font-medium text-foreground">{part.name}</span>
           {sandboxIndicator}
           {backgroundIndicator}
 
@@ -352,25 +422,23 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
                   onFileClick(previewText)
                 }
               }}
-              className="text-primary text-xs truncate hover:text-primary-hover cursor-pointer underline decoration-dotted"
+              className="min-w-0 truncate text-primary text-xs hover:text-primary-hover cursor-pointer underline decoration-dotted"
               title={`Click to open ${previewText}`}
             >
               {previewText}
             </span>
           ) : previewText ? (
-            <span className="text-muted-foreground text-xs truncate">{previewText}</span>
+            <span className="min-w-0 truncate text-muted-foreground text-xs">{previewText}</span>
           ) : null}
 
-          <span className="text-muted-foreground text-xs ml-auto">
-            {isWaitingPermission ? 'awaiting permission' : isBackgroundShell ? lifecycleLabel(shellStatus) : part.state.status}
-          </span>
+          <span className="ml-auto shrink-0 text-xs">{statusLabel}</span>
         </button>
 
         {openWalkthrough ? (
           <Button
             variant="outline"
             size="sm"
-            className="mr-2 h-7 shrink-0"
+            className="h-7 shrink-0"
             onClick={() => onOpenWalkthrough?.(openWalkthrough.source)}
           >
             Open walkthrough
@@ -378,97 +446,15 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
         ) : null}
       </div>
 
-      <ToolContentFiles part={part} className="px-4 py-2 bg-card" />
+      <ToolContentFiles part={part} className={TRANSCRIPT_DETAIL_CLASS} />
 
-      {expanded && (
-        <div className="bg-card space-y-2 p-3">
-          {part.state.status === 'streaming' && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <div className="flex gap-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '300ms' }} />
-              </div>
-              <span>Preparing tool call...</span>
-            </div>
-          )}
-
-          {part.state.status === 'running' && (
-            part.name === 'shell' ? (
-              <div className="text-sm">
-                <div className="flex items-center gap-2 mb-1">
-                  <div className="text-muted-foreground">Command:</div>
-                  <CopyButton content={displayCommand ?? ''} title="Copy command" />
-                </div>
-                <div className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">
-                  <span className="text-success">$</span> {displayCommand ?? ''}
-                </div>
-                <div className={`flex items-center gap-2 mt-2 text-xs ${isWaitingPermission ? 'text-highlight' : 'text-warning'}`}>
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  <span>{isWaitingPermission ? 'Waiting for permission...' : 'Running...'}</span>
-                </div>
-              </div>
-            ) : (
-              <div className="text-sm">
-                <div className="text-muted-foreground mb-1">Input:</div>
-                <ClickableJson json={part.state.input} onFileClick={onFileClick} />
-                <div className={`flex items-center gap-2 mt-2 text-xs ${isWaitingPermission ? 'text-highlight' : 'text-warning'}`}>
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  <span>{isWaitingPermission ? 'Waiting for permission...' : 'Running...'}</span>
-                </div>
-              </div>
-            )
-          )}
-
-          {part.state.status === 'completed' && (
-            <>
-              {part.name === 'shell' ? (
-                <div className="text-sm">
-                  <div className="flex items-center gap-2 mb-1">
-                    <div className="text-muted-foreground">Command:</div>
-                    <CopyButton content={displayCommand ?? ''} title="Copy command" />
-                  </div>
-                  <div className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">
-                    <span className="text-success">$</span> {displayCommand ?? ''}
-                  </div>
-                </div>
-              ) : (
-                <div className="text-sm">
-                  <div className="text-muted-foreground mb-1">Input:</div>
-                  <ClickableJson json={part.state.input} onFileClick={onFileClick} />
-                </div>
-              )}
-              {output && (
-                <div className="text-sm">
-                  <div className="text-muted-foreground mb-1">Output:</div>
-                  <div className="relative">
-                    <BoundedPre
-                      content={output}
-                      className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all"
-                    />
-                    <CopyButton content={output} title="Copy output" className="absolute top-1 right-1" iconSize="sm" />
-                  </div>
-                </div>
-              )}
-              {part.time.ran !== undefined && part.time.completed !== undefined && (
-                <div className="text-xs text-muted-foreground">
-                  Duration: {((part.time.completed - part.time.ran) / 1000).toFixed(2)}s
-                </div>
-              )}
-            </>
-          )}
-
-          {part.state.status === 'error' && (
-            <div className="text-sm">
-              <div className="text-destructive mb-1">Error:</div>
-              <BoundedPre
-                content={part.state.error.message}
-                className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words text-destructive"
-              />
-            </div>
-          )}
-        </div>
-      )}
+      <ToolDetails
+        open={detailsOpen}
+        onOpenChange={setDetailsOpen}
+        title={part.name + (previewText ? ` ${previewText}` : '')}
+      >
+        {detailContent}
+      </ToolDetails>
     </div>
   )
 })

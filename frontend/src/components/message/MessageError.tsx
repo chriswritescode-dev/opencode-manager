@@ -36,7 +36,7 @@ export const MessageError = memo(function MessageError({ error }: MessageErrorPr
   const isAborted = error.type === 'aborted'
   const tone = isAborted
     ? 'text-muted-foreground'
-    : 'rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-destructive'
+    : 'border-l-2 border-destructive pl-2 text-destructive'
 
   return (
     <div role={isAborted ? 'status' : 'alert'} title={error.message} className={`my-1 flex min-w-0 items-start gap-1.5 text-xs ${tone}`}>
