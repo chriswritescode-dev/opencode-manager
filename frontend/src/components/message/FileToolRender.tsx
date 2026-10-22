@@ -69,7 +69,7 @@ function FileToolRender({ part, filediff, filePath, content, toolName, onFileCli
   const hasExpandableContent = !isReadTool && (filediff || content)
   const isFileLink = Boolean(onFileClick) && !isRemoteServer
 
-  const defaultExpanded = hasDiff
+  const defaultExpanded = hasDiff || toolName === 'Write'
     ? (preferences?.expandDiffs ?? true)
     : (preferences?.expandToolCalls ?? false)
   const [detailsOpen, setDetailsOpen] = useToolDetailsState(defaultExpanded)

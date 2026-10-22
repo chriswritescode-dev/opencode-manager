@@ -102,6 +102,7 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
   const pendingPermission = useToolCallPermission(part.id, messageID)
   const isWaitingPermission = part.state.status === 'running' && pendingPermission !== null
   const outputRef = useRef<HTMLDivElement>(null)
+  const userOpenedDetailsRef = useRef(false)
   const input = toolInput(part)
   const openWalkthrough = readOpenWalkthroughCall(part)
   const rawCommand = part.name === 'shell' && typeof input?.command === 'string'
@@ -123,10 +124,10 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
   const [detailsOpen, setDetailsOpen] = useToolDetailsState(preferences?.expandToolCalls ?? false)
 
   useEffect(() => {
+    if (part.name !== 'shell' || !detailsOpen || !userOpenedDetailsRef.current) return
+    userOpenedDetailsRef.current = false
     if (isMobile) return
-    if (part.name === 'shell' && detailsOpen && outputRef.current) {
-      outputRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-    }
+    outputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }, [detailsOpen, isMobile, part.name])
 
   const getStatusColor = () => {
@@ -380,7 +381,11 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
         <ShellPreview
           command={displayCommand ?? ''}
           output={output}
-          onClick={() => setDetailsOpen(!detailsOpen)}
+          onClick={() => {
+            const nextOpen = !detailsOpen
+            if (nextOpen) userOpenedDetailsRef.current = true
+            setDetailsOpen(nextOpen)
+          }}
           status={
             <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
               <span className={getStatusColor()}>{getStatusIcon()}</span>

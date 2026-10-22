@@ -558,10 +558,14 @@ const MessageRow = memo(function MessageRow({
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-          <span style={getAgentStyleVars(message.agent)} className="font-medium text-[var(--agent-color)]">
-            {message.agent.charAt(0).toUpperCase() + message.agent.slice(1)}
-          </span>
-          <span aria-hidden="true">·</span>
+          {!simpleChatMode && (
+            <>
+              <span style={getAgentStyleVars(message.agent)} className="font-medium text-[var(--agent-color)]">
+                {message.agent.charAt(0).toUpperCase() + message.agent.slice(1)}
+              </span>
+              <span aria-hidden="true">·</span>
+            </>
+          )}
           <span className="text-foreground">{message.model.id}</span>
           {message.time.completed !== undefined ? (
             <>

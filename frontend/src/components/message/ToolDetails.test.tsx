@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { ShellPreview, ToolDetails, useToolDetailsState } from './ToolDetails'
 
 const mocks = vi.hoisted(() => ({
@@ -18,8 +18,15 @@ const Details = ({ open, onOpenChange }: { open: boolean; onOpenChange: (open: b
 )
 
 function StateProbe({ defaultOpen }: { defaultOpen: boolean }) {
-  const [open] = useToolDetailsState(defaultOpen)
-  return <span>{open ? 'open' : 'closed'}</span>
+  const [open, setOpen] = useToolDetailsState(defaultOpen)
+  return (
+    <>
+      <span>{open ? 'open' : 'closed'}</span>
+      <button type="button" onClick={() => setOpen(false)}>
+        close details
+      </button>
+    </>
+  )
 }
 
 describe('ToolDetails', () => {
@@ -89,6 +96,47 @@ describe('useToolDetailsState', () => {
     mocks.useMobile.mockReturnValue(false)
 
     render(<StateProbe defaultOpen={false} />)
+
+    expect(screen.getByText('closed')).toBeInTheDocument()
+  })
+
+  it('follows a default that turns open after mount on desktop', () => {
+    mocks.useMobile.mockReturnValue(false)
+
+    const { rerender } = render(<StateProbe defaultOpen={false} />)
+
+    expect(screen.getByText('closed')).toBeInTheDocument()
+
+    rerender(<StateProbe defaultOpen />)
+
+    expect(screen.getByText('open')).toBeInTheDocument()
+  })
+
+  it('keeps the user choice when a later default differs', () => {
+    mocks.useMobile.mockReturnValue(false)
+
+    const { rerender } = render(<StateProbe defaultOpen />)
+
+    expect(screen.getByText('open')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'close details' }))
+
+    expect(screen.getByText('closed')).toBeInTheDocument()
+
+    rerender(<StateProbe defaultOpen />)
+
+    expect(screen.getByText('closed')).toBeInTheDocument()
+  })
+
+  it('closes when the viewport shrinks to mobile after opening on desktop', () => {
+    mocks.useMobile.mockReturnValue(false)
+
+    const { rerender } = render(<StateProbe defaultOpen />)
+
+    expect(screen.getByText('open')).toBeInTheDocument()
+
+    mocks.useMobile.mockReturnValue(true)
+    rerender(<StateProbe defaultOpen />)
 
     expect(screen.getByText('closed')).toBeInTheDocument()
   })

@@ -648,6 +648,51 @@ describe('MessagePart', () => {
       expect(screen.getByText('/test/file.txt')).toBeInTheDocument()
     })
 
+    it('expands a write tool preview when expand diffs is enabled', () => {
+      setupSettings({
+        simpleChatMode: false,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+      })
+
+      renderWithProviders(
+        <MessagePart
+          part={toolPart('write', {
+            status: 'completed',
+            input: { path: '/test/file.txt', content: 'written preview line' },
+            content: [{ type: 'text', text: 'Wrote file successfully' }],
+            metadata: {},
+          })}
+        />,
+      )
+
+      expect(screen.getByText('written preview line')).toBeInTheDocument()
+    })
+
+    it('collapses a write tool preview when only expand tool calls is enabled', () => {
+      setupSettings({
+        simpleChatMode: false,
+        showReasoning: false,
+        expandToolCalls: true,
+        expandDiffs: false,
+      })
+
+      renderWithProviders(
+        <MessagePart
+          part={toolPart('write', {
+            status: 'completed',
+            input: { path: '/test/file.txt', content: 'written preview line' },
+            content: [{ type: 'text', text: 'Wrote file successfully' }],
+            metadata: {},
+          })}
+        />,
+      )
+
+      expect(screen.getByText('/test/file.txt')).toBeInTheDocument()
+      expect(screen.queryByText('written preview line')).toBeNull()
+    })
+
     it('makes legacy filePath read, write, and filediff edit calls clickable', () => {
       const onFileClick = vi.fn()
       const legacy = (name: string, metadata: Record<string, unknown>) =>

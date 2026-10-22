@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
@@ -698,6 +698,66 @@ describe('ToolCallPart shell preview', () => {
     expect(within(preview).getByText('(15 earlier lines)')).toBeInTheDocument()
     expect(preview.textContent).toMatch(/\bline 25\b/)
     expect(preview.textContent).not.toMatch(/\bline 1\b/)
+  })
+})
+
+describe('ToolCallPart shell details scrolling', () => {
+  const originalScrollIntoView = Element.prototype.scrollIntoView
+  const scrollIntoView = vi.fn()
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useSettings.mockReturnValue({
+      preferences: { expandToolCalls: false },
+      isLoading: false,
+      updateSettings: vi.fn(),
+      isUpdating: false,
+    })
+    mocks.useToolCallPermission.mockReturnValue(null)
+    Element.prototype.scrollIntoView = scrollIntoView
+  })
+
+  afterEach(() => {
+    Element.prototype.scrollIntoView = originalScrollIntoView
+  })
+
+  const completedShell = (): SessionMessageAssistantTool => ({
+    type: 'tool',
+    id: 'call_scroll',
+    name: 'shell',
+    time: { created: 1, ran: 2, completed: 3 },
+    state: {
+      status: 'completed',
+      input: { command: 'seq 25' },
+      content: [{ type: 'text', text: 'line 24\nline 25' }],
+      metadata: {},
+    },
+  })
+
+  it('does not scroll when the shell details open from the preference', () => {
+    mocks.useSettings.mockReturnValue({
+      preferences: { expandToolCalls: true },
+      isLoading: false,
+      updateSettings: vi.fn(),
+      isUpdating: false,
+    })
+
+    renderWithProviders(<ToolCallPart part={completedShell()} messageID="msg_1" />)
+
+    expect(screen.getByText('Command:')).toBeInTheDocument()
+    expect(scrollIntoView).not.toHaveBeenCalled()
+  })
+
+  it('scrolls once when the user opens the shell details', () => {
+    renderWithProviders(<ToolCallPart part={completedShell()} messageID="msg_1" />)
+
+    expect(screen.queryByText('Command:')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show shell details' }))
+
+    expect(screen.getByText('Command:')).toBeInTheDocument()
+    expect(scrollIntoView).toHaveBeenCalledTimes(1)
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'nearest' })
   })
 })
 

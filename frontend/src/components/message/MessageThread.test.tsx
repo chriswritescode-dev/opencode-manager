@@ -684,6 +684,26 @@ describe('MessageThread', () => {
     expect(screen.queryByText(/File Changes/)).not.toBeInTheDocument()
   })
 
+  it('omits the agent name from the assistant footer in simple chat mode', () => {
+    const messages = [assistantMessage('2', [textPart('Updated files')], { agent: 'build' })]
+
+    setupSettings({ simpleChatMode: true, showReasoning: false })
+    const simple = render(
+      <MessageThread sessionID="test-session" messages={messages} pending={[]} />,
+    )
+
+    expect(screen.queryByText('Build')).not.toBeInTheDocument()
+    expect(screen.getByText('test-model')).toBeInTheDocument()
+
+    simple.unmount()
+
+    setupSettings({ simpleChatMode: false, showReasoning: false })
+    render(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
+
+    expect(screen.getByText('Build')).toBeInTheDocument()
+    expect(screen.getByText('test-model')).toBeInTheDocument()
+  })
+
   it('shows the empty state when there are no messages or pending prompts', () => {
     setupSettings({ simpleChatMode: false, showReasoning: false })
 

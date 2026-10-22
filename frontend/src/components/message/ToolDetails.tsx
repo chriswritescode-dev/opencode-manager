@@ -8,11 +8,11 @@ import { TRANSCRIPT_DETAIL_CLASS } from './transcriptStyles'
 const SHELL_PREVIEW_LINES = 10
 const MOBILE_SHELL_PREVIEW_LINES = 4
 
-/** Tool-detail disclosure state that stays closed on mobile unless the user opens it. */
+/** Tool-detail disclosure state that follows the preference until the user toggles it and never auto-opens on mobile. */
 export function useToolDetailsState(defaultOpen: boolean): [boolean, (open: boolean) => void] {
   const isMobile = useMobile()
-  const [open, setOpen] = useState(() => defaultOpen && !isMobile)
-  return [open, setOpen]
+  const [userOpen, setUserOpen] = useState<boolean | null>(null)
+  return [userOpen ?? (defaultOpen && !isMobile), setUserOpen]
 }
 
 /** Renders tool detail content inline on desktop and in a fullscreen dialog on mobile. */
