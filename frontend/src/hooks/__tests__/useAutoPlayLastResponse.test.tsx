@@ -18,7 +18,7 @@ vi.mock('../useSettings', () => ({
 
 interface MockTTSReturn {
   speak: ReturnType<typeof vi.fn>
-  speakMessage: ReturnType<typeof vi.fn>
+  queueMessage: ReturnType<typeof vi.fn>
   stop: ReturnType<typeof vi.fn>
   isEnabled: boolean
   isPlaying: boolean
@@ -33,6 +33,7 @@ const createMessage = (
   id: string,
   completed?: number,
   text = 'Test message text',
+  finish?: SessionMessageAssistant['finish'],
 ): SessionMessageAssistant => ({
   id,
   type: 'assistant',
@@ -42,6 +43,7 @@ const createMessage = (
     created: Date.now(),
     ...(completed ? { completed } : {}),
   },
+  ...(finish ? { finish } : {}),
   content: [{ type: 'text', text }],
 })
 
@@ -68,14 +70,14 @@ const createAssistantMessageWithoutText = (id: string): SessionMessageAssistant 
 
 describe('useAutoPlayLastResponse', () => {
   const mockSpeak = vi.fn()
-  const mockSpeakMessage = vi.fn()
+  const mockQueueMessage = vi.fn()
   const mockStop = vi.fn()
   const mockUpdateSettings = vi.fn()
 
   beforeEach(() => {
     vi.clearAllMocks()
     mockSpeak.mockClear()
-    mockSpeakMessage.mockClear()
+    mockQueueMessage.mockClear()
     mockStop.mockClear()
     mockUpdateSettings.mockClear()
   })
@@ -86,7 +88,7 @@ describe('useAutoPlayLastResponse', () => {
   } = {}) => {
     const mockTTS: MockTTSReturn = {
       speak: mockSpeak,
-      speakMessage: mockSpeakMessage,
+      queueMessage: mockQueueMessage,
       stop: mockStop,
       isEnabled: options.ttsEnabled ?? true,
       isPlaying: false,
@@ -115,7 +117,7 @@ describe('useAutoPlayLastResponse', () => {
     return mockTTS
   }
 
-  it('does NOT call speakMessage when tts.enabled is false', () => {
+  it('does NOT call queueMessage when tts.enabled is false', () => {
     setup({ ttsEnabled: false, autoPlay: true })
 
     const message = createMessage('1', Date.now())
@@ -124,14 +126,13 @@ describe('useAutoPlayLastResponse', () => {
         sessionId: 'test-session',
         lastAssistantMessage: message,
         lastAssistantText: 'Test text',
-        isStreamingResponse: false,
       })
     )
 
-    expect(mockSpeakMessage).not.toHaveBeenCalled()
+    expect(mockQueueMessage).not.toHaveBeenCalled()
   })
 
-  it('does NOT call speakMessage when tts.autoPlay is false', () => {
+  it('does NOT call queueMessage when tts.autoPlay is false', () => {
     setup({ ttsEnabled: true, autoPlay: false })
 
     const message = createMessage('1', Date.now())
@@ -140,14 +141,13 @@ describe('useAutoPlayLastResponse', () => {
         sessionId: 'test-session',
         lastAssistantMessage: message,
         lastAssistantText: 'Test text',
-        isStreamingResponse: false,
       })
     )
 
-    expect(mockSpeakMessage).not.toHaveBeenCalled()
+    expect(mockQueueMessage).not.toHaveBeenCalled()
   })
 
-  it('does NOT call speakMessage on mount when last message was already time.completed', () => {
+  it('does NOT call queueMessage on mount when last message was already time.completed', () => {
     setup()
 
     const message = createMessage('1', Date.now() - 1000)
@@ -156,14 +156,13 @@ describe('useAutoPlayLastResponse', () => {
         sessionId: 'test-session',
         lastAssistantMessage: message,
         lastAssistantText: 'Test text',
-        isStreamingResponse: false,
       })
     )
 
-    expect(mockSpeakMessage).not.toHaveBeenCalled()
+    expect(mockQueueMessage).not.toHaveBeenCalled()
   })
 
-  it('CALLS speakMessage exactly once when lastAssistantMessage transitions from incomplete to completed', () => {
+  it('CALLS queueMessage exactly once when lastAssistantMessage transitions from incomplete to completed', () => {
     setup()
 
     const incompleteMessage = createMessage('1')
@@ -174,26 +173,120 @@ describe('useAutoPlayLastResponse', () => {
           sessionId: 'test-session',
           lastAssistantMessage: incompleteMessage,
           lastAssistantText: 'Test text',
-          isStreamingResponse: false,
         },
       }
     )
 
-    expect(mockSpeakMessage).not.toHaveBeenCalled()
+    expect(mockQueueMessage).not.toHaveBeenCalled()
 
     const completedMessage = createMessage('1', Date.now())
     rerender({
       sessionId: 'test-session',
       lastAssistantMessage: completedMessage,
       lastAssistantText: 'Test text',
-      isStreamingResponse: false,
     })
 
-    expect(mockSpeakMessage).toHaveBeenCalledTimes(1)
-    expect(mockSpeakMessage).toHaveBeenCalledWith('1', 'Test text')
+    expect(mockQueueMessage).toHaveBeenCalledTimes(1)
+    expect(mockQueueMessage).toHaveBeenCalledWith('1', 'Test text')
   })
 
-  it('does NOT call speakMessage when unattributed playback is active, and does not speak it after playback ends', () => {
+  it('queues a completed tool-calls step narration and then the following final response for a session with a baseline', () => {
+    setup()
+
+    const { rerender } = renderHook(
+      (props) => useAutoPlayLastResponse(props),
+      {
+        initialProps: {
+          sessionId: 'test-session',
+          lastAssistantMessage: createMessage('0', Date.now()),
+          lastAssistantText: 'Baseline text',
+        },
+      }
+    )
+
+    expect(mockQueueMessage).not.toHaveBeenCalled()
+
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: createMessage('1'),
+      lastAssistantText: 'Narration',
+    })
+
+    expect(mockQueueMessage).not.toHaveBeenCalled()
+
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: createMessage('1', Date.now(), 'Narration', 'tool-calls'),
+      lastAssistantText: 'Narration',
+    })
+
+    expect(mockQueueMessage).toHaveBeenCalledTimes(1)
+    expect(mockQueueMessage).toHaveBeenNthCalledWith(1, '1', 'Narration')
+
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: createMessage('2'),
+      lastAssistantText: 'Final',
+    })
+
+    expect(mockQueueMessage).toHaveBeenCalledTimes(1)
+
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: createMessage('2', Date.now(), 'Final', 'stop'),
+      lastAssistantText: 'Final',
+    })
+
+    expect(mockQueueMessage).toHaveBeenCalledTimes(2)
+    expect(mockQueueMessage).toHaveBeenNthCalledWith(1, '1', 'Narration')
+    expect(mockQueueMessage).toHaveBeenNthCalledWith(2, '2', 'Final')
+  })
+
+  it('queues a completed tool-calls step narration and then the following final response for a fresh session', () => {
+    setup()
+
+    const { rerender } = renderHook(
+      (props) => useAutoPlayLastResponse(props),
+      {
+        initialProps: {
+          sessionId: 'test-session',
+          lastAssistantMessage: undefined,
+          lastAssistantText: '',
+        },
+      }
+    )
+
+    expect(mockQueueMessage).not.toHaveBeenCalled()
+
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: createMessage('1'),
+      lastAssistantText: 'Narration',
+    })
+
+    expect(mockQueueMessage).not.toHaveBeenCalled()
+
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: createMessage('1', Date.now(), 'Narration', 'tool-calls'),
+      lastAssistantText: 'Narration',
+    })
+
+    expect(mockQueueMessage).toHaveBeenCalledTimes(1)
+    expect(mockQueueMessage).toHaveBeenNthCalledWith(1, '1', 'Narration')
+
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: createMessage('2', Date.now(), 'Final', 'stop'),
+      lastAssistantText: 'Final',
+    })
+
+    expect(mockQueueMessage).toHaveBeenCalledTimes(2)
+    expect(mockQueueMessage).toHaveBeenNthCalledWith(1, '1', 'Narration')
+    expect(mockQueueMessage).toHaveBeenNthCalledWith(2, '2', 'Final')
+  })
+
+  it('does NOT call queueMessage when unattributed playback is active, and does not speak it after playback ends', () => {
     const mockTTS = setup()
 
     const incompleteMessage = createMessage('1')
@@ -204,7 +297,6 @@ describe('useAutoPlayLastResponse', () => {
           sessionId: 'test-session',
           lastAssistantMessage: incompleteMessage,
           lastAssistantText: 'Test text',
-          isStreamingResponse: false,
         },
       }
     )
@@ -217,23 +309,21 @@ describe('useAutoPlayLastResponse', () => {
       sessionId: 'test-session',
       lastAssistantMessage: completedMessage,
       lastAssistantText: 'Test text',
-      isStreamingResponse: false,
     })
 
-    expect(mockSpeakMessage).not.toHaveBeenCalled()
+    expect(mockQueueMessage).not.toHaveBeenCalled()
 
     mockTTS.isPlaying = false
     rerender({
       sessionId: 'test-session',
       lastAssistantMessage: completedMessage,
       lastAssistantText: 'Test text',
-      isStreamingResponse: false,
     })
 
-    expect(mockSpeakMessage).not.toHaveBeenCalled()
+    expect(mockQueueMessage).not.toHaveBeenCalled()
   })
 
-  it('CALLS speakMessage when a message-attributed playback is active', () => {
+  it('CALLS queueMessage when a message-attributed playback is active', () => {
     const mockTTS = setup()
 
     const incompleteMessage = createMessage('1')
@@ -244,7 +334,6 @@ describe('useAutoPlayLastResponse', () => {
           sessionId: 'test-session',
           lastAssistantMessage: incompleteMessage,
           lastAssistantText: 'Test text',
-          isStreamingResponse: false,
         },
       }
     )
@@ -257,14 +346,13 @@ describe('useAutoPlayLastResponse', () => {
       sessionId: 'test-session',
       lastAssistantMessage: completedMessage,
       lastAssistantText: 'Test text',
-      isStreamingResponse: false,
     })
 
-    expect(mockSpeakMessage).toHaveBeenCalledTimes(1)
-    expect(mockSpeakMessage).toHaveBeenCalledWith('1', 'Test text')
+    expect(mockQueueMessage).toHaveBeenCalledTimes(1)
+    expect(mockQueueMessage).toHaveBeenCalledWith('1', 'Test text')
   })
 
-  it('does NOT call speakMessage twice for the same message id across multiple rerenders', () => {
+  it('does NOT call queueMessage twice for the same message id across multiple rerenders', () => {
     setup()
 
     const message = createMessage('1', Date.now())
@@ -275,24 +363,22 @@ describe('useAutoPlayLastResponse', () => {
           sessionId: 'test-session',
           lastAssistantMessage: message,
           lastAssistantText: 'Test text',
-          isStreamingResponse: false,
         },
       }
     )
 
-    expect(mockSpeakMessage).not.toHaveBeenCalled()
+    expect(mockQueueMessage).not.toHaveBeenCalled()
 
     rerender({
       sessionId: 'test-session',
       lastAssistantMessage: message,
       lastAssistantText: 'Test text',
-      isStreamingResponse: false,
     })
 
-    expect(mockSpeakMessage).not.toHaveBeenCalled()
+    expect(mockQueueMessage).not.toHaveBeenCalled()
   })
 
-  it('CALLS speakMessage for a subsequent new message id after the baseline', () => {
+  it('CALLS queueMessage for a subsequent new message id after the baseline', () => {
     setup()
 
     const firstMessage = createMessage('1', Date.now() - 2000)
@@ -304,23 +390,21 @@ describe('useAutoPlayLastResponse', () => {
           sessionId: 'test-session',
           lastAssistantMessage: firstMessage,
           lastAssistantText: 'First text',
-          isStreamingResponse: false,
         },
       }
     )
 
-    expect(mockSpeakMessage).not.toHaveBeenCalled()
+    expect(mockQueueMessage).not.toHaveBeenCalled()
 
     const secondMessage = createMessage('2', Date.now())
     rerender({
       sessionId: 'test-session',
       lastAssistantMessage: secondMessage,
       lastAssistantText: 'Second text',
-      isStreamingResponse: false,
     })
 
-    expect(mockSpeakMessage).toHaveBeenCalledTimes(1)
-    expect(mockSpeakMessage).toHaveBeenCalledWith('2', 'Second text')
+    expect(mockQueueMessage).toHaveBeenCalledTimes(1)
+    expect(mockQueueMessage).toHaveBeenCalledWith('2', 'Second text')
   })
 
   it('resets baseline when sessionId changes', () => {
@@ -335,42 +419,92 @@ describe('useAutoPlayLastResponse', () => {
           sessionId: 'session-1',
           lastAssistantMessage: message1,
           lastAssistantText: 'Session 1 text',
-          isStreamingResponse: false,
         },
       }
     )
 
-    expect(mockSpeakMessage).not.toHaveBeenCalled()
+    expect(mockQueueMessage).not.toHaveBeenCalled()
 
     const message2 = createMessage('1', Date.now())
     rerender({
       sessionId: 'session-2',
       lastAssistantMessage: message2,
       lastAssistantText: 'Session 2 text',
-      isStreamingResponse: false,
     })
 
-    expect(mockSpeakMessage).toHaveBeenCalledTimes(1)
-    expect(mockSpeakMessage).toHaveBeenCalledWith('1', 'Session 2 text')
+    expect(mockQueueMessage).toHaveBeenCalledTimes(1)
+    expect(mockQueueMessage).toHaveBeenCalledWith('1', 'Session 2 text')
   })
 
-  it('does NOT call speakMessage when isStreamingResponse is true', () => {
+  it('CALLS queueMessage once for the first reply in a fresh session when it starts empty then streams to completion', () => {
     setup()
 
-    const message = createMessage('1', Date.now())
-    renderHook(() =>
-      useAutoPlayLastResponse({
-        sessionId: 'test-session',
-        lastAssistantMessage: message,
-        lastAssistantText: 'Test text',
-        isStreamingResponse: true,
-      })
+    const { rerender } = renderHook(
+      (props) => useAutoPlayLastResponse(props),
+      {
+        initialProps: {
+          sessionId: 'test-session',
+          lastAssistantMessage: undefined,
+          lastAssistantText: '',
+        },
+      }
     )
 
-    expect(mockSpeakMessage).not.toHaveBeenCalled()
+    expect(mockQueueMessage).not.toHaveBeenCalled()
+
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: createMessage('1'),
+      lastAssistantText: 'Test text',
+    })
+
+    expect(mockQueueMessage).not.toHaveBeenCalled()
+
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: createMessage('1', Date.now()),
+      lastAssistantText: 'Test text',
+    })
+
+    expect(mockQueueMessage).toHaveBeenCalledTimes(1)
+    expect(mockQueueMessage).toHaveBeenCalledWith('1', 'Test text')
   })
 
-  it('does NOT call speakMessage when lastAssistantText is empty', () => {
+  it('CALLS queueMessage once when mounting on a completed message without text and then completing a new reply', () => {
+    setup()
+
+    const { rerender } = renderHook(
+      (props) => useAutoPlayLastResponse(props),
+      {
+        initialProps: {
+          sessionId: 'test-session',
+          lastAssistantMessage: createAssistantMessageWithoutText('0'),
+          lastAssistantText: '',
+        },
+      }
+    )
+
+    expect(mockQueueMessage).not.toHaveBeenCalled()
+
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: createMessage('1'),
+      lastAssistantText: 'Reply',
+    })
+
+    expect(mockQueueMessage).not.toHaveBeenCalled()
+
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: createMessage('1', Date.now()),
+      lastAssistantText: 'Reply',
+    })
+
+    expect(mockQueueMessage).toHaveBeenCalledTimes(1)
+    expect(mockQueueMessage).toHaveBeenCalledWith('1', 'Reply')
+  })
+
+  it('does NOT call queueMessage when lastAssistantText is empty', () => {
     setup()
 
     const message = createMessage('1', Date.now())
@@ -379,14 +513,13 @@ describe('useAutoPlayLastResponse', () => {
         sessionId: 'test-session',
         lastAssistantMessage: message,
         lastAssistantText: '',
-        isStreamingResponse: false,
       })
     )
 
-    expect(mockSpeakMessage).not.toHaveBeenCalled()
+    expect(mockQueueMessage).not.toHaveBeenCalled()
   })
 
-  it('does NOT call speakMessage when lastAssistantText is whitespace only', () => {
+  it('does NOT call queueMessage when lastAssistantText is whitespace only', () => {
     setup()
 
     const message = createMessage('1', Date.now())
@@ -395,11 +528,10 @@ describe('useAutoPlayLastResponse', () => {
         sessionId: 'test-session',
         lastAssistantMessage: message,
         lastAssistantText: '   ',
-        isStreamingResponse: false,
       })
     )
 
-    expect(mockSpeakMessage).not.toHaveBeenCalled()
+    expect(mockQueueMessage).not.toHaveBeenCalled()
   })
 })
 

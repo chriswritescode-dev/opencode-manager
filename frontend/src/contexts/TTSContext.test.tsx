@@ -72,6 +72,14 @@ const revokeObjectURL = vi.fn()
 const textA = 'Alpha one. Alpha two. Alpha three. Alpha four. Alpha five.'
 const textB = 'Bravo one. Bravo two. Bravo three. Bravo four. Bravo five.'
 
+async function flushPlayback() {
+  await act(async () => {
+    for (let tick = 0; tick < 20; tick += 1) {
+      await Promise.resolve()
+    }
+  })
+}
+
 function setPreferences(overrides: Partial<TTSConfig> = {}) {
   mocks.useSettings.mockReturnValue({
     preferences: {
@@ -292,5 +300,150 @@ describe('TTSProvider playback isolation', () => {
     for (const count of fetchCounts.values()) {
       expect(count).toBe(1)
     }
+  })
+})
+
+describe('TTSProvider message queue', () => {
+  const QUEUE_PAUSE_MS = 600
+  const firstText = 'Alpha plays first.'
+  const queuedText = 'Bravo waits in queue.'
+  const interruptingText = 'Charlie interrupts.'
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('plays a queued message only after the active playback ends and the pause elapses', async () => {
+    setPreferences()
+    renderProvider()
+
+    await act(async () => {
+      void ttsRef.current!.speakMessage('A', firstText)
+    })
+    await flushPlayback()
+
+    expect(FakeAudio.instances).toHaveLength(1)
+    const firstAudio = FakeAudio.instances[0]
+    expect(firstAudio.paused).toBe(false)
+    expect(ttsRef.current!.activeMessageId).toBe('A')
+
+    await act(async () => {
+      ttsRef.current!.queueMessage('B', queuedText)
+    })
+    await flushPlayback()
+
+    expect(FakeAudio.instances).toHaveLength(1)
+    expect(firstAudio.paused).toBe(false)
+    expect(ttsRef.current!.activeMessageId).toBe('A')
+    expect(ttsRef.current!.isPlaying).toBe(true)
+
+    await act(async () => {
+      firstAudio.onended!()
+    })
+    await flushPlayback()
+
+    expect(FakeAudio.instances).toHaveLength(1)
+    expect(ttsRef.current!.isIdle).toBe(true)
+    expect(ttsRef.current!.activeMessageId).toBeNull()
+
+    await act(async () => {
+      vi.advanceTimersByTime(QUEUE_PAUSE_MS - 1)
+    })
+    await flushPlayback()
+
+    expect(FakeAudio.instances).toHaveLength(1)
+
+    await act(async () => {
+      vi.advanceTimersByTime(1)
+    })
+    await flushPlayback()
+
+    expect(FakeAudio.instances).toHaveLength(2)
+    expect(FakeAudio.instances[1].paused).toBe(false)
+    expect(ttsRef.current!.activeMessageId).toBe('B')
+    expect(ttsRef.current!.isPlaying).toBe(true)
+  })
+
+  it('drops queued messages when playback is stopped', async () => {
+    setPreferences()
+    renderProvider()
+
+    await act(async () => {
+      void ttsRef.current!.speakMessage('A', firstText)
+    })
+    await flushPlayback()
+
+    await act(async () => {
+      ttsRef.current!.queueMessage('B', queuedText)
+    })
+    await flushPlayback()
+
+    await act(async () => {
+      FakeAudio.instances[0].onended!()
+    })
+    await flushPlayback()
+
+    await act(async () => {
+      ttsRef.current!.stop()
+    })
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000)
+    })
+    await flushPlayback()
+
+    expect(FakeAudio.instances).toHaveLength(1)
+    expect(fetchBodies).not.toContain(queuedText)
+    expect(ttsRef.current!.state).toBe('idle')
+    expect(ttsRef.current!.activeMessageId).toBeNull()
+  })
+
+  it('clears queued messages when a manual speakMessage interrupts playback', async () => {
+    setPreferences()
+    renderProvider()
+
+    await act(async () => {
+      void ttsRef.current!.speakMessage('A', firstText)
+    })
+    await flushPlayback()
+
+    await act(async () => {
+      ttsRef.current!.queueMessage('B', queuedText)
+    })
+    await flushPlayback()
+
+    await act(async () => {
+      void ttsRef.current!.speakMessage('C', interruptingText)
+    })
+    await flushPlayback()
+
+    expect(FakeAudio.instances).toHaveLength(2)
+    expect(FakeAudio.instances[0].paused).toBe(true)
+    expect(ttsRef.current!.activeMessageId).toBe('C')
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000)
+    })
+    await flushPlayback()
+
+    expect(FakeAudio.instances).toHaveLength(2)
+    expect(fetchBodies).not.toContain(queuedText)
+
+    await act(async () => {
+      FakeAudio.instances[1].onended!()
+    })
+    await flushPlayback()
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000)
+    })
+    await flushPlayback()
+
+    expect(FakeAudio.instances).toHaveLength(2)
+    expect(ttsRef.current!.state).toBe('idle')
   })
 })

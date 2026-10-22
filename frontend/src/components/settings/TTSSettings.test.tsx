@@ -72,6 +72,7 @@ function mockHooks(preferences: UserPreferences = buildPreferences()) {
     speak: vi.fn(),
     speakWithConfig: vi.fn(),
     speakMessage: vi.fn(),
+    queueMessage: vi.fn(),
     stop: vi.fn(),
     state: 'idle',
     error: null,

@@ -7,7 +7,6 @@ interface UseAutoPlayLastResponseParams {
   sessionId: string
   lastAssistantMessage: SessionMessageInfo | undefined
   lastAssistantText: string
-  isStreamingResponse: boolean
 }
 
 interface PlayableAssistantMessage {
@@ -35,9 +34,8 @@ export function useAutoPlayLastResponse({
   sessionId,
   lastAssistantMessage,
   lastAssistantText,
-  isStreamingResponse,
 }: UseAutoPlayLastResponseParams): void {
-  const { speakMessage, isEnabled: ttsEnabled, isPlaying, isLoading, activeMessageId } = useTTS()
+  const { queueMessage, isEnabled: ttsEnabled, isPlaying, isLoading, activeMessageId } = useTTS()
   const { preferences } = useSettings()
   
   const autoPlayEnabled = preferences?.tts?.autoPlay ?? false
@@ -76,7 +74,7 @@ export function useAutoPlayLastResponse({
       return
     }
     
-    if (isStreamingResponse || !lastAssistantMessage) {
+    if (!lastAssistantMessage) {
       return
     }
     
@@ -100,7 +98,7 @@ export function useAutoPlayLastResponse({
       lastSpokenIdRef.current = messageId
       lastKnownCompletedRef.current[messageId] = true
       if (hasSeenIncompleteRef.current && shouldAutoSpeak) {
-        speakMessage(messageId, lastAssistantText)
+        queueMessage(messageId, lastAssistantText)
       }
       return
     }
@@ -108,7 +106,7 @@ export function useAutoPlayLastResponse({
     if (!wasCompleted && messageId === lastSpokenIdRef.current) {
       lastKnownCompletedRef.current[messageId] = true
       if (shouldAutoSpeak) {
-        speakMessage(messageId, lastAssistantText)
+        queueMessage(messageId, lastAssistantText)
       }
       return
     }
@@ -117,15 +115,14 @@ export function useAutoPlayLastResponse({
       lastSpokenIdRef.current = messageId
       lastKnownCompletedRef.current[messageId] = true
       if (shouldAutoSpeak) {
-        speakMessage(messageId, lastAssistantText)
+        queueMessage(messageId, lastAssistantText)
       }
     }
   }, [
     ttsEnabled,
     autoPlayEnabled,
-    isStreamingResponse,
     lastAssistantMessage,
     lastAssistantText,
-    speakMessage,
+    queueMessage,
   ])
 }

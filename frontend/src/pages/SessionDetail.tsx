@@ -365,7 +365,6 @@ export function SessionDetail() {
     sessionId: sessionId ?? '',
     lastAssistantMessage,
     lastAssistantText,
-    isStreamingResponse,
   });
 
   const handleShowSessionsDialog = useCallback(() => setSessionsDialogOpen(true), []);

@@ -16,6 +16,7 @@ export interface TTSContextValue {
   speak: (text: string) => Promise<boolean>
   speakWithConfig: (text: string, config: TTSConfig) => Promise<boolean>
   speakMessage: (messageId: string, text: string) => Promise<boolean>
+  queueMessage: (messageId: string, text: string) => void
   stop: () => void
   state: TTSState
   error: string | null
