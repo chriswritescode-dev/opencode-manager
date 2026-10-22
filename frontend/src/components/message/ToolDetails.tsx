@@ -1,7 +1,7 @@
-import { useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useMobile } from '@/hooks/useMobile'
-import { tailLines } from '@/lib/clampDisplayText'
+import { clampDisplayText, tailLines } from '@/lib/clampDisplayText'
 import { cn } from '@/lib/utils'
 import { TRANSCRIPT_DETAIL_CLASS } from './transcriptStyles'
 
@@ -58,7 +58,11 @@ export function ShellPreview({
   status?: ReactNode
 }) {
   const isMobile = useMobile()
-  const tail = tailLines(output, isMobile ? MOBILE_SHELL_PREVIEW_LINES : SHELL_PREVIEW_LINES)
+  const lineLimit = isMobile ? MOBILE_SHELL_PREVIEW_LINES : SHELL_PREVIEW_LINES
+  const tail = useMemo(() => {
+    const result = tailLines(output, lineLimit)
+    return { ...result, text: clampDisplayText(result.text) }
+  }, [output, lineLimit])
 
   return (
     <button
