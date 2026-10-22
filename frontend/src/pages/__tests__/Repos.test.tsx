@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { Repos } from '../Repos'
@@ -27,6 +28,11 @@ vi.mock('@/hooks/useSettingsDialog', () => ({
     selectedTab: null,
     setActiveTab: vi.fn(),
   }),
+}))
+
+vi.mock('@/hooks/useActiveWork', () => ({
+  useServerActivityState: () => null,
+  useLocalActivityState: () => null,
 }))
 
 vi.mock('@/hooks/useMobile', () => ({
@@ -127,7 +133,6 @@ describe('Repos', () => {
     expect(screen.queryByText('local-repos')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Repo' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Open files' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Manage servers/ })).toHaveClass('hidden', 'sm:flex')
     expect(screen.getByRole('button', { name: 'All Schedules' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
   })
@@ -148,42 +153,37 @@ describe('Repos', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/')
   })
 
-  it('shows the connection status of the selected linked server', () => {
+  it('names the selected linked server in the header with its connection state', () => {
     useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
 
     renderRepos()
 
-    expect(screen.getByText(/Connected/)).toBeInTheDocument()
-    expect(screen.getByText(/v2\.0\.15/)).toBeInTheDocument()
+    const switcher = screen.getByRole('button', { name: 'Switch server, current: Kitchen' })
+    expect(switcher).toHaveTextContent('Kitchen')
+    expect(within(switcher).getByRole('img', { name: 'Connected' })).toBeInTheDocument()
   })
 
-  it('shows an unreachable linked server with its error', () => {
-    useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
-    mocks.useOpenCodeServerStatuses.mockReturnValue({
-      statuses: [],
-      statusById: {
-        srv_kitchen: {
-          serverId: 'srv_kitchen',
-          connected: false,
-          version: null,
-          error: 'connection refused',
-        },
-      },
-      isLoading: false,
-    })
-
+  it('does not show the server switcher in the header for the local server', () => {
     renderRepos()
 
-    expect(screen.getByText(/Unreachable/)).toBeInTheDocument()
-    expect(screen.getByText(/connection refused/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Switch server/ })).not.toBeInTheDocument()
   })
 
-  it('opens the servers settings tab from the header', () => {
+  it('switches servers and opens server settings from the header dropdown', async () => {
+    const user = userEvent.setup()
     useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
 
     renderRepos()
 
-    fireEvent.click(screen.getByRole('button', { name: /Manage servers/ }))
+    await user.click(screen.getByRole('button', { name: 'Switch server, current: Kitchen' }))
+    await user.click(await screen.findByRole('menuitem', { name: /OC Manager/ }))
+
+    expect(screen.getByText('local-repos')).toBeInTheDocument()
+    expect(screen.getByTestId('location')).toHaveTextContent('/')
+
+    act(() => useSidebarServerStore.getState().selectServer('srv_kitchen'))
+    await user.click(screen.getByRole('button', { name: 'Switch server, current: Kitchen' }))
+    await user.click(await screen.findByRole('menuitem', { name: /Manage servers/ }))
 
     expect(mocks.openTab).toHaveBeenCalledWith('servers')
   })
