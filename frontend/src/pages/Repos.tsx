@@ -62,7 +62,11 @@ export function Repos() {
             All Schedules
           </Button>
           {isLocalServer ? (
-            <Button onClick={() => setAddRepoOpen(true)} size="sm">
+            <Button
+              onClick={() => setAddRepoOpen(true)}
+              size="sm"
+              className="hidden md:inline-flex"
+            >
               <Plus className="w-4 h-4 mr-1" />
               Repo
             </Button>
@@ -73,7 +77,7 @@ export function Repos() {
         </Header.Actions>
       </Header>
       <div className="container mx-auto flex-1 pt-2 px-2 min-h-0 overflow-auto pb-[calc(env(safe-area-inset-bottom)+60px)] sm:pb-0">
-        {isLocalServer ? <RepoList /> : <RemoteProjectList serverId={selectedServerId} />}
+        {isLocalServer ? <RepoList onAddRepo={() => setAddRepoOpen(true)} /> : <RemoteProjectList serverId={selectedServerId} />}
       </div>
       {isLocalServer ? (
         <AddRepoDialog open={addRepoOpen} onOpenChange={setAddRepoOpen} />

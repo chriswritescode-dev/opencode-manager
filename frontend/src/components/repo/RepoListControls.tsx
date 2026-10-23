@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { SlidersHorizontal, Trash2, X } from "lucide-react";
+import { Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RepoSearchInput } from "./RepoSearchInput";
 import {
@@ -31,6 +31,7 @@ interface RepoListControlsProps {
   hasClonedRepos: boolean;
   selectionMode: boolean;
   onSelectionModeChange: (enabled: boolean) => void;
+  onAddRepo: () => void;
 }
 
 const FILTER_OPTIONS: { value: RepoFilterMode; label: string }[] = [
@@ -65,6 +66,7 @@ export function RepoListControls({
   hasClonedRepos,
   selectionMode,
   onSelectionModeChange,
+  onAddRepo,
 }: RepoListControlsProps) {
   const isMobile = useMobile();
   const [showMenu, setShowMenu] = useState(false);
@@ -122,10 +124,29 @@ export function RepoListControls({
       <div className="flex items-center gap-2">
         <RepoSearchInput value={searchQuery} onValueChange={onSearchChange} />
 
+        {isMobile && (
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Add repository"
+            title="Add repository"
+            className="h-9 w-9 shrink-0"
+            onClick={onAddRepo}
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
+        )}
+
         {isMobile ? (
           <DropdownMenu open={showMenu} onOpenChange={setShowMenu}>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label="Filter and sort repositories"
+                title="Filter and sort repositories"
+                className="h-9 w-9 shrink-0"
+              >
                 <SlidersHorizontal className="w-4 h-4" />
               </Button>
             </DropdownMenuTrigger>

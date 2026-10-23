@@ -6,8 +6,9 @@ import { CSS } from "@dnd-kit/utilities"
 import { listRepos, deleteRepo, updateRepoOrder, type DeleteBranchChoice } from "@/api/repos"
 import { fetchReposGitStatus } from "@/api/git"
 import { DeleteDialog } from "@/components/ui/delete-dialog"
+import { Button } from "@/components/ui/button"
 import { RadioOptionGroup, type RadioOption } from "@/components/ui/radio-option-group"
-import { GitBranch, Search, GripVertical } from "lucide-react"
+import { GitBranch, Search, GripVertical, Plus } from "lucide-react"
 import type { Repo } from "@/api/types"
 import type { GitStatusResponse } from "@/types/git"
 import { RepoCard } from "./RepoCard"
@@ -135,7 +136,7 @@ function StaticRepoCard({
   )
 }
 
-export function RepoList() {
+export function RepoList({ onAddRepo }: { onAddRepo: () => void }) {
   const queryClient = useQueryClient()
   const isMobile = useMobile()
   const { preferences, updateSettings } = useSettings()
@@ -341,6 +342,10 @@ export function RepoList() {
             <p className="text-muted-foreground">
               No repositories yet. Add one to get started.
             </p>
+            <Button size="sm" className="mt-4" onClick={onAddRepo}>
+              <Plus className="w-4 h-4 mr-1" />
+              Add repository
+            </Button>
           </div>
         )
 
@@ -413,6 +418,7 @@ export function RepoList() {
           hasClonedRepos={hasClonedRepos}
           selectionMode={selectionMode}
           onSelectionModeChange={handleSelectionModeChange}
+          onAddRepo={onAddRepo}
         />
 
         <div className="mx-2 md:mx-0 flex-1 min-h-0">
