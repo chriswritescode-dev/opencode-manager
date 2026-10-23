@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { useReducer, useEffect } from 'react'
-import { VOICE_MODE_INSTRUCTION_KEY } from '@opencode-manager/shared/opencode'
+import { VOICE_MODE_INSTRUCTION_KEY, VOICE_NO_SPEECH_TIMEOUT_MS } from '@opencode-manager/shared/opencode'
 import type { SessionMessageAssistant } from '@opencode-manager/shared/opencode'
 import type { TTSEndReason } from '@/contexts/tts-context'
 import type { SttEndOfSpeechReason } from '@/lib/webSpeechRecognizer'
@@ -17,6 +17,7 @@ interface MockSttValues {
   isRecording: boolean
   isProcessing: boolean
   isEndpointing: boolean
+  isExternalProvider: boolean
   isEnabled: boolean
   isSupported: boolean
   isError: boolean
@@ -60,6 +61,7 @@ const sttValue: MockSttValues = {
   isRecording: false,
   isProcessing: false,
   isEndpointing: false,
+  isExternalProvider: false,
   isEnabled: true,
   isSupported: true,
   isError: false,
@@ -158,6 +160,7 @@ describe('useVoiceConversation', () => {
       isRecording: false,
       isProcessing: false,
       isEndpointing: false,
+      isExternalProvider: false,
       isEnabled: true,
       isSupported: true,
       isError: false,
@@ -181,6 +184,10 @@ describe('useVoiceConversation', () => {
     harness.sendTurn.mockResolvedValue(undefined)
     harness.interrupt.mockResolvedValue(undefined)
     harness.startRecording.mockResolvedValue(true)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('starts listening and opens capture with the pause budget when idle', async () => {
@@ -364,6 +371,63 @@ describe('useVoiceConversation', () => {
 
     expect(result.current.liveTranscript).toBe('')
     expect(result.current.canEditInTextBox).toBe(false)
+  })
+
+  it('keeps an external-provider dictation open past the no-speech timeout', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props), {
+      initialProps: createProps(),
+    })
+
+    act(() => result.current.start())
+    await waitFor(() => expect(result.current.phase).toBe('listening'))
+
+    updateStt({ isExternalProvider: true, isRecording: true, interimTranscript: 'Recording...' })
+
+    act(() => {
+      vi.advanceTimersByTime(VOICE_NO_SPEECH_TIMEOUT_MS + 2_000)
+    })
+
+    expect(harness.abortRecording).not.toHaveBeenCalled()
+    expect(result.current.phase).toBe('listening')
+    expect(result.current.label).toBe('Listening')
+  })
+
+  it('keeps an external-provider capture running when the session starts a turn', async () => {
+    const { result, rerender } = renderHook(
+      (props: UseVoiceConversationInput) => useVoiceConversation(props),
+      { initialProps: createProps() },
+    )
+
+    act(() => result.current.start())
+    await waitFor(() => expect(result.current.phase).toBe('listening'))
+
+    updateStt({ isExternalProvider: true, isRecording: true, interimTranscript: 'Recording...' })
+    rerender(createProps({ status: 'busy' }))
+
+    expect(harness.abortRecording).not.toHaveBeenCalled()
+    expect(result.current.phase).toBe('listening')
+    expect(result.current.label).toBe('Listening')
+  })
+
+  it('pauses when the browser provider captures no speech for the timeout', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props), {
+      initialProps: createProps(),
+    })
+
+    act(() => result.current.start())
+    await waitFor(() => expect(result.current.phase).toBe('listening'))
+
+    updateStt({ isRecording: true })
+
+    act(() => {
+      vi.advanceTimersByTime(VOICE_NO_SPEECH_TIMEOUT_MS)
+    })
+
+    expect(harness.abortRecording).toHaveBeenCalled()
+    expect(result.current.phase).toBe('paused')
+    expect(result.current.label).toBe("Didn't catch that")
   })
 
   it('pauses without a message when the turn produces no speech', async () => {

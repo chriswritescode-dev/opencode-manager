@@ -587,7 +587,7 @@ export function useVoiceConversation(
       clearListeningTimers()
       return
     }
-    if (interimText || turnTextValue) {
+    if (stt.isExternalProvider || interimText || turnTextValue) {
       clearTimeoutRef(noSpeechTimerRef)
     } else if (noSpeechTimerRef.current === null) {
       noSpeechTimerRef.current = setTimeout(() => {
@@ -607,6 +607,7 @@ export function useVoiceConversation(
     state.phase,
     stt.isRecording,
     stt.isEndpointing,
+    stt.isExternalProvider,
     interimText,
     turnTextValue,
     handleEndOfSpeech,
@@ -682,10 +683,20 @@ export function useVoiceConversation(
 
   useEffect(() => {
     if (state.phase !== 'listening' || status === 'idle') return
+    if (stt.isExternalProvider && (stt.isRecording || stt.isProcessing)) return
     if (turnTextValue || interimText) return
     sttRef.current?.abortRecording()
     dispatch({ type: 'turn-started', baselineId: currentTurnBaseline(messages) })
-  }, [state.phase, status, interimText, turnTextValue, messages])
+  }, [
+    state.phase,
+    status,
+    interimText,
+    turnTextValue,
+    messages,
+    stt.isExternalProvider,
+    stt.isRecording,
+    stt.isProcessing,
+  ])
 
   const start = useCallback(() => {
     if (phaseRef.current !== 'off') return
