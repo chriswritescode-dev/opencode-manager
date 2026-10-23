@@ -90,26 +90,19 @@ describe('ConnectDeviceDialog', () => {
     expect(await screen.findByAltText('Browser sign-in QR code')).toBeInTheDocument()
   })
 
-  it('explains a loopback block without showing the mobile app QR code', async () => {
+  it('warns about a localhost address while still showing the mobile app QR code', async () => {
     mocks.createDevicePairingLinks.mockResolvedValue({
       ...BASE_LINKS,
-      appLink: null,
-      appLinkBlockedReason: 'loopback',
       warnings: ['plain-http', 'loopback'],
     })
     renderDialog()
 
-    expect(
-      await screen.findByText(
-        'This page is open on localhost, which your phone cannot reach. Open the Manager at its public or LAN address to show the app QR code.',
-      ),
-    ).toBeInTheDocument()
-    expect(screen.queryByAltText('Mobile app pairing QR code')).not.toBeInTheDocument()
-    expect(
-      screen.getByText('This address uses plain HTTP, so the sign-in code travels unencrypted.'),
-    ).toBeInTheDocument()
+    expect(await screen.findByAltText('Mobile app pairing QR code')).toBeInTheDocument()
     expect(
       screen.getByText('This address is localhost; other devices cannot reach it.'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('This address uses plain HTTP, so the sign-in code travels unencrypted.'),
     ).toBeInTheDocument()
   })
 

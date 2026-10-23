@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Database } from 'bun:sqlite'
 import { Hono } from 'hono'
 import {
+  DevicePairingAvailabilitySchema,
   DevicePairingLinksResponseSchema,
   buildManagerBrowserPairingLink,
   parseManagerAppLink,
+  type DevicePairingAvailability,
   type DevicePairingLinksResponse,
 } from '@opencode-manager/shared/schemas'
 
@@ -41,6 +43,10 @@ const MISSING_ORIGIN_ERROR =
   'The request had no Origin header. Open the Manager at an address listed in AUTH_TRUSTED_ORIGINS to pair a device.'
 const untrustedOriginError = (origin: string) =>
   `This address (${origin}) is not in AUTH_TRUSTED_ORIGINS. Add it and restart the Manager to pair a device.`
+const LOOPBACK_ORIGIN_ERROR =
+  'This page is open on localhost, which other devices cannot reach. Open the Manager at its public or LAN address to pair a device.'
+const INSECURE_ORIGIN_ERROR =
+  'Pairing needs HTTPS on a public address. Serve the Manager over HTTPS, or open it at a private network address.'
 const LINKS_FAILED_ERROR = 'Failed to create device pairing links'
 
 const SENSITIVE_VALUES = [CODE, ...CLOUDFLARE_SECRET_VALUES]
@@ -55,6 +61,10 @@ const createMintPairingCode = () =>
 
 async function readLinksBody(response: Response): Promise<DevicePairingLinksResponse> {
   return DevicePairingLinksResponseSchema.parse(await response.json())
+}
+
+async function readAvailabilityBody(response: Response): Promise<DevicePairingAvailability> {
+  return DevicePairingAvailabilitySchema.parse(await response.json())
 }
 
 describe('device pairing link routes', () => {
@@ -103,12 +113,24 @@ describe('device pairing link routes', () => {
     })
   }
 
+  const getAvailability = (origin?: string) => {
+    const path =
+      origin === undefined
+        ? '/device-pairing/availability'
+        : `/device-pairing/availability?origin=${encodeURIComponent(origin)}`
+
+    return app.request(path, { headers: { cookie: COOKIE_HEADER } })
+  }
+
   it('rejects a request without an origin', async () => {
     const res = await postLinks()
 
     expect(res.status).toBe(400)
     expect(res.headers.get('Cache-Control')).toBe('no-store')
-    await expect(res.json()).resolves.toEqual({ error: MISSING_ORIGIN_ERROR })
+    await expect(res.json()).resolves.toEqual({
+      error: MISSING_ORIGIN_ERROR,
+      code: 'untrusted-origin',
+    })
     expect(mintPairingCode).not.toHaveBeenCalled()
   })
 
@@ -117,9 +139,10 @@ describe('device pairing link routes', () => {
 
     expect(res.status).toBe(400)
     expect(res.headers.get('Cache-Control')).toBe('no-store')
-    const body = await res.json() as { error: string }
+    const body = await res.json() as { error: string; code: string }
     expect(body.error).toBe(untrustedOriginError('https://evil.example'))
     expect(body.error).toContain('AUTH_TRUSTED_ORIGINS')
+    expect(body.code).toBe('untrusted-origin')
     expect(mintPairingCode).not.toHaveBeenCalled()
   })
 
@@ -127,7 +150,10 @@ describe('device pairing link routes', () => {
     const res = await postLinks('null')
 
     expect(res.status).toBe(400)
-    await expect(res.json()).resolves.toEqual({ error: untrustedOriginError('null') })
+    await expect(res.json()).resolves.toEqual({
+      error: untrustedOriginError('null'),
+      code: 'untrusted-origin',
+    })
     expect(mintPairingCode).not.toHaveBeenCalled()
   })
 
@@ -195,11 +221,13 @@ describe('device pairing link routes', () => {
 
     const res = await postLinks('http://203.0.113.5:5003')
 
-    expect(res.status).toBe(200)
-    const body = await readLinksBody(res)
-
-    expect(body.appLink).toBeNull()
-    expect(body.appLinkBlockedReason).toBe('insecure-origin')
+    expect(res.status).toBe(400)
+    expect(res.headers.get('Cache-Control')).toBe('no-store')
+    await expect(res.json()).resolves.toEqual({
+      error: INSECURE_ORIGIN_ERROR,
+      code: 'insecure-origin',
+    })
+    expect(mintPairingCode).not.toHaveBeenCalled()
   })
 
   it('blocks a loopback origin outside development', async () => {
@@ -208,12 +236,12 @@ describe('device pairing link routes', () => {
 
     const res = await postLinks('http://localhost:5173')
 
-    expect(res.status).toBe(200)
-    const body = await readLinksBody(res)
-
-    expect(body.appLink).toBeNull()
-    expect(body.appLinkBlockedReason).toBe('loopback')
-    expect(body.warnings).toEqual(['plain-http', 'loopback'])
+    expect(res.status).toBe(400)
+    await expect(res.json()).resolves.toEqual({
+      error: LOOPBACK_ORIGIN_ERROR,
+      code: 'loopback',
+    })
+    expect(mintPairingCode).not.toHaveBeenCalled()
   })
 
   it('allows a loopback origin in development', async () => {
@@ -226,6 +254,7 @@ describe('device pairing link routes', () => {
     const body = await readLinksBody(res)
 
     expect(parseManagerAppLink(body.appLink ?? '')?.baseUrl).toBe('http://localhost:5173')
+    expect(body.warnings).toEqual(['plain-http', 'loopback'])
   })
 
   it('reports unreadable stored headers', async () => {
@@ -256,5 +285,120 @@ describe('device pairing link routes', () => {
     await expect(res.json()).resolves.toEqual({ error: LINKS_FAILED_ERROR })
 
     expectNoSecretsLogged(loggerMocks, SENSITIVE_VALUES)
+  })
+
+  describe('GET availability', () => {
+    it('reports a trusted https origin as available without minting', async () => {
+      const res = await getAvailability('https://m.example.com')
+
+      expect(res.status).toBe(200)
+      expect(res.headers.get('Cache-Control')).toBe('no-store')
+      await expect(readAvailabilityBody(res)).resolves.toEqual({
+        available: true,
+        reason: null,
+        message: null,
+      })
+      expect(mintPairingCode).not.toHaveBeenCalled()
+    })
+
+    it('reports an untrusted origin', async () => {
+      const res = await getAvailability('https://evil.example')
+
+      expect(res.status).toBe(200)
+      await expect(readAvailabilityBody(res)).resolves.toEqual({
+        available: false,
+        reason: 'untrusted-origin',
+        message: untrustedOriginError('https://evil.example'),
+      })
+      expect(mintPairingCode).not.toHaveBeenCalled()
+    })
+
+    it('reports a loopback origin outside development', async () => {
+      development = false
+
+      const res = await getAvailability('http://localhost:5173')
+
+      expect(res.status).toBe(200)
+      await expect(readAvailabilityBody(res)).resolves.toEqual({
+        available: false,
+        reason: 'loopback',
+        message: LOOPBACK_ORIGIN_ERROR,
+      })
+      expect(mintPairingCode).not.toHaveBeenCalled()
+    })
+
+    it('reports a loopback origin in development as available', async () => {
+      development = true
+
+      const res = await getAvailability('http://localhost:5173')
+
+      expect(res.status).toBe(200)
+      await expect(readAvailabilityBody(res)).resolves.toEqual({
+        available: true,
+        reason: null,
+        message: null,
+      })
+      expect(mintPairingCode).not.toHaveBeenCalled()
+    })
+
+    it('reports a public http origin as insecure', async () => {
+      allowPrivateNetwork = true
+
+      const res = await getAvailability('http://203.0.113.5:5003')
+
+      expect(res.status).toBe(200)
+      await expect(readAvailabilityBody(res)).resolves.toEqual({
+        available: false,
+        reason: 'insecure-origin',
+        message: INSECURE_ORIGIN_ERROR,
+      })
+      expect(mintPairingCode).not.toHaveBeenCalled()
+    })
+
+    it('keeps a private network http origin available so the browser link can be shown', async () => {
+      const res = await getAvailability('http://192.168.1.20:5003')
+
+      expect(res.status).toBe(200)
+      await expect(readAvailabilityBody(res)).resolves.toEqual({
+        available: true,
+        reason: null,
+        message: null,
+      })
+      expect(mintPairingCode).not.toHaveBeenCalled()
+    })
+
+    it('normalises the supplied address to its origin', async () => {
+      const res = await getAvailability('https://m.example.com/settings?tab=pairing')
+
+      expect(res.status).toBe(200)
+      await expect(readAvailabilityBody(res)).resolves.toEqual({
+        available: true,
+        reason: null,
+        message: null,
+      })
+    })
+
+    it('rejects a missing origin query parameter', async () => {
+      const res = await getAvailability()
+
+      expect(res.status).toBe(400)
+      expect(res.headers.get('Cache-Control')).toBe('no-store')
+      const body = await res.json() as { error: string }
+      expect(body.error).toContain('origin query parameter')
+      expect(mintPairingCode).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ['garbage text', 'not a url'],
+      ['a non-http scheme', 'ocm://link?v=2&kind=manager'],
+      ['a scheme-relative address', '//m.example.com'],
+    ])('rejects %s in the origin query parameter', async (_label, origin) => {
+      const res = await getAvailability(origin)
+
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error: string }
+      expect(body.error).toContain('absolute http or https URL')
+      expect(mintPairingCode).not.toHaveBeenCalled()
+    })
   })
 })

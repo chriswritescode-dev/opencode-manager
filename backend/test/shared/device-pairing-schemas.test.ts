@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  AppLinkBlockedReasonSchema,
+  DevicePairingAvailabilitySchema,
   REMOTE_ACCESS_HEADERS_MAX_ENCODED_LENGTH,
   REMOTE_ACCESS_HEADER_VALUE_MAX_LENGTH,
   RedeemDevicePairingCodeResponseSchema,
@@ -168,6 +170,40 @@ describe('RemoteAccessHeaderDraftValueSchema', () => {
     })
 
     expect(result.success).toBe(false)
+  })
+})
+
+describe('DevicePairingAvailabilitySchema', () => {
+  it('accepts an available origin', () => {
+    expect(
+      DevicePairingAvailabilitySchema.parse({ available: true, reason: null, message: null }),
+    ).toEqual({ available: true, reason: null, message: null })
+  })
+
+  it.each(['untrusted-origin', 'loopback', 'insecure-origin'])(
+    'accepts the unavailable reason %s',
+    (reason) => {
+      expect(
+        DevicePairingAvailabilitySchema.parse({ available: false, reason, message: 'blocked' }),
+      ).toEqual({ available: false, reason, message: 'blocked' })
+    },
+  )
+
+  it('rejects an unknown reason', () => {
+    expect(
+      DevicePairingAvailabilitySchema.safeParse({ available: false, reason: 'no-origin', message: 'x' })
+        .success,
+    ).toBe(false)
+  })
+})
+
+describe('AppLinkBlockedReasonSchema', () => {
+  it('accepts an insecure origin', () => {
+    expect(AppLinkBlockedReasonSchema.parse('insecure-origin')).toBe('insecure-origin')
+  })
+
+  it('no longer accepts loopback, which now blocks pairing entirely', () => {
+    expect(AppLinkBlockedReasonSchema.safeParse('loopback').success).toBe(false)
   })
 })
 

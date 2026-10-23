@@ -128,8 +128,19 @@ export const RedeemDevicePairingCodeResponseSchema = z.object({
   }),
 });
 
-export const AppLinkBlockedReasonSchema = z.enum(["insecure-origin", "loopback"]);
+export const AppLinkBlockedReasonSchema = z.enum(["insecure-origin"]);
 export const DevicePairingLinkWarningSchema = z.enum(["plain-http", "loopback", "headers-unreadable"]);
+export const DevicePairingUnavailableReasonSchema = z.enum([
+  "untrusted-origin",
+  "loopback",
+  "insecure-origin",
+]);
+
+export const DevicePairingAvailabilitySchema = z.object({
+  available: z.boolean(),
+  reason: DevicePairingUnavailableReasonSchema.nullable(),
+  message: z.string().nullable(),
+});
 
 export const CreateDevicePairingLinksRequestSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
@@ -170,6 +181,8 @@ export type RedeemDevicePairingCodeRequest = z.infer<typeof RedeemDevicePairingC
 export type RedeemDevicePairingCodeResponse = z.infer<typeof RedeemDevicePairingCodeResponseSchema>;
 export type AppLinkBlockedReason = z.infer<typeof AppLinkBlockedReasonSchema>;
 export type DevicePairingLinkWarning = z.infer<typeof DevicePairingLinkWarningSchema>;
+export type DevicePairingUnavailableReason = z.infer<typeof DevicePairingUnavailableReasonSchema>;
+export type DevicePairingAvailability = z.infer<typeof DevicePairingAvailabilitySchema>;
 export type CreateDevicePairingLinksRequest = z.infer<typeof CreateDevicePairingLinksRequestSchema>;
 export type DevicePairingLinksResponse = z.infer<typeof DevicePairingLinksResponseSchema>;
 export type PairedDevice = z.infer<typeof PairedDeviceSchema>;
