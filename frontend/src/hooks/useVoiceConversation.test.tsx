@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { useReducer, useEffect } from 'react'
 import { VOICE_MODE_INSTRUCTION_KEY } from '@opencode-manager/shared/opencode'
 import type { SessionMessageAssistant } from '@opencode-manager/shared/opencode'
+import type { TTSEndReason } from '@/contexts/tts-context'
 import type { SttEndOfSpeechReason } from '@/lib/webSpeechRecognizer'
 import { useVoiceConversation } from './useVoiceConversation'
 import type { UseVoiceConversationInput } from './useVoiceConversation'
@@ -113,6 +114,14 @@ async function endOfSpeech(reason: SttEndOfSpeechReason, finalText: string) {
   })
 }
 
+function speechEndHandler(callIndex = 0): (reason: TTSEndReason) => void {
+  const options = harness.speakMessage.mock.calls[callIndex]?.[2] as
+    | { onEnd?: (reason: TTSEndReason) => void }
+    | undefined
+  if (!options?.onEnd) throw new Error('speakMessage was not called with an onEnd handler')
+  return options.onEnd
+}
+
 function assistantMessage(id: string, text: string): SessionMessageAssistant {
   return {
     id,
@@ -171,6 +180,7 @@ describe('useVoiceConversation', () => {
     harness.listSessionInstructionKeys.mockResolvedValue([])
     harness.sendTurn.mockResolvedValue(undefined)
     harness.interrupt.mockResolvedValue(undefined)
+    harness.startRecording.mockResolvedValue(true)
   })
 
   it('starts listening and opens capture with the pause budget when idle', async () => {
@@ -226,8 +236,7 @@ describe('useVoiceConversation', () => {
     expect(result.current.label).toBe('Speaking')
     expect(result.current.canStopAgent).toBe(false)
 
-    const options = harness.speakMessage.mock.calls[0]?.[2] as { onEnd: () => void }
-    act(() => options.onEnd())
+    act(() => speechEndHandler(0)('completed'))
 
     await waitFor(() => expect(result.current.phase).toBe('listening'))
     expect(harness.startRecording).toHaveBeenCalledTimes(2)
@@ -373,5 +382,71 @@ describe('useVoiceConversation', () => {
     expect(result.current.label).toBe("Didn't catch that")
     expect(result.current.hint).toBe('Tap to talk')
     expect(result.current.orbLabel).toBe('Resume voice conversation')
+  })
+
+  it('pauses with an error when capture cannot start', async () => {
+    harness.startRecording.mockResolvedValue(false)
+    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props), {
+      initialProps: createProps(),
+    })
+
+    act(() => result.current.start())
+
+    await waitFor(() => expect(result.current.phase).toBe('paused'))
+    expect(result.current.label).toBe('Something went wrong')
+    expect(result.current.hint).toBe('Tap to retry')
+  })
+
+  it('pauses when speech recognition reports an error while listening', async () => {
+    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props), {
+      initialProps: createProps(),
+    })
+
+    act(() => result.current.start())
+    await waitFor(() => expect(result.current.phase).toBe('listening'))
+
+    updateStt({ isError: true, error: 'Microphone access denied' })
+
+    await waitFor(() => expect(result.current.phase).toBe('paused'))
+    expect(result.current.label).toBe('Something went wrong')
+  })
+
+  it('pauses instead of finishing the turn when reading the reply fails', async () => {
+    const { result, rerender } = renderHook(
+      (props: UseVoiceConversationInput) => useVoiceConversation(props),
+      { initialProps: createProps() },
+    )
+
+    act(() => result.current.start())
+    await waitFor(() => expect(result.current.phase).toBe('listening'))
+    await endOfSpeech('pause', 'hello there')
+    await waitFor(() => expect(result.current.phase).toBe('working'))
+
+    rerender(createProps({ messages: [assistantMessage('msg_1', 'Done')] }))
+    await waitFor(() => expect(result.current.phase).toBe('speaking'))
+
+    act(() => speechEndHandler(0)('error'))
+
+    expect(result.current.phase).toBe('paused')
+    expect(result.current.label).toBe('Something went wrong')
+    expect(harness.startRecording).toHaveBeenCalledTimes(1)
+  })
+
+  it('marks a reply with nothing to read as heard and listens again', async () => {
+    const { result, rerender } = renderHook(
+      (props: UseVoiceConversationInput) => useVoiceConversation(props),
+      { initialProps: createProps() },
+    )
+
+    act(() => result.current.start())
+    await waitFor(() => expect(result.current.phase).toBe('listening'))
+    await endOfSpeech('pause', 'hello there')
+    await waitFor(() => expect(result.current.phase).toBe('working'))
+
+    rerender(createProps({ messages: [assistantMessage('msg_1', '```ts\nconst answer = 42\n```')] }))
+
+    await waitFor(() => expect(result.current.phase).toBe('listening'))
+    expect(harness.speakMessage).not.toHaveBeenCalled()
+    expect(harness.startRecording).toHaveBeenCalledTimes(2)
   })
 })

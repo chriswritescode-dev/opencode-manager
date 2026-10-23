@@ -17,7 +17,7 @@ interface PlayableAssistantMessage {
 }
 
 export function getAssistantText(message: SessionMessageInfo | undefined): string {
-  return message?.type === 'assistant' ? assistantText(message.content) : ''
+  return message?.type === 'assistant' ? assistantText(message.content, { stripThink: true }) : ''
 }
 
 export function getLatestPlayableAssistantMessage(messages: SessionMessageInfo[] | undefined): PlayableAssistantMessage | undefined {
@@ -73,10 +73,19 @@ export function useAutoPlayLastResponse({
   }, [sessionId])
   
   useEffect(() => {
-    if (!enabled || !ttsEnabled || !autoPlayEnabled) {
+    if (!enabled) {
+      if (lastAssistantMessage && isMessageCompleted(lastAssistantMessage)) {
+        hasInitializedRef.current = true
+        lastSpokenIdRef.current = lastAssistantMessage.id
+        lastKnownCompletedRef.current[lastAssistantMessage.id] = true
+      }
       return
     }
-    
+
+    if (!ttsEnabled || !autoPlayEnabled) {
+      return
+    }
+
     if (!lastAssistantMessage) {
       return
     }

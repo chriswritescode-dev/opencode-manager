@@ -29,6 +29,7 @@ import {
 } from '@/api/opencode'
 import { useSTT } from '@/hooks/useSTT'
 import { useTTS } from '@/hooks/useTTS'
+import { sanitizeForTTS } from '@/lib/utils'
 import type { SttEndOfSpeechReason } from '@/lib/webSpeechRecognizer'
 
 /** Everything the voice conversation loop needs from the view that owns it. */
@@ -127,6 +128,10 @@ const SPEAKING_WATCHDOG_PER_CHARACTER_MS = 80
 const SPEAKING_WATCHDOG_MAX_MS = 180_000
 
 const SPEAKING_STALLED_MESSAGE = 'Reading the reply stopped responding'
+
+const REPLY_READ_FAILED_MESSAGE = 'Reading the reply failed'
+
+const STT_FAILED_MESSAGE = 'Speech recognition failed'
 
 const LISTENING_MAX_TURN_MS = 120_000
 
@@ -300,7 +305,7 @@ export function useVoiceConversation(
   const phaseRef = useRef(state.phase)
   const baselineIdRef = useRef(state.baselineId)
   const previousPhaseRef = useRef<VoicePhase>('off')
-  const captureEntryRef = useRef(false)
+  const previousSttErrorRef = useRef(false)
   const activeSessionIDRef = useRef<string | null>(null)
   const endTurnInFlightRef = useRef(false)
   const turnGenerationRef = useRef(0)
@@ -312,7 +317,6 @@ export function useVoiceConversation(
   const speakingTextRef = useRef('')
   const speakingIdRef = useRef<string | null>(null)
   const spokenIdsRef = useRef<Set<string>>(new Set())
-  const observedTtsErrorRef = useRef<string | null>(null)
   const noSpeechTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const maxTurnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingTurnBaselineRef = useRef<string | null>(null)
@@ -417,14 +421,27 @@ export function useVoiceConversation(
     [],
   )
 
+  const failCapture = useCallback((message: string) => {
+    const phase = phaseRef.current
+    if (phase !== 'listening' && phase !== 'recording') return
+    phaseRef.current = 'paused'
+    dispatch({ type: 'error', message })
+  }, [])
+
   const startCapture = useCallback(async () => {
     const current = sttRef.current
     if (!current || !current.isEnabled || !current.isSupported) return
-    await current.startRecording({
+    const generation = turnGenerationRef.current
+    const phase = phaseRef.current
+    const started = await current.startRecording({
       endpointing: { pauseMs, noSpeechTimeoutMs: VOICE_NO_SPEECH_TIMEOUT_MS },
       onEndOfSpeech: handleEndOfSpeech,
     })
-  }, [pauseMs, handleEndOfSpeech])
+    if (started) return
+    if (turnGenerationRef.current !== generation) return
+    if (phaseRef.current !== phase) return
+    failCapture(sttRef.current?.error ?? STT_FAILED_MESSAGE)
+  }, [pauseMs, handleEndOfSpeech, failCapture])
 
   const endTurn = useCallback(
     async (finalText?: string) => {
@@ -500,9 +517,8 @@ export function useVoiceConversation(
     previousPhaseRef.current = state.phase
     if (state.phase !== 'listening' && state.phase !== 'recording') return
     if (previousPhase === state.phase) return
-    if (state.phase === 'listening') captureEntryRef.current = true
     const current = sttRef.current
-    if (current?.state === 'error') current.abortRecording()
+    if (current?.isError) current.abortRecording()
     void startCapture()
   }, [state.phase, startCapture])
 
@@ -527,8 +543,14 @@ export function useVoiceConversation(
       speakingIdRef.current = message.id
       spokenIdsRef.current.add(message.id)
       void latestRef.current.tts.speakMessage(message.id, message.text, {
-        onEnd: () => {
+        onEnd: (reason) => {
           if (speakTokenRef.current !== token) return
+          if (reason === 'error') {
+            speakTokenRef.current += 1
+            speakingIdRef.current = null
+            dispatch({ type: 'error', message: REPLY_READ_FAILED_MESSAGE })
+            return
+          }
           speakingIdRef.current = null
           if (playbackHeldRef.current) {
             setHeldPlayback(false)
@@ -540,17 +562,6 @@ export function useVoiceConversation(
     },
     [setHeldPlayback],
   )
-
-  useEffect(() => {
-    const previousError = observedTtsErrorRef.current
-    observedTtsErrorRef.current = tts.error
-    if (state.phase !== 'speaking') return
-    if (tts.error === null || tts.error === previousError) return
-    speakTokenRef.current += 1
-    speakingIdRef.current = null
-    latestRef.current.tts.stop()
-    dispatch({ type: 'error', message: tts.error })
-  }, [state.phase, tts.error])
 
   useEffect(() => {
     if (state.phase !== 'speaking') return
@@ -613,17 +624,19 @@ export function useVoiceConversation(
       return
     }
     const spokenIds = spokenIdsRef.current
-    const next = findNextUnspokenMessage(messages, state.baselineId, spokenIds)
-    if (next) {
+    const unspoken = listUnspokenMessages(messages, state.baselineId, spokenIds)
+    const readable = latestRef.current.tts.isEnabled
+      ? unspoken.find((message) => sanitizeForTTS(message.text).trim() !== '')
+      : undefined
+    if (readable) {
       clearWorkingTimers()
-      if (latestRef.current.tts.isEnabled) {
-        dispatch({ type: 'speak-start' })
-        speakMessage(next)
-        return
-      }
-      for (const message of listUnspokenMessages(messages, state.baselineId, spokenIds)) {
-        spokenIds.add(message.id)
-      }
+      dispatch({ type: 'speak-start' })
+      speakMessage(readable)
+      return
+    }
+    if (unspoken.length > 0) {
+      clearWorkingTimers()
+      for (const message of unspoken) spokenIds.add(message.id)
     }
     if (pendingPromptCount > 0) clearTimeoutRef(noDeliveryTimerRef)
     if (status !== 'idle') {
@@ -890,6 +903,7 @@ export function useVoiceConversation(
       dispatch({ type: 'exit' })
       sttRef.current?.abortRecording()
       const { tts: capturedTts, serverId: capturedServerId } = latestRef.current
+      speakTokenRef.current += 1
       capturedTts.stop()
       const pendingPut = instructionPutRef.current
       instructionPutRef.current = null
@@ -933,13 +947,11 @@ export function useVoiceConversation(
   }, [requestPause])
 
   useEffect(() => {
-    const enteredCapture = captureEntryRef.current
-    captureEntryRef.current = false
-    if (state.phase !== 'listening' && state.phase !== 'recording') return
-    if (stt.state !== 'error') return
-    if (enteredCapture) return
-    dispatch({ type: 'error', message: stt.error ?? 'Speech recognition failed' })
-  }, [state.phase, stt.state, stt.error])
+    const wasError = previousSttErrorRef.current
+    previousSttErrorRef.current = stt.isError
+    if (!stt.isError || wasError) return
+    failCapture(stt.error ?? STT_FAILED_MESSAGE)
+  }, [stt.isError, stt.error, failCapture])
 
   const hasHeldReading = state.phase === 'paused' && playbackHeld
   const textInput = {

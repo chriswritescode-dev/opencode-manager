@@ -520,6 +520,27 @@ describe('listUnspokenMessages', () => {
     expect(listUnspokenMessages(messages, null, new Set())).toEqual([{ id: 'a2', text: 'Spoken' }])
   })
 
+  it('excludes an inline think block from the spoken text', () => {
+    const messages = [
+      user('u1', 'hi', 1),
+      assistant('a1', 2, 3, ['The answer is ready <think>hidden reasoning</think> and verified']),
+    ]
+
+    expect(listUnspokenMessages(messages, null, new Set())).toEqual([
+      { id: 'a1', text: 'The answer is ready and verified' },
+    ])
+  })
+
+  it('skips a completed reply that only contains a think block', () => {
+    const messages = [
+      user('u1', 'hi', 1),
+      assistant('a1', 2, 3, ['<think>hidden reasoning</think>']),
+      assistant('a2', 4, 5, ['Spoken']),
+    ]
+
+    expect(listUnspokenMessages(messages, null, new Set())).toEqual([{ id: 'a2', text: 'Spoken' }])
+  })
+
   it('considers the whole transcript when the baseline is null', () => {
     const messages = [user('u1', 'only turn', 1), assistant('a1', 2, 3, ['The answer'])]
 

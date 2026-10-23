@@ -1112,9 +1112,11 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   const handleVoiceEditInTextBox = useCallback((text: string) => {
     const dictated = text.trim()
     if (!dictated) return
-    setPrompt((current) => (current.trim() ? `${current} ${dictated}` : dictated))
-    textareaRef.current?.focus()
-  }, [])
+    const current = promptRef.current
+    const next = current.trim() ? `${current} ${dictated}` : dictated
+    setPrompt(next)
+    focusPromptAt(next.length)
+  }, [focusPromptAt])
 
   const voiceConversation = useVoiceConversation({
     sessionID,

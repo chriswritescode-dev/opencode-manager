@@ -298,6 +298,26 @@ describe('PromptInput voice conversation', () => {
 
       expect(promptInput()).toHaveValue('draft dictated words')
     })
+
+    it('focuses the text box with the cursor after the transcript once the conversation closes', async () => {
+      const view = renderComponent({ onVoiceConversationActiveChange: vi.fn() })
+
+      fireEvent.change(promptInput(), { target: { value: 'draft' } })
+
+      setVoiceController({ isActive: true, phase: 'listening', canEditInTextBox: true }, 'dictated words')
+      view.rerenderWith({ messages: [] })
+      fireEvent.click(screen.getByRole('button', { name: 'Edit in text box' }))
+
+      setVoiceController()
+      view.rerenderWith({ messages: [] })
+
+      await waitFor(() => {
+        const input = promptInput() as HTMLTextAreaElement
+        expect(input).toHaveFocus()
+        expect(input.selectionStart).toBe('draft dictated words'.length)
+        expect(input.selectionEnd).toBe('draft dictated words'.length)
+      })
+    })
   })
 
   describe('sending a voice turn', () => {

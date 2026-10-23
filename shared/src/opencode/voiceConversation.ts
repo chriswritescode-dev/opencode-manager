@@ -260,7 +260,7 @@ export function listUnspokenMessages(
     if (message === undefined || message.type !== 'assistant') continue
     if (message.time.completed === undefined) continue
     if (spokenIds.has(message.id)) continue
-    const text = assistantText(message.content).trim()
+    const text = assistantText(message.content, { stripThink: true }).trim()
     if (!text) continue
     unspoken.push({ id: message.id, text })
   }
