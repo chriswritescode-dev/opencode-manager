@@ -15,6 +15,7 @@ export function normalizeToBaseUrl(endpoint: string): string {
     .replace(/\/v1\/audio\/transcriptions$/, '')
     .replace(/\/audio\/transcriptions$/, '')
     .replace(/\/$/, '')
+    .replace(/\/v1$/, '')
 }
 
 async function ensureDiscoveryCacheDir(): Promise<void> {
