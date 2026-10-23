@@ -168,6 +168,29 @@ describe('OpenCodeServerDialog', () => {
     expect(screen.queryByText(originChangeWarning)).not.toBeInTheDocument()
   })
 
+  it('warns about unencrypted credentials only for public HTTP origins', async () => {
+    const user = userEvent.setup()
+    const transportWarning = 'This URL is not HTTPS, so credentials travel unencrypted'
+    renderDialog()
+
+    const urlInput = screen.getByLabelText('URL')
+
+    await user.type(urlInput, 'http://203.0.113.5:4096')
+    expect(screen.getByText(new RegExp(transportWarning))).toBeInTheDocument()
+
+    await user.clear(urlInput)
+    await user.type(urlInput, 'http://192.168.1.20:4096')
+    expect(screen.queryByText(new RegExp(transportWarning))).not.toBeInTheDocument()
+
+    await user.clear(urlInput)
+    await user.type(urlInput, 'http://100.101.102.103:4096')
+    expect(screen.queryByText(new RegExp(transportWarning))).not.toBeInTheDocument()
+
+    await user.clear(urlInput)
+    await user.type(urlInput, 'https://studio.example.com')
+    expect(screen.queryByText(new RegExp(transportWarning))).not.toBeInTheDocument()
+  })
+
   it('does not warn about an origin change when no password is stored', async () => {
     const user = userEvent.setup()
     renderDialog({ server: { ...savedServer, hasPassword: false } })

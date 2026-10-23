@@ -2,7 +2,7 @@
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { createBrowserRouter, RouterProvider, Outlet, useNavigate, useLocation, useParams, Navigate } from 'react-router-dom'
 import { useEffect, useRef, useCallback, type ReactNode } from 'react'
-import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
+import { DEVICE_PAIRING_PATH, LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { Toaster } from 'sonner'
 import { Repos } from './pages/Repos'
 import { RepoDetail } from './pages/RepoDetail'
@@ -12,6 +12,7 @@ import { SessionDetail } from './pages/SessionDetail'
 import { Schedules } from './pages/Schedules'
 import { GlobalSchedules } from './pages/GlobalSchedules'
 import { Login } from './pages/Login'
+import { Pair } from './pages/Pair'
 import { Register } from './pages/Register'
 import { Setup } from './pages/Setup'
 import { AssistantRedirect } from './pages/AssistantRedirect'
@@ -289,6 +290,10 @@ const router = createBrowserRouter([
         path: '/login',
         element: <Login />,
         loader: loginLoader,
+      },
+      {
+        path: DEVICE_PAIRING_PATH,
+        element: <Pair />,
       },
       {
         path: '/register',

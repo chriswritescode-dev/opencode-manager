@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { Hono } from 'hono'
 import { createNotificationRoutes } from '../../src/routes/notifications'
 import type { NotificationService } from '../../src/services/notification'
+import type { Session } from '../../src/auth'
 
 interface NotificationServiceStub {
   getVapidPublicKey: ReturnType<typeof vi.fn>
@@ -82,6 +84,7 @@ describe('Notification Routes', () => {
         'p256dh-key',
         'auth-key',
         'Phone',
+        undefined,
       )
     })
 
@@ -106,6 +109,38 @@ describe('Notification Routes', () => {
         'p256dh-key',
         'auth-key',
         undefined,
+        undefined,
+      )
+    })
+
+    it('saves the session of the device that subscribed', async () => {
+      service.saveSubscription.mockReturnValue({ id: 3 })
+
+      const sessionApp = new Hono<{ Variables: { session?: Session['session'] } }>()
+      sessionApp.use('*', async (c, next) => {
+        c.set('session', { id: 'ses_phone' } as Session['session'])
+        await next()
+      })
+      sessionApp.route('/', createNotificationRoutes(service as unknown as NotificationService))
+
+      const res = await sessionApp.fetch(new Request('http://localhost/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          endpoint: 'https://push.example.com/abc',
+          keys: { p256dh: 'p256dh-key', auth: 'auth-key' },
+          deviceName: 'Phone',
+        }),
+      }))
+
+      expect(res.status).toBe(200)
+      expect(service.saveSubscription).toHaveBeenCalledWith(
+        'default',
+        'https://push.example.com/abc',
+        'p256dh-key',
+        'auth-key',
+        'Phone',
+        'ses_phone',
       )
     })
 

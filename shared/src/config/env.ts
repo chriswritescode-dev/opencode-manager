@@ -176,6 +176,17 @@ export const getTrustedOrigins = (): string[] =>
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0)
 
+/** Reports whether a request Origin is one of the configured trusted origins. */
+export const isTrustedOrigin = (
+  origin: string | undefined,
+  options: { requireOrigin?: boolean } = {},
+  trustedOrigins: readonly string[] = getTrustedOrigins(),
+): boolean => {
+  if (!origin) return !(options.requireOrigin ?? false)
+  if (origin === 'null') return false
+  return trustedOrigins.includes(origin)
+}
+
 export const getApiUrl = (port: number = ENV.SERVER.PORT): string => {
   const host = ENV.SERVER.HOST
   

@@ -24,6 +24,7 @@ import { SettingsService } from "./settings";
 import { sseAggregator, type SSEEvent } from "./sse-aggregator";
 import { getRepoName } from "../db/queries";
 import { getScheduleRunBySessionId } from "../db/schedules";
+import { ensurePushSubscriptionsTable } from "../db/push-subscriptions";
 import type { Repo } from "../types/repo";
 import { buildServerSessionPath, buildSessionPath } from "@opencode-manager/shared/utils";
 import { sessionIDFromEvent } from "@opencode-manager/shared/opencode";
@@ -183,28 +184,7 @@ export class NotificationService {
     private serverRegistry: NotificationServerRegistry | null = null
   ) {
     this.settingsService = new SettingsService(db);
-    this.initializePushSubscriptionsTable();
-  }
-
-  private initializePushSubscriptionsTable(): void {
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS push_subscriptions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL,
-        endpoint TEXT NOT NULL UNIQUE,
-        p256dh TEXT NOT NULL,
-        auth TEXT NOT NULL,
-        device_name TEXT,
-        created_at INTEGER NOT NULL,
-        last_used_at INTEGER
-      )
-    `);
-    this.db.run(
-      "CREATE INDEX IF NOT EXISTS idx_push_sub_user ON push_subscriptions(user_id)"
-    );
-    this.db.run(
-      "CREATE UNIQUE INDEX IF NOT EXISTS idx_push_sub_endpoint ON push_subscriptions(endpoint)"
-    );
+    ensurePushSubscriptionsTable(db);
   }
 
   configureVapid(config: VapidConfig): void {
@@ -229,22 +209,24 @@ export class NotificationService {
     endpoint: string,
     p256dh: string,
     auth: string,
-    deviceName?: string
+    deviceName?: string,
+    sessionId?: string | null
   ): PushSubscriptionRecord {
     const now = Date.now();
 
     this.db
       .prepare(
-        `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, device_name, created_at, last_used_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, device_name, session_id, created_at, last_used_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(endpoint) DO UPDATE SET
            user_id = excluded.user_id,
            p256dh = excluded.p256dh,
            auth = excluded.auth,
            device_name = excluded.device_name,
+           session_id = excluded.session_id,
            last_used_at = excluded.last_used_at`
       )
-      .run(userId, endpoint, p256dh, auth, deviceName ?? null, now, now);
+      .run(userId, endpoint, p256dh, auth, deviceName ?? null, sessionId ?? null, now, now);
 
     const row = this.db
       .prepare("SELECT * FROM push_subscriptions WHERE endpoint = ?")
@@ -255,6 +237,7 @@ export class NotificationService {
       p256dh: string;
       auth: string;
       device_name: string | null;
+      session_id: string | null;
       created_at: number;
       last_used_at: number | null;
     };
