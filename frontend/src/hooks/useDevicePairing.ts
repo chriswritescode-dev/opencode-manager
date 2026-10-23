@@ -8,6 +8,7 @@ import type {
 import {
   clearRemoteAccessHeaders,
   createDevicePairingLinks,
+  getDevicePairingAvailability,
   getRemoteAccessHeaders,
   listPairedDevices,
   replaceRemoteAccessHeaders,
@@ -16,6 +17,7 @@ import {
 
 const REMOTE_ACCESS_HEADERS_QUERY_KEY = ['remote-access-headers']
 const PAIRED_DEVICES_QUERY_KEY = ['paired-devices']
+const DEVICE_PAIRING_AVAILABILITY_QUERY_KEY = ['device-pairing-availability']
 
 export function useRemoteAccessHeaders() {
   const queryClient = useQueryClient()
@@ -52,6 +54,15 @@ export function useRemoteAccessHeaders() {
 export function useCreateDevicePairingLinks() {
   return useMutation({
     mutationFn: (body: CreateDevicePairingLinksRequest = {}) => createDevicePairingLinks(body),
+  })
+}
+
+export function useDevicePairingAvailability() {
+  const origin = window.location.origin
+
+  return useQuery({
+    queryKey: [...DEVICE_PAIRING_AVAILABILITY_QUERY_KEY, origin],
+    queryFn: () => getDevicePairingAvailability(origin),
   })
 }
 

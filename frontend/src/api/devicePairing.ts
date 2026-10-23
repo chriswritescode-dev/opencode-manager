@@ -1,5 +1,6 @@
 import type {
   CreateDevicePairingLinksRequest,
+  DevicePairingAvailability,
   DevicePairingLinksResponse,
   PairedDevice,
   PairedDevicesResponse,
@@ -60,6 +61,16 @@ export async function createDevicePairingLinks(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
+}
+
+/** Reads whether the Manager can mint pairing codes for an address without minting one. */
+export async function getDevicePairingAvailability(
+  origin: string,
+): Promise<DevicePairingAvailability> {
+  return fetchWrapper<DevicePairingAvailability>(
+    `${API_BASE_URL}/api/device-pairing/availability`,
+    { params: { origin } },
+  )
 }
 
 /** Lists the devices signed in to this account. */

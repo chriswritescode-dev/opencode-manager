@@ -24,9 +24,6 @@ const WARNING_MESSAGES: Record<DevicePairingLinkWarning, string> = {
   'headers-unreadable': 'Stored remote access headers could not be decrypted and are not included.',
 }
 
-const LOOPBACK_EXPLANATION =
-  'This page is open on localhost, which your phone cannot reach. Open the Manager at its public or LAN address to show the app QR code.'
-
 const INSECURE_ORIGIN_EXPLANATION =
   "The mobile app QR code needs HTTPS. Use an HTTPS address, or turn on 'Allow plain-HTTP app links on private networks' if this Manager uses a private IP address."
 
@@ -187,11 +184,7 @@ export function ConnectDeviceDialog({ open, onOpenChange }: ConnectDeviceDialogP
                     </p>
                   </>
                 ) : (
-                  <p className="text-sm text-muted-foreground">
-                    {links.appLinkBlockedReason === 'loopback'
-                      ? LOOPBACK_EXPLANATION
-                      : INSECURE_ORIGIN_EXPLANATION}
-                  </p>
+                  <p className="text-sm text-muted-foreground">{INSECURE_ORIGIN_EXPLANATION}</p>
                 )}
               </TabsContent>
 
