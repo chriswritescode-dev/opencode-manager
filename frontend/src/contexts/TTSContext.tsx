@@ -31,24 +31,11 @@ interface SpeechRequest {
   onEnd?: (reason: TTSEndReason, error?: string) => void
 }
 
-/**
- * Returns whether a rejection is the browser refusing playback outside a user gesture.
- *
- * @param error The rejection value from play().
- * @returns True for a NotAllowedError.
- */
 function isNotAllowedError(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false
   return (error as { name?: unknown }).name === 'NotAllowedError'
 }
 
-/**
- * Picks the message shown for a failed playback.
- *
- * @param error The rejection value from play().
- * @param fallback The message to use when the rejection carries none.
- * @returns The message to surface to the user.
- */
 function playbackErrorMessage(error: unknown, fallback: string): string {
   if (isNotAllowedError(error)) return PLAYBACK_BLOCKED_MESSAGE
   return error instanceof Error && error.message ? error.message : fallback
