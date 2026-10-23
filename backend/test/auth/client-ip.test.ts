@@ -1,10 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { Hono } from 'hono'
 import { DatabaseSync } from 'node:sqlite'
 import type { Database } from 'bun:sqlite'
 import { createAuth } from '../../src/auth'
-import { AUTH_SOCKET_IP_HEADER } from '../../src/auth/client-ip'
-import { applyClientIpHeaders, getClientIpHeaders, getTrustedProxyHeaders } from '../../src/auth/client-ip'
+import { AUTH_SOCKET_IP_HEADER, applyClientIpHeaders } from '../../src/auth/client-ip'
 import { createAuthRoutes } from '../../src/routes/auth'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
@@ -16,7 +15,6 @@ const { ENV } = vi.hoisted(() => ({
       SECRET: 'test-secret-for-encryption-key-32c',
       TRUSTED_ORIGINS: 'http://localhost:5173,http://localhost:5003',
       SECURE_COOKIES: false,
-      TRUSTED_PROXY_HEADERS: '',
       ADMIN_EMAIL: undefined as string | undefined,
       ADMIN_PASSWORD: undefined as string | undefined,
       ADMIN_PASSWORD_RESET: false,
@@ -80,45 +78,21 @@ function readSessionIpAddress(db: Database): string {
   return row.ipAddress
 }
 
+function createCapturingHandler() {
+  const received: Request[] = []
+  const handler = vi.fn(async (request: Request) => {
+    received.push(request)
+    return new Response('ok')
+  })
+  return { received, handler }
+}
+
 describe('auth client ip headers', () => {
-  beforeEach(() => {
-    ENV.AUTH.TRUSTED_PROXY_HEADERS = ''
-  })
-
-  it('trusts no proxy headers by default and resolves the socket address', () => {
-    expect(getTrustedProxyHeaders()).toEqual([])
-    expect(getClientIpHeaders()).toEqual([AUTH_SOCKET_IP_HEADER])
-  })
-
-  it('reads configured proxy headers in order before the socket address', () => {
-    ENV.AUTH.TRUSTED_PROXY_HEADERS = ' CF-Connecting-IP , X-Forwarded-For '
-
-    expect(getTrustedProxyHeaders()).toEqual(['cf-connecting-ip', 'x-forwarded-for'])
-    expect(getClientIpHeaders()).toEqual(['cf-connecting-ip', 'x-forwarded-for', AUTH_SOCKET_IP_HEADER])
-  })
-
-  it('ignores empty, malformed and duplicate header names', () => {
-    ENV.AUTH.TRUSTED_PROXY_HEADERS = 'x-real-ip,,X-Real-IP,not a header'
-
-    expect(getTrustedProxyHeaders()).toEqual(['x-real-ip', 'x-real-ip'])
-  })
-
-  it('drops a client-supplied forwarded header and uses the socket address by default', () => {
-    const headers = new Headers({ 'x-forwarded-for': '198.51.100.9', [AUTH_SOCKET_IP_HEADER]: '6.6.6.6' })
+  it('overrides a client-supplied socket header with the socket address', () => {
+    const headers = new Headers({ [AUTH_SOCKET_IP_HEADER]: '6.6.6.6' })
 
     const result = applyClientIpHeaders(headers, '203.0.113.7')
 
-    expect(result.get('x-forwarded-for')).toBeNull()
-    expect(result.get(AUTH_SOCKET_IP_HEADER)).toBe('203.0.113.7')
-  })
-
-  it('keeps the configured proxy header and still forwards the socket address', () => {
-    ENV.AUTH.TRUSTED_PROXY_HEADERS = 'x-forwarded-for'
-    const headers = new Headers({ 'x-forwarded-for': '198.51.100.9' })
-
-    const result = applyClientIpHeaders(headers, '203.0.113.7')
-
-    expect(result.get('x-forwarded-for')).toBe('198.51.100.9')
     expect(result.get(AUTH_SOCKET_IP_HEADER)).toBe('203.0.113.7')
   })
 
@@ -132,55 +106,22 @@ describe('auth client ip headers', () => {
 })
 
 describe('createAuthRoutes client ip forwarding', () => {
-  beforeEach(() => {
-    ENV.AUTH.TRUSTED_PROXY_HEADERS = ''
-  })
-
-  it('passes the socket address to the auth handler and strips a spoofed forwarded header', async () => {
-    const received: Request[] = []
-    const handler = vi.fn(async (request: Request) => {
-      received.push(request)
-      return new Response('ok')
-    })
+  it('sets the socket address on the auth request and ignores a spoofed socket header', async () => {
+    const { received, handler } = createCapturingHandler()
     const app: Hono = createAuthRoutes({ handler } as unknown as ReturnType<typeof createAuth>)
 
     await app.fetch(
       new Request('http://localhost:5003/api/auth/get-session', {
-        headers: { 'x-forwarded-for': '198.51.100.9' },
+        headers: { [AUTH_SOCKET_IP_HEADER]: '6.6.6.6', 'x-forwarded-for': '198.51.100.9' },
       }),
       socketEnv('203.0.113.7')
     )
 
-    expect(received[0]?.headers.get(AUTH_SOCKET_IP_HEADER)).toBe('203.0.113.7')
-    expect(received[0]?.headers.get('x-forwarded-for')).toBeNull()
-  })
-
-  it('forwards the configured proxy header when trusted', async () => {
-    ENV.AUTH.TRUSTED_PROXY_HEADERS = 'x-forwarded-for'
-    const received: Request[] = []
-    const handler = vi.fn(async (request: Request) => {
-      received.push(request)
-      return new Response('ok')
-    })
-    const app: Hono = createAuthRoutes({ handler } as unknown as ReturnType<typeof createAuth>)
-
-    await app.fetch(
-      new Request('http://localhost:5003/api/auth/get-session', {
-        headers: { 'x-forwarded-for': '198.51.100.9' },
-      }),
-      socketEnv('203.0.113.7')
-    )
-
-    expect(received[0]?.headers.get('x-forwarded-for')).toBe('198.51.100.9')
     expect(received[0]?.headers.get(AUTH_SOCKET_IP_HEADER)).toBe('203.0.113.7')
   })
 
   it('omits the socket header when the connection info is unavailable', async () => {
-    const received: Request[] = []
-    const handler = vi.fn(async (request: Request) => {
-      received.push(request)
-      return new Response('ok')
-    })
+    const { received, handler } = createCapturingHandler()
     const app: Hono = createAuthRoutes({ handler } as unknown as ReturnType<typeof createAuth>)
 
     await app.fetch(new Request('http://localhost:5003/api/auth/get-session', {
@@ -192,40 +133,18 @@ describe('createAuthRoutes client ip forwarding', () => {
 })
 
 describe('createAuth client ip resolution', () => {
-  beforeEach(() => {
-    ENV.AUTH.TRUSTED_PROXY_HEADERS = ''
-  })
-
   it('records the socket address on a new session and ignores a spoofed forwarded header', async () => {
     const db = createAuthDatabase()
     const app: Hono = createAuthRoutes(createAuth(db))
 
     try {
       const response = await app.fetch(
-        signUpRequest({ 'x-forwarded-for': '198.51.100.9' }),
+        signUpRequest({ 'x-forwarded-for': '198.51.100.9', [AUTH_SOCKET_IP_HEADER]: '6.6.6.6' }),
         socketEnv('203.0.113.7')
       )
 
       expect(response.status).toBe(200)
       expect(readSessionIpAddress(db)).toBe('203.0.113.7')
-    } finally {
-      db.close()
-    }
-  }, 30000)
-
-  it('records the trusted forwarded address when proxy headers are configured', async () => {
-    ENV.AUTH.TRUSTED_PROXY_HEADERS = 'x-forwarded-for'
-    const db = createAuthDatabase()
-    const app: Hono = createAuthRoutes(createAuth(db))
-
-    try {
-      const response = await app.fetch(
-        signUpRequest({ 'x-forwarded-for': '198.51.100.9' }),
-        socketEnv('203.0.113.7')
-      )
-
-      expect(response.status).toBe(200)
-      expect(readSessionIpAddress(db)).toBe('198.51.100.9')
     } finally {
       db.close()
     }

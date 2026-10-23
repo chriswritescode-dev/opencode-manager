@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput } from './PromptInput'
 import { useComposerDraftStore } from '@/stores/composerDraftStore'
@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   useSendErrorStore: vi.fn(),
   useHasBackgroundActivity: vi.fn(),
   useSendPrompt: vi.fn(),
+  useSendShell: vi.fn(),
   hasPendingPermission: vi.fn(() => false),
   setShowDialog: vi.fn(),
 }))
@@ -48,9 +49,9 @@ vi.mock('@/lib/toast', () => ({
 }))
 
 vi.mock('@/hooks/useOpenCode', () => ({
-  useSendPrompt: () => ({ mutate: mocks.useSendPrompt, isPending: false }),
+  useSendPrompt: () => ({ mutate: mocks.useSendPrompt, mutateAsync: mocks.useSendPrompt, isPending: false }),
   useInterruptSession: () => ({ mutate: vi.fn() }),
-  useSendShell: () => ({ mutate: vi.fn(), isPending: false }),
+  useSendShell: () => ({ mutate: mocks.useSendShell, mutateAsync: mocks.useSendShell, isPending: false }),
   useAgents: () => ({ data: [] }),
   useSkills: () => ({ data: [] }),
 }))
@@ -120,9 +121,8 @@ describe('PromptInput per-session composer draft', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     useComposerDraftStore.setState({ drafts: {} })
-    mocks.useSendPrompt.mockImplementation((_variables, options) => {
-      options?.onSuccess?.()
-    })
+    mocks.useSendPrompt.mockResolvedValue({ id: 'inbox_1' })
+    mocks.useSendShell.mockResolvedValue({ id: 'shell_1' })
     mocks.useVoiceConversation.mockReturnValue(createVoiceConversationControllerMock())
     mocks.hasPendingPermission.mockReturnValue(false)
     mocks.useMobile.mockReturnValue(false)
@@ -196,7 +196,7 @@ describe('PromptInput per-session composer draft', () => {
     expect(screen.getByText('pic.png')).toBeInTheDocument()
   })
 
-  it('sends the restored draft to the session that owns it and clears only that draft', () => {
+  it('sends the restored draft to the session that owns it and clears only that draft', async () => {
     const { rerender } = renderSession('session-a')
 
     fireEvent.change(promptInput(), { target: { value: 'draft for A' } })
@@ -209,12 +209,74 @@ describe('PromptInput per-session composer draft', () => {
 
     expect(mocks.useSendPrompt).toHaveBeenCalledWith(
       expect.objectContaining({ sessionID: 'session-a', text: 'draft for A' }),
-      expect.anything(),
     )
-    expect(promptInput()).toHaveValue('')
+    await waitFor(() => expect(promptInput()).toHaveValue(''))
 
     rerender(harness('session-b'))
     expect(promptInput()).toHaveValue('draft for B')
+  })
+
+  it('clears a submitted draft after its session unmounted before the send resolved', async () => {
+    let resolveSend: (value: { id: string }) => void = () => {}
+    mocks.useSendPrompt.mockImplementation(() => new Promise((resolve) => {
+      resolveSend = resolve
+    }))
+
+    const { rerender } = renderSession('session-a')
+
+    fireEvent.change(promptInput(), { target: { value: 'sent while leaving' } })
+    fireEvent.click(screen.getByTitle('Send'))
+    expect(useComposerDraftStore.getState().getDraft('session-a').prompt).toBe('sent while leaving')
+
+    rerender(harness('session-b'))
+    await act(async () => {
+      resolveSend({ id: 'inbox_1' })
+    })
+
+    rerender(harness('session-a'))
+    expect(promptInput()).toHaveValue('')
+  })
+
+  it('clears a submitted bash command after its session unmounted before the send resolved', async () => {
+    let resolveShell: (value: { id: string }) => void = () => {}
+    mocks.useSendShell.mockImplementation(() => new Promise((resolve) => {
+      resolveShell = resolve
+    }))
+
+    const { rerender } = renderSession('session-a')
+
+    fireEvent.change(promptInput(), { target: { value: '!' } })
+    fireEvent.change(screen.getByPlaceholderText('Enter bash command...'), { target: { value: '!ls' } })
+    fireEvent.click(screen.getByTitle('Send'))
+
+    rerender(harness('session-b'))
+    await act(async () => {
+      resolveShell({ id: 'shell_1' })
+    })
+
+    rerender(harness('session-a'))
+    expect(promptInput()).toHaveValue('')
+    expect(screen.queryByTestId('composer-mode-badge')).not.toBeInTheDocument()
+  })
+
+  it('keeps text typed after the submit when the send resolves', async () => {
+    let resolveSend: (value: { id: string }) => void = () => {}
+    mocks.useSendPrompt.mockImplementation(() => new Promise((resolve) => {
+      resolveSend = resolve
+    }))
+
+    renderSession('session-a')
+
+    fireEvent.change(promptInput(), { target: { value: 'sent message' } })
+    fireEvent.click(screen.getByTitle('Send'))
+    fireEvent.change(promptInput(), { target: { value: 'sent message plus an edit' } })
+
+    await act(async () => {
+      resolveSend({ id: 'inbox_1' })
+    })
+
+    expect(promptInput()).toHaveValue('sent message plus an edit')
+    expect(useComposerDraftStore.getState().getDraft('session-a').prompt).toBe('sent message plus an edit')
   })
 
   it('keeps the draft when Escape is pressed while the session is idle', () => {

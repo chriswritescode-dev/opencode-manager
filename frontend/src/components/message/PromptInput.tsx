@@ -11,7 +11,7 @@ import { useSttAvailability } from '@/hooks/useSTT'
 import { useUserBash } from '@/stores/userBashStore'
 import { useSessionAgentStore } from '@/stores/sessionAgentStore'
 import { useSendErrorStore } from '@/stores/sendErrorStore'
-import { useComposerDraftStore } from '@/stores/composerDraftStore'
+import { useComposerDraftStore, type ComposerDraft } from '@/stores/composerDraftStore'
 import { useRecentCommandsStore } from '@/stores/recentCommandsStore'
 import { useHasBackgroundActivity } from '@/stores/sessionStatusStore'
 import { useTouchTapSelect } from '@/hooks/useTouchTapSelect'
@@ -189,6 +189,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
   const saveDraft = useComposerDraftStore((state) => state.saveDraft)
   const clearDraft = useComposerDraftStore((state) => state.clearDraft)
+  const clearDraftIfUnchanged = useComposerDraftStore((state) => state.clearDraftIfUnchanged)
 
   useEffect(() => {
     if (prompt === '' && !isBashMode && attachedFiles.size === 0 && imageAttachments.length === 0) {
@@ -214,6 +215,11 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       setImageAttachments([])
     }
   }, [])
+
+  const completeSubmittedDraft = useCallback((submitted: ComposerDraft, options?: { keepAttachments?: boolean }) => {
+    clearDraftIfUnchanged(sessionID, submitted, options)
+    clearSubmittedPrompt(submitted.prompt, submitted.attachedFiles, submitted.imageAttachments, options)
+  }, [sessionID, clearDraftIfUnchanged, clearSubmittedPrompt])
 
   const pendingConfirmClearRef = useRef<{
     prompt: string
@@ -376,27 +382,23 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     if (isStreamingResponse) {
       onScrollToBottom()
       const parsed = parsePromptToInput(prompt, attachedFiles, agentNames, skillIds, imageAttachments)
-      const submittedPrompt = prompt
-      const submittedAttachedFiles = attachedFiles
-      const submittedImageAttachments = imageAttachments
+      const submitted: ComposerDraft = { prompt, isBashMode, attachedFiles, imageAttachments }
       if (isGoalArmed && !isBashMode && !isExactCommandPrompt(prompt)) {
         const goalStarted = await startArmedGoal(parsed.text)
         if (!goalStarted) return
       }
-      sendPrompt.mutate(
-        {
-          sessionID,
-          text: parsed.text,
-          files: parsed.files,
-          agents: parsed.agents,
-          skills: parsed.skills,
-          model: modelRef ?? undefined,
-          agent: currentMode,
-          delivery: 'queue',
-        },
-        {
-          onSuccess: () => clearSubmittedPrompt(submittedPrompt, submittedAttachedFiles, submittedImageAttachments)
-        }
+      void sendPrompt.mutateAsync({
+        sessionID,
+        text: parsed.text,
+        files: parsed.files,
+        agents: parsed.agents,
+        skills: parsed.skills,
+        model: modelRef ?? undefined,
+        agent: currentMode,
+        delivery: 'queue',
+      }).then(
+        () => completeSubmittedDraft(submitted),
+        () => undefined,
       )
       setStoredAgent(sessionID, currentMode)
       return
@@ -407,19 +409,18 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     if (isBashMode) {
       const command = prompt.startsWith('!') ? prompt.slice(1) : prompt
       addUserBashCommand(command)
-      const submittedPrompt = prompt
-      sendShell.mutate(
-        {
-          sessionID,
-          command,
+      const submitted: ComposerDraft = { prompt, isBashMode, attachedFiles, imageAttachments }
+      void sendShell.mutateAsync({
+        sessionID,
+        command,
+      }).then(
+        () => {
+          clearDraftIfUnchanged(sessionID, submitted, { keepAttachments: true })
+          if (promptRef.current !== submitted.prompt) return
+          setPrompt('')
+          setIsBashMode(false)
         },
-        {
-          onSuccess: () => {
-            if (promptRef.current !== submittedPrompt) return
-            setPrompt('')
-            setIsBashMode(false)
-          }
-        }
+        () => undefined,
       )
       setStoredAgent(sessionID, currentMode)
       return
@@ -434,9 +435,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       if (command) {
         recordCommand(command.name)
         const parsed = parsePromptToInput(commandPrompt.args?.trim() || '', attachedFiles, agentNames, skillIds, imageAttachments)
-        const submittedPrompt = prompt
-        const submittedAttachedFiles = attachedFiles
-        const submittedImageAttachments = imageAttachments
+        const submitted: ComposerDraft = { prompt, isBashMode, attachedFiles, imageAttachments }
 
         void executeCommand(command, {
           text: parsed.text,
@@ -445,22 +444,20 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
           skills: parsed.skills,
         }).then((shouldClear) => {
           if (!shouldClear) return
-          const keepAttachments = isBuiltinCommand(command) && (submittedAttachedFiles.size > 0 || submittedImageAttachments.length > 0)
+          const keepAttachments = isBuiltinCommand(command) && (submitted.attachedFiles.size > 0 || submitted.imageAttachments.length > 0)
           if (keepAttachments) {
-            clearSubmittedPrompt(submittedPrompt, submittedAttachedFiles, submittedImageAttachments, { keepAttachments: true })
+            completeSubmittedDraft(submitted, { keepAttachments: true })
             showToast.info('Built-in commands do not use attachments; they were kept')
             return
           }
-          clearSubmittedPrompt(submittedPrompt, submittedAttachedFiles, submittedImageAttachments)
+          completeSubmittedDraft(submitted)
         })
         return
       }
     }
 
     const parsed = parsePromptToInput(prompt, attachedFiles, agentNames, skillIds, imageAttachments)
-    const submittedPrompt = prompt
-    const submittedAttachedFiles = attachedFiles
-    const submittedImageAttachments = imageAttachments
+    const submitted: ComposerDraft = { prompt, isBashMode, attachedFiles, imageAttachments }
 
     if (isGoalArmed) {
       const goalStarted = await startArmedGoal(parsed.text)
@@ -468,30 +465,27 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     }
 
     pendingConfirmClearRef.current = {
-      prompt: submittedPrompt,
-      files: submittedAttachedFiles,
-      images: submittedImageAttachments
+      prompt: submitted.prompt,
+      files: submitted.attachedFiles,
+      images: submitted.imageAttachments
     }
 
-    sendPrompt.mutate(
-      {
-        sessionID,
-        text: parsed.text,
-        files: parsed.files,
-        agents: parsed.agents,
-        skills: parsed.skills,
-        model: modelRef ?? undefined,
-        agent: currentMode,
+    void sendPrompt.mutateAsync({
+      sessionID,
+      text: parsed.text,
+      files: parsed.files,
+      agents: parsed.agents,
+      skills: parsed.skills,
+      model: modelRef ?? undefined,
+      agent: currentMode,
+    }).then(
+      () => {
+        pendingConfirmClearRef.current = null
+        completeSubmittedDraft(submitted)
       },
-      {
-        onSuccess: () => {
-          pendingConfirmClearRef.current = null
-          clearSubmittedPrompt(submittedPrompt, submittedAttachedFiles, submittedImageAttachments)
-        },
-        onError: () => {
-          pendingConfirmClearRef.current = null
-        }
-      }
+      () => {
+        pendingConfirmClearRef.current = null
+      },
     )
 
     onScrollToBottom()

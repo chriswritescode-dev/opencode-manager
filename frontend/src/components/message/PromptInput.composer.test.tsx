@@ -49,9 +49,9 @@ vi.mock('@/lib/toast', () => ({
 }))
 
 vi.mock('@/hooks/useOpenCode', () => ({
-  useSendPrompt: () => ({ mutate: mocks.useSendPrompt, isPending: false }),
+  useSendPrompt: () => ({ mutate: mocks.useSendPrompt, mutateAsync: mocks.useSendPrompt, isPending: false }),
   useInterruptSession: () => ({ mutate: vi.fn() }),
-  useSendShell: () => ({ mutate: vi.fn(), isPending: false }),
+  useSendShell: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(() => Promise.resolve()), isPending: false }),
   useAgents: () => ({ data: [] }),
   useSkills: () => ({ data: [] }),
 }))
@@ -118,6 +118,7 @@ describe('PromptInput composer layout', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     useComposerDraftStore.setState({ drafts: {} })
+    mocks.useSendPrompt.mockResolvedValue({ id: 'inbox_1' })
     mocks.useVoiceConversation.mockReturnValue(createVoiceConversationControllerMock())
     mocks.hasPendingPermission.mockReturnValue(false)
     mocks.useMobile.mockReturnValue(false)
@@ -193,12 +194,13 @@ describe('PromptInput composer layout', () => {
       expect(button.parentElement?.contains(controlsRow())).toBe(false)
     })
 
-    it('sends the typed prompt from the row button', () => {
+    it('sends the typed prompt from the row button', async () => {
       renderComponent()
 
       fireEvent.change(promptInput(), { target: { value: 'row send' } })
       fireEvent.click(screen.getByTitle('Send'))
 
+      await waitFor(() => expect(promptInput()).toHaveValue(''))
       const [variables] = mocks.useSendPrompt.mock.calls[0] as [{ text: string }]
       expect(variables.text).toBe('row send')
     })

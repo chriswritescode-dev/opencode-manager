@@ -13,7 +13,6 @@ const { ENV } = vi.hoisted(() => ({
       SECRET: 'test-secret-for-encryption-key-32c',
       TRUSTED_ORIGINS: 'http://localhost:5173,http://localhost:5003',
       SECURE_COOKIES: false,
-      TRUSTED_PROXY_HEADERS: '',
       ADMIN_EMAIL: undefined as string | undefined,
       ADMIN_PASSWORD: undefined as string | undefined,
       ADMIN_PASSWORD_RESET: false,
@@ -47,7 +46,6 @@ function resetEnv(): void {
   ENV.SERVER.PORT = 5003
   ENV.AUTH.TRUSTED_ORIGINS = 'http://localhost:5173,http://localhost:5003'
   ENV.AUTH.SECURE_COOKIES = false
-  ENV.AUTH.TRUSTED_PROXY_HEADERS = ''
   ENV.AUTH.ADMIN_EMAIL = undefined
   ENV.AUTH.ADMIN_PASSWORD = undefined
   ENV.AUTH.GITHUB_CLIENT_ID = undefined

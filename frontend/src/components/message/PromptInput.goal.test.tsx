@@ -42,8 +42,8 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/hooks/useOpenCode')>()
   return {
     ...actual,
-    useSendPrompt: () => ({ mutate: mocks.sendPrompt, isPending: false }),
-    useSendShell: () => ({ mutate: mocks.sendShell, isPending: false }),
+    useSendPrompt: () => ({ mutate: mocks.sendPrompt, mutateAsync: mocks.sendPrompt, isPending: false }),
+    useSendShell: () => ({ mutate: mocks.sendShell, mutateAsync: mocks.sendShell, isPending: false }),
     useInterruptSession: () => ({ mutate: mocks.interrupt }),
     useAgents: () => ({ data: mocks.agents }),
     useSkills: () => ({ data: mocks.skills }),
@@ -170,6 +170,8 @@ describe('PromptInput goal mode', () => {
     mocks.useSessionGoal.mockReturnValue({ data: null })
     mocks.useSessionPermissionMode.mockReturnValue({ data: undefined })
     mocks.startGoal.mockResolvedValue({ id: 1 })
+    mocks.sendPrompt.mockResolvedValue({ id: 'inbox_1' })
+    mocks.sendShell.mockResolvedValue({ id: 'shell_1' })
     mocks.agents = []
     mocks.useMobile.mockReturnValue(false)
     mocks.useSTT.mockReturnValue({
@@ -267,7 +269,6 @@ describe('PromptInput goal mode', () => {
     }))
     await waitFor(() => expect(mocks.sendPrompt).toHaveBeenCalledWith(
       expect.objectContaining({ delivery: 'queue' }),
-      expect.anything(),
     ))
     expect(mocks.startGoal.mock.invocationCallOrder[0]).toBeLessThan(mocks.sendPrompt.mock.invocationCallOrder[0])
   })

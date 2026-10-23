@@ -244,13 +244,6 @@ describe('workspace ownership configuration', () => {
     expect(envExample).toContain('# PUID=1000')
     expect(envExample).toContain('# PGID=1000')
   })
-
-  it('forwards the auth trusted proxy header opt-in and documents it', () => {
-    expect(read(composePath)).toContain('- AUTH_TRUSTED_PROXY_HEADERS=${AUTH_TRUSTED_PROXY_HEADERS:-}')
-    expect(read(join(repoRoot, 'docker-compose.release.yml')))
-      .toContain('- AUTH_TRUSTED_PROXY_HEADERS=${AUTH_TRUSTED_PROXY_HEADERS:-}')
-    expect(read(envExamplePath)).toContain('# AUTH_TRUSTED_PROXY_HEADERS=x-forwarded-for')
-  })
 })
 
 describe('compose image source', () => {
