@@ -318,23 +318,332 @@ describe('WebSpeechRecognizer', () => {
     vi.useRealTimers()
   })
 
-  it('reports no-speech instead of an error when the browser raises no-speech during endpointing', async () => {
+  it('reports no-speech instead of an error when Chrome raises no-speech after the deadline', async () => {
     const rec = new WebSpeechRecognizer()
     const onEndOfSpeech = vi.fn()
     const onError = vi.fn()
+    const onEnd = vi.fn()
     rec.onError(onError)
-    await rec.start({ endpointing: { pauseMs: 800, noSpeechTimeoutMs: 5000 }, onEndOfSpeech })
+    rec.onEnd(onEnd)
 
+    vi.useFakeTimers()
+
+    const startPromise = rec.start({ endpointing: { pauseMs: 800, noSpeechTimeoutMs: 5000 }, onEndOfSpeech })
+    await vi.advanceTimersByTimeAsync(0)
+    await startPromise
+
+    vi.setSystemTime(Date.now() + 5000)
     fakeRec.onerror!({ error: 'no-speech' })
 
     expect(onEndOfSpeech).toHaveBeenCalledTimes(1)
     expect(onEndOfSpeech).toHaveBeenCalledWith('no-speech', '')
     expect(onError).not.toHaveBeenCalled()
-    expect(rec.getState()).toBe('error')
+    expect(fakeRec.start).toHaveBeenCalledTimes(1)
 
     fakeRec.onend!(new Event('end'))
     expect(onEndOfSpeech).toHaveBeenCalledTimes(1)
+    expect(onEnd).toHaveBeenCalledTimes(1)
     expect(rec.getState()).toBe('idle')
+    vi.useRealTimers()
+  })
+
+  it('restarts transparently when Chrome raises no-speech before the deadline', async () => {
+    const rec = new WebSpeechRecognizer()
+    const onEndOfSpeech = vi.fn()
+    const onError = vi.fn()
+    const onEnd = vi.fn()
+    const onStart = vi.fn()
+    rec.onError(onError)
+    rec.onEnd(onEnd)
+    rec.onStart(onStart)
+
+    vi.useFakeTimers()
+
+    const startPromise = rec.start({
+      endpointing: { pauseMs: 2000, noSpeechTimeoutMs: 10000 },
+      onEndOfSpeech,
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    await startPromise
+
+    expect(onStart).toHaveBeenCalledTimes(1)
+
+    vi.advanceTimersByTime(6000)
+    fakeRec.onerror!({ error: 'no-speech' })
+
+    expect(onEndOfSpeech).not.toHaveBeenCalled()
+    expect(onError).not.toHaveBeenCalled()
+
+    fakeRec.onend!(new Event('end'))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(fakeRec.start).toHaveBeenCalledTimes(2)
+    expect(onStart).toHaveBeenCalledTimes(1)
+    expect(onEnd).not.toHaveBeenCalled()
+    expect(rec.isCurrentlyListening()).toBe(true)
+
+    vi.advanceTimersByTime(3999)
+    expect(onEndOfSpeech).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(1)
+    expect(onEndOfSpeech).toHaveBeenCalledTimes(1)
+    expect(onEndOfSpeech).toHaveBeenCalledWith('no-speech', '')
+
+    fakeRec.onend!(new Event('end'))
+    expect(onEnd).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
+  it('restarts when recognition ends unexpectedly before the deadline without speech', async () => {
+    const rec = new WebSpeechRecognizer()
+    const onEndOfSpeech = vi.fn()
+    const onError = vi.fn()
+    const onEnd = vi.fn()
+    const onStart = vi.fn()
+    rec.onError(onError)
+    rec.onEnd(onEnd)
+    rec.onStart(onStart)
+
+    vi.useFakeTimers()
+
+    const startPromise = rec.start({
+      endpointing: { pauseMs: 2000, noSpeechTimeoutMs: 10000 },
+      onEndOfSpeech,
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    await startPromise
+
+    vi.advanceTimersByTime(3000)
+    fakeRec.onend!(new Event('end'))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(fakeRec.start).toHaveBeenCalledTimes(2)
+    expect(onStart).toHaveBeenCalledTimes(1)
+    expect(onEnd).not.toHaveBeenCalled()
+    expect(onError).not.toHaveBeenCalled()
+    expect(onEndOfSpeech).not.toHaveBeenCalled()
+    expect(rec.isCurrentlyListening()).toBe(true)
+    vi.useRealTimers()
+  })
+
+  it('reports a pause with the final transcript when recognition ends unexpectedly', async () => {
+    const rec = new WebSpeechRecognizer()
+    const onEndOfSpeech = vi.fn()
+    const onEnd = vi.fn()
+    rec.onEnd(onEnd)
+
+    vi.useFakeTimers()
+
+    const startPromise = rec.start({
+      endpointing: { pauseMs: 2000, noSpeechTimeoutMs: 10000 },
+      onEndOfSpeech,
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    await startPromise
+
+    fakeRec.onresult!(makeResultEvent(0, 1, [
+      { isFinal: true, transcript: 'hello world', confidence: 1.0 },
+    ]))
+
+    fakeRec.onend!(new Event('end'))
+
+    expect(fakeRec.start).toHaveBeenCalledTimes(1)
+    expect(onEndOfSpeech).toHaveBeenCalledTimes(1)
+    expect(onEndOfSpeech).toHaveBeenCalledWith('pause', 'hello world')
+    expect(onEnd).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
+  it('keeps the accumulated transcript across transparent restarts', async () => {
+    const rec = new WebSpeechRecognizer()
+    const onEndOfSpeech = vi.fn()
+
+    vi.useFakeTimers()
+
+    const startPromise = rec.start({
+      endpointing: { pauseMs: 5000, noSpeechTimeoutMs: 10000 },
+      onEndOfSpeech,
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    await startPromise
+
+    fakeRec.onresult!(makeResultEvent(0, 1, [
+      { isFinal: true, transcript: 'hello', confidence: 1.0 },
+    ]))
+
+    vi.advanceTimersByTime(1000)
+    fakeRec.onerror!({ error: 'no-speech' })
+    fakeRec.onend!(new Event('end'))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(rec.getFinalTranscript()).toBe('hello')
+
+    fakeRec.onresult!(makeResultEvent(0, 1, [
+      { isFinal: true, transcript: 'world', confidence: 1.0 },
+    ]))
+    fakeRec.onend!(new Event('end'))
+
+    expect(onEndOfSpeech).toHaveBeenCalledTimes(1)
+    expect(onEndOfSpeech).toHaveBeenCalledWith('pause', 'hello world')
+    vi.useRealTimers()
+  })
+
+  it('reports a pause with the interim transcript when recognition ends unexpectedly before a final result', async () => {
+    const rec = new WebSpeechRecognizer()
+    const onEndOfSpeech = vi.fn()
+
+    vi.useFakeTimers()
+
+    const startPromise = rec.start({
+      endpointing: { pauseMs: 2000, noSpeechTimeoutMs: 10000 },
+      onEndOfSpeech,
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    await startPromise
+
+    fakeRec.onresult!(makeResultEvent(0, 1, [
+      { isFinal: false, transcript: 'hello there', confidence: 0.0 },
+    ]))
+
+    fakeRec.onend!(new Event('end'))
+
+    expect(onEndOfSpeech).toHaveBeenCalledTimes(1)
+    expect(onEndOfSpeech).toHaveBeenCalledWith('pause', 'hello there')
+    vi.useRealTimers()
+  })
+
+  it('cancels a pending restart when stop() is called', async () => {
+    const rec = new WebSpeechRecognizer()
+    const onEndOfSpeech = vi.fn()
+    const onEnd = vi.fn()
+    rec.onEnd(onEnd)
+
+    vi.useFakeTimers()
+
+    const startPromise = rec.start({
+      endpointing: { pauseMs: 2000, noSpeechTimeoutMs: 10000 },
+      onEndOfSpeech,
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    await startPromise
+
+    vi.advanceTimersByTime(3000)
+    fakeRec.onerror!({ error: 'no-speech' })
+    rec.stop()
+    fakeRec.onend!(new Event('end'))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(fakeRec.start).toHaveBeenCalledTimes(1)
+    expect(onEndOfSpeech).not.toHaveBeenCalled()
+    expect(onEnd).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
+  it('surfaces an error when a transparent restart throws', async () => {
+    const rec = new WebSpeechRecognizer()
+    const onEndOfSpeech = vi.fn()
+    const onError = vi.fn()
+    const onEnd = vi.fn()
+    rec.onError(onError)
+    rec.onEnd(onEnd)
+
+    vi.useFakeTimers()
+
+    const startPromise = rec.start({
+      endpointing: { pauseMs: 2000, noSpeechTimeoutMs: 10000 },
+      onEndOfSpeech,
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    await startPromise
+
+    fakeRec.start.mockImplementationOnce(() => {
+      throw new Error('InvalidStateError')
+    })
+
+    vi.advanceTimersByTime(3000)
+    fakeRec.onend!(new Event('end'))
+
+    expect(fakeRec.start).toHaveBeenCalledTimes(2)
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect(onError).toHaveBeenCalledWith('Speech recognition stopped unexpectedly. Please try again.')
+    expect(onEndOfSpeech).not.toHaveBeenCalled()
+    expect(onEnd).toHaveBeenCalledTimes(1)
+    expect(rec.getState()).toBe('idle')
+    vi.useRealTimers()
+  })
+
+  it('stops restarting after the transparent restart cap', async () => {
+    const rec = new WebSpeechRecognizer()
+    const onEndOfSpeech = vi.fn()
+    const onEnd = vi.fn()
+    rec.onEnd(onEnd)
+
+    vi.useFakeTimers()
+
+    const startPromise = rec.start({
+      endpointing: { pauseMs: 2000, noSpeechTimeoutMs: 20000 },
+      onEndOfSpeech,
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    await startPromise
+
+    for (let i = 0; i < 6; i++) {
+      vi.advanceTimersByTime(500)
+      fakeRec.onerror!({ error: 'no-speech' })
+      fakeRec.onend!(new Event('end'))
+      await vi.advanceTimersByTimeAsync(0)
+    }
+
+    expect(fakeRec.start).toHaveBeenCalledTimes(6)
+    expect(onEndOfSpeech).toHaveBeenCalledTimes(1)
+    expect(onEndOfSpeech).toHaveBeenCalledWith('no-speech', '')
+    expect(onEnd).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
+  it('stops restarting when a restarted session ends immediately without audio', async () => {
+    const rec = new WebSpeechRecognizer()
+    const onEndOfSpeech = vi.fn()
+
+    vi.useFakeTimers()
+
+    const startPromise = rec.start({
+      endpointing: { pauseMs: 2000, noSpeechTimeoutMs: 10000 },
+      onEndOfSpeech,
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    await startPromise
+
+    vi.advanceTimersByTime(3000)
+    fakeRec.onend!(new Event('end'))
+    await vi.advanceTimersByTimeAsync(0)
+
+    vi.advanceTimersByTime(100)
+    fakeRec.onend!(new Event('end'))
+
+    expect(fakeRec.start).toHaveBeenCalledTimes(2)
+    expect(onEndOfSpeech).toHaveBeenCalledTimes(1)
+    expect(onEndOfSpeech).toHaveBeenCalledWith('no-speech', '')
+    vi.useRealTimers()
+  })
+
+  it('surfaces Chrome no-speech as an error when endpointing is off', async () => {
+    const rec = new WebSpeechRecognizer()
+    const onError = vi.fn()
+    const onEnd = vi.fn()
+    rec.onError(onError)
+    rec.onEnd(onEnd)
+
+    await rec.start()
+
+    fakeRec.onerror!({ error: 'no-speech' })
+
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect(onError).toHaveBeenCalledWith('No speech detected. Please try again.')
+    expect(fakeRec.start).toHaveBeenCalledTimes(1)
+
+    fakeRec.onend!(new Event('end'))
+    expect(onEnd).toHaveBeenCalledTimes(1)
   })
 
   it('does not report end of speech for a manual stop', async () => {
