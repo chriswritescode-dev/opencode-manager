@@ -78,7 +78,7 @@ describe('createAuth', () => {
         body: { email: 'other@example.com', password: 'test-password', name: 'Other' },
       })).rejects.toThrow('Registration is disabled')
 
-      await syncAdminFromEnv(auth, db)
+      await syncAdminFromEnv(auth)
       const response = await auth.handler(new Request('http://localhost:5173/api/auth/sign-in/email', {
         method: 'POST',
         headers: { 'content-type': 'application/json', origin: 'http://localhost:5173' },

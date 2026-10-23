@@ -244,7 +244,7 @@ try {
   await gitAuthService.initialize(ipcServer, db)
   logger.info(`Git IPC server running at ${ipcServer.ipcHandlePath}`)
 
-  await syncAdminFromEnv(auth, db)
+  await syncAdminFromEnv(auth)
 
   opencodeServerManager.setDatabase(db)
   detectSandboxCapability()
@@ -389,7 +389,7 @@ const previewSessionStore = new PreviewSessionStore()
 const previewAvailability = createPreviewAvailability(false)
 
 app.route('/api/auth', createAuthRoutes(auth))
-app.route('/api/auth-info', createAuthInfoRoutes(auth, db))
+app.route('/api/auth-info', createAuthInfoRoutes(auth))
 app.route('/api/health', createHealthRoutes(db, openCodeSupervisor))
 
 app.route('/api/mcp-oauth-proxy', createMcpOauthProxyRoutes(openCodeClient, requireAuth))
