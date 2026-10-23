@@ -7,8 +7,6 @@ import { useModelSelection } from '@/hooks/useModelSelection'
 import { useVariants } from '@/hooks/useVariants'
 import { useSessionAgent } from '@/hooks/useSessionAgent'
 import { useSttAvailability } from '@/hooks/useSTT'
-import { useVoiceConversation } from '@/hooks/useVoiceConversation'
-import { useVoicePauseSetting } from '@/hooks/useVoicePauseSetting'
 
 import { useUserBash } from '@/stores/userBashStore'
 import { useSessionAgentStore } from '@/stores/sessionAgentStore'
@@ -30,7 +28,7 @@ import { PromptSuggestions, type PromptSuggestion } from './PromptSuggestions'
 import { ComposerActivityBar } from './ComposerActivityBar'
 import { ModelQuickSelect } from '@/components/model/ModelQuickSelect'
 import { AgentQuickSelect } from '@/components/agent/AgentQuickSelect'
-import { VoiceConversationBar } from './VoiceConversationBar'
+import { VoiceConversation, type VoiceConversationHandle } from './VoiceConversation'
 import { PermissionModeToggle } from '@/components/session/PermissionModeToggle'
 import { SessionSandboxMenu } from '@/components/session/SessionSandboxMenu'
 import { ComposerToolsMenu } from './ComposerToolsMenu'
@@ -47,7 +45,7 @@ import { isOpenSessionGoal } from '@opencode-manager/shared/schemas'
 import { useProviders } from '@/hooks/useProviders'
 
 
-import type { CommandInfo, SessionInboxInfo, SessionMessageInfo, VoiceSessionStatus } from '@opencode-manager/shared/opencode'
+import type { CommandInfo } from '@opencode-manager/shared/opencode'
 import type { FileAttachmentInfo, ImageAttachment } from '@/api/types'
 import { isBuiltinCommand, type CommandActions, type PageCommandActions } from '@/lib/builtinCommands'
 
@@ -120,9 +118,6 @@ export interface PromptInputHandle {
 interface PromptInputProps {
   directory?: string
   sessionID: string
-  messages: SessionMessageInfo[]
-  pending: SessionInboxInfo[]
-  transcriptStatus: VoiceSessionStatus
   onVoiceConversationActiveChange?: (active: boolean) => void
   showScrollButton?: boolean
   isSessionActive?: boolean
@@ -135,9 +130,6 @@ interface PromptInputProps {
 export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(function PromptInput({ 
   directory,
   sessionID,
-  messages,
-  pending,
-  transcriptStatus,
   onVoiceConversationActiveChange,
   showScrollButton,
   isSessionActive = false,
@@ -162,6 +154,8 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0)
   const [localMode, setLocalMode] = useState<string | null>(null)
   const [isPromptFocused, setIsPromptFocused] = useState(false)
+  const [isVoiceActive, setIsVoiceActive] = useState(false)
+  const voiceRef = useRef<VoiceConversationHandle>(null)
   const promptBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingCommandSubmitRef = useRef(false)
   const handleSubmitRef = useRef<() => void>(() => {})
@@ -1093,7 +1087,6 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
           : 'Goal mode: the next message becomes the objective'
   const isGoalModeDisabled = lockedReason !== null || hasOpenGoal || isBashMode || startGoal.isPending
   const toggleGoalArmed = () => setIsGoalArmed((value) => !value)
-  const { pauseMs } = useVoicePauseSetting()
 
   const sendVoiceTurn = useCallback(
     async (text: string, options: { busy: boolean }): Promise<void> => {
@@ -1118,22 +1111,14 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     focusPromptAt(next.length)
   }, [focusPromptAt])
 
-  const voiceConversation = useVoiceConversation({
-    sessionID,
-    serverId,
-    messages,
-    pending,
-    status: transcriptStatus,
-    hasPendingApproval: hasPendingPermissionForSession,
-    pauseMs,
-    sendTurn: sendVoiceTurn,
-    interrupt: interruptTurn,
-    onEditInTextBox: handleVoiceEditInTextBox,
-  })
+  const handleVoiceActiveChange = useCallback((active: boolean) => {
+    setIsVoiceActive(active)
+    onVoiceConversationActiveChange?.(active)
+  }, [onVoiceConversationActiveChange])
 
-  useEffect(() => {
-    onVoiceConversationActiveChange?.(voiceConversation.isActive)
-  }, [onVoiceConversationActiveChange, voiceConversation.isActive])
+  const handleViewApproval = useCallback(() => {
+    setShowDialog(true)
+  }, [setShowDialog])
 
   const hasPromptContent = prompt.trim().length > 0 || imageAttachments.length > 0
   const showVoiceMic = sttAvailability.isEnabled && sttAvailability.isSupported && !hasPendingPermissionForSession
@@ -1147,7 +1132,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
       onMouseDown={(event) => event.preventDefault()}
       onClick={() => {
         textareaRef.current?.blur()
-        voiceConversation.start()
+        voiceRef.current?.start()
       }}
       className={isMobile
         ? 'min-h-11 min-w-11 px-0 rounded-lg transition-all duration-150 flex items-center justify-center border bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border active:bg-muted-foreground/30 active:scale-95'
@@ -1228,13 +1213,19 @@ return (
           {composerModeStyle.label}
         </span>
       )}
-      {voiceConversation.isActive ? (
-        <VoiceConversationBar
-          controller={voiceConversation}
-          hasPendingApproval={hasPendingPermissionForSession}
-          onViewApproval={() => setShowDialog(true)}
-        />
-      ) : (
+      <VoiceConversation
+        ref={voiceRef}
+        sessionID={sessionID}
+        serverId={serverId}
+        hasPendingApproval={hasPendingPermissionForSession}
+        sendTurn={sendVoiceTurn}
+        interrupt={interruptTurn}
+        onEditInTextBox={handleVoiceEditInTextBox}
+        onViewApproval={handleViewApproval}
+        onActiveChange={handleVoiceActiveChange}
+      />
+
+      {!isVoiceActive && (
         <>
       <div className="flex items-end gap-1.5 md:gap-2 mb-1.5 md:mb-2">
         <textarea
@@ -1403,7 +1394,7 @@ return (
         </>
       )}
 
-      {!voiceConversation.isActive && (
+      {!isVoiceActive && (
         <>
       <PromptSuggestions
         isOpen={showSuggestions}

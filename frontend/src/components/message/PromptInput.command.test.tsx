@@ -147,9 +147,6 @@ describe('PromptInput command submission', () => {
   const defaultProps = {
     directory: '/test',
     sessionID: 'test-session',
-    messages: [],
-    pending: [],
-    transcriptStatus: 'idle' as const,
     showScrollButton: false,
     isSessionActive: false,
     isStreamingResponse: false,

@@ -3,6 +3,10 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput } from './PromptInput'
 import {
+  SessionTranscriptContext,
+  type SessionTranscriptSnapshot,
+} from '@/contexts/session-transcript-context'
+import {
   createCommandActionsMock,
   createVoiceConversationControllerMock,
 } from '@/test/test-utils'
@@ -10,6 +14,7 @@ import type {
   UseVoiceConversationInput,
   VoiceConversationController,
 } from '@/hooks/useVoiceConversation'
+import type { SessionMessageInfo } from '@opencode-manager/shared/opencode'
 
 const createTestQueryClient = () => new QueryClient({
   defaultOptions: {
@@ -146,9 +151,6 @@ describe('PromptInput voice conversation', () => {
   const defaultProps = {
     directory: '/test',
     sessionID: 'test-session',
-    messages: [],
-    pending: [],
-    transcriptStatus: 'idle' as const,
     showScrollButton: false,
     isSessionActive: false,
     isStreamingResponse: false,
@@ -157,17 +159,41 @@ describe('PromptInput voice conversation', () => {
     onPromptChange: vi.fn(),
   }
 
-  const renderComponent = (overrides: Partial<typeof defaultProps> = {}) => {
+  const createUserMessage = (id: string, text: string): SessionMessageInfo => ({
+    id,
+    type: 'user',
+    text,
+    time: { created: 1000 },
+  } as SessionMessageInfo)
+
+  const buildSnapshot = (overrides: Partial<SessionTranscriptSnapshot> = {}): SessionTranscriptSnapshot => ({
+    messages: [],
+    pending: [],
+    status: 'idle',
+    ...overrides,
+  })
+
+  const renderComponent = (
+    overrides: Partial<typeof defaultProps> = {},
+    snapshotOverrides: Partial<SessionTranscriptSnapshot> = {},
+  ) => {
     const queryClient = createTestQueryClient()
-    const tree = (nextOverrides: Partial<typeof defaultProps>) => (
+    const tree = (
+      nextOverrides: Partial<typeof defaultProps>,
+      snapshot = buildSnapshot(snapshotOverrides),
+    ) => (
       <QueryClientProvider client={queryClient}>
-        <PromptInput {...defaultProps} {...overrides} {...nextOverrides} />
+        <SessionTranscriptContext.Provider value={snapshot}>
+          <PromptInput {...defaultProps} {...overrides} {...nextOverrides} />
+        </SessionTranscriptContext.Provider>
       </QueryClientProvider>
     )
     const view = render(tree({}))
     return {
       ...view,
-      rerenderWith: (nextOverrides: Partial<typeof defaultProps>) => view.rerender(tree(nextOverrides)),
+      rerenderWith: (nextOverrides: Partial<typeof defaultProps>) => {
+        view.rerender(tree(nextOverrides, buildSnapshot(snapshotOverrides)))
+      },
     }
   }
 
@@ -251,6 +277,16 @@ describe('PromptInput voice conversation', () => {
     })
   })
 
+  it('passes the published transcript to the voice conversation', () => {
+    const messages = [createUserMessage('msg_voice_1', 'hello there')]
+
+    renderComponent({}, { messages, status: 'busy' })
+
+    expect(mocks.useVoiceConversation).toHaveBeenCalledWith(
+      expect.objectContaining({ messages, status: 'busy' }),
+    )
+  })
+
   describe('while a conversation is active', () => {
     it('replaces the composer with the conversation bar and keeps the draft after exit', () => {
       const onVoiceConversationActiveChange = vi.fn()
@@ -259,14 +295,14 @@ describe('PromptInput voice conversation', () => {
       fireEvent.change(promptInput(), { target: { value: 'keep this draft' } })
 
       setVoiceController({ isActive: true, phase: 'listening', label: 'Listening' })
-      view.rerenderWith({ messages: [] })
+      view.rerenderWith({})
 
       expect(screen.queryByPlaceholderText('Send a message...')).toBeNull()
       expect(screen.getByText('Listening')).toBeInTheDocument()
       expect(onVoiceConversationActiveChange).toHaveBeenLastCalledWith(true)
 
       setVoiceController()
-      view.rerenderWith({ messages: [] })
+      view.rerenderWith({})
 
       expect(promptInput()).toHaveValue('keep this draft')
       expect(onVoiceConversationActiveChange).toHaveBeenLastCalledWith(false)
@@ -279,7 +315,7 @@ describe('PromptInput voice conversation', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Edit in text box' }))
 
       setVoiceController()
-      view.rerenderWith({ messages: [] })
+      view.rerenderWith({})
 
       expect(promptInput()).toHaveValue('dictated words')
     })
@@ -290,11 +326,11 @@ describe('PromptInput voice conversation', () => {
       fireEvent.change(promptInput(), { target: { value: 'draft' } })
 
       setVoiceController({ isActive: true, phase: 'listening', canEditInTextBox: true }, 'dictated words')
-      view.rerenderWith({ messages: [] })
+      view.rerenderWith({})
       fireEvent.click(screen.getByRole('button', { name: 'Edit in text box' }))
 
       setVoiceController()
-      view.rerenderWith({ messages: [] })
+      view.rerenderWith({})
 
       expect(promptInput()).toHaveValue('draft dictated words')
     })
@@ -305,11 +341,11 @@ describe('PromptInput voice conversation', () => {
       fireEvent.change(promptInput(), { target: { value: 'draft' } })
 
       setVoiceController({ isActive: true, phase: 'listening', canEditInTextBox: true }, 'dictated words')
-      view.rerenderWith({ messages: [] })
+      view.rerenderWith({})
       fireEvent.click(screen.getByRole('button', { name: 'Edit in text box' }))
 
       setVoiceController()
-      view.rerenderWith({ messages: [] })
+      view.rerenderWith({})
 
       await waitFor(() => {
         const input = promptInput() as HTMLTextAreaElement
@@ -366,9 +402,6 @@ describe('PromptInput submission', () => {
   const defaultProps = {
     directory: '/test',
     sessionID: 'test-session',
-    messages: [],
-    pending: [],
-    transcriptStatus: 'idle' as const,
     showScrollButton: false,
     isSessionActive: false,
     isStreamingResponse: false,

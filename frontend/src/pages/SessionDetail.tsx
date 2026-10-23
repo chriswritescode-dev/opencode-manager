@@ -56,6 +56,7 @@ import { useSessionStatus } from "@/stores/sessionStatusStore";
 import type { PageCommandActions } from "@/lib/builtinCommands";
 import { useRedoMessage, useUndoMessage } from "@/hooks/useUndoMessage";
 import { usePermissions, useForms } from "@/contexts/EventContext";
+import { SessionTranscriptContext, type SessionTranscriptSnapshot } from "@/contexts/session-transcript-context";
 import type { FormInfo, SessionMessageInfo } from "@opencode-manager/shared/opencode";
 import type { SkillFileInfo } from "@opencode-manager/shared";
 import { formatOpenCodeModelRef } from "@opencode-manager/shared/opencode";
@@ -272,6 +273,11 @@ export function SessionDetail() {
   const messages = useMemo(
     () => applyRevertBoundary(transcriptMessages, session?.revert?.messageID),
     [transcriptMessages, session?.revert?.messageID],
+  );
+
+  const transcriptSnapshot = useMemo<SessionTranscriptSnapshot>(
+    () => ({ messages, pending: pendingPrompts, status: transcriptStatus }),
+    [messages, pendingPrompts, transcriptStatus],
   );
 
   const messagesRef = useRef(messages);
@@ -975,21 +981,20 @@ export function SessionDetail() {
                     onChildSessionClick={handleChildSessionClick}
                   />
                 </div>
-                <PromptInput
-                  ref={promptInputRef}
-                  directory={sessionDirectory}
-                  sessionID={sessionId}
-                  messages={messages}
-                  pending={pendingPrompts}
-                  transcriptStatus={transcriptStatus}
-                  onVoiceConversationActiveChange={setIsVoiceConversationActive}
-                  showScrollButton={showScrollButton}
-                  isSessionActive={isSessionActive}
-                  isStreamingResponse={isStreamingResponse}
-                  onScrollToBottom={scrollToBottom}
-                  commandActions={commandActions}
-                  onPromptChange={setHasPromptContent}
-                />
+                <SessionTranscriptContext.Provider value={transcriptSnapshot}>
+                  <PromptInput
+                    ref={promptInputRef}
+                    directory={sessionDirectory}
+                    sessionID={sessionId}
+                    onVoiceConversationActiveChange={setIsVoiceConversationActive}
+                    showScrollButton={showScrollButton}
+                    isSessionActive={isSessionActive}
+                    isStreamingResponse={isStreamingResponse}
+                    onScrollToBottom={scrollToBottom}
+                    commandActions={commandActions}
+                    onPromptChange={setHasPromptContent}
+                  />
+                </SessionTranscriptContext.Provider>
               </div>
             </div>
           </div>
