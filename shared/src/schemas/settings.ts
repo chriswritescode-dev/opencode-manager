@@ -124,9 +124,20 @@ export const GitCredentialSchema = z.object({
 
 export type GitCredential = z.infer<typeof GitCredentialSchema>;
 
+const GIT_IDENTITY_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * A git identity email is valid when it is blank or a plain `local@domain` address. Blank is allowed because the
+ * default identity starts without an email.
+ */
+export function isValidGitIdentityEmail(email: string): boolean {
+  const trimmed = email.trim();
+  return trimmed === "" || GIT_IDENTITY_EMAIL_PATTERN.test(trimmed);
+}
+
 export const GitIdentitySchema = z.object({
   name: z.string(),
-  email: z.string(),
+  email: z.string().trim().refine(isValidGitIdentityEmail, "Invalid email address"),
 });
 
 export type GitIdentity = z.infer<typeof GitIdentitySchema>;

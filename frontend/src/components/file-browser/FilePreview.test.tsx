@@ -105,6 +105,14 @@ describe('FilePreview header buttons', () => {
     expect(external).toHaveAttribute('rel', 'noopener noreferrer')
   })
 
+  it('shows the binary message and no edit action for non-text files', () => {
+    render(<FilePreview file={{ ...textFile('blob.bin', 'application/octet-stream'), content: btoa('\u0000\u0001\u0002') }} />)
+
+    expect(screen.getByText('Binary file - download to view content')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Edit file' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Download file' })).toBeInTheDocument()
+  })
+
   it('keeps the success and destructive tints on the edit actions in dark mode', () => {
     render(<FilePreview file={textFile('Dockerfile', 'text/plain')} />)
 

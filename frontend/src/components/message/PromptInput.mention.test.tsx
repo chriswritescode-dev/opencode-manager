@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput } from './PromptInput'
+import { useComposerDraftStore } from '@/stores/composerDraftStore'
 import { createCommandActionsMock, createVoiceConversationControllerMock } from '@/test/test-utils'
 
 const mocks = vi.hoisted(() => ({
@@ -9,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   switchSessionModel: vi.fn(),
   switchSessionAgent: vi.fn(),
   runCommand: vi.fn(),
-  agents: [] as Array<{ name: string; description?: string }>,
+  agents: [] as Array<{ name: string; description?: string; mode?: string; hidden?: boolean }>,
   skills: [] as Array<{ id: string; name: string; description?: string }>,
   useSTT: vi.fn(),
   useVoiceConversation: vi.fn(),
@@ -24,7 +25,7 @@ const mocks = vi.hoisted(() => ({
   useSendErrorStore: vi.fn(),
 }))
 
-const suggestionProps = vi.hoisted(() => ({ isOpen: false, selectedIndex: 0 }))
+const suggestionProps = vi.hoisted(() => ({ isOpen: false, selectedIndex: 0, labels: [] as string[] }))
 
 vi.mock('@/api/opencode', async () => {
   const actual = await vi.importActual('@/api/opencode')
@@ -95,10 +96,11 @@ vi.mock('@/hooks/useSessionPermissionMode', () => ({
 }))
 
 vi.mock('./PromptSuggestions', () => ({
-  PromptSuggestions: (props: { isOpen: boolean; selectedIndex: number }) => {
+  PromptSuggestions: (props: { isOpen: boolean; selectedIndex: number; items: Array<{ label: string }> }) => {
     if (props.isOpen) {
       suggestionProps.isOpen = true
       suggestionProps.selectedIndex = props.selectedIndex
+      suggestionProps.labels = props.items.map((item) => item.label)
     }
     return null
   },
@@ -153,6 +155,7 @@ describe('PromptInput agent mention submission', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    useComposerDraftStore.setState({ drafts: {} })
     mocks.useVoiceConversation.mockReturnValue(createVoiceConversationControllerMock())
     mocks.sendPrompt.mockResolvedValue({
       id: 'inbox_1',
@@ -199,6 +202,7 @@ describe('PromptInput agent mention submission', () => {
     mocks.useSessionAgentStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ setAgent: vi.fn() }))
     suggestionProps.isOpen = false
     suggestionProps.selectedIndex = 0
+    suggestionProps.labels = []
   })
 
   it('sends an @agent mention as an attachment without switching the session agent', async () => {
@@ -310,5 +314,24 @@ describe('PromptInput agent mention submission', () => {
 
     fireEvent.keyDown(input, { key: 'ArrowDown' })
     await waitFor(() => expect(suggestionProps.selectedIndex).toBe(1))
+  })
+
+  it('offers only mentionable subagents in the @ list', async () => {
+    mocks.agents = [
+      { name: 'build', description: 'Build', mode: 'primary', hidden: false },
+      { name: 'plan', description: 'Plan', mode: 'primary', hidden: false },
+      { name: 'explore', description: 'Explore', mode: 'subagent', hidden: false },
+      { name: 'general', description: 'General', mode: 'all', hidden: false },
+      { name: 'Compaction', description: 'Compaction', mode: 'primary', hidden: true },
+      { name: 'Title', description: 'Title', mode: 'primary', hidden: true },
+    ]
+    mocks.skills = []
+    renderComponent()
+
+    const input = await screen.findByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: '@', selectionStart: 1 } })
+
+    await waitFor(() => expect(suggestionProps.isOpen).toBe(true))
+    expect(suggestionProps.labels).toEqual(['explore', 'general'])
   })
 })

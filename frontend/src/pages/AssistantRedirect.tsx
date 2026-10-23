@@ -18,7 +18,7 @@ import { PreviewPanel } from "@/components/preview/PreviewPanel"
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog"
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup"
 import { ToolSidePanel } from "@/components/navigation/ToolSidePanel"
-import { useMobile } from "@/hooks/useMobile"
+import { useToolPanelLayout } from "@/hooks/useToolPanelLayout"
 import { useToolPanel } from "@/hooks/useToolPanel"
 import { Plus } from "lucide-react"
 
@@ -32,8 +32,8 @@ export function AssistantRedirect() {
   const [terminalOpen, setTerminalOpen] = useTerminalDialogParam()
   const [previewOpen, setPreviewOpen] = useDialogParam('preview')
   const [resetPermissionsOpen, setResetPermissionsOpen] = useDialogParam('resetPermissions')
-  const docked = !useMobile()
-  const toolPanel = useToolPanel(docked)
+  const { docked, showRail } = useToolPanelLayout()
+  const toolPanel = useToolPanel(showRail)
 
   const { data: repo, isLoading: repoLoading, error: repoError } = useQuery({
     queryKey: ["repo", repoId],
@@ -109,7 +109,7 @@ export function AssistantRedirect() {
         </>
       )}
     </div>
-      {docked && (
+      {showRail && (
         <ToolSidePanel
           panel={toolPanel}
           repoId={repoId}

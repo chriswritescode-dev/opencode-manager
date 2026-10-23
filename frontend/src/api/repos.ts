@@ -42,6 +42,7 @@ export async function getRepo(id: number): Promise<Repo> {
   return fetchWrapper(`${API_BASE_URL}/api/repos/${id}`)
 }
 
+
 export function workspaceLabel(workspace: RepoSibling): string {
   return workspace.currentBranch || workspace.branch || workspace.localPath || 'worktree'
 }

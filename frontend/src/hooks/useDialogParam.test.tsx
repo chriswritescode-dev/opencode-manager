@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { renderHook, act, render, screen } from '@testing-library/react'
-import { MemoryRouter, useNavigate } from 'react-router-dom'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { dialogSearch, openDialogParam, useDialogParam } from './useDialogParam'
 import { describe, it, expect, vi } from 'vitest'
 
@@ -157,5 +157,58 @@ describe('useDialogParam', () => {
 
     expect(search).toBe('?dialog=terminal&terminal=pty+1%2F2')
     expect(search).not.toContain('mobileTab')
+  })
+
+  describe('history entries', () => {
+    function DialogHistoryHarness() {
+      const [isOpen, setOpen] = useDialogParam('mcp')
+      const location = useLocation()
+      const navigate = useNavigate()
+
+      return (
+        <div>
+          <span data-testid="dialog-state">{isOpen ? 'open' : 'closed'}</span>
+          <span data-testid="pathname">{location.pathname}</span>
+          <button onClick={() => setOpen(true)}>open</button>
+          <button onClick={() => setOpen(false)}>close</button>
+          <button onClick={() => navigate(-1)}>back</button>
+        </div>
+      )
+    }
+
+    it('closing a dialog the app opened goes back instead of leaving a dead history entry', () => {
+      render(
+        <MemoryRouter initialEntries={['/repos/2', '/']} initialIndex={1}>
+          <DialogHistoryHarness />
+        </MemoryRouter>,
+      )
+
+      act(() => { screen.getByText('open').click() })
+      expect(screen.getByTestId('dialog-state').textContent).toBe('open')
+
+      act(() => { screen.getByText('close').click() })
+      expect(screen.getByTestId('dialog-state').textContent).toBe('closed')
+      expect(screen.getByTestId('pathname').textContent).toBe('/')
+
+      act(() => { screen.getByText('back').click() })
+      expect(screen.getByTestId('pathname').textContent).toBe('/repos/2')
+    })
+
+    it('closing a deep-linked dialog replaces the entry instead of leaving the route', () => {
+      render(
+        <MemoryRouter initialEntries={['/repos/2', '/?dialog=mcp']} initialIndex={1}>
+          <DialogHistoryHarness />
+        </MemoryRouter>,
+      )
+
+      expect(screen.getByTestId('dialog-state').textContent).toBe('open')
+
+      act(() => { screen.getByText('close').click() })
+      expect(screen.getByTestId('dialog-state').textContent).toBe('closed')
+      expect(screen.getByTestId('pathname').textContent).toBe('/')
+
+      act(() => { screen.getByText('back').click() })
+      expect(screen.getByTestId('pathname').textContent).toBe('/repos/2')
+    })
   })
 })

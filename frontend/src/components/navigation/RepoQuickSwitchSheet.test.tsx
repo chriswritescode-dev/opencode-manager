@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RepoQuickSwitchSheet } from './RepoQuickSwitchSheet'
 import { getRepoSiblings, listRepos } from '@/api/repos'
+import { stubMatchMedia } from '@/test/test-utils'
 import { listProjects, type OpenCodeProject } from '@/api/opencode'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
@@ -236,6 +237,7 @@ describe('RepoQuickSwitchSheet', () => {
     activityMocks.useActivityWindowMinutes.mockReturnValue(30)
     setActivityGroups({})
     setLinkedServers([])
+    stubMatchMedia(true)
   })
 
   it('renders with loading state', async () => {
@@ -246,7 +248,7 @@ describe('RepoQuickSwitchSheet', () => {
       { wrapper: createWrapper() },
     )
     await waitFor(() => {
-      expect(screen.getByPlaceholderText('Search projects...')).toBeInTheDocument()
+      expect(screen.getByPlaceholderText('Search repos...')).toBeInTheDocument()
     })
   })
 
@@ -294,7 +296,7 @@ describe('RepoQuickSwitchSheet', () => {
       expect(screen.getByText('repo1')).toBeInTheDocument()
       expect(screen.getByText('repo2')).toBeInTheDocument()
     })
-    const input = screen.getByPlaceholderText('Search projects...')
+    const input = screen.getByPlaceholderText('Search repos...')
     fireEvent.change(input, { target: { value: 'repo1' } })
     await waitFor(() => {
       expect(screen.getByText('repo1')).toBeInTheDocument()
@@ -773,7 +775,7 @@ describe('RepoQuickSwitchSheet', () => {
 
     render(<RepoQuickSwitchSheet isOpen onClose={vi.fn()} />, { wrapper: createWrapper() })
 
-    const input = await screen.findByPlaceholderText('Search projects...')
+    const input = await screen.findByPlaceholderText('Search repos...')
     await waitFor(() => expect(screen.getByText('repo2')).toBeInTheDocument())
     expect(screen.queryByLabelText('Clear search')).toBeNull()
 
@@ -927,7 +929,7 @@ describe('RepoQuickSwitchSheet', () => {
 
     expect(await screen.findByRole('heading', { name: 'Activity' })).toBeInTheDocument()
 
-    fireEvent.change(screen.getByPlaceholderText('Search projects...'), { target: { value: 'repo' } })
+    fireEvent.change(screen.getByPlaceholderText('Search repos...'), { target: { value: 'repo' } })
 
     expect(screen.queryByRole('heading', { name: 'Activity' })).toBeNull()
     expect(screen.queryByText('Session s1')).toBeNull()
@@ -1092,5 +1094,35 @@ describe('RepoQuickSwitchSheet', () => {
       '/servers/srv_kitchen/projects?directory=%2Fprojects%2Falpha',
     )
     expect(handleClose).toHaveBeenCalled()
+  })
+
+  it('leaves the search input unfocused on touch screens so the keyboard stays closed', async () => {
+    vi.mocked(listRepos).mockResolvedValue([createRepo(1, 'repo1', '/path/to/repo1')])
+    stubMatchMedia(false)
+
+    render(<RepoQuickSwitchSheet isOpen onClose={vi.fn()} />, { wrapper: createWrapper() })
+
+    const input = await screen.findByPlaceholderText('Search repos...')
+    expect(input).not.toHaveFocus()
+  })
+
+  it('focuses the search input when a fine pointer is available', async () => {
+    vi.mocked(listRepos).mockResolvedValue([createRepo(1, 'repo1', '/path/to/repo1')])
+    stubMatchMedia(true)
+
+    render(<RepoQuickSwitchSheet isOpen onClose={vi.fn()} />, { wrapper: createWrapper() })
+
+    const input = await screen.findByPlaceholderText('Search repos...')
+    await waitFor(() => expect(input).toHaveFocus())
+  })
+
+  it('uses project wording for the search placeholder when a linked server is selected', async () => {
+    vi.mocked(listRepos).mockResolvedValue([createRepo(1, 'repo1', '/path/to/repo1')])
+    vi.mocked(listProjects).mockResolvedValue([createProject('p1', 'Alpha', '/projects/alpha')])
+    useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
+
+    render(<RepoQuickSwitchSheet isOpen onClose={vi.fn()} />, { wrapper: createWrapper() })
+
+    expect(await screen.findByPlaceholderText('Search projects...')).toBeInTheDocument()
   })
 })

@@ -3,7 +3,7 @@ import { act, render, screen } from '@testing-library/react'
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { describe, it, expect } from 'vitest'
 import { useSettingsDialog } from './useSettingsDialog'
-import { renderHookWithRouter } from '@/test/test-utils'
+import { renderHookWithRouter, renderHookWithRouterAndLocation } from '@/test/test-utils'
 
 describe('useSettingsDialog', () => {
   it('returns closed and account tab when no params present', () => {
@@ -39,14 +39,32 @@ describe('useSettingsDialog', () => {
     expect(result.current.selectedTab).toBeNull()
   })
 
-  it('open sets settings=open and settingsTab, clears mobileTab', () => {
-    const { result } = renderHookWithRouter(() => useSettingsDialog(), ['/?mobileTab=more'])
+  it('open sets settings=open without a tab, clears mobileTab', () => {
+    const { result, capturedSearch } = renderHookWithRouterAndLocation(
+      () => useSettingsDialog(),
+      ['/?mobileTab=more'],
+    )
     expect(result.current.isOpen).toBe(false)
 
     act(() => { result.current.open() })
 
     expect(result.current.isOpen).toBe(true)
     expect(result.current.activeTab).toBe('account')
+    expect(result.current.selectedTab).toBeNull()
+    expect(capturedSearch.current).toBe('?settings=open')
+  })
+
+  it('open drops a stale settingsTab so mobile shows the settings menu', () => {
+    const { result, capturedSearch } = renderHookWithRouterAndLocation(
+      () => useSettingsDialog(),
+      ['/?settingsTab=git'],
+    )
+
+    act(() => { result.current.open() })
+
+    expect(result.current.isOpen).toBe(true)
+    expect(result.current.selectedTab).toBeNull()
+    expect(capturedSearch.current).toBe('?settings=open')
   })
 
   it('close removes settings and settingsTab params', () => {
@@ -84,6 +102,59 @@ describe('useSettingsDialog', () => {
     act(() => { result.current.toggle() })
 
     expect(result.current.isOpen).toBe(false)
+  })
+
+  describe('history entries', () => {
+    function SettingsHarness() {
+      const { isOpen, open, close } = useSettingsDialog()
+      const location = useLocation()
+      const navigate = useNavigate()
+
+      return (
+        <div>
+          <span data-testid="dialog-state">{isOpen ? 'open' : 'closed'}</span>
+          <span data-testid="pathname">{location.pathname}</span>
+          <button onClick={open}>open</button>
+          <button onClick={close}>close</button>
+          <button onClick={() => navigate(-1)}>back</button>
+        </div>
+      )
+    }
+
+    it('closing settings the app opened goes back instead of leaving a dead history entry', () => {
+      render(
+        <MemoryRouter initialEntries={['/repos/2', '/']} initialIndex={1}>
+          <SettingsHarness />
+        </MemoryRouter>,
+      )
+
+      act(() => { screen.getByText('open').click() })
+      expect(screen.getByTestId('dialog-state').textContent).toBe('open')
+
+      act(() => { screen.getByText('close').click() })
+      expect(screen.getByTestId('dialog-state').textContent).toBe('closed')
+      expect(screen.getByTestId('pathname').textContent).toBe('/')
+
+      act(() => { screen.getByText('back').click() })
+      expect(screen.getByTestId('pathname').textContent).toBe('/repos/2')
+    })
+
+    it('closing deep-linked settings replaces the entry instead of leaving the route', () => {
+      render(
+        <MemoryRouter initialEntries={['/repos/2', '/?settings=open&settingsTab=git']} initialIndex={1}>
+          <SettingsHarness />
+        </MemoryRouter>,
+      )
+
+      expect(screen.getByTestId('dialog-state').textContent).toBe('open')
+
+      act(() => { screen.getByText('close').click() })
+      expect(screen.getByTestId('dialog-state').textContent).toBe('closed')
+      expect(screen.getByTestId('pathname').textContent).toBe('/')
+
+      act(() => { screen.getByText('back').click() })
+      expect(screen.getByTestId('pathname').textContent).toBe('/repos/2')
+    })
   })
 
   describe('stable identity', () => {

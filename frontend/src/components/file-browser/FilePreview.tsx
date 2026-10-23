@@ -426,25 +426,25 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
               )}
               
               {isTextFile && viewMode !== 'edit' && (
-                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleEdit() }} className="h-7 w-7 p-0">
+                <Button variant="outline" size="sm" aria-label="Edit file" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleEdit() }} className="h-7 w-7 p-0">
                   <Edit3 className="w-3 h-3" />
                 </Button>
               )}
               
               {showSaveButton && (
-                <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); if (shouldVirtualize) { handleVirtualizedSaveClick(); } else { handleSave(); } }} disabled={isSaving || (shouldVirtualize && !hasVirtualizedChanges)} className={SUCCESS_TINT_BUTTON_CLASS}>
+                <Button variant="ghost" size="sm" aria-label="Save file" onClick={(e) => { e.stopPropagation(); e.preventDefault(); if (shouldVirtualize) { handleVirtualizedSaveClick(); } else { handleSave(); } }} disabled={isSaving || (shouldVirtualize && !hasVirtualizedChanges)} className={SUCCESS_TINT_BUTTON_CLASS}>
                   <Save className="w-3 h-3" />
                 </Button>
               )}
               
               {showCancelButton && (
-                <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleCancel() }} className={DESTRUCTIVE_TINT_BUTTON_CLASS}>
+                <Button variant="ghost" size="sm" aria-label="Cancel editing" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleCancel() }} className={DESTRUCTIVE_TINT_BUTTON_CLASS}>
                   <XIcon className="w-3 h-3" />
                 </Button>
               )}
               
               {viewMode !== 'edit' && (
-                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleDownload() }} className="h-7 w-7 p-0">
+                <Button variant="outline" size="sm" aria-label="Download file" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleDownload() }} className="h-7 w-7 p-0">
                   <Download className="w-3 h-3" />
                 </Button>
               )}

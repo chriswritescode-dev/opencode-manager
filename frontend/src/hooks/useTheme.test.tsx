@@ -10,6 +10,10 @@ import { createUseSettingsMock, stubMatchMedia } from '@/test/test-utils'
 
 vi.mock('@/hooks/useSettings')
 
+vi.mock('@/hooks/useAuth', () => ({
+  useAuth: () => ({ isAuthenticated: true }),
+}))
+
 function mockPreferences(preferences: Partial<UserPreferences> | undefined) {
   vi.mocked(useSettings).mockReturnValue(
     createUseSettingsMock({ preferences: preferences as UserPreferences | undefined }),

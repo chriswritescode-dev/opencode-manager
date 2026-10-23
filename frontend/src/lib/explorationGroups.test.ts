@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionMessageAssistant, SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
-import { explorationLabel, groupExplorationParts } from './explorationGroups'
+import { explorationFailureCount, explorationLabel, groupExplorationParts } from './explorationGroups'
 
 const tool = (id: string, name: string, status: 'completed' | 'running' = 'completed'): SessionMessageAssistantTool =>
   status === 'completed'
     ? { type: 'tool', id, name, state: { status, input: {}, content: [], metadata: {} }, time: { created: 0, ran: 0, completed: 1 } }
     : { type: 'tool', id, name, state: { status, input: {} }, time: { created: 0, ran: 0 } }
+
+const failedTool = (id: string, name: string): SessionMessageAssistantTool => ({
+  type: 'tool',
+  id,
+  name,
+  state: { status: 'error', input: {}, error: { type: 'tool.failed', message: 'File not found' }, metadata: {} },
+  time: { created: 0, ran: 1, completed: 2 },
+})
 
 const text = (value: string): SessionMessageAssistant['content'][number] => ({ type: 'text', text: value })
 const reasoning = (value: string): SessionMessageAssistant['content'][number] => ({ type: 'reasoning', text: value })
@@ -44,5 +52,25 @@ describe('explorationLabel', () => {
 
   it('reports in-progress groups as exploring', () => {
     expect(explorationLabel([tool('a', 'read'), tool('b', 'read', 'running')])).toBe('Exploring: 2 reads')
+  })
+
+  it('surfaces failed members in the summary', () => {
+    expect(explorationLabel([tool('a', 'read'), failedTool('b', 'read')])).toBe('Explored: 2 reads, 1 failed')
+  })
+
+  it('counts every failed member', () => {
+    expect(explorationLabel([failedTool('a', 'read'), failedTool('b', 'grep'), tool('c', 'glob')]))
+      .toBe('Explored: 1 read, 2 searches, 2 failed')
+  })
+
+  it('does not report failures for a group without errors', () => {
+    expect(explorationLabel([tool('a', 'read')])).toBe('Explored: 1 read')
+  })
+})
+
+describe('explorationFailureCount', () => {
+  it('counts only errored members', () => {
+    expect(explorationFailureCount([tool('a', 'read'), failedTool('b', 'read'), failedTool('c', 'glob')])).toBe(2)
+    expect(explorationFailureCount([tool('a', 'read')])).toBe(0)
   })
 })

@@ -16,6 +16,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { MobileTabBar } from './MobileTabBar'
 import { useMobile } from '@/hooks/useMobile'
+import { useUnreadScheduleRuns } from '@/hooks/useSchedules'
 import { useSidebarServerStore } from '@/stores/sidebarServerStore'
 
 function LocationSpy() {
@@ -27,6 +28,9 @@ describe('MobileTabBar', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
+    vi.mocked(useUnreadScheduleRuns).mockReturnValue(
+      { data: undefined } as unknown as ReturnType<typeof useUnreadScheduleRuns>,
+    )
     useSidebarServerStore.setState({ serverId: LOCAL_OPENCODE_SERVER_ID })
   })
 
@@ -418,6 +422,45 @@ describe('MobileTabBar', () => {
       </QueryClientProvider>,
     )
     expect(container.firstChild).toBeNull()
+  })
+
+  it('shows the unread schedule indicator on More when the Schedules tab is replaced by Git', () => {
+    vi.mocked(useMobile).mockReturnValue(true)
+    vi.mocked(useUnreadScheduleRuns).mockReturnValue({
+      data: { total: 2, runs: [] },
+    } as unknown as ReturnType<typeof useUnreadScheduleRuns>)
+    const queryClient = new QueryClient()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/repos/123']}>
+          <MobileTabBar />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    expect(screen.queryByText('Schedules')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'More' }).querySelector('[data-unread-badge]')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Git' }).querySelector('[data-unread-badge]')).toBeNull()
+  })
+
+  it('keeps the unread schedule indicator on Schedules and off More when that tab is shown', () => {
+    vi.mocked(useMobile).mockReturnValue(true)
+    vi.mocked(useUnreadScheduleRuns).mockReturnValue({
+      data: { total: 1, runs: [] },
+    } as unknown as ReturnType<typeof useUnreadScheduleRuns>)
+    const queryClient = new QueryClient()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/']}>
+          <MobileTabBar />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    expect(screen.getByRole('button', { name: 'Schedules' }).querySelector('[data-unread-badge]')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'More' }).querySelector('[data-unread-badge]')).toBeNull()
   })
 
 })

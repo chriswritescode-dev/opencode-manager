@@ -181,7 +181,8 @@ function TreeNode({ file, level, onFileSelect, onDirectoryClick, selectedFile, o
             <Button
               variant="ghost"
               size="sm"
-              className={`w-6 h-6 p-0 ${isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+              aria-label={`Actions for ${file.name}`}
+              className={`w-6 h-6 p-0 ${isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}
             >
               <MoreVertical className="w-3 h-3" />
             </Button>

@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -51,6 +51,7 @@ export function PermissionRequestDialog({
   const [loadingAction, setLoadingAction] = useState<PermissionResponse | null>(null)
   const [rejectReason, setRejectReason] = useState('')
   const reasonInputId = useId()
+  const allowOnceRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     setRejectReason('')
@@ -81,7 +82,13 @@ export function PermissionRequestDialog({
 
   return (
     <Dialog open={parentOpen ?? true} onOpenChange={onOpenChange ?? (() => {})}>
-      <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md p-4 sm:p-6">
+      <DialogContent
+        className="max-w-[calc(100vw-2rem)] sm:max-w-md p-4 sm:p-6"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault()
+          allowOnceRef.current?.focus()
+        }}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 flex-wrap">
             <span>Permission Request</span>
@@ -215,6 +222,7 @@ export function PermissionRequestDialog({
             variant="default"
             onClick={() => handleResponse('once')}
             disabled={isLoading}
+            ref={allowOnceRef}
             className={cn(
               "w-full sm:flex-1 text-sm h-9 sm:h-10",
               loadingAction === 'once' && "opacity-70"

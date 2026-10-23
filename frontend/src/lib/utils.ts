@@ -121,6 +121,8 @@ export function sanitizeForTTS(text: string): string {
   // Remove headers: ### Header -> Header
   sanitized = sanitized.replace(/^#{1,6}\s+/gm, '')
 
+  sanitized = sanitized.replace(/^\s*(?:(?:[-*+]|\d+\.)\s+)?\[[ xX]\]\s+/gm, '')
+
   // Remove list markers: - item, * item, + item, or 1. item -> item
   sanitized = sanitized.replace(/^\s*[-*+]\s+/gm, '')
   sanitized = sanitized.replace(/^\s*\d+\.\s+/gm, '')
@@ -128,8 +130,8 @@ export function sanitizeForTTS(text: string): string {
   // Remove blockquotes: > quote -> quote
   sanitized = sanitized.replace(/^>\s+/gm, '')
 
-  // Remove horizontal rules: --- or *** or ___
-  sanitized = sanitized.replace(/^(\*\*\*|---|___)\s*$/gm, '')
+  // Remove horizontal rules and setext heading underlines: ---, ***, ___ or ===
+  sanitized = sanitized.replace(/^(\*\*\*|---|___|={3,})\s*$/gm, '')
 
   // Remove footnote references: [^1] -> remove
   sanitized = sanitized.replace(/\[\^[^\]]+\]/g, '')

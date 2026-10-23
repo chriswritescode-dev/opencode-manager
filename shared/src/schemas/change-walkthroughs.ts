@@ -155,6 +155,7 @@ export type ChangeWalkthrough = z.infer<typeof ChangeWalkthroughSchema>;
 export const ChangeWalkthroughStateSchema = z.object({
   walkthrough: ChangeWalkthroughSchema.nullable(),
   currentDiffHash: z.string().nullable(),
+  hasChanges: z.boolean(),
   stale: z.boolean(),
   generating: z.boolean(),
   running: z.boolean(),

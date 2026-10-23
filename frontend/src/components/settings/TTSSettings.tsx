@@ -94,15 +94,22 @@ export function TTSSettings() {
   
   const { reset, formState: { isDirty, isValid }, getValues } = form
   
+  const shouldDiscoverTTS = Boolean(
+    preferences?.tts?.enabled
+    && preferences.tts.provider === 'external'
+    && preferences.tts.apiKey
+    && preferences.tts.endpoint,
+  )
+
   // Fetch available models and voices for external provider
   const { data: modelsData, isLoading: isLoadingModels, refetch: refetchModels } = useTTSModels(
     undefined,
-    true
+    shouldDiscoverTTS
   )
   
   const { data: voicesData, isLoading: isLoadingVoices, refetch: refetchVoices } = useTTSVoices(
     undefined,
-    true
+    shouldDiscoverTTS
   )
   
   const availableModels = modelsData?.models || preferences?.tts?.availableModels || []

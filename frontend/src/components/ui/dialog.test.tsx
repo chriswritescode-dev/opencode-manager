@@ -201,7 +201,26 @@ describe("DialogContent", () => {
       );
       const closeTrigger = document.querySelector('[data-swipe-close-trigger]');
       expect(closeTrigger).toBeInTheDocument();
+      expect(closeTrigger).toHaveAccessibleName('Dismiss dialog');
     });
+  });
+
+  it('extends the close button hit area without enlarging the icon', () => {
+    render(
+      <Dialog open>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Close Target Dialog</DialogTitle>
+          </DialogHeader>
+        </DialogContent>
+      </Dialog>
+    );
+
+    const closeButton = screen.getByRole('button', { name: 'Close' });
+    const icon = closeButton.querySelector('svg');
+
+    expect(closeButton).toHaveClass('after:-inset-2', 'pointer-coarse:after:-inset-3.5');
+    expect(icon).toHaveClass('h-4', 'w-4');
   });
 
   it('does not render hidden close trigger when mobileSwipeToClose is false', () => {

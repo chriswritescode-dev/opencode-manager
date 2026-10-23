@@ -216,7 +216,8 @@ export const sessionQueryOptions = (
   refetchOnReconnect: true,
   staleTime: 15000,
   retry: (failureCount: number, error: unknown) =>
-    !(error instanceof FetchError && error.statusCode === 404) && failureCount < 3,
+    !(error instanceof FetchError && (error.statusCode === 400 || error.statusCode === 404))
+    && failureCount < 3,
 });
 
 export const useSession = (sessionID: string | undefined, directory?: string) => {

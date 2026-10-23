@@ -36,6 +36,9 @@ vi.mock('@/components/terminal/TerminalPanel', () => ({
   TerminalWorkspace: ({ onLastTerminalExited }: { onLastTerminalExited?: () => void }) => (
     <div>
       terminal-tool
+      <div className="xterm">
+        <textarea aria-label="terminal input" />
+      </div>
       <button type="button" onClick={onLastTerminalExited}>Exit last terminal</button>
     </div>
   ),
@@ -98,6 +101,14 @@ function renderAt(search: string, docked = true) {
 
 function search(): URLSearchParams {
   return new URLSearchParams(screen.getByTestId('search').textContent ?? '')
+}
+
+function stubNarrowPage(): () => void {
+  const main = document.createElement('main')
+  main.getBoundingClientRect = () =>
+    ({ width: 560, height: 800, top: 0, left: 0, right: 560, bottom: 800, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
+  document.body.append(main)
+  return () => main.remove()
 }
 
 const WINDOW_MINUTES = 30
@@ -274,6 +285,137 @@ describe('ToolSidePanel', () => {
     await user.click(screen.getByRole('button', { name: 'Files' }))
     await user.click(await screen.findByRole('button', { name: 'Close panel' }))
     await waitFor(() => expect(search().has('panel')).toBe(false))
+  })
+
+  it('renders the panel as a modal sheet over the page when docking would squeeze it', async () => {
+    const removePage = stubNarrowPage()
+
+    try {
+      renderAt('?panel=files')
+
+      const panel = await screen.findByRole('dialog', { name: 'Files' })
+      const backdrop = screen.getByTestId('tool-panel-backdrop')
+      expect(panel.className).toContain('fixed')
+      expect(panel).toHaveAttribute('aria-modal', 'true')
+      expect(panel).not.toHaveAttribute('style')
+      expect(panel.className).toContain('z-50')
+      expect(backdrop.className).toContain('z-50')
+      expect(backdrop).toHaveAttribute('aria-hidden', 'true')
+      expect(screen.queryByRole('separator', { name: 'Resize panel' })).not.toBeInTheDocument()
+    } finally {
+      removePage()
+    }
+  })
+
+  it('portals the floating overlay into the document body so page stacking contexts cannot cover it', async () => {
+    const removePage = stubNarrowPage()
+
+    try {
+      renderAt('?panel=files')
+
+      const panel = await screen.findByRole('dialog', { name: 'Files' })
+      const backdrop = screen.getByTestId('tool-panel-backdrop')
+
+      expect(panel.parentElement).toBe(document.body)
+      expect(backdrop.parentElement).toBe(document.body)
+      expect(backdrop.className).toContain('inset-y-0')
+    } finally {
+      removePage()
+    }
+  })
+
+  it('moves focus into the floating panel and returns it to the rail on close', async () => {
+    const user = userEvent.setup()
+    const removePage = stubNarrowPage()
+
+    try {
+      renderAt('')
+
+      const filesButton = screen.getByRole('button', { name: 'Files' })
+      await user.click(filesButton)
+      const panel = await screen.findByRole('dialog', { name: 'Files' })
+
+      await waitFor(() => expect(document.activeElement).toBe(panel))
+
+      await user.keyboard('{Escape}')
+
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Files' })).not.toBeInTheDocument())
+      await waitFor(() => expect(document.activeElement).toBe(filesButton))
+      expect(search().has('panel')).toBe(false)
+    } finally {
+      removePage()
+    }
+  })
+
+  it('closes the floating panel on Escape and on an outside click', async () => {
+    const user = userEvent.setup()
+    const removePage = stubNarrowPage()
+
+    try {
+      renderAt('?panel=files')
+
+      await screen.findByRole('dialog', { name: 'Files' })
+      await user.keyboard('{Escape}')
+      await waitFor(() => expect(search().has('panel')).toBe(false))
+
+      await user.click(screen.getByRole('button', { name: 'Files' }))
+      await screen.findByRole('dialog', { name: 'Files' })
+
+      await user.click(screen.getByTestId('tool-panel-backdrop'))
+      await waitFor(() => expect(search().has('panel')).toBe(false))
+    } finally {
+      removePage()
+    }
+  })
+
+  it('keeps the floating terminal open on Escape typed into the terminal', async () => {
+    const user = userEvent.setup()
+    const removePage = stubNarrowPage()
+
+    try {
+      renderAt('?panel=terminal&terminal=pty-1')
+
+      await screen.findByRole('dialog', { name: 'Terminal' })
+      const terminalInput = screen.getByLabelText('terminal input')
+      await user.click(terminalInput)
+      await user.keyboard('{Escape}')
+
+      expect(screen.getByRole('dialog', { name: 'Terminal' })).toBeInTheDocument()
+      expect(search().get('panel')).toBe('terminal')
+    } finally {
+      removePage()
+    }
+  })
+
+  it('keeps a docked panel open on Escape', async () => {
+    const user = userEvent.setup()
+    renderAt('?panel=files')
+
+    await screen.findByRole('complementary', { name: 'Files' })
+    await user.keyboard('{Escape}')
+
+    expect(search().get('panel')).toBe('files')
+  })
+
+  it('resizes the docked panel from the keyboard and clamps it', async () => {
+    const user = userEvent.setup()
+    renderAt('?panel=files')
+
+    const handle = await screen.findByRole('separator', { name: 'Resize panel' })
+    const panel = screen.getByRole('complementary', { name: 'Files' })
+    expect(panel.parentElement).not.toBe(document.body)
+    const initial = Number(handle.getAttribute('aria-valuenow'))
+
+    handle.focus()
+    await user.keyboard('{ArrowRight}')
+
+    expect(Number(handle.getAttribute('aria-valuenow'))).toBe(initial - 16)
+    expect(panel).toHaveStyle({ width: `${initial - 16}px` })
+
+    await user.keyboard('{Home}')
+
+    expect(Number(handle.getAttribute('aria-valuenow'))).toBe(320)
+    expect(panel).toHaveStyle({ width: '320px' })
   })
 
   it('opens non-panel session items from the rail as dialogs', async () => {

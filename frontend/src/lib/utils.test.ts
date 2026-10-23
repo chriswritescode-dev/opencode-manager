@@ -75,8 +75,21 @@ describe('sanitizeForTTS', () => {
     expect(sanitizeForTTS(input)).toBe(expected)
   })
 
+  it('should remove task-list markers but keep the task text', () => {
+    expect(sanitizeForTTS('- [x] task done\n- [ ] task pending')).toBe('task done\ntask pending')
+    expect(sanitizeForTTS('* [X] starred\n+ [ ] plus\n1. [x] numbered')).toBe('starred\nplus\nnumbered')
+  })
+
+  it('should remove nested task-list markers and checked variants', () => {
+    expect(sanitizeForTTS('  - [x] nested done\n  - [ ] nested pending')).toBe('nested done\nnested pending')
+  })
+
   it('should remove horizontal rules', () => {
     expect(sanitizeForTTS('Before\n---\nAfter')).toBe('Before\nAfter')
+  })
+
+  it('should remove setext heading underlines', () => {
+    expect(sanitizeForTTS('Title\n===')).toBe('Title')
   })
 
   it('should normalize whitespace', () => {

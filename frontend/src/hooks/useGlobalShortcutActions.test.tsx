@@ -59,6 +59,7 @@ describe('useGlobalShortcutActions', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
     queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     mocks.useMobile.mockReturnValue(false)
     mocks.getRepo.mockResolvedValue({ id: 5, fullPath: '/repo/five' })
@@ -143,14 +144,40 @@ describe('useGlobalShortcutActions', () => {
     expect(mocks.getRepo).not.toHaveBeenCalled()
   })
 
-  it('does not fall back to a Manager host for a tool the linked-server route lacks', async () => {
-    const { location } = renderHarness('/servers/srv_kitchen/sessions/ses_1')
+  it('toggles the navigation sidebar instead of the Files panel from the sidebar shortcut', async () => {
+    const { location } = renderHarness('/repos/5')
+
+    pressLeaderFollowUp('b')
+
+    await waitFor(() => expect(localStorage.getItem('oc:sidebar:collapsed')).toBe('true'))
+    expect(location()).toBe('/repos/5')
+
+    pressLeaderFollowUp('b')
+
+    await waitFor(() => expect(localStorage.getItem('oc:sidebar:collapsed')).toBe('false'))
+    expect(location()).toBe('/repos/5')
+  })
+
+  it('does not change the persisted sidebar state from the sidebar shortcut on mobile', async () => {
+    mocks.useMobile.mockReturnValue(true)
+    const { location } = renderHarness('/repos/5')
 
     pressLeaderFollowUp('b')
 
     await act(async () => {
       await Promise.resolve()
     })
+
+    expect(localStorage.getItem('oc:sidebar:collapsed')).toBeNull()
+    expect(location()).toBe('/repos/5')
+  })
+
+  it('does not fall back to a Manager host for a tool the linked-server route lacks', async () => {
+    const { location } = renderHarness('/servers/srv_kitchen/sessions/ses_1')
+
+    pressLeaderFollowUp('b')
+
+    await waitFor(() => expect(localStorage.getItem('oc:sidebar:collapsed')).toBe('true'))
 
     expect(location()).toBe('/servers/srv_kitchen/sessions/ses_1')
     expect(mocks.getRepo).not.toHaveBeenCalled()

@@ -26,6 +26,13 @@ export type VoicePhase =
 /** Why a paused voice conversation stopped listening. */
 export type VoicePauseReason = 'user' | 'background' | 'no-speech' | 'error'
 
+/**
+ * Where a failure came from, which decides what the user must fix before a
+ * retry can succeed. A failed capture usually means the microphone, while a
+ * failed send or reading can succeed on a plain retry.
+ */
+export type VoiceFailureSource = 'capture' | 'send' | 'playback'
+
 /** The reported status of a session, as a session transcript carries it. */
 export type VoiceSessionStatus = SessionStatus['type']
 
@@ -37,6 +44,8 @@ export interface VoiceConversationState {
   pauseReason: VoicePauseReason | null
   /** Message shown to the user after a failure, or null when there is none. */
   error: string | null
+  /** Where the failure came from, or null when there is no failure. */
+  failureSource: VoiceFailureSource | null
   /**
    * Id of the transcript message whose successors the conversation reads
    * aloud, or null when the whole transcript is in scope. Replies after it are
@@ -52,6 +61,7 @@ export const INITIAL_VOICE_CONVERSATION_STATE: VoiceConversationState = {
   phase: 'off',
   pauseReason: null,
   error: null,
+  failureSource: null,
   baselineId: null,
   sawBusy: false,
 }
@@ -74,7 +84,7 @@ export type VoiceConversationEvent =
   | { type: 'pause'; reason: VoicePauseReason }
   | { type: 'resume'; busy: boolean; baselineId: string | null }
   | { type: 'resume-speech' }
-  | { type: 'error'; message: string }
+  | { type: 'error'; message: string; source: VoiceFailureSource }
   | { type: 'exit' }
 
 /** An assistant message the conversation reads aloud. */
@@ -113,6 +123,12 @@ export interface VoiceConversationLabelInput {
   isPlaybackPaused: boolean
   /** Whether the session is still working on the current turn. */
   sessionBusy: boolean
+  /** Message shown to the user after a failure, or null when there is none. */
+  error?: string | null
+  /** Where the failure came from, which decides how the user can recover. */
+  failureSource?: VoiceFailureSource | null
+  /** Whether the microphone was asked to start but has not begun capturing yet. */
+  isStartingCapture?: boolean
 }
 
 /**
@@ -136,6 +152,7 @@ export function reduceVoiceConversation(
             phase: 'working',
             pauseReason: null,
             error: null,
+            failureSource: null,
             sawBusy: true,
             baselineId: event.baselineId,
           }
@@ -143,6 +160,7 @@ export function reduceVoiceConversation(
             phase: 'listening',
             pauseReason: null,
             error: null,
+            failureSource: null,
             sawBusy: false,
             baselineId: null,
           }
@@ -159,7 +177,13 @@ export function reduceVoiceConversation(
       return { ...state, phase: 'working', sawBusy: true, baselineId: event.baselineId }
     case 'send-failed':
       if (state.phase !== 'sending' && state.phase !== 'working') return state
-      return { ...state, phase: 'paused', pauseReason: 'error', error: event.message }
+      return {
+        ...state,
+        phase: 'paused',
+        pauseReason: 'error',
+        error: event.message,
+        failureSource: 'send',
+      }
     case 'status':
       if (state.phase !== 'working') return state
       if (!event.busy || state.sawBusy) return state
@@ -198,6 +222,7 @@ export function reduceVoiceConversation(
             baselineId: event.baselineId,
             pauseReason: null,
             error: null,
+            failureSource: null,
           }
         : {
             ...state,
@@ -206,13 +231,26 @@ export function reduceVoiceConversation(
             baselineId: null,
             pauseReason: null,
             error: null,
+            failureSource: null,
           }
     case 'resume-speech':
       if (state.phase !== 'paused') return state
-      return { ...state, phase: 'speaking', pauseReason: null, error: null }
+      return {
+        ...state,
+        phase: 'speaking',
+        pauseReason: null,
+        error: null,
+        failureSource: null,
+      }
     case 'error':
       if (state.phase === 'off') return state
-      return { ...state, phase: 'paused', pauseReason: 'error', error: event.message }
+      return {
+        ...state,
+        phase: 'paused',
+        pauseReason: 'error',
+        error: event.message,
+        failureSource: event.source,
+      }
     case 'exit':
       return INITIAL_VOICE_CONVERSATION_STATE
     default:
@@ -349,11 +387,11 @@ export function isVoiceTurnComplete(input: VoiceTurnCompletionInput): boolean {
  * @returns The status to display, or an empty string when voice mode is off.
  */
 export function voiceConversationLabel(input: VoiceConversationLabelInput): string {
-  const { phase, pauseReason, pendingApproval } = input
+  const { phase, pauseReason, pendingApproval, error, isStartingCapture } = input
 
   switch (phase) {
     case 'listening':
-      return 'Listening'
+      return isStartingCapture ? 'Starting…' : 'Listening'
     case 'sending':
       return 'Sending…'
     case 'working':
@@ -361,10 +399,10 @@ export function voiceConversationLabel(input: VoiceConversationLabelInput): stri
     case 'speaking':
       return 'Speaking'
     case 'recording':
-      return 'Adding to queue'
+      return isStartingCapture ? 'Starting…' : 'Adding to queue'
     case 'paused':
       if (pauseReason === 'no-speech') return "Didn't catch that"
-      if (pauseReason === 'error') return 'Something went wrong'
+      if (pauseReason === 'error') return error?.trim() || 'Something went wrong'
       return 'Paused'
     case 'off':
       return ''
@@ -381,11 +419,20 @@ export function voiceConversationLabel(input: VoiceConversationLabelInput): stri
  * @returns The hint to display, or an empty string when the orb has no action.
  */
 export function voiceConversationHint(input: VoiceConversationLabelInput): string {
-  const { phase, pauseReason, pendingApproval, isEndpointing, isPlaybackPaused, sessionBusy } =
-    input
+  const {
+    phase,
+    pauseReason,
+    pendingApproval,
+    isEndpointing,
+    isPlaybackPaused,
+    sessionBusy,
+    failureSource,
+    isStartingCapture,
+  } = input
 
   switch (phase) {
     case 'listening':
+      if (isStartingCapture) return ''
       return isEndpointing ? '' : 'Tap to send'
     case 'sending':
       return ''
@@ -394,10 +441,14 @@ export function voiceConversationHint(input: VoiceConversationLabelInput): strin
     case 'speaking':
       return sessionBusy ? 'Tap to add a message' : 'Tap to skip'
     case 'recording':
-      return 'Tap to queue'
+      return isStartingCapture ? '' : 'Tap to queue'
     case 'paused':
       if (pauseReason === 'no-speech') return 'Tap to talk'
-      if (pauseReason === 'error') return 'Tap to retry'
+      if (pauseReason === 'error') {
+        return failureSource === 'capture'
+          ? 'Allow microphone access, then tap to retry'
+          : 'Tap to retry'
+      }
       return isPlaybackPaused ? 'Tap to continue' : 'Tap to talk'
     case 'off':
       return ''

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput } from './PromptInput'
+import { useComposerDraftStore } from '@/stores/composerDraftStore'
 import { createCommandActionsMock, stubMatchMedia, createVoiceConversationControllerMock } from '@/test/test-utils'
 
 const mocks = vi.hoisted(() => ({
@@ -164,6 +165,7 @@ describe('PromptInput goal mode', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    useComposerDraftStore.setState({ drafts: {} })
     mocks.useVoiceConversation.mockReturnValue(createVoiceConversationControllerMock())
     mocks.useSessionGoal.mockReturnValue({ data: null })
     mocks.useSessionPermissionMode.mockReturnValue({ data: undefined })

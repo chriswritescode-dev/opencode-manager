@@ -263,6 +263,13 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     ((schedulePreset === 'daily' || schedulePreset === 'weekdays' || schedulePreset === 'weekly' || schedulePreset === 'monthly') && !timezone.trim()) ||
     (schedulePreset === 'weekly' && weeklyDays.length === 0)
 
+  const missingRequirements = [
+    name.trim() ? null : 'name',
+    prompt.trim() ? null : 'prompt',
+    isScheduleConfigInvalid ? 'valid timing' : null,
+    showRepoSelector && !job && selectedRepoId === undefined ? 'repository' : null,
+  ].filter((requirement): requirement is string => requirement !== null)
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -368,9 +375,19 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
           />
         </Tabs>
 
-        <div className="mt-0 shrink-0 border-t border-border px-3 sm:px-6 py-4 flex flex-row gap-2 sm:justify-end">
+        <div className="mt-0 shrink-0 border-t border-border px-3 sm:px-6 py-4 flex flex-row flex-wrap items-center gap-2 sm:justify-end">
+          {missingRequirements.length > 0 ? (
+            <p id="schedule-requirements" className="order-last w-full text-xs text-muted-foreground sm:order-first sm:mr-auto sm:w-auto">
+              Required: {missingRequirements.join(', ')}
+            </p>
+          ) : null}
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving} className="flex-1 sm:flex-none">Cancel</Button>
-          <Button onClick={handleSubmit} disabled={isSaving || !name.trim() || !prompt.trim() || isScheduleConfigInvalid || (!!showRepoSelector && !job && selectedRepoId === undefined)} className="flex-1 sm:flex-none">
+          <Button
+            onClick={handleSubmit}
+            disabled={isSaving || missingRequirements.length > 0}
+            aria-describedby={missingRequirements.length > 0 ? 'schedule-requirements' : undefined}
+            className="flex-1 sm:flex-none"
+          >
             {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             {isSaving ? 'Saving...' : job ? 'Save changes' : 'Create schedule'}
           </Button>

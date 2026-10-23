@@ -11,6 +11,7 @@ function state(overrides: Partial<ChangeWalkthroughState> = {}): ChangeWalkthrou
   return {
     walkthrough: null,
     currentDiffHash: 'hash',
+    hasChanges: true,
     stale: false,
     generating: false,
     running: false,
@@ -24,6 +25,7 @@ describe('change walkthrough routes', () => {
   let startGeneration: ReturnType<typeof vi.fn>
   let cancelGeneration: ReturnType<typeof vi.fn>
   let refine: ReturnType<typeof vi.fn>
+  let listHelperSessionIds: ReturnType<typeof vi.fn>
   let app: Hono
 
   beforeEach(() => {
@@ -31,11 +33,20 @@ describe('change walkthrough routes', () => {
     startGeneration = vi.fn(async () => state({ generating: true }))
     cancelGeneration = vi.fn(async () => true)
     refine = vi.fn(async () => state({ generating: true }))
+    listHelperSessionIds = vi.fn(() => ['ses_helper'])
     app = new Hono()
     app.route(
       '/change-walkthroughs',
-      createChangeWalkthroughRoutes({ getState, startGeneration, cancelGeneration, refine } as unknown as ChangeWalkthroughService),
+      createChangeWalkthroughRoutes({ getState, startGeneration, cancelGeneration, refine, listHelperSessionIds } as unknown as ChangeWalkthroughService),
     )
+  })
+
+  it('GET helper-sessions lists walkthrough helper sessions', async () => {
+    const res = await app.request('/change-walkthroughs/helper-sessions')
+
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toEqual({ sessionIds: ['ses_helper'] })
+    expect(getState).not.toHaveBeenCalled()
   })
 
   it('GET returns the state for the default source', async () => {

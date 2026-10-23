@@ -96,7 +96,7 @@ function isAllowedAddress(address: string): boolean {
     address === WILDCARD_V4 ||
     address === WILDCARD_V6 ||
     address === '::1' ||
-    address.startsWith('127.')
+    address === '127.0.0.1'
   )
 }
 

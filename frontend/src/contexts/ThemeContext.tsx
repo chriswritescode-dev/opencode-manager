@@ -1,12 +1,14 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useState } from 'react'
 import { useSettings } from '@/hooks/useSettings'
+import { useAuth } from '@/hooks/useAuth'
 import { applyColorTheme, getDocumentThemeMode, type ThemeMode } from '@/lib/theme/colorTheme'
 
 const ThemeContext = createContext<ThemeMode | null>(null)
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const { preferences } = useSettings()
+  const { isAuthenticated } = useAuth()
+  const { preferences } = useSettings('default', { enabled: isAuthenticated })
   const [themeMode, setThemeMode] = useState<ThemeMode>(getDocumentThemeMode)
   const hasPreferences = preferences !== undefined
   const theme = preferences?.theme || 'dark'

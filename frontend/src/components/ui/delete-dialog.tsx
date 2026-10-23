@@ -10,6 +10,8 @@ interface DeleteDialogProps {
   description: ReactNode
   itemName?: string
   isDeleting?: boolean
+  confirmLabel?: string
+  pendingLabel?: string
   children?: ReactNode
 }
 
@@ -22,6 +24,8 @@ export function DeleteDialog({
   description,
   itemName,
   isDeleting = false,
+  confirmLabel,
+  pendingLabel = 'Deleting...',
   children
 }: DeleteDialogProps) {
   return (
@@ -35,8 +39,8 @@ export function DeleteDialog({
       warning={itemName ? (
         <>This will permanently delete "<span className="font-medium">{itemName}</span>". This action cannot be undone.</>
       ) : undefined}
-      confirmLabel={title.includes('Configuration') ? 'Delete Configuration' : 'Delete'}
-      pendingLabel="Deleting..."
+      confirmLabel={confirmLabel ?? (title.includes('Configuration') ? 'Delete Configuration' : 'Delete')}
+      pendingLabel={pendingLabel}
       isPending={isDeleting}
     >
       {children}

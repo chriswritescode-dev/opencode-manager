@@ -498,7 +498,7 @@ app.get('/', async (c) => {
       return c.json({ ...updatedRepo, currentBranch })
     } catch (error: unknown) {
       logger.error('Failed to create branch:', error)
-      return c.json({ error: getErrorMessage(error) }, 500)
+      return c.json({ error: getErrorMessage(error) }, getStatusCode(error) as ContentfulStatusCode)
     }
   })
 

@@ -117,7 +117,7 @@ describe('TerminalPanel', () => {
     renderPanel()
 
     expect(createMutate).toHaveBeenCalledTimes(1)
-    expect(createMutate).toHaveBeenCalledWith({ directory: '/repo' }, expect.any(Object))
+    expect(createMutate).toHaveBeenCalledWith({ directory: '/repo', title: 'Terminal 1' }, expect.any(Object))
   })
 
   it('does not auto-create while the list request is unresolved or failed', () => {
@@ -140,7 +140,7 @@ describe('TerminalPanel', () => {
     )
 
     expect(createMutate).toHaveBeenCalledTimes(1)
-    expect(createMutate).toHaveBeenCalledWith({ directory: '/repo' }, expect.any(Object))
+    expect(createMutate).toHaveBeenCalledWith({ directory: '/repo', title: 'Terminal 1' }, expect.any(Object))
   })
 
   it('auto-creates a shell when only exited terminals exist and none is requested', () => {
@@ -148,7 +148,7 @@ describe('TerminalPanel', () => {
     renderPanel()
 
     expect(createMutate).toHaveBeenCalledTimes(1)
-    expect(createMutate).toHaveBeenCalledWith({ directory: '/repo' }, expect.any(Object))
+    expect(createMutate).toHaveBeenCalledWith({ directory: '/repo', title: 'Terminal 1' }, expect.any(Object))
   })
 
   it('decides on auto-creation once per opening, so a shell exiting later is not replaced', () => {
@@ -260,10 +260,10 @@ describe('TerminalPanel', () => {
 
     fireEvent.click(screen.getByLabelText('Close Terminal'))
 
-    expect(screen.getByText('Stop the running process?')).toBeInTheDocument()
+    expect(screen.getByText('Close this terminal?')).toBeInTheDocument()
     expect(removeMutate).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Close terminal' }))
 
     expect(removeMutate).toHaveBeenCalledWith({ ptyID: 't1', directory: '/repo' }, expect.any(Object))
   })
@@ -275,7 +275,7 @@ describe('TerminalPanel', () => {
 
     fireEvent.click(screen.getByLabelText('Close Build'))
 
-    expect(screen.queryByText('Stop the running process?')).not.toBeInTheDocument()
+    expect(screen.queryByText('Close this terminal?')).not.toBeInTheDocument()
     expect(removeMutate).toHaveBeenCalledWith({ ptyID: 't2', directory: '/repo' }, expect.any(Object))
   })
 
@@ -344,6 +344,97 @@ describe('TerminalPanel', () => {
     expect(screen.getByTestId('terminal-view')).toHaveAttribute('data-pty-id', 't1')
     expect(screen.getByTestId('terminal-view')).toHaveAttribute('data-active', 'true')
     expect(createMutate).not.toHaveBeenCalled()
+  })
+
+  it('keeps an action terminal that exited cleanly so its output stays visible', async () => {
+    const runningActionTerminal: TerminalInfo = {
+      id: 't4',
+      title: 'Say hi',
+      kind: 'action',
+      actionId: 'say-hi',
+      cwd: '/repo',
+      status: 'running',
+    }
+    mockTerminalHooks([runningActionTerminal])
+    refetch.mockResolvedValue({ data: [{ ...runningActionTerminal, status: 'exited', exitCode: 0 }] })
+    const onClose = vi.fn()
+    const { rerender } = renderPanel('/repos/1?dialog=terminal&terminal=t4', onClose)
+    await screen.findAllByTestId('terminal-view')
+
+    fireEvent.click(screen.getByLabelText('exit t4'))
+
+    await waitFor(() => expect(refetch).toHaveBeenCalledTimes(1))
+    expect(removeMutate).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('Close Say hi')).toBeInTheDocument()
+
+    mockTerminalHooks([{ ...runningActionTerminal, status: 'exited', exitCode: 0 }])
+    rerender(
+      <MemoryRouter initialEntries={['/repos/1?dialog=terminal&terminal=t4']}>
+        <TerminalPanel target={{ kind: 'repo', repoId: 1 }} directory="/repo" isOpen onClose={onClose} />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('exited (0)')).toBeInTheDocument()
+  })
+
+  it('sends a single delete when a closed terminal reports its exit', async () => {
+    mockTerminalHooks([runningTerminal])
+    const onClose = vi.fn()
+    renderPanel('/repos/1?dialog=terminal&terminal=t1', onClose)
+    await screen.findAllByTestId('terminal-view')
+
+    fireEvent.click(screen.getByLabelText('Close Terminal'))
+    fireEvent.click(screen.getByRole('button', { name: 'Close terminal' }))
+
+    expect(removeMutate).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByLabelText('exit t1'))
+
+    expect(refetch).not.toHaveBeenCalled()
+    expect(removeMutate).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes the panel after the user closes the last terminal', async () => {
+    mockTerminalHooks([runningTerminal])
+    removeMutate.mockImplementation((_variables: unknown, options: { onSuccess?: () => void }) => {
+      options.onSuccess?.()
+    })
+    const onClose = vi.fn()
+    renderPanel('/repos/1?dialog=terminal&terminal=t1', onClose)
+    await screen.findAllByTestId('terminal-view')
+
+    fireEvent.click(screen.getByLabelText('Close Terminal'))
+    fireEvent.click(screen.getByRole('button', { name: 'Close terminal' }))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the panel open when other terminals remain after a manual close', async () => {
+    const otherTerminal: TerminalInfo = { ...runningTerminal, id: 't3', title: 'Shell' }
+    mockTerminalHooks([runningTerminal, otherTerminal])
+    removeMutate.mockImplementation((_variables: unknown, options: { onSuccess?: () => void }) => {
+      options.onSuccess?.()
+    })
+    const onClose = vi.fn()
+    renderPanel('/repos/1?dialog=terminal&terminal=t3', onClose)
+    await screen.findAllByTestId('terminal-view')
+
+    fireEvent.click(screen.getByLabelText('Close Shell'))
+    fireEvent.click(screen.getByRole('button', { name: 'Close terminal' }))
+
+    expect(removeMutate).toHaveBeenCalledWith({ ptyID: 't3', directory: '/repo' }, expect.any(Object))
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('numbers new shell tabs so they can be told apart', async () => {
+    mockTerminalHooks([runningTerminal])
+    renderPanel()
+    await screen.findAllByTestId('terminal-view')
+
+    fireEvent.click(screen.getByRole('button', { name: 'New terminal' }))
+
+    expect(createMutate).toHaveBeenCalledWith({ directory: '/repo', title: 'Terminal 2' }, expect.any(Object))
   })
 
   it('renders the key bar only on mobile', async () => {

@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback } from 'react'
 import { useUrlParams } from './useUrlParams'
 
 const SETTINGS_CONTENT_TABS = ['account', 'general', 'notifications', 'voice', 'git', 'shortcuts', 'servers', 'opencode', 'providers', 'logs'] as const
@@ -11,6 +11,10 @@ export function isSettingsContentTab(value: string | null): value is SettingsCon
 
 interface UseSettingsDialogReturn {
   isOpen: boolean
+  /**
+   * Opens the settings dialog without a tab, so mobile shows the settings menu and desktop falls
+   * back to Account.
+   */
   open: () => void
   /**
    * Opens the settings dialog on the given tab by pushing a new history entry, so Back closes
@@ -25,15 +29,12 @@ interface UseSettingsDialogReturn {
 }
 
 export function useSettingsDialog(): UseSettingsDialogReturn {
-  const { searchParams, updateParams } = useUrlParams()
+  const { searchParams, updateParams, closePushedParams } = useUrlParams()
 
   const isOpen = searchParams.get('settings') === 'open'
   const rawTab = searchParams.get('settingsTab')
   const selectedTab = isSettingsContentTab(rawTab) ? rawTab : null
   const activeTab = selectedTab || 'account'
-
-  const activeTabRef = useRef(activeTab)
-  activeTabRef.current = activeTab
 
   const openTab = useCallback((tab: SettingsContentTab) => {
     updateParams((p) => {
@@ -44,15 +45,19 @@ export function useSettingsDialog(): UseSettingsDialogReturn {
   }, [updateParams])
 
   const open = useCallback(() => {
-    openTab(activeTabRef.current)
-  }, [openTab])
+    updateParams((p) => {
+      p.set('settings', 'open')
+      p.delete('settingsTab')
+      p.delete('mobileTab')
+    }, 'push')
+  }, [updateParams])
 
   const close = useCallback(() => {
-    updateParams((p) => {
+    closePushedParams((p) => {
       p.delete('settings')
       p.delete('settingsTab')
-    }, 'replace')
-  }, [updateParams])
+    })
+  }, [closePushedParams])
 
   const toggle = useCallback(() => {
     const isCurrentlyOpen = searchParams.get('settings') === 'open'

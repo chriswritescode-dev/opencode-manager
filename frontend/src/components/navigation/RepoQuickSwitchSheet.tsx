@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { useRefreshOnOpen } from '@/hooks/useRefreshOnOpen'
+import { FINE_POINTER_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
 import { Input } from '@/components/ui/input'
 import { BottomSheet, BottomSheetHeader, BottomSheetContent } from '@/components/ui/bottom-sheet'
 import { Button } from '@/components/ui/button'
@@ -32,6 +33,7 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
   const [selectedServerId] = useSidebarServerSelection()
   const isRemote = selectedServerId !== LOCAL_OPENCODE_SERVER_ID
   const activeRepoId = getActiveRepoId(location.pathname)
+  const hasFinePointer = useMediaQuery(FINE_POINTER_MEDIA_QUERY)
 
   const { repos, isLoading, refetch } = useNavigableRepos(isOpen)
 
@@ -76,10 +78,10 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
             <div className="relative flex-1">
               <Input
                 type="text"
-                placeholder="Search projects..."
+                placeholder={isRemote ? 'Search projects...' : 'Search repos...'}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                autoFocus
+                autoFocus={hasFinePointer}
                 className="pr-9"
                 autoComplete="off"
                 name="repo-quick-switch"

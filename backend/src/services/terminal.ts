@@ -5,6 +5,7 @@ import type { OpenCodeClient } from './opencode/client'
 import type { CredentialProvider } from './credential-provider'
 import { toWebSocketUrl } from './opencode/upstream'
 import { bridgeWebSocket, type WebSocketBridge, type WebSocketPeer } from '../utils/websocket-bridge'
+import { TerminalHub, TerminalHubRegistry } from './terminal-hub'
 
 type OpenCodePty = Awaited<ReturnType<OpenCodeClient['api']['pty']['list']>>['data'][number]
 type OpenCodePersistentPty = Awaited<ReturnType<OpenCodeClient['api']['experimental']['persistentPty']['list']>>[number]
@@ -36,15 +37,28 @@ export class TerminalNotFoundError extends Error {
   }
 }
 
+const DEFERRED_START_SHELL = '/bin/sh'
+const DEFERRED_START_SCRIPT = 'sleep 0.3; exec "$@"'
+const DEFERRED_START_HANDLE = 'ocm-terminal'
+const DEFERRED_START_KINDS: ReadonlySet<TerminalKind> = new Set(['action', 'setup'])
+
+function deferCommandStart(command: string, args: readonly string[]): { command: string; args: string[] } {
+  return {
+    command: DEFERRED_START_SHELL,
+    args: ['-c', DEFERRED_START_SCRIPT, DEFERRED_START_HANDLE, command, ...args],
+  }
+}
+
 export class TerminalService {
   constructor(
     private readonly target: TerminalTarget,
     private readonly credentialProvider: CredentialProvider,
     private readonly openSocket: (url: string) => WebSocket = (url) => new WebSocket(url),
+    private readonly hubs: TerminalHubRegistry = new TerminalHubRegistry(),
   ) {}
 
   forTarget(target: TerminalTarget): TerminalService {
-    return new TerminalService(target, this.credentialProvider, this.openSocket)
+    return new TerminalService(target, this.credentialProvider, this.openSocket, this.hubs)
   }
 
   async list(directory: string): Promise<TerminalInfo[]> {
@@ -53,17 +67,39 @@ export class TerminalService {
   }
 
   async create(directory: string, input: CreateTerminalInput): Promise<TerminalInfo> {
+    const deferred =
+      input.command !== undefined && DEFERRED_START_KINDS.has(input.kind) && process.platform !== 'win32'
+        ? deferCommandStart(input.command, input.args ?? [])
+        : undefined
     const result = await this.target.client.api.pty.create({
       location: { directory },
       title: formatTerminalTitle({ kind: input.kind, name: input.name, actionId: input.actionId }),
-      ...(input.command !== undefined ? { command: input.command } : {}),
-      ...(input.args !== undefined ? { args: input.args } : {}),
+      ...(deferred
+        ? { command: deferred.command, args: deferred.args }
+        : {
+            ...(input.command !== undefined ? { command: input.command } : {}),
+            ...(input.args !== undefined ? { args: input.args } : {}),
+          }),
       env: {
         ...(this.target.includeLocalCredentials ? this.credentialProvider.getGhCliEnv({ cwd: directory }) : {}),
         ...input.env,
       },
     })
-    return this.toTerminalInfo(result.data)
+    const terminal = this.toTerminalInfo(result.data)
+    this.recordTerminal(directory, terminal.id)
+    return terminal
+  }
+
+  private recordTerminal(directory: string, ptyID: string): void {
+    const key = this.hubKey(directory, ptyID)
+    if (this.hubs.get(key)) return
+    const hub = new TerminalHub({ openUpstream: () => this.openUpstreamSocket(directory, ptyID, 0) })
+    this.hubs.register(key, hub)
+    void hub.start()
+  }
+
+  private hubKey(directory: string, ptyID: string): string {
+    return `${this.target.baseUrl()}\u0000${directory}\u0000${ptyID}`
   }
 
   async requireTerminal(directory: string, ptyID: string): Promise<TerminalInfo> {
@@ -80,7 +116,11 @@ export class TerminalService {
   }
 
   async remove(directory: string, ptyID: string): Promise<void> {
-    await this.target.client.api.pty.remove({ ptyID, location: { directory } })
+    try {
+      await this.target.client.api.pty.remove({ ptyID, location: { directory } })
+    } finally {
+      this.hubs.dispose(this.hubKey(directory, ptyID))
+    }
   }
 
   async removeAll(directory: string): Promise<void> {
@@ -104,6 +144,19 @@ export class TerminalService {
   ): Promise<WebSocketBridge> {
     await this.requireTerminal(directory, ptyID)
 
+    const key = this.hubKey(directory, ptyID)
+    const hub = this.hubs.get(key)
+    if (hub?.isAvailable()) return hub.attach(peer, cursor)
+    if (hub) this.hubs.dispose(key)
+
+    return bridgeWebSocket(await this.openUpstreamSocket(directory, ptyID, cursor), peer)
+  }
+
+  private async openUpstreamSocket(
+    directory: string,
+    ptyID: string,
+    cursor: number | undefined,
+  ): Promise<WebSocket> {
     const result = await this.target.client.api.pty.connect.token({
       ptyID,
       location: { directory },
@@ -117,7 +170,7 @@ export class TerminalService {
     socketUrl.searchParams.set('location[directory]', directory)
     if (cursor !== undefined) socketUrl.searchParams.set('cursor', String(cursor))
 
-    return bridgeWebSocket(this.openSocket(toWebSocketUrl(socketUrl.toString())), peer)
+    return this.openSocket(toWebSocketUrl(socketUrl.toString()))
   }
 
   private async removePersistentTerminals(directory: string): Promise<void> {

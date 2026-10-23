@@ -74,7 +74,14 @@ export function VoiceConversationBar({
   return (
     <div className="flex flex-col gap-1 border-t border-border bg-card px-3 pt-2 pb-2">
       <div role="status" aria-live="polite" className="flex h-5 items-center gap-2">
-        <span className="max-w-[50%] shrink-0 truncate text-xs font-semibold">{label}</span>
+        <span
+          className={cn(
+            'truncate text-xs font-semibold',
+            liveTranscript ? 'max-w-[50%] shrink-0' : 'min-w-0 flex-1',
+          )}
+        >
+          {label}
+        </span>
         {liveTranscript ? (
           <span
             dir="rtl"

@@ -375,12 +375,13 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const ancestryInFlightRef = useRef<Set<string>>(new Set())
   const forgottenSessionIDsRef = useRef(new Set<string>())
 
+  const { isAuthenticated } = useAuth()
   const { data: repos } = useQuery({
     queryKey: ['repos'],
     queryFn: listRepos,
+    enabled: isAuthenticated,
   })
 
-  const { isAuthenticated } = useAuth()
   const { servers, isSuccess: serversLoaded } = useOpenCodeServers({ enabled: isAuthenticated })
   const enabledRemoteServers = useMemo(() => servers.filter((server) => server.enabled), [servers])
   const enabledRemoteServersRef = useRef(enabledRemoteServers)
@@ -967,6 +968,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [rememberSessionDirectory, reconcileFormsForDirectory])
 
   useEffect(() => {
+    if (!isAuthenticated) return
+
     const handleSSEMessage = (data: unknown) => {
       if (!data || typeof data !== 'object' || !('type' in data)) return
       
@@ -1211,7 +1214,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       subscription.dispose()
       subscriptionRef.current = null
     }
-  }, [addPermission, removePermission, addForm, removeForm, forgetPendingActionsForSession, rememberSessionDirectory, fetchInitialSessionStatuses, startStatusPoll, stopStatusPoll, queryClient, handleHealthChange, reconcilePendingActionsForDirectories, reconcilePendingActionsForServer, collectTrackedDirectories, syncRunningShells, resolveSessionAncestry, reconcileRemoteSessionStatuses, reconcileRemoteServersOnce, invalidateRemoteStatusSyncs])
+  }, [isAuthenticated, addPermission, removePermission, addForm, removeForm, forgetPendingActionsForSession, rememberSessionDirectory, fetchInitialSessionStatuses, startStatusPoll, stopStatusPoll, queryClient, handleHealthChange, reconcilePendingActionsForDirectories, reconcilePendingActionsForServer, collectTrackedDirectories, syncRunningShells, resolveSessionAncestry, reconcileRemoteSessionStatuses, reconcileRemoteServersOnce, invalidateRemoteStatusSyncs])
 
   useEffect(() => {
     reposRef.current = repos

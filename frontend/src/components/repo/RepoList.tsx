@@ -22,6 +22,7 @@ import {
   sortRepos,
   groupReposIntoSections,
   countAttentionItems,
+  getRepoListEmptyMessage,
   type RepoFilterMode,
   type RepoSortMode,
 } from "./repo-list-state"
@@ -181,10 +182,14 @@ export function RepoList({ onAddRepo }: { onAddRepo: () => void }) {
     if (!repos) return { hasLocalRepos: false, hasClonedRepos: false }
     const selectedRepoObjects = repos.filter(r => selectedRepos.has(r.id))
     return {
-      hasLocalRepos: selectedRepoObjects.some(r => r.isLocal),
-      hasClonedRepos: selectedRepoObjects.some(r => !r.isLocal),
+      hasLocalRepos: selectedRepoObjects.some(r => r.isLocal && !r.isWorktree),
+      hasClonedRepos: selectedRepoObjects.some(r => !r.isLocal || r.isWorktree),
     }
   }, [selectedRepos, repos])
+
+  const unlinkOnly = selectedRepos.size > 0
+    ? hasLocalRepos && !hasClonedRepos
+    : Boolean(repoForDelete?.isLocal && !repoForDelete?.isWorktree)
 
   const repoIds = regularRepos?.map((repo) => repo.id) || []
 
@@ -430,7 +435,7 @@ export function RepoList({ onAddRepo }: { onAddRepo: () => void }) {
                     <div className="text-center p-12">
                       <Search className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
                       <p className="text-muted-foreground">
-                        {sections[0]?.emptyMessage || `No repositories found${searchQuery ? ` matching "${searchQuery}"` : ''}`}
+                        {getRepoListEmptyMessage(sections, searchQuery)}
                       </p>
                     </div>
                   )
@@ -565,6 +570,8 @@ export function RepoList({ onAddRepo }: { onAddRepo: () => void }) {
               : "Are you sure you want to delete this repository? This will remove all local files. This action cannot be undone."
         }
         isDeleting={deleteMutation.isPending || batchDeleteMutation.isPending}
+        confirmLabel={unlinkOnly ? 'Unlink' : 'Delete'}
+        pendingLabel={unlinkOnly ? 'Unlinking...' : 'Deleting...'}
       >
         {selectedRepos.size === 0 && repoForDelete?.isWorktree && (
           <div>

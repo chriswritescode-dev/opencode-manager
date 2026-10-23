@@ -78,6 +78,13 @@ describe('entrypoint library wiring', () => {
     const dockerfile = read(dockerfilePath)
     expect(dockerfile).not.toMatch(/chmod \+x \/usr\/local\/lib\/ocm\/container-user\.sh/)
   })
+
+  it('runs the entrypoint under tini so orphaned processes are reaped', () => {
+    const dockerfile = read(dockerfilePath)
+    expect(dockerfile).toMatch(/^\s+tini \\$/m)
+    expect(dockerfile).toContain('ENTRYPOINT ["/usr/bin/tini", "--", "/docker-entrypoint.sh"]')
+    expect(read(composePath)).not.toContain('init: true')
+  })
 })
 
 describe('microsandbox runtime install', () => {
@@ -236,6 +243,13 @@ describe('workspace ownership configuration', () => {
     expect(envExample).toContain('OCM_WORKSPACE_HOST_PATH')
     expect(envExample).toContain('# PUID=1000')
     expect(envExample).toContain('# PGID=1000')
+  })
+
+  it('forwards the auth trusted proxy header opt-in and documents it', () => {
+    expect(read(composePath)).toContain('- AUTH_TRUSTED_PROXY_HEADERS=${AUTH_TRUSTED_PROXY_HEADERS:-}')
+    expect(read(join(repoRoot, 'docker-compose.release.yml')))
+      .toContain('- AUTH_TRUSTED_PROXY_HEADERS=${AUTH_TRUSTED_PROXY_HEADERS:-}')
+    expect(read(envExamplePath)).toContain('# AUTH_TRUSTED_PROXY_HEADERS=x-forwarded-for')
   })
 })
 

@@ -3,13 +3,14 @@ import { settingsApi } from '@/api/settings'
 import type { UserPreferences } from '@/api/types/settings'
 import { invalidateConfigCaches } from '@/lib/queryInvalidation'
 
-export function useSettings(userId = 'default') {
+export function useSettings(userId = 'default', options: { enabled?: boolean } = {}) {
   const queryClient = useQueryClient()
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['settings', userId],
     queryFn: () => settingsApi.getSettings(userId),
     staleTime: 1000 * 60 * 5,
+    enabled: options.enabled ?? true,
   })
 
   const updateMutation = useMutation({

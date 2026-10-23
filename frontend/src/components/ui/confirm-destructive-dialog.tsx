@@ -44,7 +44,7 @@ export function ConfirmDestructiveDialog({
         {warning && (
           <Alert className="overflow-hidden">
             <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-            <AlertDescription className="break-all">{warning}</AlertDescription>
+            <AlertDescription className="break-words">{warning}</AlertDescription>
           </Alert>
         )}
 

@@ -39,6 +39,22 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
     staleTime: 30_000,
   })
 
+  const resetForm = useCallback(() => {
+    setRepoUrl('')
+    setLocalPath('')
+    setFolderPath('')
+    setDirectoryName('')
+    setBranch('')
+    setRepoType('remote')
+    setSkipSSHVerification(false)
+    directoryTouched.current = false
+  }, [])
+
+  const repoUrlError = useMemo(() => {
+    if (repoType !== 'remote' || !repoUrl.trim()) return null
+    return /\s/.test(repoUrl.trim()) ? 'Enter a valid repository URL without spaces' : null
+  }, [repoType, repoUrl])
+
   const directoryNameError = useMemo(() => {
     if (!showDirectoryName || !directoryName) return null
     return getRepoDirectoryNameError(directoryName)
@@ -82,14 +98,7 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
     },
     onSuccess: (result) => {
       invalidateRepoListCaches(queryClient)
-      setRepoUrl('')
-      setLocalPath('')
-      setFolderPath('')
-      setDirectoryName('')
-      setBranch('')
-      setRepoType('remote')
-      setSkipSSHVerification(false)
-      directoryTouched.current = false
+      resetForm()
 
       if (result.mode === 'discover') {
         const summary = [
@@ -118,9 +127,17 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if ((repoType === 'remote' && repoUrl) || (repoType === 'local' && localPath) || (repoType === 'folder' && folderPath)) {
+    if ((repoType === 'remote' && repoUrl && !repoUrlError) || (repoType === 'local' && localPath) || (repoType === 'folder' && folderPath)) {
       mutation.mutate()
     }
+  }
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      resetForm()
+      mutation.reset()
+    }
+    onOpenChange(nextOpen)
   }
 
   const handleRepoUrlChange = useCallback((value: string) => {
@@ -140,7 +157,7 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
   }, [])
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent mobileFullscreen mobileSwipeToClose className="content-start gap-0 sm:max-w-[500px] sm:max-h-[80vh] sm:h-auto sm:top-[50%] sm:translate-y-[-50%] bg-card border-border">
         <DialogHeader className="px-4 sm:px-6 pt-2 sm:pt-6 pb-2 sm:pb-3 h-fit">
           <DialogTitle className="text-xl text-foreground">
@@ -161,28 +178,34 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
 
           {repoType === 'remote' ? (
             <div className="space-y-2">
-              <label className="text-sm text-muted-foreground">Repository URL</label>
+              <label htmlFor="add-repo-url" className="text-sm text-muted-foreground">Repository URL</label>
               <Input
+                id="add-repo-url"
                 placeholder="owner/repo or https://github.com/user/repo.git"
                 value={repoUrl}
                 onChange={(e) => handleRepoUrlChange(e.target.value)}
                 disabled={mutation.isPending}
-                className="bg-muted border-border text-foreground placeholder:text-muted-foreground min-h-[44px] text-base"
+                className="bg-muted border-border text-foreground placeholder:text-placeholder min-h-[44px] text-base"
               />
-              <p className="text-xs text-muted-foreground">
-                Full URL or shorthand format (owner/repo for GitHub)
-              </p>
+              {repoUrlError ? (
+                <p className="text-xs text-warning">{repoUrlError}.</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Full URL or shorthand format (owner/repo for GitHub)
+                </p>
+              )}
             </div>
           ) : repoType === 'local' ? (
             <div className="space-y-2">
-              <label className="text-sm text-muted-foreground">Local Path</label>
+              <label htmlFor="add-repo-local-path" className="text-sm text-muted-foreground">Local Path</label>
               <div className="flex gap-2">
                 <Input
+                  id="add-repo-local-path"
                   placeholder="my-local-project OR /absolute/path/to/git-repo"
                   value={localPath}
                   onChange={(e) => setLocalPath(e.target.value)}
                   disabled={mutation.isPending}
-                  className="bg-muted border-border text-foreground placeholder:text-muted-foreground min-h-[44px] text-base"
+                  className="bg-muted border-border text-foreground placeholder:text-placeholder min-h-[44px] text-base"
                 />
                 <Button
                   type="button"
@@ -201,14 +224,15 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
             </div>
           ) : (
             <div className="space-y-2">
-              <label className="text-sm text-muted-foreground">Folder Path</label>
+              <label htmlFor="add-repo-folder-path" className="text-sm text-muted-foreground">Folder Path</label>
               <div className="flex gap-2">
                 <Input
+                  id="add-repo-folder-path"
                   placeholder="/absolute/path/to/projects"
                   value={folderPath}
                   onChange={(e) => setFolderPath(e.target.value)}
                   disabled={mutation.isPending}
-                  className="bg-muted border-border text-foreground placeholder:text-muted-foreground min-h-[44px] text-base"
+                  className="bg-muted border-border text-foreground placeholder:text-placeholder min-h-[44px] text-base"
                 />
                 <Button
                   type="button"
@@ -229,13 +253,14 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
 
           {showDirectoryName && (
             <div className="space-y-2">
-              <label className="text-sm text-muted-foreground">Directory Name</label>
+              <label htmlFor="add-repo-directory-name" className="text-sm text-muted-foreground">Directory Name</label>
               <Input
+                id="add-repo-directory-name"
                 placeholder="Auto-detected from URL"
                 value={directoryName}
                 onChange={(e) => handleDirectoryNameChange(e.target.value)}
                 disabled={mutation.isPending}
-                className="bg-muted border-border text-foreground placeholder:text-muted-foreground min-h-[44px] text-base"
+                className="bg-muted border-border text-foreground placeholder:text-placeholder min-h-[44px] text-base"
               />
               {directoryNameError ? (
                 <p className="text-xs text-warning">
@@ -259,13 +284,14 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
           )}
           
           <div className="space-y-2">
-            <label className="text-sm text-muted-foreground">Branch (optional)</label>
+            <label htmlFor="add-repo-branch" className="text-sm text-muted-foreground">Branch (optional)</label>
             <Input
+              id="add-repo-branch"
               placeholder="Uses default if empty"
               value={branch}
               onChange={(e) => setBranch(e.target.value)}
               disabled={mutation.isPending || repoType === 'folder'}
-              className="bg-muted border-border text-foreground placeholder:text-muted-foreground min-h-[44px] text-base"
+              className="bg-muted border-border text-foreground placeholder:text-placeholder min-h-[44px] text-base"
             />
             <p className="text-xs text-muted-foreground">
               {repoType === 'folder' 
@@ -300,7 +326,7 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
 
           <Button 
             type="submit" 
-            disabled={(!repoUrl && repoType === 'remote') || (!localPath && repoType === 'local') || (!folderPath && repoType === 'folder') || mutation.isPending || (showDirectoryName && (!!directoryNameError || !!directoryCollision))}
+            disabled={(!repoUrl && repoType === 'remote') || !!repoUrlError || (!localPath && repoType === 'local') || (!folderPath && repoType === 'folder') || mutation.isPending || (showDirectoryName && (!!directoryNameError || !!directoryCollision))}
             className="w-full min-h-[48px] bg-primary hover:bg-primary-hover text-primary-foreground text-base font-medium"
           >
             {mutation.isPending ? (

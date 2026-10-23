@@ -494,6 +494,24 @@ describe('Repo Routes', () => {
       const body = await res.json() as { error: string }
       expect(body.error).toBe('init failed')
     })
+
+    it('should return the client status for user-input repo failures', async () => {
+      vi.mocked(repoService.cloneRepo).mockRejectedValue(Object.assign(
+        new Error('Repository not found or access denied: https://github.com/test/missing.'),
+        { statusCode: 400 },
+      ))
+
+      const app = createTestRoutes()
+      const res = await app.request('/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repoUrl: 'https://github.com/test/missing' }),
+      })
+
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error: string }
+      expect(body.error).toBe('Repository not found or access denied: https://github.com/test/missing.')
+    })
   })
 
   describe('POST /:id/workspaces', () => {
@@ -1107,6 +1125,25 @@ describe('Repo Routes', () => {
       expect(res.status).toBe(500)
       const body = await res.json() as { error: string }
       expect(body.error).toBe('create failed')
+    })
+
+    it('should return 400 when the branch name is invalid', async () => {
+      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1 }))
+      vi.mocked(repoService.createBranch).mockRejectedValue(Object.assign(
+        new Error("Invalid branch name: 'bad name..x'."),
+        { statusCode: 400 },
+      ))
+
+      const app = createTestRoutes()
+      const res = await app.request('/1/branch/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ branch: 'bad name..x' }),
+      })
+
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error: string }
+      expect(body.error).toBe("Invalid branch name: 'bad name..x'.")
     })
   })
 

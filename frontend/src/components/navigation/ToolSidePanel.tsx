@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react'
-import type { ReactNode } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
+import type { ReactNode, RefObject } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { FileBrowser } from '@/components/file-browser/FileBrowser'
@@ -32,14 +33,137 @@ import { useActiveWorkCounts, useActivityWindowMinutes } from '@/hooks/useActive
 import { formatActivityWindow } from '@/lib/activeWork'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, TOOLTIP_OPEN_DELAY_MS } from '@/components/ui/tooltip'
 import { restoreOverlayFocus } from '@/lib/overlayFocus'
+import { useRestoreFocusOnClose } from '@/hooks/useRestoreFocusOnClose'
 import { cn } from '@/lib/utils'
+import { useToolPanelLayout, useToolPanelWidth } from '@/hooks/useToolPanelLayout'
 import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 
 const PANEL_WIDTH_CLASSES: Partial<Record<PanelTool, string>> = {
   activity: 'w-80',
 }
 
+interface PanelResizeState {
+  pointerId: number
+  startX: number
+  startWidth: number
+}
+
+interface PanelResizeHandleProps {
+  width: number
+  minWidth: number
+  maxWidth: number
+  onWidthChange: (width: number) => void
+}
+
+function PanelResizeHandle({ width, minWidth, maxWidth, onWidthChange }: PanelResizeHandleProps) {
+  const dragRef = useRef<PanelResizeState | null>(null)
+
+  const handlePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return
+      event.preventDefault()
+      event.currentTarget.setPointerCapture?.(event.pointerId)
+      dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: width }
+    },
+    [width],
+  )
+
+  const handlePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const drag = dragRef.current
+      if (!drag || drag.pointerId !== event.pointerId) return
+      onWidthChange(drag.startWidth - (event.clientX - drag.startX))
+    },
+    [onWidthChange],
+  )
+
+  const handlePointerEnd = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId)
+    }
+    dragRef.current = null
+  }, [])
+
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      const step = event.shiftKey ? 64 : 16
+      let nextWidth: number
+      switch (event.key) {
+        case 'ArrowLeft':
+          nextWidth = width + step
+          break
+        case 'ArrowRight':
+          nextWidth = width - step
+          break
+        case 'Home':
+          nextWidth = minWidth
+          break
+        case 'End':
+          nextWidth = maxWidth
+          break
+        default:
+          return
+      }
+      event.preventDefault()
+      onWidthChange(nextWidth)
+    },
+    [maxWidth, minWidth, onWidthChange, width],
+  )
+
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize panel"
+      tabIndex={0}
+      aria-valuenow={width}
+      aria-valuemin={minWidth}
+      aria-valuemax={maxWidth}
+      className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none bg-transparent hover:bg-highlight/30 focus-visible:bg-highlight/30 focus-visible:outline-none"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerEnd}
+      onPointerCancel={handlePointerEnd}
+      onKeyDown={handleKeyDown}
+    />
+  )
+}
+
 const REMOTE_TOOL_KEYS: ReadonlySet<string> = new Set(['activity', 'mcp', 'skills', 'source-control', 'terminal'])
+
+/**
+ * Escape closes the floating panel, except while a nested menu is open or the terminal owns
+ * the key. Focus moving into the opener is handled by `useRestoreFocusOnClose`.
+ */
+function useFloatingPanelDismiss(
+  floating: boolean,
+  closePanel: () => void,
+  panelRef: RefObject<HTMLElement | null>,
+) {
+  const closeRef = useRef(closePanel)
+  closeRef.current = closePanel
+
+  useEffect(() => {
+    if (!floating) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      const target = event.target
+      if (target instanceof Element) {
+        if (target.closest('.xterm')) return
+        if (target.closest('[role="listbox"], [role="menu"]')) return
+        const dialog = target.closest('[role="dialog"]')
+        if (dialog !== null && dialog !== panelRef.current) return
+      }
+      closeRef.current()
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [floating, panelRef])
+}
 
 function ActivityWindowLabel() {
   const minutes = useActivityWindowMinutes()
@@ -141,8 +265,10 @@ function RailButton({ item, active, onClick, indicator }: RailButtonProps) {
 }
 
 /**
- * Desktop-only docked tool panel with its icon rail, rendered to the right of a page's content.
- * The rail lists the current route's tool items; repo- and session-scoped tools render only when their context is given.
+ * Desktop-only tool panel with its icon rail, rendered to the right of a page's content. The panel
+ * docks when the page has room and otherwise floats over the page as a sheet, so the content keeps
+ * a usable width. The rail lists the current route's tool items; repo- and session-scoped tools
+ * render only when their context is given.
  */
 export function ToolSidePanel({
   panel,
@@ -167,7 +293,21 @@ export function ToolSidePanel({
   const routeServerId = useRouteOpenCodeServerId()
   const isRemoteRoute = !isLocalOpenCodeServer(routeServerId)
   const railRef = useRef<HTMLElement>(null)
+  const panelRef = useRef<HTMLElement>(null)
   const previousActiveToolRef = useRef(activeTool)
+  const panelWidth = useToolPanelWidth()
+  const { docked } = useToolPanelLayout()
+  const floating = activeTool !== null && !docked
+
+  useRestoreFocusOnClose(floating, panelRef)
+  useFloatingPanelDismiss(floating, closePanel, panelRef)
+
+  useEffect(() => {
+    if (!floating) return
+    const panelElement = panelRef.current
+    if (panelElement === null || panelElement.contains(document.activeElement)) return
+    panelElement.focus()
+  }, [floating])
 
   useEffect(() => {
     const previousTool = previousActiveToolRef.current
@@ -247,39 +387,72 @@ export function ToolSidePanel({
     }
   }
 
-  const panelContent =
+  const fixedWidthClass = activeTool ? PANEL_WIDTH_CLASSES[activeTool] : undefined
+
+  const panelBody =
     activeTool && activeLabel ? (
-      <aside
-        aria-label={activeLabel}
-        className={cn(
-          'flex shrink-0 flex-col border-l border-border bg-background',
-          PANEL_WIDTH_CLASSES[activeTool] ?? 'w-[min(600px,45vw)]',
-        )}
-      >
-        <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
-          <div className="flex min-w-0 flex-1 items-baseline gap-2">
-            <h2 className="min-w-0 truncate text-sm font-semibold text-foreground">{activeLabel}</h2>
-            {activeTool === 'activity' ? <ActivityWindowLabel /> : null}
-          </div>
-          {activeTool === 'walkthrough' ? (
-            <>
-              <ChangesWalkthroughSourcePicker />
-              <ChangesWalkthroughCancel />
-              <ChangesWalkthroughRegenerate />
-            </>
-          ) : null}
-          <button
-            type="button"
+      <>
+        {docked ? null : (
+          <div
+            data-testid="tool-panel-backdrop"
+            aria-hidden="true"
+            className="fixed inset-y-0 left-0 right-11 z-50 bg-black/50 backdrop-blur-sm"
             onClick={closePanel}
-            aria-label="Close panel"
-            className="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="flex min-h-0 flex-1 flex-col">{renderTool(activeTool)}</div>
-      </aside>
+          />
+        )}
+        <aside
+          ref={panelRef}
+          aria-label={activeLabel}
+          role={docked ? undefined : 'dialog'}
+          aria-modal={docked ? undefined : true}
+          tabIndex={docked ? undefined : -1}
+          className={cn(
+            'flex flex-col border-l border-border bg-background outline-none',
+            docked
+              ? 'relative shrink-0'
+              : 'fixed inset-y-0 right-11 z-50 w-[min(420px,calc(100vw-2.75rem))] pt-safe pb-safe shadow-2xl',
+            fixedWidthClass,
+          )}
+          style={docked && !fixedWidthClass ? { width: panelWidth.width } : undefined}
+        >
+          {docked && !fixedWidthClass ? (
+            <PanelResizeHandle
+              width={panelWidth.width}
+              minWidth={panelWidth.minWidth}
+              maxWidth={panelWidth.maxWidth}
+              onWidthChange={panelWidth.setWidth}
+            />
+          ) : null}
+          <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
+            <div className="flex min-w-0 flex-1 items-baseline gap-2">
+              <h2 className="min-w-0 truncate text-sm font-semibold text-foreground">{activeLabel}</h2>
+              {activeTool === 'activity' ? <ActivityWindowLabel /> : null}
+            </div>
+            {activeTool === 'walkthrough' ? (
+              <>
+                <ChangesWalkthroughSourcePicker />
+                <ChangesWalkthroughCancel />
+                <ChangesWalkthroughRegenerate />
+              </>
+            ) : null}
+            <button
+              type="button"
+              onClick={closePanel}
+              aria-label="Close panel"
+              className="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col">{renderTool(activeTool)}</div>
+        </aside>
+      </>
     ) : null
+
+  const panelContent =
+    panelBody !== null && !docked && typeof document !== 'undefined'
+      ? createPortal(panelBody, document.body)
+      : panelBody
 
   return (
     <>

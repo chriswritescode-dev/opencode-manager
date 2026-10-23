@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput } from './PromptInput'
+import { useComposerDraftStore } from '@/stores/composerDraftStore'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 import { createCommandActionsMock, createVoiceConversationControllerMock } from '@/test/test-utils'
 
@@ -116,6 +117,7 @@ describe('PromptInput composer layout', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    useComposerDraftStore.setState({ drafts: {} })
     mocks.useVoiceConversation.mockReturnValue(createVoiceConversationControllerMock())
     mocks.hasPendingPermission.mockReturnValue(false)
     mocks.useMobile.mockReturnValue(false)

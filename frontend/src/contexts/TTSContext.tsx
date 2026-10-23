@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect, type ReactNode } from 'react'
 import { useSettings } from '@/hooks/useSettings'
+import { useAuth } from '@/hooks/useAuth'
 import { API_BASE_URL } from '@/config'
 import { TTSContext, type TTSState, type TTSConfig, type TTSEndReason, type SpeakMessageOptions } from './tts-context'
 import { sanitizeForTTS } from '@/lib/utils'
@@ -45,7 +46,8 @@ interface TTSProviderProps {
 }
 
 export function TTSProvider({ children }: TTSProviderProps) {
-  const { preferences } = useSettings()
+  const { isAuthenticated } = useAuth()
+  const { preferences } = useSettings('default', { enabled: isAuthenticated })
   const [state, setState] = useState<TTSState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [currentText, setCurrentText] = useState<string | null>(null)

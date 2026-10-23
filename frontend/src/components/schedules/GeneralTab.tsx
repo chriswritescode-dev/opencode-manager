@@ -158,10 +158,10 @@ export function GeneralTab({
         <div className="rounded-lg border border-border bg-card p-4">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-2">
-              <p className="text-sm font-medium">Enabled</p>
+              <p id="schedule-enabled-label" className="text-sm font-medium">Enabled</p>
               <InfoHint text="Auto-run this job on its schedule while still allowing manual runs from the dashboard." />
             </div>
-            <Switch checked={enabled} onCheckedChange={onEnabledChange} />
+            <Switch checked={enabled} onCheckedChange={onEnabledChange} aria-labelledby="schedule-enabled-label" />
           </div>
         </div>
 
@@ -201,19 +201,27 @@ export function GeneralTab({
           <div className="rounded-lg border border-border bg-card p-4">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-2">
-                <p className="text-sm font-medium">Allow access outside the working directory</p>
+                <p id="schedule-allow-external-label" className="text-sm font-medium">Allow access outside the working directory</p>
                 <InfoHint text="When disabled, runs are confined to the worktree. Enable to allow the agent to read/write files elsewhere on the system." />
               </div>
-              <Switch checked={allowExternalDirectory} onCheckedChange={onAllowExternalDirectoryChange} />
+              <Switch
+                checked={allowExternalDirectory}
+                onCheckedChange={onAllowExternalDirectoryChange}
+                aria-labelledby="schedule-allow-external-label"
+              />
             </div>
           </div>
           <div className="rounded-lg border border-border bg-card p-4">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-2">
-                <p className="text-sm font-medium">Allow questions</p>
+                <p id="schedule-allow-questions-label" className="text-sm font-medium">Allow questions</p>
                 <InfoHint text="Scheduled runs are unattended. When disabled, the agent's question tool is denied so a run can never stall waiting for an answer that nobody is there to give." />
               </div>
-              <Switch checked={allowQuestions} onCheckedChange={onAllowQuestionsChange} />
+              <Switch
+                checked={allowQuestions}
+                onCheckedChange={onAllowQuestionsChange}
+                aria-labelledby="schedule-allow-questions-label"
+              />
             </div>
           </div>
           <div className="rounded-lg border border-border bg-card p-4">

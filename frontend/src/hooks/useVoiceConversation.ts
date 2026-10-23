@@ -425,7 +425,7 @@ export function useVoiceConversation(
     const phase = phaseRef.current
     if (phase !== 'listening' && phase !== 'recording') return
     phaseRef.current = 'paused'
-    dispatch({ type: 'error', message })
+    dispatch({ type: 'error', message, source: 'capture' })
   }, [])
 
   const startCapture = useCallback(async () => {
@@ -548,7 +548,7 @@ export function useVoiceConversation(
           if (reason === 'error') {
             speakTokenRef.current += 1
             speakingIdRef.current = null
-            dispatch({ type: 'error', message: REPLY_READ_FAILED_MESSAGE })
+            dispatch({ type: 'error', message: REPLY_READ_FAILED_MESSAGE, source: 'playback' })
             return
           }
           speakingIdRef.current = null
@@ -573,7 +573,7 @@ export function useVoiceConversation(
       speakTokenRef.current += 1
       speakingIdRef.current = null
       latestRef.current.tts.stop()
-      dispatch({ type: 'error', message: SPEAKING_STALLED_MESSAGE })
+      dispatch({ type: 'error', message: SPEAKING_STALLED_MESSAGE, source: 'playback' })
     }, Math.min(SPEAKING_WATCHDOG_MAX_MS, estimated))
     return clearSpeakingWatchdog
   }, [state.phase, clearSpeakingWatchdog])
@@ -965,6 +965,7 @@ export function useVoiceConversation(
   }, [stt.isError, stt.error, failCapture])
 
   const hasHeldReading = state.phase === 'paused' && playbackHeld
+  const isCapturing = state.phase === 'listening' || state.phase === 'recording'
   const textInput = {
     phase: state.phase,
     pauseReason: state.pauseReason,
@@ -972,10 +973,12 @@ export function useVoiceConversation(
     isEndpointing: stt.isEndpointing,
     isPlaybackPaused: hasHeldReading,
     sessionBusy: status !== 'idle',
+    error: state.error,
+    failureSource: state.failureSource,
+    isStartingCapture: isCapturing && stt.isStarting,
   }
   const label = voiceConversationLabel(textInput)
   const hint = voiceConversationHint(textInput)
-  const isCapturing = state.phase === 'listening' || state.phase === 'recording'
   const liveTranscript = isCapturing ? interimText || turnTextValue : ''
   const canEditInTextBox = isCapturing && (interimText !== '' || turnTextValue !== '')
   const canStopAgent = isActive && status !== 'idle'

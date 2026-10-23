@@ -1,6 +1,7 @@
 import { useRouteError, isRouteErrorResponse } from 'react-router-dom'
 import { AlertTriangle, RefreshCw, LogIn, WifiOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { NotFoundState } from '@/components/ui/not-found-state'
 import { parseNetworkError } from '@/lib/opencode-errors'
 
 function getErrorDetails(error: unknown) {
@@ -56,6 +57,10 @@ export function RouteErrorBoundary() {
   const { title, message, isRetryable, statusCode } = details
 
   const isAuthError = statusCode === 401 || statusCode === 403
+
+  if (statusCode === 404) {
+    return <NotFoundState title={title} message={message} backTo="/" backLabel="Go home" />
+  }
 
   if ('variant' in details && details.variant === 'offline') {
     return (

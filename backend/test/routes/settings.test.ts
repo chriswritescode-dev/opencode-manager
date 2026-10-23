@@ -1554,6 +1554,59 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     })
   })
 
+  describe('PATCH / - git identity validation', () => {
+    it.each(['not-an-email', 'missing@tld', 'two words@example.com'])('rejects the email %s with 400', async (email) => {
+      const res = await settingsApp.fetch(new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { gitIdentity: { name: 'Agent', email } } }),
+      }))
+      const json = await res.json() as { error: string }
+
+      expect(res.status).toBe(400)
+      expect(json.error).toBe('Invalid settings data')
+      expect(mockUpdateSettings).not.toHaveBeenCalled()
+    })
+
+    it('accepts an empty email and a valid email', async () => {
+      mockGetSettings.mockReturnValue({
+        preferences: { gitIdentity: { name: 'Agent', email: '' } },
+        updatedAt: 1,
+      })
+      mockUpdateSettings.mockReturnValue({
+        preferences: { gitIdentity: { name: 'Agent', email: 'agent@example.com' } },
+        updatedAt: 2,
+      })
+
+      const emptyRes = await settingsApp.fetch(new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { gitIdentity: { name: 'Agent', email: '' } } }),
+      }))
+      expect(emptyRes.status).toBe(200)
+
+      const validRes = await settingsApp.fetch(new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { gitIdentity: { name: 'Agent', email: 'agent@example.com' } } }),
+      }))
+      expect(validRes.status).toBe(200)
+    })
+
+    it('rejects an invalid email in a saved identity profile', async () => {
+      const res = await settingsApp.fetch(new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          preferences: { gitIdentities: [{ id: 'a', name: 'Alpha', email: 'not-an-email' }] },
+        }),
+      }))
+
+      expect(res.status).toBe(400)
+      expect(mockUpdateSettings).not.toHaveBeenCalled()
+    })
+  })
+
   describe('PATCH / - sandbox enable guard', () => {
     afterEach(() => {
       forceProcessAttestation(null)

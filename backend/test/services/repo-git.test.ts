@@ -196,9 +196,13 @@ describe('repo service real git', () => {
     })
 
     it('rejects a missing absolute path', async () => {
-      const { initLocalRepo } = await import('../../src/services/repo')
+      const { initLocalRepo, RepoInputError } = await import('../../src/services/repo')
 
-      await expect(initLocalRepo(db, gitAuth, path.join(projectsRoot, 'missing-absolute'))).rejects.toThrow(/No such file or directory/)
+      const error = await initLocalRepo(db, gitAuth, path.join(projectsRoot, 'missing-absolute')).catch((thrown: unknown) => thrown)
+
+      expect(error).toBeInstanceOf(RepoInputError)
+      expect((error as { statusCode: number }).statusCode).toBe(400)
+      expect((error as Error).message).toMatch(/No such directory/)
     })
 
     it('rejects the repos root itself as a source', async () => {
@@ -397,6 +401,19 @@ describe('repo service real git', () => {
 
       await expect(createBranch(db, gitAuth, 9999, 'main')).rejects.toThrow(/Repo not found/)
     })
+
+    it('rejects an invalid branch name as a repo input error', async () => {
+      const { createBranch, RepoInputError } = await import('../../src/services/repo')
+      const repoPath = path.join(reposPath, uniqueName('create-bad-branch'))
+      createCommittedRepo(repoPath)
+      const repo = registerLocalRepo(path.basename(repoPath))
+
+      const error = await createBranch(db, gitAuth, repo.id, 'bad name..x').catch((thrown: unknown) => thrown)
+
+      expect(error).toBeInstanceOf(RepoInputError)
+      expect((error as Error).message).toBe("Invalid branch name: 'bad name..x'.")
+      expect(git(['rev-parse', '--abbrev-ref', 'HEAD'], repoPath)).toBe('main')
+    })
   })
 
   describe('pullRepo', () => {
@@ -458,11 +475,63 @@ describe('repo service real git', () => {
   })
 
   describe('deleteRepoFiles', () => {
-    it('deletes a local repo directory and its row', async () => {
+    it('keeps the files of a local repo inside the repos directory and deletes the row', async () => {
       const { deleteRepoFiles } = await import('../../src/services/repo')
-      const repoPath = path.join(reposPath, uniqueName('delete-local'))
+      const repoPath = path.join(reposPath, uniqueName('delete-local-inside'))
       createCommittedRepo(repoPath)
+      writeFileSync(path.join(repoPath, 'important.txt'), 'keep me')
       const repo = registerLocalRepo(path.basename(repoPath))
+
+      await deleteRepoFiles(db, repo.id)
+
+      expect(existsSync(path.join(repoPath, 'important.txt'))).toBe(true)
+      expect(existsSync(path.join(repoPath, '.git'))).toBe(true)
+      expect(getRepoById(db, repo.id)).toBeNull()
+    })
+
+    it('removes only the workspace alias of a local repo outside the repos directory', async () => {
+      const { initLocalRepo, deleteRepoFiles } = await import('../../src/services/repo')
+      const sourcePath = path.join(projectsRoot, uniqueName('delete-local-outside'))
+      createCommittedRepo(sourcePath)
+      writeFileSync(path.join(sourcePath, 'important.txt'), 'keep me')
+      const repo = await initLocalRepo(db, gitAuth, sourcePath)
+      const aliasPath = path.join(reposPath, repo.localPath)
+
+      expect(lstatSync(aliasPath).isSymbolicLink()).toBe(true)
+
+      await deleteRepoFiles(db, repo.id)
+
+      expect(existsSync(aliasPath)).toBe(false)
+      expect(existsSync(path.join(sourcePath, 'important.txt'))).toBe(true)
+      expect(getRepoById(db, repo.id)).toBeNull()
+    })
+
+    it('keeps local repo files when the alias is missing', async () => {
+      const { initLocalRepo, deleteRepoFiles } = await import('../../src/services/repo')
+      const sourcePath = path.join(projectsRoot, uniqueName('delete-local-alias-gone'))
+      createCommittedRepo(sourcePath)
+      const repo = await initLocalRepo(db, gitAuth, sourcePath)
+      rmSync(path.join(reposPath, repo.localPath), { force: true })
+
+      await deleteRepoFiles(db, repo.id)
+
+      expect(existsSync(path.join(sourcePath, '.git'))).toBe(true)
+      expect(getRepoById(db, repo.id)).toBeNull()
+    })
+
+    it('deletes a cloned repo directory and its row', async () => {
+      const { deleteRepoFiles } = await import('../../src/services/repo')
+      const baseName = uniqueName('delete-clone')
+      const repoPath = path.join(reposPath, baseName)
+      createCommittedRepo(repoPath)
+      const repo = createRepo(db, {
+        repoUrl: `https://github.com/example/${baseName}.git`,
+        localPath: baseName,
+        branch: 'main',
+        defaultBranch: 'main',
+        cloneStatus: 'ready',
+        clonedAt: Date.now(),
+      })
 
       await deleteRepoFiles(db, repo.id)
 
@@ -653,10 +722,29 @@ describe('repo service real git', () => {
     })
 
     it('enhances a missing local clone error and rolls back the row', async () => {
-      const { cloneRepo } = await import('../../src/services/repo')
+      const { cloneRepo, RepoInputError } = await import('../../src/services/repo')
       const name = uniqueName('clone-missing-source')
 
-      await expect(cloneRepo(db, gitAuth, path.join(workspaceRoot, 'no-such-origin'), { directoryName: name })).rejects.toThrow(/does not exist/)
+      const error = await cloneRepo(db, gitAuth, path.join(workspaceRoot, 'no-such-origin'), { directoryName: name })
+        .catch((thrown: unknown) => thrown)
+
+      expect(error).toBeInstanceOf(RepoInputError)
+      expect((error as Error).message).toMatch(/Repository not found or access denied/)
+      expect((error as { statusCode: number }).statusCode).toBe(400)
+      expect(getRepoByLocalPath(db, name)).toBeNull()
+    })
+
+    it('reports an unparseable clone URL as a repo input error', async () => {
+      const { cloneRepo, RepoInputError } = await import('../../src/services/repo')
+      const name = uniqueName('clone-bad-url')
+
+      const error = await cloneRepo(db, gitAuth, 'not a url !!', { directoryName: name })
+        .catch((thrown: unknown) => thrown)
+
+      expect(error).toBeInstanceOf(RepoInputError)
+      expect((error as Error).message).not.toMatch(/Command failed/)
+      expect((error as Error).message).toMatch(/Repository not found or access denied/)
+      expect((error as { statusCode: number }).statusCode).toBe(400)
       expect(getRepoByLocalPath(db, name)).toBeNull()
     })
 

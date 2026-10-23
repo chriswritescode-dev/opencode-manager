@@ -58,6 +58,10 @@ vi.mock('@/hooks/useSessionPins', () => ({
   useToggleSessionPin: () => ({ mutate: togglePinMock }),
 }))
 
+vi.mock('@/hooks/useChangeWalkthrough', () => ({
+  useWalkthroughHelperSessionIds: () => new Set<string>(),
+}))
+
 describe('SessionList', () => {
   beforeEach(() => {
     sessionsData.splice(0, sessionsData.length,

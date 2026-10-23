@@ -42,7 +42,7 @@ const walkthroughForA: ChangeWalkthrough = {
 }
 
 function state(overrides: Partial<ChangeWalkthroughState> = {}): ChangeWalkthroughState {
-  return { walkthrough: null, currentDiffHash: 'hash-a', stale: false, generating: false, running: false, error: null, ...overrides }
+  return { walkthrough: null, currentDiffHash: 'hash-a', hasChanges: true, stale: false, generating: false, running: false, error: null, ...overrides }
 }
 
 function deferred<T>() {

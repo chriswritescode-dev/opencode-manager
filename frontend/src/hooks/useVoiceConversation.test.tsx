@@ -15,6 +15,7 @@ interface MockStartOptions {
 
 interface MockSttValues {
   isRecording: boolean
+  isStarting: boolean
   isProcessing: boolean
   isEndpointing: boolean
   isExternalProvider: boolean
@@ -59,6 +60,7 @@ const sttListeners = new Set<() => void>()
 
 const sttValue: MockSttValues = {
   isRecording: false,
+  isStarting: false,
   isProcessing: false,
   isEndpointing: false,
   isExternalProvider: false,
@@ -158,6 +160,7 @@ describe('useVoiceConversation', () => {
     vi.clearAllMocks()
     Object.assign(sttValue, {
       isRecording: false,
+      isStarting: false,
       isProcessing: false,
       isEndpointing: false,
       isExternalProvider: false,
@@ -457,8 +460,62 @@ describe('useVoiceConversation', () => {
     act(() => result.current.start())
 
     await waitFor(() => expect(result.current.phase).toBe('paused'))
-    expect(result.current.label).toBe('Something went wrong')
+    expect(result.current.label).toBe('Speech recognition failed')
+    expect(result.current.hint).toBe('Allow microphone access, then tap to retry')
+  })
+
+  it('shows the specific microphone failure and how to fix it', async () => {
+    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props), {
+      initialProps: createProps(),
+    })
+
+    act(() => result.current.start())
+    await waitFor(() => expect(result.current.phase).toBe('listening'))
+
+    updateStt({
+      isError: true,
+      error: 'Microphone access denied. Please allow microphone permissions.',
+    })
+
+    await waitFor(() => expect(result.current.phase).toBe('paused'))
+    expect(result.current.label).toBe(
+      'Microphone access denied. Please allow microphone permissions.',
+    )
+    expect(result.current.hint).toBe('Allow microphone access, then tap to retry')
+  })
+
+  it('keeps a plain retry for a failure that retrying can clear', async () => {
+    harness.sendTurn.mockRejectedValueOnce(new Error('network down'))
+    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props), {
+      initialProps: createProps(),
+    })
+
+    act(() => result.current.start())
+    await waitFor(() => expect(result.current.phase).toBe('listening'))
+    await endOfSpeech('pause', 'hello there')
+
+    await waitFor(() => expect(result.current.phase).toBe('paused'))
+    expect(result.current.label).toBe('network down')
     expect(result.current.hint).toBe('Tap to retry')
+  })
+
+  it('reports that the microphone is starting until capture begins', async () => {
+    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props), {
+      initialProps: createProps(),
+    })
+
+    act(() => result.current.start())
+    await waitFor(() => expect(result.current.phase).toBe('listening'))
+
+    updateStt({ isStarting: true })
+
+    expect(result.current.label).toBe('Starting…')
+    expect(result.current.hint).toBe('')
+
+    updateStt({ isStarting: false, isRecording: true })
+
+    expect(result.current.label).toBe('Listening')
+    expect(result.current.hint).toBe('Tap to send')
   })
 
   it('pauses when speech recognition reports an error while listening', async () => {
@@ -472,7 +529,7 @@ describe('useVoiceConversation', () => {
     updateStt({ isError: true, error: 'Microphone access denied' })
 
     await waitFor(() => expect(result.current.phase).toBe('paused'))
-    expect(result.current.label).toBe('Something went wrong')
+    expect(result.current.label).toBe('Microphone access denied')
   })
 
   it('pauses instead of finishing the turn when reading the reply fails', async () => {
@@ -492,7 +549,8 @@ describe('useVoiceConversation', () => {
     act(() => speechEndHandler(0)('error'))
 
     expect(result.current.phase).toBe('paused')
-    expect(result.current.label).toBe('Something went wrong')
+    expect(result.current.label).toBe('Reading the reply failed')
+    expect(result.current.hint).toBe('Tap to retry')
     expect(harness.startRecording).toHaveBeenCalledTimes(1)
   })
 

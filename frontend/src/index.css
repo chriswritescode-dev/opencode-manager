@@ -11,6 +11,7 @@
   --color-primary-hover: #1e40af;
   --color-primary-foreground: #fafafa;
   --color-muted-foreground: #d4d4d8;
+  --color-placeholder: color-mix(in oklab, var(--color-muted-foreground) 55%, var(--color-background));
   --color-accent: #27272a;
   --color-input: #323232;
   --color-muted: #18181b;
@@ -57,6 +58,7 @@
   --color-primary-hover: #1e40af;
   --color-primary-foreground: #ffffff;
   --color-muted-foreground: #6b7280;
+  --color-placeholder: var(--color-muted-foreground);
   --color-accent: #f3f4f6;
   --color-input: #e5e7eb;
   --color-muted: #f4f4f5;

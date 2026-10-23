@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput } from './PromptInput'
+import { useComposerDraftStore } from '@/stores/composerDraftStore'
 import {
   SessionTranscriptContext,
   type SessionTranscriptSnapshot,
@@ -220,6 +221,7 @@ describe('PromptInput voice conversation', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    useComposerDraftStore.setState({ drafts: {} })
     mocks.useSendPromptMutate.mockImplementation((_variables, options) => {
       options?.onSuccess?.()
     })
@@ -423,6 +425,7 @@ describe('PromptInput submission', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    useComposerDraftStore.setState({ drafts: {} })
     mocks.useSendPromptMutate.mockImplementation((_variables, options) => {
       options?.onSuccess?.()
     })

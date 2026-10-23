@@ -308,8 +308,13 @@ function NewRunForm({ target, directory, defaultBaseRef, open, onLaunched }: New
     })
   }, [])
 
-  const canSubmit =
-    name.trim().length > 0 && prompt.trim().length > 0 && selectedModels.length > 0 && !launch.isPending
+  const missingRequirements = [
+    name.trim().length > 0 ? null : 'group name',
+    prompt.trim().length > 0 ? null : 'prompt',
+    selectedModels.length > 0 ? null : 'at least one model',
+  ].filter((requirement): requirement is string => requirement !== null)
+
+  const canSubmit = missingRequirements.length === 0 && !launch.isPending
 
   const handleLaunch = () => {
     if (!canSubmit) return
@@ -411,11 +416,22 @@ function NewRunForm({ target, directory, defaultBaseRef, open, onLaunched }: New
         </div>
       ) : null}
 
-      <div className="flex justify-end">
-        <Button className="min-w-32" onClick={handleLaunch} disabled={!canSubmit} aria-busy={launch.isPending}>
+      <div className="flex flex-col items-end gap-1">
+        <Button
+          className="min-w-32"
+          onClick={handleLaunch}
+          disabled={!canSubmit}
+          aria-busy={launch.isPending}
+          aria-describedby={missingRequirements.length > 0 ? 'multi-run-requirements' : undefined}
+        >
           {launch.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
           {launch.isPending ? 'Launching…' : 'Launch'}
         </Button>
+        {missingRequirements.length > 0 ? (
+          <p id="multi-run-requirements" className="text-xs text-muted-foreground">
+            Required: {missingRequirements.join(', ')}
+          </p>
+        ) : null}
       </div>
     </SideDrawerContent>
   )

@@ -615,7 +615,7 @@ useEffect(() => {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="flex-1"
               />
-              <Button variant="outline" size="sm" onClick={handleRefresh}>
+              <Button variant="outline" size="sm" aria-label="Refresh files" onClick={handleRefresh}>
                 <RefreshCw className="w-4 h-4" />
               </Button>
               <FileOperations
@@ -705,7 +705,7 @@ useEffect(() => {
               <FolderOpen className="w-5 h-5" />
               File Browser
             </CardTitle>
-            <Button variant="outline" size="sm" onClick={handleRefresh}>
+            <Button variant="outline" size="sm" aria-label="Refresh files" onClick={handleRefresh}>
               <RefreshCw className="w-4 h-4" />
             </Button>
           </div>

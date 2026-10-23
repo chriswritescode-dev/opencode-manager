@@ -112,6 +112,14 @@ export function filterReposByMode(repos: RepoViewModel[], mode: RepoFilterMode):
   }
 }
 
+export function getRepoListEmptyMessage(sections: RepoListSection[], searchQuery: string): string {
+  const query = searchQuery.trim()
+  if (query) {
+    return `No repositories found matching "${query}"`
+  }
+  return sections[0]?.emptyMessage ?? 'No repositories found'
+}
+
 export function sortRepos(repos: RepoViewModel[], mode: RepoSortMode, manualOrder?: number[]): RepoViewModel[] {
   switch (mode) {
     case 'recent':

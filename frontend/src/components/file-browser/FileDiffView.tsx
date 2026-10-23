@@ -117,6 +117,7 @@ export function FileDiffContent({
             size="sm"
             onClick={onBack}
             className="h-7 w-7 p-0 mr-1"
+            aria-label="Back to file list"
           >
             <ArrowLeft className="w-4 h-4" />
           </Button>

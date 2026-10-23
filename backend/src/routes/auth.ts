@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { isAdminConfigured, type AuthInstance } from '../auth'
+import { applyClientIpHeaders, resolveSocketIp } from '../auth/client-ip'
 import { Database } from 'bun:sqlite'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { logger } from '../utils/logger'
@@ -8,7 +9,10 @@ import { hashPassword } from 'better-auth/crypto'
 export function createAuthRoutes(auth: AuthInstance): Hono {
   const app = new Hono()
 
-  app.all('/*', (c) => auth.handler(c.req.raw))
+  app.all('/*', (c) => {
+    applyClientIpHeaders(c.req.raw.headers, resolveSocketIp(c))
+    return auth.handler(c.req.raw)
+  })
 
   return app
 }

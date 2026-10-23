@@ -292,6 +292,78 @@ describe('ToolCallPart background indicator', () => {
   })
 })
 
+describe('ToolCallPart shell exit status', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useSettings.mockReturnValue({
+      preferences: { expandToolCalls: false },
+      isLoading: false,
+      updateSettings: vi.fn(),
+      isUpdating: false,
+    })
+    mocks.useToolCallPermission.mockReturnValue(null)
+    useUserBash.setState({ userBashCommands: new Map() })
+  })
+
+  const completedShell = (metadata: Record<string, unknown>): SessionMessageAssistantTool => ({
+    type: 'tool',
+    id: 'call_exit',
+    name: 'shell',
+    time: { created: 1, ran: 2, completed: 3 },
+    state: {
+      status: 'completed',
+      input: { command: 'cat does-not-exist.txt' },
+      content: [{ type: 'text', text: 'Exited with code 1' }],
+      metadata,
+    },
+  })
+
+  it('marks a completed shell with a non-zero exit as failed', () => {
+    renderWithProviders(<ToolCallPart part={completedShell({ exit: 1 })} messageID="msg_1" />)
+
+    expect(screen.getByText('exit 1')).toBeInTheDocument()
+    expect(screen.queryByText('completed')).not.toBeInTheDocument()
+    expect(screen.getByText('✗').parentElement).toHaveClass('text-destructive')
+  })
+
+  it('keeps a completed shell with exit code zero successful', () => {
+    renderWithProviders(<ToolCallPart part={completedShell({ exit: 0 })} messageID="msg_1" />)
+
+    expect(screen.getByText('completed')).toBeInTheDocument()
+    expect(screen.getByText('✓').parentElement).toHaveClass('text-success')
+    expect(screen.queryByText('✗')).not.toBeInTheDocument()
+  })
+
+  it('keeps a completed shell without an exit code successful', () => {
+    renderWithProviders(<ToolCallPart part={completedShell({})} messageID="msg_1" />)
+
+    expect(screen.getByText('completed')).toBeInTheDocument()
+  })
+
+  it('does not read an exit code from a non-shell tool', () => {
+    renderWithProviders(
+      <ToolCallPart
+        part={{
+          type: 'tool',
+          id: 'call_fetch',
+          name: 'webfetch',
+          time: { created: 1, ran: 2, completed: 3 },
+          state: {
+            status: 'completed',
+            input: { url: 'https://example.com' },
+            content: [{ type: 'text', text: 'ok' }],
+            metadata: { exit: 1 },
+          },
+        }}
+        messageID="msg_1"
+      />,
+    )
+
+    expect(screen.getByText('completed')).toBeInTheDocument()
+    expect(screen.queryByText('✗')).not.toBeInTheDocument()
+  })
+})
+
 describe('ToolCallPart execute renderer', () => {
   beforeEach(() => {
     vi.clearAllMocks()

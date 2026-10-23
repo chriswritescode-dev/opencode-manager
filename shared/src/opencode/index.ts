@@ -154,6 +154,7 @@ export type {
   VoiceConversationEvent,
   VoiceConversationLabelInput,
   VoiceConversationState,
+  VoiceFailureSource,
   VoicePauseReason,
   VoicePhase,
   VoiceSessionStatus,

@@ -21,6 +21,7 @@ const IPV4_FIXTURE = [
   procRow('0100007F:1F90', '00000000:0000', '0A', '22222'),
   procRow('0501A8C0:1F90', '00000000:0000', '0A', '33333'),
   procRow('0100007F:1435', '0100007F:9C40', '01', '44444'),
+  procRow('0B00007F:8F71', '00000000:0000', '0A', '88888'),
 ].join('\n')
 
 const IPV6_FIXTURE = [
@@ -68,6 +69,12 @@ describe('parseProcNetTcp', () => {
       { port: 5173, address: '0.0.0.0', inode: '11111' },
       { port: 8080, address: '127.0.0.1', inode: '22222' },
     ])
+  })
+
+  it('drops loopback aliases such as Docker embedded DNS', () => {
+    const sockets = parseProcNetTcp(IPV4_FIXTURE, 4)
+
+    expect(sockets.map((socket) => socket.address)).not.toContain('127.0.0.11')
   })
 
   it('decodes little-endian IPv6 addresses and keeps loopback and wildcard', () => {
@@ -250,6 +257,19 @@ describe('listListeningPorts', () => {
       { port: 5174, host: '127.0.0.1', pid: 888, command: 'bun', cwd: '/Users/dev/api' },
     ])
     expect(cwdCalls).toEqual([[777, 888]])
+  })
+
+  it('drops loopback aliases from lsof listeners', async () => {
+    const deps = createDeps(
+      { files: {}, links: {}, dirs: {} },
+      {
+        platform: 'darwin',
+        runLsof: async () => ['p999', 'cdockerd', 'n127.0.0.11:36721'].join('\n'),
+        runLsofCwd: async () => '',
+      },
+    )
+
+    expect(await listListeningPorts(deps)).toEqual([])
   })
 
   it('keeps cwd null when the cwd lsof call rejects but still lists the ports', async () => {

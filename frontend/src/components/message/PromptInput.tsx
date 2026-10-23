@@ -11,6 +11,7 @@ import { useSttAvailability } from '@/hooks/useSTT'
 import { useUserBash } from '@/stores/userBashStore'
 import { useSessionAgentStore } from '@/stores/sessionAgentStore'
 import { useSendErrorStore } from '@/stores/sendErrorStore'
+import { useComposerDraftStore } from '@/stores/composerDraftStore'
 import { useRecentCommandsStore } from '@/stores/recentCommandsStore'
 import { useHasBackgroundActivity } from '@/stores/sessionStatusStore'
 import { useTouchTapSelect } from '@/hooks/useTouchTapSelect'
@@ -119,6 +120,7 @@ interface PromptInputProps {
   directory?: string
   sessionID: string
   onVoiceConversationActiveChange?: (active: boolean) => void
+  onSuggestionsOpenChange?: (open: boolean) => void
   showScrollButton?: boolean
   isSessionActive?: boolean
   isStreamingResponse?: boolean
@@ -131,6 +133,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   directory,
   sessionID,
   onVoiceConversationActiveChange,
+  onSuggestionsOpenChange,
   showScrollButton,
   isSessionActive = false,
   isStreamingResponse = false,
@@ -138,13 +141,14 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   commandActions,
   onPromptChange
 }, ref) {
-  const [prompt, setPrompt] = useState('')
-  const [isBashMode, setIsBashMode] = useState(false)
+  const [restoredDraft] = useState(() => useComposerDraftStore.getState().getDraft(sessionID))
+  const [prompt, setPrompt] = useState(restoredDraft.prompt)
+  const [isBashMode, setIsBashMode] = useState(restoredDraft.isBashMode)
   const [isGoalArmed, setIsGoalArmed] = useState(false)
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [suggestionQuery, setSuggestionQuery] = useState('')
-  const [attachedFiles, setAttachedFiles] = useState(new Map<string, FileAttachmentInfo>())
-  const [imageAttachments, setImageAttachments] = useState<ImageAttachment[]>([])
+  const [attachedFiles, setAttachedFiles] = useState(restoredDraft.attachedFiles)
+  const [imageAttachments, setImageAttachments] = useState(restoredDraft.imageAttachments)
   const [isDragging, setIsDragging] = useState(false)
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false)
   const [showMentionSuggestions, setShowMentionSuggestions] = useState(false)
@@ -182,6 +186,17 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     attachedFilesRef.current = attachedFiles
     imageAttachmentsRef.current = imageAttachments
   }, [attachedFiles, imageAttachments, prompt])
+
+  const saveDraft = useComposerDraftStore((state) => state.saveDraft)
+  const clearDraft = useComposerDraftStore((state) => state.clearDraft)
+
+  useEffect(() => {
+    if (prompt === '' && !isBashMode && attachedFiles.size === 0 && imageAttachments.length === 0) {
+      clearDraft(sessionID)
+      return
+    }
+    saveDraft(sessionID, { prompt, isBashMode, attachedFiles, imageAttachments })
+  }, [sessionID, prompt, isBashMode, attachedFiles, imageAttachments, saveDraft, clearDraft])
 
   const clearSubmittedPrompt = useCallback((submittedPrompt: string, submittedAttachedFiles: Map<string, FileAttachmentInfo>, submittedImageAttachments: ImageAttachment[], options?: { keepAttachments?: boolean }) => {
     if (
@@ -246,6 +261,10 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   
   const { data: agents = [] } = useAgents(directory)
   const { data: skills = [] } = useSkills(directory)
+  const mentionableAgents = useMemo(
+    () => agents.filter((agent) => !agent.hidden && agent.mode !== 'primary'),
+    [agents],
+  )
   const agentNames = useMemo(() => agents.map((agent) => agent.name), [agents])
   const skillIds = useMemo(() => skills.map((skill) => skill.id), [skills])
   const failedPrompt = useSendErrorStore((state) => state.errors[sessionID]?.failedPrompt)
@@ -269,7 +288,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   }, [failedPrompt])
   
   const mentionSuggestions = useMemo((): PromptSuggestion<MentionItem>[] => {
-    const agentMatches = rankByMatch(agents, mentionQuery, {
+    const agentMatches = rankByMatch(mentionableAgents, mentionQuery, {
       getName: (agent) => agent.name,
       getDescription: (agent) => agent.description,
     }).map(({ item, tier, ranges }) => ({
@@ -321,7 +340,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     return [...agentMatches, ...skillMatches, ...fileMatches]
       .sort((a, b) => a.tier - b.tier)
       .map(({ suggestion }) => suggestion)
-  }, [agents, skills, searchResults, mentionQuery])
+  }, [mentionableAgents, skills, searchResults, mentionQuery])
 
   const commandSuggestions = useMemo((): PromptSuggestion<CommandInfo>[] =>
     searchCommands(suggestionQuery).map(({ item, ranges }) => ({
@@ -735,7 +754,10 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (isBashMode && e.key === 'Escape') {
       e.preventDefault()
-      resetPrompt()
+      if (prompt === '!' || prompt === '') {
+        setIsBashMode(false)
+        setPrompt('')
+      }
       return
     }
 
@@ -815,8 +837,6 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
         textareaRef.current?.blur()
       }
       handleSubmit()
-    } else if (e.key === 'Escape' && !isSessionActive) {
-      resetPrompt()
     }
   }
 
@@ -1063,6 +1083,12 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   })
   const isCommandListOpen = showSuggestions && commandSuggestions.length > 0
   const isMentionListOpen = showMentionSuggestions && mentionSuggestions.length > 0
+  const isSuggestionListOpen = isCommandListOpen || isMentionListOpen
+
+  useEffect(() => {
+    onSuggestionsOpenChange?.(isSuggestionListOpen)
+  }, [isSuggestionListOpen, onSuggestionsOpenChange])
+
   const composerMode: ComposerMode | null = isBashMode
     ? 'bash'
     : isMentionListOpen
@@ -1071,7 +1097,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
         ? 'command'
         : null
   const composerModeStyle = composerMode ? COMPOSER_MODE_STYLES[composerMode] : null
-  const isTakeoverOpen = isMobile && (isCommandListOpen || isMentionListOpen)
+  const isTakeoverOpen = isMobile && isSuggestionListOpen
   const showStopButton = isSessionActive
   const showMobileScrollButton = isMobile && showScrollButton
   const hasOpenGoal = isOpenSessionGoal(sessionGoal)
@@ -1279,6 +1305,7 @@ return (
               <span className="max-w-[120px] truncate">{attachment.filename}</span>
               <button
                 type="button"
+                aria-label={`Remove ${attachment.filename}`}
                 onClick={() => removeImageAttachment(attachment.id)}
                 className="p-0.5 rounded hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground"
               >

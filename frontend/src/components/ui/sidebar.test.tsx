@@ -186,6 +186,21 @@ describe('Sidebar resize handle', () => {
 
     expect(handleWidthChange).not.toHaveBeenCalled()
   })
+
+  it('keeps the collapse toggle clear of the full-height resize strip', () => {
+    render(
+      <Sidebar collapsed={false} onToggle={vi.fn()} width={300} onWidthChange={vi.fn()}>
+        <div>Content</div>
+      </Sidebar>
+    )
+
+    const handle = screen.getByRole('separator', { name: 'Resize sidebar' })
+    const toggle = screen.getByRole('button', { name: 'Collapse sidebar' })
+
+    expect(handle).toHaveClass('inset-y-0')
+    expect(handle).not.toContainElement(toggle)
+    expect(toggle).not.toHaveClass('absolute')
+  })
 })
 
 describe('SidebarSection', () => {

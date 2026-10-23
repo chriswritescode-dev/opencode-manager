@@ -265,8 +265,24 @@ describe('ChangeWalkthroughService', () => {
     expect(state.walkthrough).toBeNull()
     expect(state.stale).toBe(false)
     expect(state.currentDiffHash).toBe(computeChangesHash(THREE_HUNKS))
+    expect(state.hasChanges).toBe(true)
     expect(state.generating).toBe(false)
     expect(state.error).toBeNull()
+  })
+
+  it('reports no changes for a session with an empty diff', async () => {
+    sessions[SESSION_ID]!.changes = []
+
+    const state = await service.getState(SESSION_ID)
+
+    expect(state.currentDiffHash).toBe(computeChangesHash([]))
+    expect(state.hasChanges).toBe(false)
+  })
+
+  it('lists the helper sessions of existing walkthroughs', async () => {
+    await service.startGeneration(SESSION_ID, {})
+
+    expect(service.listHelperSessionIds()).toEqual(['ses_walk_1'])
   })
 
   it('creates exactly one walkthrough session and returns generating', async () => {
@@ -479,6 +495,7 @@ describe('ChangeWalkthroughService', () => {
 
     const state = await service.getState(SESSION_ID)
     expect(state.currentDiffHash).toBeNull()
+    expect(state.hasChanges).toBe(true)
     expect(state.stale).toBe(false)
   })
 

@@ -12,6 +12,10 @@ import { ServiceError } from '../utils/service-error'
 export function createChangeWalkthroughRoutes(service: ChangeWalkthroughService) {
   const app = new Hono()
 
+  app.get('/helper-sessions', (c) => {
+    return c.json({ sessionIds: service.listHelperSessionIds() })
+  })
+
   app.get('/:sessionId', async (c) => {
     const sourceParam = c.req.query('source')
     const source = sourceParam === undefined ? DEFAULT_WALKTHROUGH_SOURCE : parseWalkthroughSourceKey(sourceParam)

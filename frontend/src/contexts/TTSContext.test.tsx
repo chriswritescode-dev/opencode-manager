@@ -24,6 +24,10 @@ vi.mock('@/hooks/useSettings', () => ({
   useSettings: mocks.useSettings,
 }))
 
+vi.mock('@/hooks/useAuth', () => ({
+  useAuth: () => ({ isAuthenticated: true }),
+}))
+
 vi.mock('@/lib/webSpeechSynthesizer', () => ({
   getWebSpeechSynthesizer: () => webSpeech as unknown as WebSpeechSynthesizer,
   isWebSpeechSupported: () => true,

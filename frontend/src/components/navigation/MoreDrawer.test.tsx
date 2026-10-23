@@ -229,7 +229,7 @@ describe('MoreDrawer', () => {
     renderMoreDrawer({ onClose: handleClose })
     fireEvent.click(screen.getByText('Settings'))
     expect(navigateMock).toHaveBeenCalledWith(
-      { search: 'settings=open&settingsTab=account' },
+      { search: 'settings=open' },
       { replace: true },
     )
   })
@@ -332,7 +332,10 @@ describe('MoreDrawer', () => {
 
     fireEvent.click(screen.getByText('Repos'))
 
-    expect(navigateMock).toHaveBeenCalledWith({ search: 'mobileTab=repos' }, { replace: false })
+    expect(navigateMock).toHaveBeenCalledWith(
+      { search: 'mobileTab=repos' },
+      { state: { urlParamHistory: { previousSearch: '?mobileTab=more' } } },
+    )
   })
 
   it('keeps Home and hides the Repos row outside a session', () => {

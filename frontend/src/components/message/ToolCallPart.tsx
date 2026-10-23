@@ -121,6 +121,12 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
     return typeof provider === 'string' ? provider : undefined
   })()
   const sandboxProviderLabel = sandboxProvider !== undefined && sandboxProvider !== 'ocm' ? sandboxProvider : undefined
+  const foregroundShellExit =
+    part.name === 'shell' && !isBackgroundShell && part.state.status === 'completed'
+      ? toolMetadata(part).exit
+      : undefined
+  const failedShellExit =
+    typeof foregroundShellExit === 'number' && foregroundShellExit !== 0 ? foregroundShellExit : undefined
   const [detailsOpen, setDetailsOpen] = useToolDetailsState(preferences?.expandToolCalls ?? false)
 
   useEffect(() => {
@@ -132,6 +138,7 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
 
   const getStatusColor = () => {
     if (isBackgroundShell) return backgroundTaskStatusColor(shellStatus)
+    if (failedShellExit !== undefined) return 'text-destructive'
     switch (part.state.status) {
       case 'completed':
         return 'text-success'
@@ -151,6 +158,7 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
 
   const getStatusIcon = () => {
     if (isBackgroundShell) return renderShellLifecycleIcon(shellStatus)
+    if (failedShellExit !== undefined) return <span>✗</span>
     switch (part.state.status) {
       case 'completed':
         return <span>✓</span>
@@ -294,7 +302,9 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
     ? 'awaiting permission'
     : isBackgroundShell
       ? lifecycleLabel(shellStatus)
-      : part.state.status
+      : failedShellExit !== undefined
+        ? `exit ${failedShellExit}`
+        : part.state.status
   const commandBlock = (
     <div className="text-sm">
       <div className="flex items-center gap-2 mb-1">

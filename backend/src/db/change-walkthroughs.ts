@@ -222,6 +222,13 @@ export function updateChangeWalkthrough(
   return getChangeWalkthrough(db, sessionId, sourceKey)
 }
 
+export function listChangeWalkthroughSessionIds(db: Database): string[] {
+  const rows = db
+    .prepare('SELECT DISTINCT walkthrough_session_id FROM change_walkthroughs WHERE walkthrough_session_id IS NOT NULL')
+    .all() as Array<{ walkthrough_session_id: string }>
+  return rows.map((row) => row.walkthrough_session_id)
+}
+
 export function listChangeWalkthroughs(db: Database, sessionId: string): ChangeWalkthrough[] {
   const rows = db
     .prepare(`SELECT ${ROW_COLUMNS} FROM change_walkthroughs WHERE session_id = ?`)

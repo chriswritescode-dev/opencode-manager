@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { renderHook, act, render, screen } from '@testing-library/react'
-import { MemoryRouter, useNavigate } from 'react-router-dom'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { describe, it, expect } from 'vitest'
 import { useMobileTabBar } from './useMobileTabBar'
 import { renderHookWithRouter, createRouterWrapper } from '@/test/test-utils'
@@ -125,5 +125,58 @@ describe('useMobileTabBar', () => {
 
     act(() => { screen.getByText('back').click() })
     expect(screen.getByTestId('openSheet').textContent).toBe('')
+  })
+
+  describe('history entries', () => {
+    function SheetHarness() {
+      const { openSheet, open, close } = useMobileTabBar()
+      const location = useLocation()
+      const navigate = useNavigate()
+
+      return (
+        <div>
+          <span data-testid="openSheet">{openSheet ?? ''}</span>
+          <span data-testid="pathname">{location.pathname}</span>
+          <button onClick={() => open('more')}>open</button>
+          <button onClick={close}>close</button>
+          <button onClick={() => navigate(-1)}>back</button>
+        </div>
+      )
+    }
+
+    it('closing a sheet the tab bar opened goes back instead of leaving a dead history entry', () => {
+      render(
+        <MemoryRouter initialEntries={['/repos/2', '/']} initialIndex={1}>
+          <SheetHarness />
+        </MemoryRouter>,
+      )
+
+      act(() => { screen.getByText('open').click() })
+      expect(screen.getByTestId('pathname').textContent).toBe('/')
+
+      act(() => { screen.getByText('close').click() })
+      expect(screen.getByTestId('openSheet').textContent).toBe('')
+      expect(screen.getByTestId('pathname').textContent).toBe('/')
+
+      act(() => { screen.getByText('back').click() })
+      expect(screen.getByTestId('pathname').textContent).toBe('/repos/2')
+    })
+
+    it('closing a deep-linked sheet replaces the entry instead of leaving the route', () => {
+      render(
+        <MemoryRouter initialEntries={['/repos/2', '/?mobileTab=more']} initialIndex={1}>
+          <SheetHarness />
+        </MemoryRouter>,
+      )
+
+      expect(screen.getByTestId('openSheet').textContent).toBe('more')
+
+      act(() => { screen.getByText('close').click() })
+      expect(screen.getByTestId('openSheet').textContent).toBe('')
+      expect(screen.getByTestId('pathname').textContent).toBe('/')
+
+      act(() => { screen.getByText('back').click() })
+      expect(screen.getByTestId('pathname').textContent).toBe('/repos/2')
+    })
   })
 })

@@ -229,6 +229,24 @@ describe('GitSettings draft preservation', () => {
     await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['repoGitIdentity'] }))
   })
 
+  it('blocks saving and shows an inline error for an invalid identity email', async () => {
+    const user = userEvent.setup()
+    setupServer(buildPreferences())
+    renderGitSettings()
+
+    const emailInput = await screen.findByLabelText('Email', { selector: 'input#git-email' })
+    await user.type(emailInput, 'not-an-email')
+
+    expect(emailInput).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByText('Enter a valid email address')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /save changes/i }))
+
+    expect(updateSettingsMock).not.toHaveBeenCalled()
+    expect(showToastMock.success).not.toHaveBeenCalled()
+    expect(emailInput).toHaveValue('not-an-email')
+  })
+
   it('retains identity drafts when saving fails', async () => {
     const user = userEvent.setup()
     setupServer(buildPreferences())

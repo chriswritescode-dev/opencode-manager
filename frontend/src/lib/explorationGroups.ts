@@ -41,7 +41,12 @@ export function isExplorationComplete(parts: SessionMessageAssistantTool[]): boo
   return parts.every((part) => part.state.status === 'completed' || part.state.status === 'error')
 }
 
-/** TUI-style summary such as `Explored: 5 reads, 2 searches`. */
+/** Number of exploration tools that ended in an error. */
+export function explorationFailureCount(parts: SessionMessageAssistantTool[]): number {
+  return parts.filter((part) => part.state.status === 'error').length
+}
+
+/** TUI-style summary such as `Explored: 5 reads, 2 searches`, with a failure count when any tool errored. */
 export function explorationLabel(parts: SessionMessageAssistantTool[]): string {
   const counts = new Map<string, number>()
   parts.forEach((part) => {
@@ -52,5 +57,7 @@ export function explorationLabel(parts: SessionMessageAssistantTool[]): string {
   const names = [...counts].map(([noun, count]) =>
     `${count} ${count === 1 ? noun : noun === 'search' || noun === 'fetch' ? `${noun}es` : `${noun}s`}`,
   )
-  return `${isExplorationComplete(parts) ? 'Explored' : 'Exploring'}: ${names.join(', ')}`
+  const failures = explorationFailureCount(parts)
+  const failureLabel = failures > 0 ? `, ${failures} failed` : ''
+  return `${isExplorationComplete(parts) ? 'Explored' : 'Exploring'}: ${names.join(', ')}${failureLabel}`
 }

@@ -21,17 +21,17 @@ describe('repo worktree helpers', () => {
     worktreePath = path.join(tmpDir, 'feature-x')
 
     // Init bare origin
-    execSync(`git init --bare "${originRepoPath}"`, { env })
+    execSync(`git init --bare -b main "${originRepoPath}"`, { env })
 
-    // Clone origin to get a working base repo (default branch is "master" in bare repos)
+    // Clone origin to get a working base repo (default branch is "main")
     execSync(`git clone "${originRepoPath}" "${baseRepoPath}"`, { env })
 
     // Set git config for commits
     execSync(`git -C "${baseRepoPath}" config user.email test@test.com`, { env })
     execSync(`git -C "${baseRepoPath}" config user.name Test`, { env })
 
-    // Rename default branch to "main" and push
-    execSync(`git -C "${baseRepoPath}" branch -m master main`, { env })
+    // Ensure the branch is "main" and push
+    execSync(`git -C "${baseRepoPath}" branch -M main`, { env })
     execSync(`git -C "${baseRepoPath}" commit --allow-empty -m "Initial commit"`, { env })
     execSync(`git -C "${baseRepoPath}" push origin main`, { env })
 

@@ -40,9 +40,15 @@ interface FileUploadResult {
   mimeType: string
 }
 
+const BINARY_MIME_TYPE = 'application/octet-stream'
+const SNIFF_BYTE_COUNT = 8192
+const MAX_INVALID_UTF8_RATIO = 0.1
+
+type DetectedMimeType = AllowedMimeType | typeof BINARY_MIME_TYPE
+
 export interface RawFileMetadata {
   size: number
-  mimeType: AllowedMimeType
+  mimeType: DetectedMimeType
   lastModified: Date
 }
 
@@ -85,7 +91,7 @@ export async function getRawFileMetadata(userPath: string): Promise<RawFileMetad
 
     return {
       size: stats.size,
-      mimeType: getMimeType(validatedPath),
+      mimeType: await detectMimeType(validatedPath),
       lastModified: stats.lastModified,
     }
   } catch (error) {
@@ -141,12 +147,10 @@ export async function getFile(userPath: string): Promise<FileInfo> {
     } else {
       // It's a file - get content
       let content = ''
-      const mimeType = getMimeType(validatedPath)
+      const mimeType = await detectMimeType(validatedPath)
       
       if (stats.size < FILE_LIMITS.MAX_SIZE_BYTES) {
         try {
-          const mimeType = getMimeType(validatedPath)
-          
           if (mimeType.startsWith('image/') || !mimeType.startsWith('text/')) {
             content = await readFileAsBase64(validatedPath)
           } else {
@@ -179,7 +183,7 @@ export async function uploadFile(userPath: string, file: File, relativePath?: st
     throw new Error('File too large')
   }
   
-  const mimeType = (file.type || getMimeType(file.name)) as AllowedMimeType
+  const mimeType = (file.type || getKnownMimeType(file.name) || 'text/plain') as AllowedMimeType
   if (!ALLOWED_MIME_TYPES.includes(mimeType) && !mimeType.startsWith('text/')) {
     throw new Error('File type not allowed')
   }
@@ -288,7 +292,7 @@ function validatePath(userPath: string): string {
   return resolved
 }
 
-function getMimeType(filePath: string): AllowedMimeType {
+function getKnownMimeType(filePath: string): AllowedMimeType | undefined {
   const ext = path.extname(filePath).toLowerCase()
   
   const mimeTypes: Record<string, AllowedMimeType> = {
@@ -315,7 +319,32 @@ function getMimeType(filePath: string): AllowedMimeType {
     '.mdx': 'text/markdown',
   }
   
-  return mimeTypes[ext] || 'text/plain'
+  return mimeTypes[ext]
+}
+
+async function detectMimeType(filePath: string): Promise<DetectedMimeType> {
+  const known = getKnownMimeType(filePath)
+  if (known) return known
+  return isBinaryContent(await readFilePrefix(filePath)) ? BINARY_MIME_TYPE : 'text/plain'
+}
+
+async function readFilePrefix(filePath: string): Promise<Buffer> {
+  const handle = await fs.open(filePath, 'r')
+  try {
+    const buffer = Buffer.alloc(SNIFF_BYTE_COUNT)
+    const { bytesRead } = await handle.read(buffer, 0, SNIFF_BYTE_COUNT, 0)
+    return buffer.subarray(0, bytesRead)
+  } finally {
+    await handle.close()
+  }
+}
+
+function isBinaryContent(buffer: Buffer): boolean {
+  if (buffer.length === 0) return false
+  if (buffer.includes(0)) return true
+  const decoded = buffer.toString('utf8')
+  const invalidCharacters = decoded.split('\uFFFD').length - 1
+  return invalidCharacters / decoded.length > MAX_INVALID_UTF8_RATIO
 }
 
 async function readFileLinesAndCount(
@@ -356,7 +385,7 @@ export async function getFileRange(userPath: string, startLine: number, endLine:
   
   const { lines, totalLines } = await readFileLinesAndCount(validatedPath, startLine, endLine)
   const clampedEnd = Math.min(endLine, totalLines)
-  const mimeType = getMimeType(validatedPath)
+  const mimeType = await detectMimeType(validatedPath)
   
   return {
     name: path.basename(validatedPath),

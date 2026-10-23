@@ -57,8 +57,10 @@ export function ChangesTab({ repoId, onFileSelect, onClearFileSelection, selecte
   }
 
   const handleCommit = () => {
-    git.commit.mutate({ message: commitMessage.trim() })
-    setCommitMessage('')
+    git.commit.mutate(
+      { message: commitMessage.trim() },
+      { onSuccess: () => setCommitMessage('') },
+    )
   }
 
   const handleGenerateMessage = () => {

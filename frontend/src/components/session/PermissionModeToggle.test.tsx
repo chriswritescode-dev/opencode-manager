@@ -41,7 +41,7 @@ describe('PermissionModeToggle', () => {
     mockHooks()
     render(<PermissionModeToggle sessionID="ses_1" directory="/repo" />)
 
-    expect(screen.getByRole('button', { name: 'Permissions: ask every time' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Permissions: follow configured rules' })).toBeEnabled()
   })
 
   it('switches to accept-everything with the directory when clicked', async () => {
@@ -50,7 +50,7 @@ describe('PermissionModeToggle', () => {
     mockHooks({ mutate })
     render(<PermissionModeToggle sessionID="ses_1" directory="/repo" />)
 
-    await user.click(screen.getByRole('button', { name: 'Permissions: ask every time' }))
+    await user.click(screen.getByRole('button', { name: 'Permissions: follow configured rules' }))
 
     expect(mutate).toHaveBeenCalledWith({ directory: '/repo', mode: 'auto' })
   })
@@ -61,7 +61,7 @@ describe('PermissionModeToggle', () => {
     mockHooks({ state: { mode: 'auto' }, mutate })
     render(<PermissionModeToggle sessionID="ses_1" directory="/repo" />)
 
-    await user.click(screen.getByRole('button', { name: 'Permissions: accept everything' }))
+    await user.click(screen.getByRole('button', { name: 'Permissions: auto-accept all' }))
 
     expect(mutate).toHaveBeenCalledWith({ directory: '/repo', mode: 'ask' })
   })
@@ -114,7 +114,7 @@ describe('PermissionModeToggle', () => {
     mockHooks({ data: { ...baseState, mode: 'auto' }, mutate })
     render(<PermissionModeToggle sessionID="ses_1" directory="/repo" />)
 
-    await user.click(screen.getByRole('button', { name: 'Permissions: accept everything' }))
+    await user.click(screen.getByRole('button', { name: 'Permissions: auto-accept all' }))
 
     expect(mutate).toHaveBeenCalledWith({ directory: '/repo', mode: 'ask' })
   })
