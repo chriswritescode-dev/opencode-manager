@@ -66,6 +66,16 @@ const revokeBlobUrls = (attachments: ImageAttachment[]) => {
   })
 }
 
+const runAfterSend = async (send: Promise<unknown>, onSent: () => void, onFailed?: () => void) => {
+  try {
+    await send
+  } catch {
+    onFailed?.()
+    return
+  }
+  onSent()
+}
+
 const ACCEPTED_FILE_TYPES = [...ACCEPTED_IMAGE_TYPES, "application/pdf"]
 
 const COMMAND_TRIGGER_PATTERN = /(^|\s)\/([a-zA-Z0-9_-]*)$/
@@ -387,18 +397,18 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
         const goalStarted = await startArmedGoal(parsed.text)
         if (!goalStarted) return
       }
-      void sendPrompt.mutateAsync({
-        sessionID,
-        text: parsed.text,
-        files: parsed.files,
-        agents: parsed.agents,
-        skills: parsed.skills,
-        model: modelRef ?? undefined,
-        agent: currentMode,
-        delivery: 'queue',
-      }).then(
+      void runAfterSend(
+        sendPrompt.mutateAsync({
+          sessionID,
+          text: parsed.text,
+          files: parsed.files,
+          agents: parsed.agents,
+          skills: parsed.skills,
+          model: modelRef ?? undefined,
+          agent: currentMode,
+          delivery: 'queue',
+        }),
         () => completeSubmittedDraft(submitted),
-        () => undefined,
       )
       setStoredAgent(sessionID, currentMode)
       return
@@ -410,17 +420,14 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       const command = prompt.startsWith('!') ? prompt.slice(1) : prompt
       addUserBashCommand(command)
       const submitted: ComposerDraft = { prompt, isBashMode, attachedFiles, imageAttachments }
-      void sendShell.mutateAsync({
-        sessionID,
-        command,
-      }).then(
+      void runAfterSend(
+        sendShell.mutateAsync({ sessionID, command }),
         () => {
           clearDraftIfUnchanged(sessionID, submitted, { keepAttachments: true })
           if (promptRef.current !== submitted.prompt) return
           setPrompt('')
           setIsBashMode(false)
         },
-        () => undefined,
       )
       setStoredAgent(sessionID, currentMode)
       return
@@ -470,15 +477,16 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       images: submitted.imageAttachments
     }
 
-    void sendPrompt.mutateAsync({
-      sessionID,
-      text: parsed.text,
-      files: parsed.files,
-      agents: parsed.agents,
-      skills: parsed.skills,
-      model: modelRef ?? undefined,
-      agent: currentMode,
-    }).then(
+    void runAfterSend(
+      sendPrompt.mutateAsync({
+        sessionID,
+        text: parsed.text,
+        files: parsed.files,
+        agents: parsed.agents,
+        skills: parsed.skills,
+        model: modelRef ?? undefined,
+        agent: currentMode,
+      }),
       () => {
         pendingConfirmClearRef.current = null
         completeSubmittedDraft(submitted)
