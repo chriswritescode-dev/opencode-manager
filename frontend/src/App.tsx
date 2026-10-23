@@ -21,6 +21,7 @@ import { PwaUpdatePrompt } from '@/components/PwaUpdatePrompt'
 import { MobileTabBar } from '@/components/navigation/MobileTabBar'
 import { MobileSheetHost } from '@/components/navigation/MobileSheetHost'
 import { RouteErrorBoundary } from '@/components/ui/route-error-boundary'
+import { NotFoundState } from '@/components/ui/not-found-state'
 import { DesktopSidebar } from '@/components/navigation/DesktopSidebar'
 import { useRightEdgeSwipe, useSwipeBack } from './hooks/useMobile'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
@@ -164,6 +165,19 @@ function ServerScope({ children }: { children: ReactNode }) {
   return <OpenCodeServerProvider serverId={serverId}>{children}</OpenCodeServerProvider>
 }
 
+function RootLayout() {
+  return (
+    <AuthProvider>
+      <ThemeProvider>
+        <TTSProvider>
+          <ThemedToaster />
+          <Outlet />
+        </TTSProvider>
+      </ThemeProvider>
+    </AuthProvider>
+  )
+}
+
 function AppShell() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -233,41 +247,36 @@ function AppShell() {
   )
 
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <EventProvider>
-          <RepoWorktreesProvider>
-            <KeyboardShortcutsProvider>
-              <GlobalShortcuts />
-              <SidebarServerRouteSync />
-              <div className="flex h-dvh w-full min-w-0 flex-col">
-                <PwaUpdatePrompt />
-                <div ref={rootRef} className="flex flex-1 min-h-0 w-full min-w-0">
-                  <DesktopSidebar />
-                  <main className="flex-1 min-w-0 min-h-0 flex flex-col">
-                    <Outlet />
-                  </main>
-                </div>
-              </div>
-              <MobileTabBar />
-              <MobileSheetHost />
-              <PermissionDialogWrapper />
-              <SSHHostKeyDialogWrapper />
-              <SettingsDialog />
-              <HealthMonitor />
-              <VersionNotifier />
-              <ThemedToaster />
-            </KeyboardShortcutsProvider>
-          </RepoWorktreesProvider>
-        </EventProvider>
-      </AuthProvider>
-    </ThemeProvider>
+    <EventProvider>
+      <RepoWorktreesProvider>
+        <KeyboardShortcutsProvider>
+          <GlobalShortcuts />
+          <SidebarServerRouteSync />
+          <div className="flex h-dvh w-full min-w-0 flex-col">
+            <PwaUpdatePrompt />
+            <div ref={rootRef} className="flex flex-1 min-h-0 w-full min-w-0">
+              <DesktopSidebar />
+              <main className="flex-1 min-w-0 min-h-0 flex flex-col">
+                <Outlet />
+              </main>
+            </div>
+          </div>
+          <MobileTabBar />
+          <MobileSheetHost />
+          <PermissionDialogWrapper />
+          <SSHHostKeyDialogWrapper />
+          <SettingsDialog />
+          <HealthMonitor />
+          <VersionNotifier />
+        </KeyboardShortcutsProvider>
+      </RepoWorktreesProvider>
+    </EventProvider>
   )
 }
 
 const router = createBrowserRouter([
   {
-    element: <AppShell />,
+    element: <RootLayout />,
     errorElement: <RouteErrorBoundary />,
     children: [
       {
@@ -286,62 +295,80 @@ const router = createBrowserRouter([
         loader: setupLoader,
       },
       {
-        path: '/',
-        element: <Repos />,
-        loader: protectedLoader,
-      },
-      {
-        path: '/assistant',
-        element: <AssistantRedirect />,
-        loader: protectedLoader,
-      },
-      {
-        path: '/repos/:id',
-        element: <RepoDetail />,
-        loader: protectedLoader,
-      },
-      {
-        path: '/repos/:id/assistant',
-        element: <AssistantRedirect />,
-        loader: protectedLoader,
-      },
-      {
-        path: '/repos/:id/sessions/:sessionId',
-        element: <SessionDetail />,
-        loader: protectedLoader,
-      },
-      {
-        path: '/repos/:id/schedules',
-        element: <Schedules />,
-        loader: protectedLoader,
-      },
-      {
-        path: '/schedules',
-        element: <GlobalSchedules />,
-        loader: protectedLoader,
-      },
-      {
-        path: '/servers/:serverId',
-        element: <LinkedServerRedirect />,
-        loader: protectedLoader,
-      },
-      {
-        path: '/servers/:serverId/projects',
-        element: (
-          <ServerScope>
-            <RemoteProject />
-          </ServerScope>
-        ),
-        loader: protectedLoader,
-      },
-      {
-        path: '/servers/:serverId/sessions/:sessionId',
-        element: (
-          <ServerScope>
-            <SessionDetail />
-          </ServerScope>
-        ),
-        loader: protectedLoader,
+        element: <AppShell />,
+        errorElement: <RouteErrorBoundary />,
+        children: [
+          {
+            path: '/',
+            element: <Repos />,
+            loader: protectedLoader,
+          },
+          {
+            path: '/assistant',
+            element: <AssistantRedirect />,
+            loader: protectedLoader,
+          },
+          {
+            path: '/repos/:id',
+            element: <RepoDetail />,
+            loader: protectedLoader,
+          },
+          {
+            path: '/repos/:id/assistant',
+            element: <AssistantRedirect />,
+            loader: protectedLoader,
+          },
+          {
+            path: '/repos/:id/sessions/:sessionId',
+            element: <SessionDetail />,
+            loader: protectedLoader,
+          },
+          {
+            path: '/repos/:id/schedules',
+            element: <Schedules />,
+            loader: protectedLoader,
+          },
+          {
+            path: '/schedules',
+            element: <GlobalSchedules />,
+            loader: protectedLoader,
+          },
+          {
+            path: '/servers/:serverId',
+            element: <LinkedServerRedirect />,
+            loader: protectedLoader,
+          },
+          {
+            path: '/servers/:serverId/projects',
+            element: (
+              <ServerScope>
+                <RemoteProject />
+              </ServerScope>
+            ),
+            loader: protectedLoader,
+          },
+          {
+            path: '/servers/:serverId/sessions/:sessionId',
+            element: (
+              <ServerScope>
+                <SessionDetail />
+              </ServerScope>
+            ),
+            loader: protectedLoader,
+          },
+          {
+            path: '*',
+            element: (
+              <NotFoundState
+                title="Page Not Found"
+                message="The page you are looking for does not exist."
+                backTo="/"
+                backLabel="Go home"
+              />
+            ),
+            loader: protectedLoader,
+          },
+        ],
       },
     ],
   },
@@ -350,11 +377,9 @@ const router = createBrowserRouter([
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TTSProvider>
-        <SwipeNavigationProvider>
-          <RouterProvider router={router} />
-        </SwipeNavigationProvider>
-      </TTSProvider>
+      <SwipeNavigationProvider>
+        <RouterProvider router={router} />
+      </SwipeNavigationProvider>
     </QueryClientProvider>
   )
 }

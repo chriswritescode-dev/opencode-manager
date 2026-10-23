@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { getRepo } from "@/api/repos";
+import { repoQueryOptions } from "@/lib/repoQuery";
+import { NotFoundState } from "@/components/ui/not-found-state";
 import { SessionList, type SessionListRenderArgs } from "@/components/session/SessionList";
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Header } from "@/components/ui/header";
@@ -21,7 +22,7 @@ import { useSSE } from "@/hooks/useSSE";
 import { useDialogParam } from "@/hooks/useDialogParam";
 import { useOpenTerminal, useTerminalDialogParam, useTerminalDirectoryParam } from "@/hooks/useOpenTerminal";
 import { useWorktreeTab } from "@/hooks/useWorktreeTab";
-import { useMobile } from "@/hooks/useMobile";
+import { useToolPanelLayout } from "@/hooks/useToolPanelLayout";
 import { useToolPanel } from "@/hooks/useToolPanel";
 import { ToolSidePanel } from "@/components/navigation/ToolSidePanel";
 import { WorktreeTabs } from "@/components/repo/WorktreeTabs";
@@ -56,12 +57,11 @@ export function RepoDetail() {
   const { activeTab, setActiveTab } = useWorktreeTab();
   const openTerminal = useOpenTerminal();
   const terminalDirectory = useTerminalDirectoryParam();
-  const docked = !useMobile();
-  const toolPanel = useToolPanel(docked);
+  const { docked, showRail } = useToolPanelLayout();
+  const toolPanel = useToolPanel(showRail);
 
   const { data: repo, isLoading: repoLoading } = useQuery({
-    queryKey: ["repo", repoId],
-    queryFn: () => getRepo(repoId),
+    ...repoQueryOptions(repoId),
     enabled: !!repoId,
   });
 
@@ -192,13 +192,7 @@ export function RepoDetail() {
   }
 
   if (!repo) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-background">
-        <p className="text-muted-foreground">
-          Repository not found
-        </p>
-      </div>
-    );
+    return <NotFoundState message="Repository not found" backTo="/" backLabel="Back to repositories" />;
   }
   
   if (repo.cloneStatus !== 'ready') {
@@ -225,7 +219,7 @@ export function RepoDetail() {
     <div
       className="flex-1 min-w-0 h-full max-h-full overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col pb-[calc(env(safe-area-inset-bottom)+56px)] sm:pb-0"
     >
-      <Header>
+      <Header className="@container">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
           <Header.BackButton to="/" />
           <Header.Title>{repoName}</Header.Title>
@@ -237,45 +231,27 @@ export function RepoDetail() {
           ) : null}
         </div>
         <Header.Actions className="shrink-0 gap-1 sm:gap-2 pl-2">
-          <div className="flex items-center gap-0.5 sm:gap-1">
-            <ProjectActionsMenu repoId={repoId} directory={baseDirectory} />
-            <PendingActionsGroup />
-            <Button
-              onClick={() => setMultiRunOpen(true)}
-              aria-label="Multi-run"
-              variant="ghost"
-              size="icon"
-              className="sm:hidden h-10 w-10 text-muted-foreground hover:text-foreground"
-            >
-              <Columns3 className="w-5 h-5" />
-            </Button>
-          </div>
+          <ProjectActionsMenu repoId={repoId} directory={baseDirectory} />
+          <PendingActionsGroup />
           <Button
             onClick={() => setMultiRunOpen(true)}
+            aria-label="Multi-run"
             variant="outline"
             size="sm"
-            className="hidden sm:inline-flex h-9"
+            className="h-9 w-9 p-0 @min-[36rem]:w-auto @min-[36rem]:px-3"
           >
-            <Columns3 className="w-4 h-4 mr-2" />
-            <span>Multi-run</span>
-          </Button>
-          <Button
-            onClick={() => handleCreateSession()}
-            disabled={createSessionMutation.isPending}
-            size="sm"
-            className="hidden sm:inline-flex bg-primary hover:bg-primary-hover text-primary-foreground transition-all duration-200 hover:scale-105"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            <span>New Session</span>
+            <Columns3 className="w-4 h-4 @min-[36rem]:mr-2" />
+            <span className="hidden @min-[36rem]:inline">Multi-run</span>
           </Button>
           <Button
             onClick={() => handleCreateSession()}
             disabled={createSessionMutation.isPending}
             aria-label="New Session"
             size="sm"
-            className="sm:hidden h-10 w-10 p-0 bg-primary hover:bg-primary-hover text-primary-foreground transition-all duration-200 hover:scale-105"
+            className="h-9 w-9 p-0 @min-[36rem]:w-auto @min-[36rem]:px-3 bg-primary hover:bg-primary-hover text-primary-foreground transition-all duration-200 hover:scale-105"
           >
-            <Plus className="w-5 h-5" />
+            <Plus className="w-4 h-4 @min-[36rem]:mr-2" />
+            <span className="hidden @min-[36rem]:inline">New Session</span>
           </Button>
         </Header.Actions>
       </Header>
@@ -370,7 +346,7 @@ export function RepoDetail() {
         onOpenChange={setMultiRunOpen}
       />
     </div>
-      {docked && (
+      {showRail && (
         <ToolSidePanel
           panel={toolPanel}
           repoId={repoId}

@@ -18,8 +18,27 @@ function createPty(overrides: Partial<PtyRecord> = {}): PtyRecord {
   return { id: 'pty-1', title: 'Terminal', command: 'sh', args: [], cwd: '/repo', status: 'running', pid: 1, ...overrides }
 }
 
+const DEFERRED_SCRIPT = 'stty -echo 2>/dev/null; IFS= read -r _; stty echo 2>/dev/null; exec "$@"'
+
+function deferredArgs(command: string, args: string[]): string[] {
+  return ['-c', DEFERRED_SCRIPT, 'ocm-terminal', command, ...args]
+}
+
 function createClient(pty: Record<string, unknown>, api: Record<string, unknown> = {}): OpenCodeClient {
-  return { api: { pty, ...api } } as unknown as OpenCodeClient
+  const hubToken = vi.fn(async () => ({ data: { ticket: 'hub-ticket', expires_in: 60 } }))
+  return { api: { pty: { connect: { token: hubToken }, ...pty }, ...api } } as unknown as OpenCodeClient
+}
+
+function createSocketFactory(): { openSocket: (url: string) => WebSocket; sockets: FakeUpstreamSocket[] } {
+  const sockets: FakeUpstreamSocket[] = []
+  return {
+    sockets,
+    openSocket: (url) => {
+      const socket = new FakeUpstreamSocket(url)
+      sockets.push(socket)
+      return socket as unknown as WebSocket
+    },
+  }
 }
 
 function createCredentialProvider(shellEnv: Record<string, string> = {}): CredentialProvider {
@@ -29,7 +48,7 @@ function createCredentialProvider(shellEnv: Record<string, string> = {}): Creden
 function createTerminalService(
   client: OpenCodeClient,
   provider: CredentialProvider,
-  openSocket?: (url: string) => WebSocket,
+  openSocket: (url: string) => WebSocket = createSocketFactory().openSocket,
   baseUrl = 'http://127.0.0.1:5551',
   includeLocalCredentials = true,
 ): TerminalService {
@@ -139,7 +158,7 @@ describe('TerminalService', () => {
         location: { directory: '/repo' },
         title: 'ocm:action:dev:Dev server',
         command: '/bin/sh',
-        args: ['-c', 'npm run dev'],
+        args: deferredArgs('/bin/sh', ['-c', 'npm run dev']),
         env: { GH_TOKEN: 'gh', FOO: 'bar' },
       })
       expect(result).toEqual({
@@ -169,6 +188,230 @@ describe('TerminalService', () => {
       expect(captured).not.toHaveProperty('command')
       expect(captured).not.toHaveProperty('args')
       expect(captured?.env).toEqual({})
+    })
+
+    it('defers a setup command until the manager has attached to the new PTY', async () => {
+      const create = vi.fn(async () => ({
+        location: { directory: '/repo' },
+        data: createPty({ id: 'pty-setup', title: 'ocm:setup:Worktree setup' }),
+      }))
+      const service = createTerminalService(createClient({ create }), createCredentialProvider())
+
+      await service.create('/repo', {
+        kind: 'setup',
+        name: 'Worktree setup',
+        command: '/bin/sh',
+        args: ['-c', 'set -e\npnpm install'],
+      })
+
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          command: '/bin/sh',
+          args: deferredArgs('/bin/sh', ['-c', 'set -e\npnpm install']),
+        }),
+      )
+    })
+
+    it('keeps a plain shell command without deferring it', async () => {
+      let captured: Record<string, unknown> | undefined
+      const create = vi.fn(async (input: Record<string, unknown>) => {
+        captured = input
+        return { location: { directory: '/repo' }, data: createPty({ id: 'pty-1', title: 'Terminal' }) }
+      })
+      const service = createTerminalService(createClient({ create }), createCredentialProvider())
+
+      await service.create('/repo', { kind: 'shell', name: 'Terminal', command: '/bin/zsh', args: ['-l'] })
+
+      expect(captured).toMatchObject({ command: '/bin/zsh', args: ['-l'] })
+    })
+  })
+
+  describe('hub capture', () => {
+    function createCapturingService(actionTerminal = createPty({ id: 'pty-action', title: 'ocm:action:say:Say hi' })) {
+      const create = vi.fn(async () => ({ location: { directory: '/repo' }, data: actionTerminal }))
+      const list = vi.fn(async () => ({ location: { directory: '/repo' }, data: [actionTerminal] }))
+      const factory = createSocketFactory()
+      const service = createTerminalService(
+        createClient({ create, list }),
+        createCredentialProvider(),
+        factory.openSocket,
+      )
+      return { service, sockets: factory.sockets }
+    }
+
+    function createSingleTerminalService(terminal: PtyRecord) {
+      const create = vi.fn(async () => ({ location: { directory: '/repo' }, data: terminal }))
+      const list = vi.fn(async () => ({ location: { directory: '/repo' }, data: [terminal] }))
+      const factory = createSocketFactory()
+      const service = createTerminalService(
+        createClient({ create, list }),
+        createCredentialProvider(),
+        factory.openSocket,
+      )
+      return { service, sockets: factory.sockets }
+    }
+
+    async function openHub(sockets: FakeUpstreamSocket[]): Promise<FakeUpstreamSocket> {
+      await vi.waitFor(() => expect(sockets).toHaveLength(1))
+      sockets[0]!.emit('open', {})
+      return sockets[0]!
+    }
+
+    const actionInput = {
+      kind: 'action' as const,
+      actionId: 'say',
+      name: 'Say hi',
+      command: '/bin/sh',
+      args: ['-c', 'echo hi'],
+    }
+
+    it('opens the upstream at creation so output is captured before the first client attaches', async () => {
+      const { service, sockets } = createCapturingService()
+
+      await service.create('/repo', actionInput)
+      const socket = await openHub(sockets)
+
+      const url = new URL(socket.url)
+      expect(url.pathname).toBe('/api/pty/pty-action/connect')
+      expect(url.searchParams.get('cursor')).toBe('0')
+    })
+
+    it('captures a setup terminal and releases its deferred command', async () => {
+      const setup = createPty({ id: 'pty-setup', title: 'ocm:setup:Worktree setup' })
+      const { service, sockets } = createSingleTerminalService(setup)
+
+      await service.create('/repo', { kind: 'setup', name: 'Worktree setup', command: '/bin/sh', args: ['-c', 'pnpm install'] })
+      const socket = await openHub(sockets)
+
+      expect(socket.sent).toEqual(['\n'])
+    })
+
+    it('bridges a plain shell without a hub', async () => {
+      const shell = createPty({ id: 'pty-shell', title: 'Terminal' })
+      const { service, sockets } = createSingleTerminalService(shell)
+
+      await service.create('/repo', { kind: 'shell', name: 'Terminal' })
+      expect(sockets).toHaveLength(0)
+
+      await service.connect('/repo', 'pty-shell', 12, createPeer())
+
+      expect(sockets).toHaveLength(1)
+      expect(new URL(sockets[0]!.url).searchParams.get('cursor')).toBe('12')
+    })
+
+    it('replays captured output and the exit close frame to a late client', async () => {
+      const exited = createPty({ id: 'pty-action', title: 'ocm:action:say:Say hi', status: 'exited', exitCode: 0 })
+      const { service, sockets } = createCapturingService(exited)
+
+      await service.create('/repo', actionInput)
+      const socket = await openHub(sockets)
+      socket.emit('message', { data: 'hi\r\n' })
+      socket.emit('close', { code: 1000 })
+
+      const peer = createPeer()
+      await service.connect('/repo', 'pty-action', undefined, peer)
+
+      expect(peer.sent[0]).toBe('hi\r\n')
+      expect(peer.sent[1]).toBeInstanceOf(Uint8Array)
+      const meta = peer.sent[1] as Uint8Array
+      expect(meta[0]).toBe(0)
+      expect(JSON.parse(new TextDecoder().decode(meta.subarray(1)))).toEqual({ cursor: 4 })
+      expect(peer.closeCalls).toEqual([{ code: 1000, reason: undefined }])
+      expect(sockets).toHaveLength(1)
+    })
+
+    it('forwards late-client input through the captured upstream', async () => {
+      const { service, sockets } = createCapturingService()
+
+      await service.create('/repo', actionInput)
+      const socket = await openHub(sockets)
+      const peer = createPeer()
+      const bridge = await service.connect('/repo', 'pty-action', undefined, peer)
+
+      bridge.send('ls\r')
+
+      expect(socket.sent).toEqual(['\n', 'ls\r'])
+    })
+
+    it('streams live output to an attached client without duplicating the replay', async () => {
+      const { service, sockets } = createCapturingService()
+
+      await service.create('/repo', actionInput)
+      const socket = await openHub(sockets)
+      socket.emit('message', { data: 'old' })
+      const peer = createPeer()
+      await service.connect('/repo', 'pty-action', undefined, peer)
+
+      socket.emit('message', { data: 'new' })
+
+      expect(peer.sent[0]).toBe('old')
+      expect(peer.sent[2]).toBe('new')
+    })
+
+    it('falls back to the bridge with the client cursor after an abnormal hub close', async () => {
+      const { service, sockets } = createCapturingService()
+
+      await service.create('/repo', actionInput)
+      const socket = await openHub(sockets)
+      const attached = createPeer()
+      await service.connect('/repo', 'pty-action', undefined, attached)
+
+      socket.emit('close', { code: 1006 })
+
+      expect(attached.closeCalls).toEqual([{ code: 1011, reason: undefined }])
+
+      const peer = createPeer()
+      await service.connect('/repo', 'pty-action', 7, peer)
+
+      expect(sockets).toHaveLength(2)
+      expect(new URL(sockets[1]!.url).searchParams.get('cursor')).toBe('7')
+      sockets[1]!.emit('open', {})
+      expect(sockets[1]!.sent).toEqual([])
+    })
+
+    it('delivers the deferred release through the fallback bridge when the hub fails first', async () => {
+      const { service, sockets } = createCapturingService()
+
+      await service.create('/repo', actionInput)
+      await vi.waitFor(() => expect(sockets).toHaveLength(1))
+      sockets[0]!.emit('close', { code: 1006 })
+      await vi.waitFor(() => expect(sockets).toHaveLength(2), { timeout: 3000 })
+      sockets[1]!.emit('close', { code: 1006 })
+      await vi.waitFor(() => expect(sockets).toHaveLength(3), { timeout: 3000 })
+      sockets[2]!.emit('close', { code: 1006 })
+
+      const peer = createPeer()
+      await service.connect('/repo', 'pty-action', undefined, peer)
+      expect(sockets).toHaveLength(4)
+      sockets[3]!.emit('open', {})
+      expect(sockets[3]!.sent).toEqual(['\n'])
+
+      await service.connect('/repo', 'pty-action', undefined, createPeer())
+      expect(sockets).toHaveLength(5)
+      sockets[4]!.emit('open', {})
+      expect(sockets[4]!.sent).toEqual([])
+    })
+
+    it('drops the captured upstream when the terminal is removed', async () => {
+      const removed = createPty({ id: 'pty-action', title: 'Terminal', status: 'exited', exitCode: 0 })
+      const remove = vi.fn(async () => undefined)
+      const factory = createSocketFactory()
+      const service = createTerminalService(
+        createClient({ create: vi.fn(async () => ({ data: removed })), list: vi.fn(async () => ({ data: [removed] })), remove }),
+        createCredentialProvider(),
+        factory.openSocket,
+      )
+
+      await service.create('/repo', actionInput)
+      await openHub(factory.sockets)
+      await service.remove('/repo', 'pty-action')
+
+      const peer = createPeer()
+      await service.connect('/repo', 'pty-action', undefined, peer)
+
+      expect(remove).toHaveBeenCalledWith({ ptyID: 'pty-action', location: { directory: '/repo' } })
+      expect(factory.sockets).toHaveLength(2)
+      expect(new URL(factory.sockets[1]!.url).searchParams.has('cursor')).toBe(false)
     })
   })
 

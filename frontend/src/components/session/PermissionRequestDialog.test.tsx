@@ -123,6 +123,14 @@ describe('PermissionRequestDialog', () => {
     expect(screen.queryByRole('button', { name: 'Open session' })).not.toBeInTheDocument()
   })
 
+  it('focuses the allow action instead of the optional reason field', async () => {
+    render(<PermissionRequestDialog permission={permission} pendingCount={1} onRespond={vi.fn()} />)
+
+    const allowOnce = screen.getByRole('button', { name: 'Allow Once' })
+    await waitFor(() => expect(allowOnce).toHaveFocus())
+    expect(screen.getByLabelText('Reason (optional)')).not.toHaveFocus()
+  })
+
   it('replies with the selected decision for the permission request', async () => {
     const onRespond = vi.fn().mockResolvedValue(undefined)
     render(<PermissionRequestDialog permission={permission} pendingCount={1} onRespond={onRespond} />)

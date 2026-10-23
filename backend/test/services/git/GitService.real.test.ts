@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
 import { Database } from 'bun:sqlite'
 import { migrate } from '../../../src/db/migration-runner'
@@ -15,6 +15,7 @@ import { createRepoRoutes } from '../../../src/routes/repos'
 import { createStubOpenCodeClient } from '../../helpers/stub-opencode-client'
 import { cloneOrigin, createCommittedRepo, createGitAuthService, createOrigin, git, uniqueName } from '../../helpers/git-fixtures'
 import { GitOperationError, parseGitError } from '../../../src/utils/git-errors'
+import { logger } from '../../../src/utils/logger'
 import type { GitAuthService } from '../../../src/services/git-auth'
 import type { Repo } from '../../../src/types/repo'
 import type { TerminalService } from '../../../src/services/terminal'
@@ -100,6 +101,121 @@ describe('GitService real git', () => {
       symlinkSync(realPath, aliasPath)
 
       expect(getRepoByDirectory(db, aliasPath)?.id).toBe(repo.id)
+    })
+  })
+
+  describe('getLog unpushed commits', () => {
+    it('flags only the commits that are not on a remote', async () => {
+      const origin = path.join(workspaceRoot, uniqueName('unpushed-origin.git'))
+      const work = path.join(workspaceRoot, uniqueName('unpushed-work'))
+      createOrigin(origin, work)
+      const repoPath = path.join(reposPath, uniqueName('unpushed-clone'))
+      cloneOrigin(origin, repoPath)
+      const repo = registerClone(origin, repoPath)
+
+      writeFileSync(path.join(repoPath, 'pushed.txt'), 'pushed\n')
+      git(['add', 'pushed.txt'], repoPath)
+      git(['commit', '-m', 'pushed commit'], repoPath)
+      git(['push', 'origin', 'main'], repoPath)
+      writeFileSync(path.join(repoPath, 'local.txt'), 'local\n')
+      git(['add', 'local.txt'], repoPath)
+      git(['commit', '-m', 'local commit'], repoPath)
+
+      const commits = await service.getLog(repo.id, db, 10)
+
+      expect(commits.map((commit) => [commit.message, commit.unpushed])).toEqual([
+        ['local commit', true],
+        ['pushed commit', false],
+        ['init', false],
+      ])
+    })
+
+    it('flags the listed branch rather than HEAD', async () => {
+      const origin = path.join(workspaceRoot, uniqueName('unpushed-branch-origin.git'))
+      const work = path.join(workspaceRoot, uniqueName('unpushed-branch-work'))
+      createOrigin(origin, work)
+      const repoPath = path.join(reposPath, uniqueName('unpushed-branch-clone'))
+      cloneOrigin(origin, repoPath)
+      const repo = registerClone(origin, repoPath)
+
+      git(['checkout', '-b', 'feature'], repoPath)
+      writeFileSync(path.join(repoPath, 'feature.txt'), 'feature\n')
+      git(['add', 'feature.txt'], repoPath)
+      git(['commit', '-m', 'feature commit'], repoPath)
+      git(['checkout', 'main'], repoPath)
+
+      const commits = await service.getLog(repo.id, db, 10, 'feature')
+
+      expect(commits.map((commit) => [commit.message, commit.unpushed])).toEqual([
+        ['feature commit', true],
+        ['init', false],
+      ])
+    })
+
+    it('flags every commit as unpushed when the repository has no remote', async () => {
+      const repoPath = path.join(reposPath, uniqueName('unpushed-local'))
+      createCommittedRepo(repoPath)
+      git(['commit', '--allow-empty', '-m', 'local only'], repoPath)
+      const repo = createRepo(db, {
+        isLocal: true,
+        localPath: path.basename(repoPath),
+        sourcePath: repoPath,
+        branch: 'main',
+        defaultBranch: 'main',
+        cloneStatus: 'ready',
+        clonedAt: Date.now(),
+      })
+
+      const commits = await service.getLog(repo.id, db, 10)
+
+      expect(commits.map((commit) => commit.message)).toEqual(['local only', 'init'])
+      expect(commits.every((commit) => commit.unpushed)).toBe(true)
+    })
+  })
+
+  describe('getBranchStatus', () => {
+    it('returns zeros without logging when the branch has no upstream', async () => {
+      const repoPath = path.join(reposPath, uniqueName('status-no-upstream'))
+      createCommittedRepo(repoPath)
+      const repo = createRepo(db, {
+        isLocal: true,
+        localPath: path.basename(repoPath),
+        sourcePath: repoPath,
+        branch: 'main',
+        defaultBranch: 'main',
+        cloneStatus: 'ready',
+        clonedAt: Date.now(),
+      })
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+
+      try {
+        await expect(service.getBranchStatus(repo.id, db)).resolves.toEqual({ ahead: 0, behind: 0 })
+        expect(warnSpy).not.toHaveBeenCalled()
+      } finally {
+        warnSpy.mockRestore()
+      }
+    })
+
+    it('still logs a real failure', async () => {
+      const notARepoPath = path.join(reposPath, uniqueName('status-not-a-repo'))
+      mkdirSync(notARepoPath, { recursive: true })
+      const repo = createRepo(db, {
+        isLocal: true,
+        localPath: path.basename(notARepoPath),
+        sourcePath: notARepoPath,
+        branch: 'main',
+        defaultBranch: 'main',
+        cloneStatus: 'ready',
+        clonedAt: Date.now(),
+      })
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+
+      try {
+        await expect(service.getBranchStatus(repo.id, db)).resolves.toEqual({ ahead: 0, behind: 0 })
+        expect(warnSpy).toHaveBeenCalledTimes(1)
+      } finally {
+        warnSpy.mockRestore()
+      }
     })
   })
 

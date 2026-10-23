@@ -124,6 +124,13 @@ export const GitCredentialSchema = z.object({
 
 export type GitCredential = z.infer<typeof GitCredentialSchema>;
 
+const GIT_IDENTITY_EMAIL_PATTERN = /^[^\s@<>]+@[^\s@<>]+$/;
+
+export function isValidGitIdentityEmail(email: string): boolean {
+  const trimmed = email.trim();
+  return trimmed === "" || GIT_IDENTITY_EMAIL_PATTERN.test(trimmed);
+}
+
 export const GitIdentitySchema = z.object({
   name: z.string(),
   email: z.string(),

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { act, render, screen } from '@testing-library/react'
-import { MemoryRouter, useNavigate } from 'react-router-dom'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { describe, it, expect } from 'vitest'
 import { useScheduleUrlState } from '../useScheduleUrlState'
 import { renderHookWithRouterAndLocation } from '@/test/test-utils'
@@ -60,8 +60,8 @@ describe('useScheduleUrlState', () => {
     expect(result.current.jobId).toBeNull()
   })
 
-  it('closeDialog after edit preserves scheduleDialog and jobId', () => {
-    const { result, capturedSearch } = renderHookWithRouterAndLocation(() => useScheduleUrlState(), )
+  it('closeDialog after edit returns to the entry before the dialog and keeps jobId', () => {
+    const { result, capturedSearch } = renderHookWithRouterAndLocation(() => useScheduleUrlState(), ['/?jobId=12'])
     act(() => {
       result.current.openEditJob(12)
     })
@@ -78,8 +78,8 @@ describe('useScheduleUrlState', () => {
     expect(capturedSearch.current).toContain('jobId=12')
   })
 
-  it('closeDialog after delete preserves jobId when canceling', () => {
-    const { result, capturedSearch } = renderHookWithRouterAndLocation(() => useScheduleUrlState(), )
+  it('closeDialog after delete returns to the entry before the dialog and keeps jobId', () => {
+    const { result, capturedSearch } = renderHookWithRouterAndLocation(() => useScheduleUrlState(), ['/?jobId=42'])
     act(() => {
       result.current.openDeleteJob(42)
     })
@@ -256,8 +256,7 @@ describe('useScheduleUrlState', () => {
     expect(result.current.replaceUrlParams).toBe(firstReplaceUrlParams)
   })
 
-  describe('combined atomic URL mutations', () => {
-    it('selectJobAndView sets jobId and scheduleTab in a single navigation', () => {
+  describe('combined atomic URL mutations', () => {    it('selectJobAndView sets jobId and scheduleTab in a single navigation', () => {
       const { result, capturedSearch } = renderHookWithRouterAndLocation(() => useScheduleUrlState(), )
       act(() => {
         result.current.selectJobAndView(42)
@@ -441,6 +440,77 @@ describe('useScheduleUrlState', () => {
       })
       expect(result.current.promptDialog).toBe('edit')
       expect(result.current.templateId).toBe(7)
+    })
+  })
+
+  describe('dialog history entries', () => {
+    function ScheduleDialogHarness() {
+      const state = useScheduleUrlState()
+      const location = useLocation()
+      const navigate = useNavigate()
+
+      return (
+        <div>
+          <span data-testid="pathname">{location.pathname}</span>
+          <span data-testid="search">{location.search}</span>
+          <button onClick={() => state.openDeleteJob(7)}>open delete</button>
+          <button onClick={() => state.openNewTemplate()}>open template</button>
+          <button onClick={() => state.closeDialog()}>close dialog</button>
+          <button onClick={() => state.closePromptDialog()}>close template</button>
+          <button onClick={() => navigate(-1)}>back</button>
+        </div>
+      )
+    }
+
+    it('closing a schedule dialog the app opened goes back instead of leaving a dead history entry', () => {
+      render(
+        <MemoryRouter initialEntries={['/repos/2/schedules?jobId=7', '/repos/2/schedules']} initialIndex={1}>
+          <ScheduleDialogHarness />
+        </MemoryRouter>,
+      )
+
+      act(() => { screen.getByText('open delete').click() })
+      expect(screen.getByTestId('search').textContent).toContain('scheduleDialog=delete')
+
+      act(() => { screen.getByText('close dialog').click() })
+      expect(screen.getByTestId('search').textContent).toBe('')
+
+      act(() => { screen.getByText('back').click() })
+      expect(screen.getByTestId('search').textContent).toBe('?jobId=7')
+    })
+
+    it('closing a prompt dialog the app opened goes back to the previous route state', () => {
+      render(
+        <MemoryRouter initialEntries={['/repos/2/schedules?jobId=7', '/repos/2/schedules']} initialIndex={1}>
+          <ScheduleDialogHarness />
+        </MemoryRouter>,
+      )
+
+      act(() => { screen.getByText('open template').click() })
+      expect(screen.getByTestId('search').textContent).toContain('promptDialog=new')
+
+      act(() => { screen.getByText('close template').click() })
+      expect(screen.getByTestId('search').textContent).toBe('')
+
+      act(() => { screen.getByText('back').click() })
+      expect(screen.getByTestId('search').textContent).toBe('?jobId=7')
+    })
+
+    it('closing a deep-linked dialog replaces the entry instead of leaving the route', () => {
+      render(
+        <MemoryRouter initialEntries={['/repos/2/schedules?jobId=3', '/repos/2/schedules?scheduleDialog=delete&jobId=7']} initialIndex={1}>
+          <ScheduleDialogHarness />
+        </MemoryRouter>,
+      )
+
+      expect(screen.getByTestId('search').textContent).toContain('scheduleDialog=delete')
+
+      act(() => { screen.getByText('close dialog').click() })
+      expect(screen.getByTestId('pathname').textContent).toBe('/repos/2/schedules')
+      expect(screen.getByTestId('search').textContent).toBe('?jobId=7')
+
+      act(() => { screen.getByText('back').click() })
+      expect(screen.getByTestId('search').textContent).toBe('?jobId=3')
     })
   })
 })

@@ -101,14 +101,22 @@ export function RepoSchedulesContent({ repoId, embedded }: RepoSchedulesContentP
     [dialog, jobId, jobs],
   )
 
+  const deleteJob = useMemo<ScheduleJob | undefined>(
+    () => (dialog === 'delete' && jobId !== null ? jobs?.find((j) => j.id === jobId) : undefined),
+    [dialog, jobId, jobs],
+  )
+
   useEffect(() => {
     if (jobs === undefined) return
 
+    const dialogNeedsJob = dialog === 'edit' || dialog === 'delete'
+
     if (!jobs.length) {
-      if (jobId !== null || scheduleTab !== 'jobs') {
+      if (jobId !== null || scheduleTab !== 'jobs' || dialogNeedsJob) {
         replaceUrlParams((p) => {
           p.delete('jobId')
           p.delete('scheduleTab')
+          if (dialogNeedsJob) p.delete('scheduleDialog')
         })
       }
       return
@@ -117,15 +125,16 @@ export function RepoSchedulesContent({ repoId, embedded }: RepoSchedulesContentP
     const stillExists = jobId !== null && jobs.some((job) => job.id === jobId)
     if (!stillExists) {
       const newId = jobs[0]?.id ?? null
-      if (newId !== jobId || scheduleTab !== 'jobs') {
+      if (newId !== jobId || scheduleTab !== 'jobs' || dialogNeedsJob) {
         replaceUrlParams((p) => {
           if (newId === null) p.delete('jobId')
           else p.set('jobId', String(newId))
           p.delete('scheduleTab')
+          if (dialogNeedsJob) p.delete('scheduleDialog')
         })
       }
     }
-  }, [jobs, jobId, scheduleTab, replaceUrlParams])
+  }, [jobs, jobId, scheduleTab, dialog, replaceUrlParams])
 
   useEffect(() => {
     if (runs === undefined) return
@@ -170,7 +179,7 @@ export function RepoSchedulesContent({ repoId, embedded }: RepoSchedulesContentP
   }
 
   const handleDelete = () => {
-    if (dialog !== 'delete' || jobId === null) {
+    if (dialog !== 'delete' || jobId === null || deleteJob === undefined) {
       return
     }
 
@@ -357,6 +366,7 @@ export function RepoSchedulesContent({ repoId, embedded }: RepoSchedulesContentP
         onCancel={() => closeDialog()}
         title="Delete Schedule"
         description={DELETE_SCHEDULE_DESCRIPTION}
+        itemName={deleteJob?.name}
         isDeleting={deleteMutation.isPending}
       />
 

@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { executeCommand } from '../../src/utils/process'
+import { logger } from '../../src/utils/logger'
 
 describe('executeCommand signal handling', () => {
   it('reports a signal-terminated child as a non-zero exit code when exit codes are ignored', async () => {
@@ -49,5 +50,22 @@ describe('executeCommand signal handling', () => {
     const result = await executeCommand(['sh', '-c', 'printf "hello"'], { maxOutputChars: 100, silent: true })
 
     expect(result).toBe('hello')
+  })
+
+  it('logs a git command as one debug line and never at info level', async () => {
+    const infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => {})
+    const debugSpy = vi.spyOn(logger, 'debug').mockImplementation(() => {})
+
+    try {
+      await executeCommand(['git', '--version'], { silent: true })
+
+      expect(infoSpy).not.toHaveBeenCalled()
+      expect(debugSpy).toHaveBeenCalledTimes(1)
+      expect(debugSpy.mock.calls[0]).toHaveLength(1)
+      expect(debugSpy.mock.calls[0]?.[0]).toContain('git --version')
+    } finally {
+      infoSpy.mockRestore()
+      debugSpy.mockRestore()
+    }
   })
 })

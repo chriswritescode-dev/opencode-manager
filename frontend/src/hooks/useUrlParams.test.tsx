@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { act, render, screen } from '@testing-library/react'
-import { MemoryRouter, useNavigate } from 'react-router-dom'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { describe, it, expect } from 'vitest'
 import { useUrlParams } from './useUrlParams'
 import { renderHookWithRouterAndLocation } from '@/test/test-utils'
@@ -86,6 +86,93 @@ describe('useUrlParams', () => {
         result.current.updateParams((p) => p.set('q', 'hello world & more'))
       })
       expect(result.current.search).toContain('q=hello+world+%26+more')
+    })
+
+    it('composes consecutive updates made in the same tick', () => {
+      const { result, capturedSearch } = renderHookWithRouterAndLocation(() => useUrlParams(), ['/?keep=1'])
+      act(() => {
+        result.current.updateParams((p) => {
+          p.delete('keep')
+          p.set('jobId', '3')
+        })
+        result.current.updateParams((p) => {
+          p.set('jobId', '1')
+          p.set('added', 'yes')
+        })
+      })
+      expect(result.current.search).toBe('?jobId=1&added=yes')
+      expect(capturedSearch.current).toBe('?jobId=1&added=yes')
+    })
+
+    it('keeps a param deleted by an earlier update in the same tick', () => {
+      const { result, capturedSearch } = renderHookWithRouterAndLocation(
+        () => useUrlParams(),
+        ['/?scheduleDialog=delete&jobId=3'],
+      )
+      act(() => {
+        result.current.updateParams((p) => p.delete('scheduleDialog'))
+        result.current.updateParams((p) => p.set('jobId', '1'))
+      })
+      expect(result.current.search).toBe('?jobId=1')
+      expect(capturedSearch.current).toBe('?jobId=1')
+    })
+  })
+
+  describe('closePushedParams', () => {
+    it('goes back in history to the entry that pushed the params', () => {
+      function Harness() {
+        const { search, updateParams, closePushedParams } = useUrlParams()
+        const [opened, setOpened] = useState(false)
+
+        useEffect(() => {
+          if (opened) updateParams((p) => p.set('sheet', 'open'), 'push')
+        }, [opened, updateParams])
+
+        return (
+          <div>
+            <span data-testid="search">{search}</span>
+            <button onClick={() => setOpened(true)}>open</button>
+            <button onClick={() => closePushedParams((p) => p.delete('sheet'))}>close</button>
+          </div>
+        )
+      }
+
+      render(
+        <MemoryRouter initialEntries={['/repos/2', '/']} initialIndex={1}>
+          <Harness />
+        </MemoryRouter>,
+      )
+
+      act(() => { screen.getByText('open').click() })
+      expect(screen.getByTestId('search').textContent).toBe('?sheet=open')
+
+      act(() => { screen.getByText('close').click() })
+      expect(screen.getByTestId('search').textContent).toBe('')
+    })
+
+    it('replaces instead of going back when the params were not pushed by an opener', () => {
+      function Harness() {
+        const { search, closePushedParams } = useUrlParams()
+        const location = useLocation()
+
+        return (
+          <div>
+            <span data-testid="search">{search}</span>
+            <span data-testid="pathname">{location.pathname}</span>
+            <button onClick={() => closePushedParams((p) => p.delete('sheet'))}>close</button>
+          </div>
+        )
+      }
+
+      render(
+        <MemoryRouter initialEntries={['/repos/2', '/?sheet=open']} initialIndex={1}>
+          <Harness />
+        </MemoryRouter>,
+      )
+
+      act(() => { screen.getByText('close').click() })
+      expect(screen.getByTestId('search').textContent).toBe('')
+      expect(screen.getByTestId('pathname').textContent).toBe('/')
     })
   })
 

@@ -46,12 +46,18 @@ export function TerminalWorkspace({ target, directory, isOpen, onLastTerminalExi
   const [ctrlArmed, setCtrlArmed] = useState(false)
   const [pendingClose, setPendingClose] = useState<TerminalInfo | null>(null)
   const [dismissedTerminalIds, setDismissedTerminalIds] = useState<ReadonlySet<string>>(() => new Set())
+  const removingTerminalIdsRef = useRef(new Set<string>())
   const viewHandlesRef = useRef(new Map<string, TerminalViewHandle>())
   const autoCreateCheckedDirectoryRef = useRef<string | null>(null)
 
   const terminals = useMemo(
     () => (data ?? []).filter((terminal) => !dismissedTerminalIds.has(terminal.id)),
     [data, dismissedTerminalIds],
+  )
+
+  const nextShellTitle = useCallback(
+    () => `Terminal ${terminals.filter((terminal) => terminal.kind === 'shell').length + 1}`,
+    [terminals],
   )
 
   const selectTerminal = useCallback((id: string) => {
@@ -76,23 +82,25 @@ export function TerminalWorkspace({ target, directory, isOpen, onLastTerminalExi
     autoCreateCheckedDirectoryRef.current = directory
     if (!needsShell) return
     createTerminal(
-      { directory },
+      { directory, title: nextShellTitle() },
       { onSuccess: (terminal) => selectTerminal(terminal.id) },
     )
-  }, [isOpen, directory, isSuccess, isFetching, needsShell, createTerminal, selectTerminal])
+  }, [isOpen, directory, isSuccess, isFetching, needsShell, createTerminal, selectTerminal, nextShellTitle])
 
   const handleCreate = useCallback(() => {
     createTerminal(
-      { directory },
+      { directory, title: nextShellTitle() },
       { onSuccess: (terminal) => selectTerminal(terminal.id) },
     )
-  }, [createTerminal, directory, selectTerminal])
+  }, [createTerminal, directory, selectTerminal, nextShellTitle])
 
   const performRemove = useCallback(
     (
       terminalId: string,
       options: { onRemoved?: () => void; onError?: () => void } = {},
     ) => {
+      if (removingTerminalIdsRef.current.has(terminalId)) return
+      removingTerminalIdsRef.current.add(terminalId)
       removeTerminal(
         { ptyID: terminalId, directory },
         {
@@ -102,22 +110,34 @@ export function TerminalWorkspace({ target, directory, isOpen, onLastTerminalExi
             }, 'replace')
             options.onRemoved?.()
           },
-          onError: options.onError,
+          onError: () => {
+            removingTerminalIdsRef.current.delete(terminalId)
+            options.onError?.()
+          },
         },
       )
     },
     [removeTerminal, directory, updateParams],
   )
 
+  const closeTerminal = useCallback((terminal: TerminalInfo) => {
+    performRemove(terminal.id, {
+      onRemoved: () => {
+        if (terminals.every((entry) => entry.id === terminal.id)) onLastTerminalExited?.()
+      },
+    })
+  }, [performRemove, terminals, onLastTerminalExited])
+
   const handleCloseTab = useCallback((terminal: TerminalInfo) => {
     if (terminal.status === 'running') {
       setPendingClose(terminal)
       return
     }
-    performRemove(terminal.id)
-  }, [performRemove])
+    closeTerminal(terminal)
+  }, [closeTerminal])
 
   const handleTerminalExited = useCallback((terminalId: string) => {
+    if (removingTerminalIdsRef.current.has(terminalId)) return
     const settleExit = async () => {
       let latestTerminals: TerminalInfo[]
       try {
@@ -126,8 +146,9 @@ export function TerminalWorkspace({ target, directory, isOpen, onLastTerminalExi
       } catch {
         return
       }
-      const exitCode = latestTerminals.find((terminal) => terminal.id === terminalId)?.exitCode
-      if (exitCode !== undefined && exitCode !== 0) return
+      const exitedTerminal = latestTerminals.find((terminal) => terminal.id === terminalId)
+      if (exitedTerminal?.kind === 'action') return
+      if (exitedTerminal?.exitCode !== undefined && exitedTerminal.exitCode !== 0) return
       setDismissedTerminalIds((ids) => new Set(ids).add(terminalId))
       performRemove(terminalId, {
         onRemoved: () => {
@@ -186,7 +207,10 @@ export function TerminalWorkspace({ target, directory, isOpen, onLastTerminalExi
               type="button"
               onClick={() => handleCloseTab(terminal)}
               aria-label={`Close ${terminal.title}`}
-              className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+              className={cn(
+                'flex items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground',
+                isMobile ? 'h-8 w-8' : 'h-6 w-6',
+              )}
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -246,14 +270,14 @@ export function TerminalWorkspace({ target, directory, isOpen, onLastTerminalExi
         open={pendingClose !== null}
         onOpenChange={(open) => { if (!open) setPendingClose(null) }}
         onConfirm={() => {
-          if (pendingClose) performRemove(pendingClose.id)
+          if (pendingClose) closeTerminal(pendingClose)
           setPendingClose(null)
         }}
         onCancel={() => setPendingClose(null)}
         title="Close Terminal"
-        description="Stop the running process?"
-        confirmLabel="Stop"
-        pendingLabel="Stopping..."
+        description="Close this terminal?"
+        confirmLabel="Close terminal"
+        pendingLabel="Closing..."
         isPending={isRemoving}
       />
     </div>

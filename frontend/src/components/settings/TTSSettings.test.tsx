@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
@@ -76,6 +76,7 @@ function mockHooks(preferences: UserPreferences = buildPreferences()) {
     stop: vi.fn(),
     pause: vi.fn(),
     resume: vi.fn(),
+    unlock: vi.fn(),
     state: 'idle',
     error: null,
     currentText: null,
@@ -181,5 +182,34 @@ describe('TTSSettings audio cache', () => {
     renderTTSSettings()
     expect(screen.getByRole('button', { name: 'Clear audio cache' })).toBeInTheDocument()
     expect(await screen.findByText('1 voices available in your browser')).toBeInTheDocument()
+  })
+
+  it('discovers models and voices only when external TTS is configured', async () => {
+    renderTTSSettings()
+    await act(async () => {})
+    expect(vi.mocked(useTTSModels).mock.calls.at(-1)?.[1]).toBe(true)
+    expect(vi.mocked(useTTSVoices).mock.calls.at(-1)?.[1]).toBe(true)
+  })
+
+  it('skips server discovery while TTS is disabled, builtin, or missing credentials', async () => {
+    mockHooks(buildPreferences({ tts: { ...baseTts, enabled: false } }))
+    const disabledRender = renderTTSSettings()
+    await act(async () => {})
+    expect(vi.mocked(useTTSModels).mock.calls.at(-1)?.[1]).toBe(false)
+    expect(vi.mocked(useTTSVoices).mock.calls.at(-1)?.[1]).toBe(false)
+    disabledRender.unmount()
+
+    mockHooks(buildPreferences({ tts: { ...baseTts, provider: 'builtin', voice: 'Alex' } }))
+    const builtinRender = renderTTSSettings()
+    await act(async () => {})
+    expect(vi.mocked(useTTSModels).mock.calls.at(-1)?.[1]).toBe(false)
+    expect(vi.mocked(useTTSVoices).mock.calls.at(-1)?.[1]).toBe(false)
+    builtinRender.unmount()
+
+    mockHooks(buildPreferences({ tts: { ...baseTts, apiKey: '' } }))
+    renderTTSSettings()
+    await act(async () => {})
+    expect(vi.mocked(useTTSModels).mock.calls.at(-1)?.[1]).toBe(false)
+    expect(vi.mocked(useTTSVoices).mock.calls.at(-1)?.[1]).toBe(false)
   })
 })

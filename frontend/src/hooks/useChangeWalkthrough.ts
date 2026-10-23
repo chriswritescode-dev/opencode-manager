@@ -1,9 +1,11 @@
+import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 import {
   cancelChangeWalkthrough,
   generateChangeWalkthrough,
   getChangeWalkthrough,
+  getWalkthroughHelperSessionIds,
   refineChangeWalkthrough,
 } from '@/api/changeWalkthroughs'
 import { walkthroughSourceKey } from '@opencode-manager/shared/schemas'
@@ -34,6 +36,16 @@ export function changeWalkthroughQueryKey(sessionId: string, sourceKey?: string)
     : (['change-walkthrough', sessionId, sourceKey] as const)
 }
 
+export function useWalkthroughHelperSessionIds(): ReadonlySet<string> {
+  const { data } = useQuery({
+    queryKey: ['change-walkthrough-helper-sessions'],
+    queryFn: getWalkthroughHelperSessionIds,
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  return useMemo(() => new Set(data ?? []), [data])
+}
+
 export function useChangeWalkthrough(
   sessionId: string | undefined,
   enabled: boolean,
@@ -61,7 +73,10 @@ export function useGenerateChangeWalkthrough(sessionId: string | undefined, sour
       const state = await generateChangeWalkthrough(targetSessionId, { ...request, source })
       return { sessionId: targetSessionId, sourceKey, state }
     },
-    onSuccess: (result) => writeChangeWalkthroughToCache(queryClient, result),
+    onSuccess: (result) => {
+      writeChangeWalkthroughToCache(queryClient, result)
+      void queryClient.invalidateQueries({ queryKey: ['change-walkthrough-helper-sessions'] })
+    },
   })
 }
 

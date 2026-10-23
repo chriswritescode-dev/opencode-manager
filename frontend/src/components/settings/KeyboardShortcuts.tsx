@@ -4,7 +4,7 @@ import { useMobile } from '@/hooks/useMobile'
 import { Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { formatEventModifiers, formatShortcutEvent, formatShortcutLabel, isModifierOnlyEvent, normalizeShortcut, resolveShortcutBindings } from '@/lib/keyboardShortcuts'
-import { applyTuiKeybindImport, parseTuiKeybindConfig } from '@/lib/tuiKeybindImport'
+import { applyRecordedShortcut, applyTuiKeybindImport, parseTuiKeybindConfig } from '@/lib/tuiKeybindImport'
 import { showToast } from '@/lib/toast'
 
 const CONVERSATION_ACTIONS = ['submit', 'abort', 'clearPrompt', 'toggleMode', 'undo', 'redo', 'compact', 'fork', 'timeline', 'exportSession', 'selectModel', 'variantCycle', 'favoriteCycle', 'halfPageUp', 'halfPageDown', 'speakVisible']
@@ -180,6 +180,14 @@ export function KeyboardShortcuts() {
     })
   }, [])
 
+  const resetShortcuts = () => {
+    stopRecording()
+    setTempShortcuts({})
+    setTempLeaderKey(null)
+    updateSettings({ keyboardShortcuts: {}, directShortcuts: [], leaderKey: '' })
+    showToast.success('Keyboard shortcuts reset to defaults')
+  }
+
   useEffect(() => {
     if (!recordingKey && !recordingLeader) return
 
@@ -189,6 +197,11 @@ export function KeyboardShortcuts() {
     const handleKeyDown = (e: KeyboardEvent) => {
       e.preventDefault()
       e.stopPropagation()
+
+      if (e.key === 'Escape') {
+        stopRecording()
+        return
+      }
 
       const shortcut = formatShortcutEvent(e)
       if (!shortcut) {
@@ -212,14 +225,22 @@ export function KeyboardShortcuts() {
         return
       }
 
-      const otherDirectShortcuts = directShortcutsRef.current.filter((action) => action !== recordingKey)
-      setTempShortcuts(prev => ({ ...prev, [recordingKey]: shortcut }))
+      const applied = applyRecordedShortcut(recordingKey, shortcut, leaderPressed, {
+        keyboardShortcuts: shortcutsRef.current,
+        directShortcuts: directShortcutsRef.current,
+      })
+      setTempShortcuts(applied.keyboardShortcuts)
       setRecordingKey(null)
       setCurrentKeys('')
       updateSettingsRef.current({
-        keyboardShortcuts: { ...shortcutsRef.current, [recordingKey]: shortcut },
-        directShortcuts: leaderPressed ? otherDirectShortcuts : [...otherDirectShortcuts, recordingKey],
+        keyboardShortcuts: applied.keyboardShortcuts,
+        directShortcuts: applied.directShortcuts,
       })
+      if (applied.cleared.length > 0) {
+        showToast.info('Shortcut conflict resolved', {
+          description: `Unbound to avoid conflicts: ${applied.cleared.map((action) => formatActionLabel(action).toLowerCase()).join(', ')}`,
+        })
+      }
     }
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -228,13 +249,13 @@ export function KeyboardShortcuts() {
       }
     }
 
-    document.addEventListener('keydown', handleKeyDown, true)
-    document.addEventListener('keyup', handleKeyUp)
+    window.addEventListener('keydown', handleKeyDown, true)
+    window.addEventListener('keyup', handleKeyUp)
     return () => {
-      document.removeEventListener('keydown', handleKeyDown, true)
-      document.removeEventListener('keyup', handleKeyUp)
+      window.removeEventListener('keydown', handleKeyDown, true)
+      window.removeEventListener('keyup', handleKeyUp)
     }
-  }, [recordingKey, recordingLeader])
+  }, [recordingKey, recordingLeader, stopRecording])
 
   if (isLoading) {
     return (
@@ -321,9 +342,14 @@ export function KeyboardShortcuts() {
         <h2 className="text-lg font-semibold text-foreground">Keyboard Shortcuts</h2>
 
         <div className="flex flex-col items-end gap-1">
-          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
-            Import from OpenCode TUI
-          </Button>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={resetShortcuts}>
+              Reset to defaults
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+              Import from OpenCode TUI
+            </Button>
+          </div>
           <input
             ref={fileInputRef}
             type="file"

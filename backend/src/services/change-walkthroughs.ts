@@ -31,6 +31,7 @@ import {
   deleteChangeWalkthroughs,
   getChangeWalkthrough,
   getChangeWalkthroughByWalkthroughSession,
+  listChangeWalkthroughSessionIds,
   listChangeWalkthroughs,
   updateChangeWalkthrough,
   type ChangeWalkthroughPatch,
@@ -56,6 +57,7 @@ import type { SettingsService } from './settings'
 import type { SSEEvent } from './sse-aggregator'
 
 const WALKTHROUGH_TIMEOUT_MESSAGE = 'The walkthrough session did not publish within 15 minutes'
+const EMPTY_CHANGES_HASH = computeChangesHash([])
 
 export interface ChangeWalkthroughServiceOptions {
   generationTimeoutMs?: number
@@ -170,6 +172,11 @@ export class ChangeWalkthroughService {
     this.walkthroughsRoot = options.walkthroughsRoot ?? getWalkthroughsPath()
   }
 
+  /** Sessions the walkthrough runs were created in, which are helper sessions rather than user sessions. */
+  listHelperSessionIds(): string[] {
+    return listChangeWalkthroughSessionIds(this.db)
+  }
+
   async getState(
     sessionId: string,
     source: WalkthroughSource = DEFAULT_WALKTHROUGH_SOURCE,
@@ -187,6 +194,7 @@ export class ChangeWalkthroughService {
     return {
       walkthrough,
       currentDiffHash,
+      hasChanges: currentDiffHash === null || currentDiffHash !== EMPTY_CHANGES_HASH,
       stale: walkthrough !== null && currentDiffHash !== null && walkthrough.diffHash !== currentDiffHash,
       generating: walkthrough?.status === 'generating',
       running: walkthrough !== null && walkthrough.executionStartedAt !== null,

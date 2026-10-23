@@ -5,7 +5,7 @@ export type TTSState = 'idle' | 'loading' | 'playing' | 'error'
 export type TTSEndReason = 'completed' | 'stopped' | 'error'
 
 export interface SpeakMessageOptions {
-  onEnd?: (reason: TTSEndReason) => void
+  onEnd?: (reason: TTSEndReason, error?: string) => void
 }
 
 export interface TTSConfig {
@@ -23,6 +23,7 @@ export interface TTSContextValue {
   speakWithConfig: (text: string, config: TTSConfig) => Promise<boolean>
   speakMessage: (messageId: string, text: string, options?: SpeakMessageOptions) => Promise<boolean>
   queueMessage: (messageId: string, text: string) => void
+  unlock: () => void
   stop: () => void
   pause: () => void
   resume: () => void

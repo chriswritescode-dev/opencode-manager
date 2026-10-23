@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput } from './PromptInput'
+import { useComposerDraftStore } from '@/stores/composerDraftStore'
 import {
   SessionTranscriptContext,
   type SessionTranscriptSnapshot,
@@ -55,7 +56,7 @@ vi.mock('@/hooks/useOpenCode', () => ({
     isPending: mocks.sendPromptPending(),
   }),
   useInterruptSession: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
-  useSendShell: () => ({ mutate: vi.fn(), isPending: false }),
+  useSendShell: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(() => Promise.resolve()), isPending: false }),
   useAgents: () => ({ data: [] }),
   useSkills: () => ({ data: [] }),
 }))
@@ -151,7 +152,6 @@ describe('PromptInput voice conversation', () => {
   const defaultProps = {
     directory: '/test',
     sessionID: 'test-session',
-    showScrollButton: false,
     isSessionActive: false,
     isStreamingResponse: false,
     onScrollToBottom: vi.fn(),
@@ -220,9 +220,7 @@ describe('PromptInput voice conversation', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useSendPromptMutate.mockImplementation((_variables, options) => {
-      options?.onSuccess?.()
-    })
+    useComposerDraftStore.setState({ drafts: {} })
     mocks.useSendPromptMutateAsync.mockResolvedValue({ id: 'inbox_1' })
     mocks.sendPromptPending.mockReturnValue(false)
     mocks.useMobile.mockReturnValue(true)
@@ -402,7 +400,6 @@ describe('PromptInput submission', () => {
   const defaultProps = {
     directory: '/test',
     sessionID: 'test-session',
-    showScrollButton: false,
     isSessionActive: false,
     isStreamingResponse: false,
     onScrollToBottom: vi.fn(),
@@ -423,9 +420,8 @@ describe('PromptInput submission', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useSendPromptMutate.mockImplementation((_variables, options) => {
-      options?.onSuccess?.()
-    })
+    useComposerDraftStore.setState({ drafts: {} })
+    mocks.useSendPromptMutateAsync.mockResolvedValue({ id: 'inbox_1' })
     mocks.sendPromptPending.mockReturnValue(false)
     mocks.useMobile.mockReturnValue(true)
     mocks.useSttAvailability.mockReturnValue({ isEnabled: true, isSupported: true })
@@ -436,7 +432,7 @@ describe('PromptInput submission', () => {
   })
 
   it('keeps submitted text until send succeeds', () => {
-    mocks.useSendPromptMutate.mockImplementation(() => undefined)
+    mocks.useSendPromptMutateAsync.mockImplementation(() => new Promise(() => {}))
     renderComponent()
 
     const input = screen.getByPlaceholderText('Send a message...')
@@ -459,7 +455,7 @@ describe('PromptInput submission', () => {
   })
 
   it('clears submitted text once the server confirms it is processing', async () => {
-    mocks.useSendPromptMutate.mockImplementation(() => undefined)
+    mocks.useSendPromptMutateAsync.mockImplementation(() => new Promise(() => {}))
     const view = renderComponent()
 
     const input = screen.getByPlaceholderText('Send a message...')
@@ -475,7 +471,7 @@ describe('PromptInput submission', () => {
     })
   })
 
-  it('allows queuing a follow-up while a non-queued send is pending', () => {
+  it('allows queuing a follow-up while a non-queued send is pending', async () => {
     mocks.sendPromptPending.mockReturnValue(true)
     renderComponent({ isStreamingResponse: true })
 
@@ -487,7 +483,8 @@ describe('PromptInput submission', () => {
 
     fireEvent.click(queueButton)
 
-    const [callArgs] = mocks.useSendPromptMutate.mock.calls[0] as [{ text: string }, unknown]
+    await waitFor(() => expect(input).toHaveValue(''))
+    const [callArgs] = mocks.useSendPromptMutateAsync.mock.calls[0] as [{ text: string }]
     expect(callArgs.text).toBe('follow-up')
   })
 
@@ -498,7 +495,7 @@ describe('PromptInput submission', () => {
     fireEvent.change(input, { target: { value: 'queued message' } })
     fireEvent.click(screen.getByTitle('Queue message'))
 
-    const [callArgs] = mocks.useSendPromptMutate.mock.calls[0] as [{ text: string }, unknown]
+    const [callArgs] = mocks.useSendPromptMutateAsync.mock.calls[0] as [{ text: string }]
     expect(callArgs.text).toBe('queued message')
 
     await waitFor(() => {

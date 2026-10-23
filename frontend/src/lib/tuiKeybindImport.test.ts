@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  applyRecordedShortcut,
   applyTuiKeybindImport,
   parseTuiKeybindConfig,
   type TuiKeybindImport,
@@ -214,5 +215,27 @@ describe('applyTuiKeybindImport', () => {
     expect(applied.cleared).toEqual(['toggleMode', 'submit'])
     expect(applied.keyboardShortcuts).toMatchObject({ toggleMode: '', submit: '', variantCycle: 't', toggleTerminal: 'T', abort: 'Ctrl+S' })
     expect(applied.directShortcuts).toEqual(['submit', 'abort', 'variantCycle'])
+  })
+})
+
+describe('applyRecordedShortcut', () => {
+  it('unbinds another action that used the same key in the same mode', () => {
+    const applied = applyRecordedShortcut('submit', 'Ctrl+K', false, {
+      keyboardShortcuts: { abort: 'Ctrl+K', sessions: 'Ctrl+K', submit: 'Ctrl+Return' },
+      directShortcuts: ['submit', 'abort'],
+    })
+    expect(applied.cleared).toEqual(['abort'])
+    expect(applied.keyboardShortcuts).toMatchObject({ submit: 'Ctrl+K', abort: '', sessions: 'Ctrl+K' })
+    expect(applied.directShortcuts).toEqual(['submit', 'abort'])
+  })
+
+  it('keeps a leader binding that shares the key with a new direct binding', () => {
+    const applied = applyRecordedShortcut('submit', 'T', false, {
+      keyboardShortcuts: { toggleTerminal: 'T', submit: 'Ctrl+Return' },
+      directShortcuts: ['submit'],
+    })
+    expect(applied.cleared).toEqual([])
+    expect(applied.keyboardShortcuts).toMatchObject({ toggleTerminal: 'T', submit: 'T' })
+    expect(applied.directShortcuts).toEqual(['submit'])
   })
 })

@@ -47,6 +47,7 @@ export interface StartRecordingOptions {
 export function useSTT(userId = 'default') {
   const { preferences } = useSettings(userId)
   const [isRecording, setIsRecording] = useState(false)
+  const [isStarting, setIsStarting] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [isError, setIsError] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -88,6 +89,7 @@ export function useSTT(userId = 'default') {
 
   const resetToIdle = useCallback((clearInterim = false) => {
     setIsRecording(false)
+    setIsStarting(false)
     setIsProcessing(false)
     setIsEndpointing(false)
     setState('idle')
@@ -130,6 +132,7 @@ export function useSTT(userId = 'default') {
     })
 
     rec.onStart(() => {
+      setIsStarting(false)
       setIsRecording(true)
       setIsProcessing(false)
       setState('listening')
@@ -148,6 +151,7 @@ export function useSTT(userId = 'default') {
   const setupAudioRecorder = useCallback((recorder: AudioRecorder) => {
     recorder.setOnStateChange((recState) => {
       if (recState === 'recording') {
+        setIsStarting(false)
         setIsRecording(true)
         setIsProcessing(false)
         setState('listening')
@@ -263,11 +267,14 @@ export function useSTT(userId = 'default') {
 
         await Promise.race([startupPromise, timeoutPromise])
         clearStartupTimeout()
+        if (startOpIdRef.current !== startOpId) return false
+        setIsStarting(false)
 
-        return startOpIdRef.current === startOpId
+        return true
       } catch (err) {
         clearStartupTimeout()
         if (startOpIdRef.current !== startOpId) return false
+        setIsStarting(false)
         setIsProcessing(false)
         if (err instanceof Error && err.message === 'Microphone start timed out') {
           abortAndResetOnTimeout()
@@ -306,6 +313,7 @@ export function useSTT(userId = 'default') {
 
     const startOpId = ++startOpIdRef.current
     clearStartupTimeout()
+    setIsStarting(true)
 
     if (isExternalProvider) {
       const recorder = ensureAudioRecorder()
@@ -394,6 +402,7 @@ export function useSTT(userId = 'default') {
 
   return {
     isRecording,
+    isStarting,
     isProcessing,
     isError,
     error,

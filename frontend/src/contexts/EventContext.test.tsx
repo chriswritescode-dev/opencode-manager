@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   listProjects: vi.fn(),
   servers: [] as Array<{ id: string; enabled: boolean }>,
   serversLoaded: false,
+  isAuthenticated: true,
 }))
 
 vi.mock('@/api/repos', () => ({
@@ -45,7 +46,7 @@ vi.mock('@/api/opencode', () => ({
 }))
 
 vi.mock('@/hooks/useAuth', () => ({
-  useAuth: () => ({ isAuthenticated: true }),
+  useAuth: () => ({ isAuthenticated: mocks.isAuthenticated }),
 }))
 
 vi.mock('@/hooks/useOpenCodeServers', () => ({
@@ -242,6 +243,7 @@ describe('EventProvider permissions and forms', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.history.pushState({}, '', '/')
+    mocks.isAuthenticated = true
     mocks.listRepos.mockResolvedValue([])
     mocks.listProjects.mockResolvedValue([])
     mocks.servers = []
@@ -262,6 +264,15 @@ describe('EventProvider permissions and forms', () => {
       reconnect: vi.fn(),
       reportVisibility: vi.fn(),
     })
+  })
+
+  it('defers authenticated bootstrap reads and the event stream until a session exists', () => {
+    mocks.isAuthenticated = false
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    expect(mocks.listRepos).not.toHaveBeenCalled()
+    expect(mocks.subscribeGlobalMonitor).not.toHaveBeenCalled()
   })
 
   it('syncs missed pending forms for a session', async () => {

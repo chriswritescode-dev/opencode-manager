@@ -72,12 +72,12 @@ describe('ScheduleWorktreeManager', () => {
     nonGitDir = path.join(tmpDir, 'non-git-dir')
     mkdirSync(nonGitDir, { recursive: true })
 
-    // Init bare origin and clone a working base repo
-    execSync(`git init --bare "${originRepoPath}"`, { env })
+    // Init bare origin on main and clone a working base repo
+    execSync(`git init --bare -b main "${originRepoPath}"`, { env })
     execSync(`git clone "${originRepoPath}" "${baseRepoPath}"`, { env })
     execSync(`git -C "${baseRepoPath}" config user.email test@test.com`, { env })
     execSync(`git -C "${baseRepoPath}" config user.name Test`, { env })
-    execSync(`git -C "${baseRepoPath}" branch -m master main`, { env })
+    execSync(`git -C "${baseRepoPath}" branch -M main`, { env })
     execSync(`git -C "${baseRepoPath}" commit --allow-empty -m "Initial commit"`, { env })
     execSync(`git -C "${baseRepoPath}" push origin main`, { env })
     execSync(`git -C "${originRepoPath}" symbolic-ref HEAD refs/heads/main`, { env })

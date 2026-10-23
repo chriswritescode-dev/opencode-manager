@@ -12,6 +12,13 @@ function walkthroughUrl(sessionId: string): string {
   return `${API_BASE_URL}/api/change-walkthroughs/${encodeURIComponent(sessionId)}`
 }
 
+const HELPER_SESSIONS_URL = `${API_BASE_URL}/api/change-walkthroughs/helper-sessions`
+
+export async function getWalkthroughHelperSessionIds(): Promise<string[]> {
+  const response = await fetchWrapper<{ sessionIds: string[] }>(HELPER_SESSIONS_URL)
+  return response.sessionIds
+}
+
 export async function getChangeWalkthrough(
   sessionId: string,
   source: WalkthroughSource,

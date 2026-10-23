@@ -593,7 +593,7 @@ export function ModelQuickSelect({
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
                   placeholder="Search models..."
-                  className="h-9 border-border bg-muted pl-9 text-sm text-foreground placeholder:text-muted-foreground"
+                  className="h-9 border-border bg-muted pl-9 text-sm text-foreground placeholder:text-placeholder"
                   autoComplete="off"
                   name="model-search"
                 />

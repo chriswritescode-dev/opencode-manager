@@ -57,6 +57,7 @@ export function ManagerTokenSettings({ isOpen: controlledOpen, onToggle }: Manag
             type="button"
             onClick={() => setShowToken(!showToken)}
             disabled={!token}
+            aria-label={showToken ? 'Hide token' : 'Show token'}
             className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
           >
             {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -73,6 +74,8 @@ export function ManagerTokenSettings({ isOpen: controlledOpen, onToggle }: Manag
           type="button"
           onClick={handleRotate}
           disabled={rotate.isPending || isLoading}
+          aria-label="Rotate token"
+          title="Rotate token"
         >
           <RefreshCw className={`h-4 w-4 ${rotate.isPending ? 'animate-spin' : ''}`} />
         </Button>

@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button'
 import { Plus, Minus, FileText, FilePlus, FileX, FileSearch, CircleDot, RotateCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useMobile } from '@/hooks/useMobile'
 import type { GitFileStatus } from '@/types/git'
 import { GIT_STATUS_COLORS, GIT_UI_COLORS } from '@/lib/git-status-styles'
 
@@ -23,11 +24,21 @@ const statusIcons = {
 }
 
 export function GitFlatFileItem({ file, isSelected, onSelect, onStage, onUnstage, onDiscard }: GitFlatFileItemProps) {
+  const isMobile = useMobile()
   const StatusIcon = statusIcons[file.status] || FileText
   const statusColor = GIT_STATUS_COLORS[file.status] || 'text-muted-foreground'
 
-  const fileName = file.path.split('/').pop() || file.path
-  const dirPath = file.path.includes('/') ? file.path.substring(0, file.path.lastIndexOf('/')) : ''
+  const isDirectory = file.path.endsWith('/')
+  const normalizedPath = file.path.replace(/\/+$/, '')
+  const baseName = normalizedPath.split('/').pop() || normalizedPath
+  const fileName = isDirectory ? `${baseName}/` : baseName
+  const dirPath = normalizedPath.includes('/') ? normalizedPath.substring(0, normalizedPath.lastIndexOf('/')) : ''
+  const actionButtonClass = cn(
+    'h-6 w-6 p-0 transition-opacity flex-shrink-0',
+    isMobile
+      ? 'opacity-100'
+      : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 group-focus-within:opacity-100'
+  )
 
   const handleAction = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -81,8 +92,9 @@ export function GitFlatFileItem({ file, isSelected, onSelect, onStage, onUnstage
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+          className={actionButtonClass}
           onClick={handleAction}
+          aria-label={file.staged ? `Unstage ${fileName}` : `Stage ${fileName}`}
         >
           {file.staged ? (
             <Minus className={cn('w-3 h-3', GIT_UI_COLORS.unstage)} />
@@ -95,9 +107,10 @@ export function GitFlatFileItem({ file, isSelected, onSelect, onStage, onUnstage
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+          className={actionButtonClass}
           onClick={handleDiscard}
           title="Discard changes"
+          aria-label={`Discard changes to ${fileName}`}
         >
           <RotateCcw className="w-3 h-3 text-destructive" />
         </Button>

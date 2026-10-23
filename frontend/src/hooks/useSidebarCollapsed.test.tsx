@@ -49,4 +49,19 @@ describe('useSidebarCollapsed', () => {
 
     expect(result.current[0]).toBe(true)
   })
+
+  it('shares the collapse state between consumers', () => {
+    localStorageMock.getItem.mockReturnValue(null)
+
+    const first = renderHook(() => useSidebarCollapsed())
+    const second = renderHook(() => useSidebarCollapsed())
+
+    act(() => {
+      first.result.current[1]()
+    })
+
+    expect(first.result.current[0]).toBe(true)
+    expect(second.result.current[0]).toBe(true)
+    expect(localStorageMock.setItem).toHaveBeenCalledWith('oc:sidebar:collapsed', 'true')
+  })
 })

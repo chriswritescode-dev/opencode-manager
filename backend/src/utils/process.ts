@@ -32,14 +32,10 @@ export async function executeCommand<O extends ExecuteCommandOptions = ExecuteCo
     
     const effectiveEnv = { ...process.env, ...options.env }
     
-    // Log key git-related environment variables
     if (command === 'git') {
-      logger.info(`executeCommand: ${args.join(' ')}`)
-      logger.info(`  GIT_ASKPASS: ${effectiveEnv.GIT_ASKPASS || '(not set)'}`)
-      logger.info(`  VSCODE_GIT_IPC_HANDLE: ${effectiveEnv.VSCODE_GIT_IPC_HANDLE || '(not set)'}`)
-      logger.info(`  GIT_TERMINAL_PROMPT: ${effectiveEnv.GIT_TERMINAL_PROMPT || '(not set)'}`)
-      logger.info(`  GIT_SSH_COMMAND: ${effectiveEnv.GIT_SSH_COMMAND || '(not set)'}`)
-      logger.info(`  VSCODE_GIT_SSH_HOST_KEY: ${effectiveEnv.VSCODE_GIT_SSH_HOST_KEY || '(not set)'}`)
+      logger.debug(
+        `executeCommand: ${args.join(' ')} | GIT_ASKPASS=${effectiveEnv.GIT_ASKPASS || '(not set)'} VSCODE_GIT_IPC_HANDLE=${effectiveEnv.VSCODE_GIT_IPC_HANDLE || '(not set)'} GIT_TERMINAL_PROMPT=${effectiveEnv.GIT_TERMINAL_PROMPT || '(not set)'} GIT_SSH_COMMAND=${effectiveEnv.GIT_SSH_COMMAND || '(not set)'} VSCODE_GIT_SSH_HOST_KEY=${effectiveEnv.VSCODE_GIT_SSH_HOST_KEY || '(not set)'}`
+      )
     }
     
     const proc: ChildProcess = spawn(command || '', cmdArgs, {

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, act, waitFor } from '@testing-library/react'
 import { TTSProvider } from './TTSContext'
 import { useTTS } from '@/hooks/useTTS'
-import type { TTSConfig, TTSContextValue } from './tts-context'
+import type { SpeakMessageOptions, TTSConfig, TTSContextValue } from './tts-context'
 import type { WebSpeechSynthesizer } from '@/lib/webSpeechSynthesizer'
 
 const mocks = vi.hoisted(() => ({
@@ -24,6 +24,10 @@ vi.mock('@/hooks/useSettings', () => ({
   useSettings: mocks.useSettings,
 }))
 
+vi.mock('@/hooks/useAuth', () => ({
+  useAuth: () => ({ isAuthenticated: true }),
+}))
+
 vi.mock('@/lib/webSpeechSynthesizer', () => ({
   getWebSpeechSynthesizer: () => webSpeech as unknown as WebSpeechSynthesizer,
   isWebSpeechSupported: () => true,
@@ -31,18 +35,22 @@ vi.mock('@/lib/webSpeechSynthesizer', () => ({
 
 class FakeAudio {
   static instances: FakeAudio[] = []
+  static nextPlayRejection: unknown = null
 
   src: string
   paused = true
   onended: (() => void) | null = null
   onerror: (() => void) | null = null
 
-  constructor(src: string) {
+  constructor(src = '') {
     this.src = src
     FakeAudio.instances.push(this)
   }
 
-  play = vi.fn(() => {
+  play = vi.fn((): Promise<void> => {
+    const rejection = FakeAudio.nextPlayRejection
+    FakeAudio.nextPlayRejection = null
+    if (rejection) return Promise.reject(rejection)
     this.paused = false
     return Promise.resolve()
   })
@@ -80,6 +88,24 @@ async function flushPlayback() {
       await Promise.resolve()
     }
   })
+}
+
+function player(): FakeAudio {
+  const instance = FakeAudio.instances[0]
+  if (!instance) throw new Error('expected the shared audio player to exist')
+  return instance
+}
+
+async function startPlayback(
+  messageId: string,
+  text: string,
+  options?: SpeakMessageOptions,
+): Promise<FakeAudio> {
+  await act(async () => {
+    await ttsRef.current!.speakMessage(messageId, text, options)
+  })
+  await waitFor(() => expect(player().paused).toBe(false))
+  return player()
 }
 
 function setPreferences(overrides: Partial<TTSConfig> = {}) {
@@ -132,6 +158,7 @@ function renderProvider() {
 beforeEach(() => {
   vi.clearAllMocks()
   FakeAudio.instances = []
+  FakeAudio.nextPlayRejection = null
   fetchBodies = []
   objectUrlCounter = 0
   ttsRef.current = null
@@ -166,59 +193,46 @@ describe('TTSProvider playback isolation', () => {
     setPreferences()
     renderProvider()
 
-    await act(async () => {
-      await ttsRef.current!.speakMessage('A', textA)
-    })
-
-    await waitFor(() => expect(FakeAudio.instances.length).toBeGreaterThanOrEqual(1))
-    const firstAudio = FakeAudio.instances[0]
-    await waitFor(() => expect(firstAudio.paused).toBe(false))
-    const staleOnended = firstAudio.onended
+    const audio = await startPlayback('A', textA)
+    const firstSrc = audio.src
+    expect(firstSrc).toMatch(/^blob:/)
+    const staleOnended = audio.onended
     expect(staleOnended).toBeTypeOf('function')
 
     await act(async () => {
       await ttsRef.current!.speakMessage('B', textB)
     })
 
-    await waitFor(() => expect(FakeAudio.instances.length).toBeGreaterThanOrEqual(2))
-    const secondAudio = FakeAudio.instances[1]
-    await waitFor(() => expect(secondAudio.paused).toBe(false))
     await waitFor(() => expect(fetchBodies).toContain('Bravo three. Bravo four.'))
-
-    expect(firstAudio.paused).toBe(true)
+    await waitFor(() => expect(audio.src).not.toBe(firstSrc))
+    const activeSrc = audio.src
+    expect(audio.paused).toBe(false)
 
     await act(async () => {
       staleOnended!()
       await new Promise((resolve) => setTimeout(resolve, 0))
     })
 
-    const playing = FakeAudio.instances.filter((audio) => !audio.paused)
-    expect(playing).toHaveLength(1)
-    expect(playing[0]).toBe(secondAudio)
-    expect(FakeAudio.instances).toHaveLength(2)
+    expect(FakeAudio.instances).toHaveLength(1)
+    expect(audio.src).toBe(activeSrc)
+    expect(audio.paused).toBe(false)
   })
 
   it('ignores a stale onerror after cleanup without orphaning the new audio or corrupting state', async () => {
     setPreferences()
     renderProvider()
 
-    await act(async () => {
-      await ttsRef.current!.speakMessage('A', textA)
-    })
-
-    await waitFor(() => expect(FakeAudio.instances.length).toBeGreaterThanOrEqual(1))
-    const firstAudio = FakeAudio.instances[0]
-    await waitFor(() => expect(firstAudio.paused).toBe(false))
-    const staleOnerror = firstAudio.onerror
+    const audio = await startPlayback('A', textA)
+    const staleOnerror = audio.onerror
     expect(staleOnerror).toBeTypeOf('function')
 
     await act(async () => {
       await ttsRef.current!.speakMessage('B', textB)
     })
 
-    await waitFor(() => expect(FakeAudio.instances.length).toBeGreaterThanOrEqual(2))
-    const secondAudio = FakeAudio.instances[1]
-    await waitFor(() => expect(secondAudio.paused).toBe(false))
+    await waitFor(() => expect(fetchBodies).toContain('Bravo three. Bravo four.'))
+    const activeSrc = audio.src
+    const playCalls = audio.play.mock.calls.length
 
     await act(async () => {
       staleOnerror!()
@@ -226,7 +240,10 @@ describe('TTSProvider playback isolation', () => {
 
     expect(ttsRef.current!.state).toBe('playing')
     expect(ttsRef.current!.error).toBeNull()
-    expect(secondAudio.paused).toBe(false)
+    expect(audio.paused).toBe(false)
+    expect(audio.src).toBe(activeSrc)
+    expect(audio.play.mock.calls.length).toBe(playCalls)
+    expect(FakeAudio.instances).toHaveLength(1)
   })
 
   it('cancels active Web Speech playback when an external playback starts', async () => {
@@ -269,18 +286,13 @@ describe('TTSProvider playback isolation', () => {
       }),
     )
 
-    await act(async () => {
-      await ttsRef.current!.speakMessage('A', textA)
-    })
-
-    await waitFor(() => expect(FakeAudio.instances.length).toBeGreaterThanOrEqual(1))
-    const firstAudio = FakeAudio.instances[0]
-    await waitFor(() => expect(firstAudio.paused).toBe(false))
+    const audio = await startPlayback('A', textA)
     await waitFor(() => expect(fetchBodies).toContain('Alpha one. Alpha two.'))
     expect(fetchBodies).not.toContain(slowChunkText)
+    const firstSrc = audio.src
 
     await act(async () => {
-      firstAudio.onended!()
+      audio.onended!()
       await new Promise((resolve) => setTimeout(resolve, 0))
     })
 
@@ -289,9 +301,9 @@ describe('TTSProvider playback isolation', () => {
       await new Promise((resolve) => setTimeout(resolve, 0))
     })
 
-    await waitFor(() => expect(FakeAudio.instances.length).toBeGreaterThanOrEqual(2))
-    const secondAudio = FakeAudio.instances[1]
-    await waitFor(() => expect(secondAudio.paused).toBe(false))
+    await waitFor(() => expect(audio.src).not.toBe(firstSrc))
+    await waitFor(() => expect(audio.play).toHaveBeenCalledTimes(2))
+    expect(audio.paused).toBe(false)
 
     expect(fetchBodies.filter((text) => text === slowChunkText)).toHaveLength(1)
 
@@ -315,10 +327,11 @@ describe('TTSProvider message completion', () => {
       await ttsRef.current!.speakMessage('A', textA, { onEnd })
     })
 
+    await waitFor(() => expect(FakeAudio.instances).toHaveLength(1))
+    const audio = player()
+
     for (let index = 0; index < 3; index += 1) {
-      await waitFor(() => expect(FakeAudio.instances.length).toBeGreaterThan(index))
-      const audio = FakeAudio.instances[index]
-      await waitFor(() => expect(audio.paused).toBe(false))
+      await waitFor(() => expect(audio.play).toHaveBeenCalledTimes(index + 1))
       expect(onEnd).not.toHaveBeenCalled()
       await act(async () => {
         audio.onended!()
@@ -326,7 +339,7 @@ describe('TTSProvider message completion', () => {
     }
 
     await waitFor(() => expect(onEnd).toHaveBeenCalledTimes(1))
-    expect(onEnd).toHaveBeenCalledWith('completed')
+    expect(onEnd).toHaveBeenCalledWith('completed', undefined)
     expect(ttsRef.current!.state).toBe('idle')
   })
 
@@ -335,21 +348,15 @@ describe('TTSProvider message completion', () => {
     renderProvider()
     const onEnd = vi.fn()
 
-    await act(async () => {
-      await ttsRef.current!.speakMessage('A', textA, { onEnd })
-    })
-
-    await waitFor(() => expect(FakeAudio.instances.length).toBeGreaterThanOrEqual(1))
-    const firstAudio = FakeAudio.instances[0]
-    await waitFor(() => expect(firstAudio.paused).toBe(false))
-    const staleOnended = firstAudio.onended
+    const audio = await startPlayback('A', textA, { onEnd })
+    const staleOnended = audio.onended
 
     await act(async () => {
       ttsRef.current!.stop()
     })
 
     expect(onEnd).toHaveBeenCalledTimes(1)
-    expect(onEnd).toHaveBeenCalledWith('stopped')
+    expect(onEnd).toHaveBeenCalledWith('stopped', undefined)
 
     await act(async () => {
       staleOnended!()
@@ -365,21 +372,15 @@ describe('TTSProvider message completion', () => {
     const onEndA = vi.fn()
     const onEndB = vi.fn()
 
-    await act(async () => {
-      await ttsRef.current!.speakMessage('A', textA, { onEnd: onEndA })
-    })
-
-    await waitFor(() => expect(FakeAudio.instances.length).toBeGreaterThanOrEqual(1))
-    const firstAudio = FakeAudio.instances[0]
-    await waitFor(() => expect(firstAudio.paused).toBe(false))
-    const staleOnended = firstAudio.onended
+    const audio = await startPlayback('A', textA, { onEnd: onEndA })
+    const staleOnended = audio.onended
 
     await act(async () => {
       await ttsRef.current!.speakMessage('B', textB, { onEnd: onEndB })
     })
 
     expect(onEndA).toHaveBeenCalledTimes(1)
-    expect(onEndA).toHaveBeenCalledWith('stopped')
+    expect(onEndA).toHaveBeenCalledWith('stopped', undefined)
     expect(onEndB).not.toHaveBeenCalled()
 
     await act(async () => {
@@ -396,13 +397,7 @@ describe('TTSProvider message completion', () => {
     renderProvider()
     const onEnd = vi.fn()
 
-    await act(async () => {
-      await ttsRef.current!.speakMessage('A', textA, { onEnd })
-    })
-
-    await waitFor(() => expect(FakeAudio.instances.length).toBeGreaterThanOrEqual(1))
-    const firstAudio = FakeAudio.instances[0]
-    await waitFor(() => expect(firstAudio.paused).toBe(false))
+    await startPlayback('A', textA, { onEnd })
 
     await act(async () => {
       ttsRef.current!.pause()
@@ -416,7 +411,7 @@ describe('TTSProvider message completion', () => {
 
     expect(ttsRef.current!.isPaused).toBe(false)
     expect(onEnd).toHaveBeenCalledTimes(1)
-    expect(onEnd).toHaveBeenCalledWith('stopped')
+    expect(onEnd).toHaveBeenCalledWith('stopped', undefined)
   })
 })
 
@@ -425,14 +420,8 @@ describe('TTSProvider pause and resume', () => {
     setPreferences()
     renderProvider()
 
-    await act(async () => {
-      await ttsRef.current!.speakMessage('A', textA)
-    })
-
-    await waitFor(() => expect(FakeAudio.instances.length).toBeGreaterThanOrEqual(1))
-    const firstAudio = FakeAudio.instances[0]
-    await waitFor(() => expect(firstAudio.paused).toBe(false))
-    const instanceCount = FakeAudio.instances.length
+    const audio = await startPlayback('A', textA)
+    const firstSrc = audio.src
 
     await act(async () => {
       ttsRef.current!.pause()
@@ -440,19 +429,20 @@ describe('TTSProvider pause and resume', () => {
 
     expect(ttsRef.current!.isPaused).toBe(true)
     expect(ttsRef.current!.isPlaying).toBe(true)
-    expect(firstAudio.pause).toHaveBeenCalled()
-    expect(firstAudio.paused).toBe(true)
+    expect(audio.pause).toHaveBeenCalled()
+    expect(audio.paused).toBe(true)
 
-    const playCallsWhilePaused = firstAudio.play.mock.calls.length
+    const playCallsWhilePaused = audio.play.mock.calls.length
 
     await act(async () => {
       ttsRef.current!.resume()
     })
 
     expect(ttsRef.current!.isPaused).toBe(false)
-    expect(firstAudio.play.mock.calls.length).toBe(playCallsWhilePaused + 1)
-    expect(firstAudio.paused).toBe(false)
-    expect(FakeAudio.instances).toHaveLength(instanceCount)
+    expect(audio.play.mock.calls.length).toBe(playCallsWhilePaused + 1)
+    expect(audio.paused).toBe(false)
+    expect(audio.src).toBe(firstSrc)
+    expect(FakeAudio.instances).toHaveLength(1)
     expect(fetchBodies.filter((text) => text === 'Alpha one. Alpha two.')).toHaveLength(1)
   })
 
@@ -460,27 +450,23 @@ describe('TTSProvider pause and resume', () => {
     setPreferences()
     renderProvider()
 
-    await act(async () => {
-      await ttsRef.current!.speakMessage('A', textA)
-    })
-
-    await waitFor(() => expect(FakeAudio.instances.length).toBeGreaterThanOrEqual(1))
-    const firstAudio = FakeAudio.instances[0]
-    await waitFor(() => expect(firstAudio.paused).toBe(false))
+    const audio = await startPlayback('A', textA)
+    const firstSrc = audio.src
 
     await act(async () => {
       ttsRef.current!.pause()
     })
 
+    const playCallsWhilePaused = audio.play.mock.calls.length
+
     await act(async () => {
-      firstAudio.onended!()
+      audio.onended!()
     })
 
-    await waitFor(() => expect(FakeAudio.instances.length).toBeGreaterThanOrEqual(2))
-    const secondAudio = FakeAudio.instances[1]
+    await waitFor(() => expect(audio.src).not.toBe(firstSrc))
 
-    expect(secondAudio.play).not.toHaveBeenCalled()
-    expect(secondAudio.paused).toBe(true)
+    expect(audio.play.mock.calls.length).toBe(playCallsWhilePaused)
+    expect(audio.paused).toBe(true)
     expect(ttsRef.current!.isPaused).toBe(true)
     expect(ttsRef.current!.activeMessageId).toBe('A')
 
@@ -488,8 +474,8 @@ describe('TTSProvider pause and resume', () => {
       ttsRef.current!.resume()
     })
 
-    expect(secondAudio.play).toHaveBeenCalledTimes(1)
-    expect(secondAudio.paused).toBe(false)
+    expect(audio.play.mock.calls.length).toBe(playCallsWhilePaused + 1)
+    expect(audio.paused).toBe(false)
     expect(ttsRef.current!.isPaused).toBe(false)
   })
 
@@ -533,6 +519,115 @@ describe('TTSProvider pause and resume', () => {
   })
 })
 
+describe('TTSProvider playback failures', () => {
+  it('reports the browser blocking playback with its own message', async () => {
+    setPreferences()
+    renderProvider()
+    const onEnd = vi.fn()
+    FakeAudio.nextPlayRejection = Object.assign(new Error('play blocked'), {
+      name: 'NotAllowedError',
+    })
+
+    await act(async () => {
+      await ttsRef.current!.speakMessage('A', textA, { onEnd })
+    })
+    await flushPlayback()
+
+    expect(onEnd).toHaveBeenCalledTimes(1)
+    expect(onEnd).toHaveBeenCalledWith('error', 'Audio playback was blocked by the browser')
+    expect(ttsRef.current!.state).toBe('error')
+    expect(ttsRef.current!.error).toBe('Audio playback was blocked by the browser')
+
+    act(() => ttsRef.current!.unlock())
+
+    expect(player().src.startsWith('data:audio/wav;base64,')).toBe(true)
+    expect(player().play).toHaveBeenCalledTimes(2)
+  })
+
+  it('reports the rejection message for a playback failure that is not a gesture block', async () => {
+    setPreferences()
+    renderProvider()
+    const onEnd = vi.fn()
+    FakeAudio.nextPlayRejection = new Error('decoder gave up')
+
+    await act(async () => {
+      await ttsRef.current!.speakMessage('A', textA, { onEnd })
+    })
+    await flushPlayback()
+
+    expect(onEnd).toHaveBeenCalledWith('error', 'decoder gave up')
+    expect(ttsRef.current!.error).toBe('decoder gave up')
+  })
+})
+
+describe('TTSProvider unlock', () => {
+  it('primes the shared element with a silent clip and reuses it for chunk playback', async () => {
+    setPreferences()
+    renderProvider()
+
+    act(() => ttsRef.current!.unlock())
+
+    expect(FakeAudio.instances).toHaveLength(1)
+    const audio = player()
+    expect(audio.src.startsWith('data:audio/wav;base64,')).toBe(true)
+    expect(audio.play).toHaveBeenCalledTimes(1)
+
+    await flushPlayback()
+
+    expect(audio.src).toBe('')
+    expect(audio.paused).toBe(true)
+
+    await act(async () => {
+      await ttsRef.current!.speakMessage('A', textA)
+    })
+    await flushPlayback()
+
+    expect(FakeAudio.instances).toHaveLength(1)
+    expect(audio.src).toMatch(/^blob:/)
+    expect(audio.play).toHaveBeenCalledTimes(2)
+    expect(audio.paused).toBe(false)
+  })
+
+  it('does nothing on a repeat call once the element is primed', async () => {
+    setPreferences()
+    renderProvider()
+
+    act(() => ttsRef.current!.unlock())
+    await flushPlayback()
+    const playCalls = player().play.mock.calls.length
+
+    act(() => ttsRef.current!.unlock())
+
+    expect(player().play).toHaveBeenCalledTimes(playCalls)
+    expect(FakeAudio.instances).toHaveLength(1)
+  })
+
+  it('does not interrupt a message that is already playing', async () => {
+    setPreferences()
+    renderProvider()
+
+    const audio = await startPlayback('A', textA)
+    const src = audio.src
+
+    act(() => ttsRef.current!.unlock())
+
+    expect(audio.src).toBe(src)
+    expect(audio.play).toHaveBeenCalledTimes(1)
+    expect(audio.pause).not.toHaveBeenCalled()
+    expect(audio.paused).toBe(false)
+    expect(ttsRef.current!.isPlaying).toBe(true)
+  })
+
+  it('does not touch the shared element for builtin playback', async () => {
+    setPreferences({ provider: 'builtin' })
+    renderProvider()
+
+    act(() => ttsRef.current!.unlock())
+
+    expect(FakeAudio.instances).toHaveLength(0)
+  })
+})
+
 describe('TTSProvider message queue', () => {
   const QUEUE_PAUSE_MS = 600
   const firstText = 'Alpha plays first.'
@@ -557,8 +652,9 @@ describe('TTSProvider message queue', () => {
     await flushPlayback()
 
     expect(FakeAudio.instances).toHaveLength(1)
-    const firstAudio = FakeAudio.instances[0]
-    expect(firstAudio.paused).toBe(false)
+    const audio = player()
+    const firstSrc = audio.src
+    expect(audio.paused).toBe(false)
     expect(ttsRef.current!.activeMessageId).toBe('A')
 
     await act(async () => {
@@ -566,17 +662,17 @@ describe('TTSProvider message queue', () => {
     })
     await flushPlayback()
 
-    expect(FakeAudio.instances).toHaveLength(1)
-    expect(firstAudio.paused).toBe(false)
+    expect(audio.play).toHaveBeenCalledTimes(1)
+    expect(audio.src).toBe(firstSrc)
+    expect(audio.paused).toBe(false)
     expect(ttsRef.current!.activeMessageId).toBe('A')
     expect(ttsRef.current!.isPlaying).toBe(true)
 
     await act(async () => {
-      firstAudio.onended!()
+      audio.onended!()
     })
     await flushPlayback()
 
-    expect(FakeAudio.instances).toHaveLength(1)
     expect(ttsRef.current!.isIdle).toBe(true)
     expect(ttsRef.current!.activeMessageId).toBeNull()
 
@@ -585,15 +681,16 @@ describe('TTSProvider message queue', () => {
     })
     await flushPlayback()
 
-    expect(FakeAudio.instances).toHaveLength(1)
+    expect(audio.play).toHaveBeenCalledTimes(1)
 
     await act(async () => {
       vi.advanceTimersByTime(1)
     })
     await flushPlayback()
 
-    expect(FakeAudio.instances).toHaveLength(2)
-    expect(FakeAudio.instances[1].paused).toBe(false)
+    expect(audio.play).toHaveBeenCalledTimes(2)
+    expect(audio.paused).toBe(false)
+    expect(fetchBodies).toContain(queuedText)
     expect(ttsRef.current!.activeMessageId).toBe('B')
     expect(ttsRef.current!.isPlaying).toBe(true)
   })
@@ -607,13 +704,15 @@ describe('TTSProvider message queue', () => {
     })
     await flushPlayback()
 
+    const audio = player()
+
     await act(async () => {
       ttsRef.current!.queueMessage('B', queuedText)
     })
     await flushPlayback()
 
     await act(async () => {
-      FakeAudio.instances[0].onended!()
+      audio.onended!()
     })
     await flushPlayback()
 
@@ -626,6 +725,7 @@ describe('TTSProvider message queue', () => {
     })
     await flushPlayback()
 
+    expect(audio.play).toHaveBeenCalledTimes(1)
     expect(FakeAudio.instances).toHaveLength(1)
     expect(fetchBodies).not.toContain(queuedText)
     expect(ttsRef.current!.state).toBe('idle')
@@ -641,6 +741,8 @@ describe('TTSProvider message queue', () => {
     })
     await flushPlayback()
 
+    const audio = player()
+
     await act(async () => {
       ttsRef.current!.queueMessage('B', queuedText)
     })
@@ -651,20 +753,20 @@ describe('TTSProvider message queue', () => {
     })
     await flushPlayback()
 
-    expect(FakeAudio.instances).toHaveLength(2)
-    expect(FakeAudio.instances[0].paused).toBe(true)
+    expect(audio.play).toHaveBeenCalledTimes(2)
     expect(ttsRef.current!.activeMessageId).toBe('C')
+    expect(ttsRef.current!.isPlaying).toBe(true)
 
     await act(async () => {
       vi.advanceTimersByTime(1000)
     })
     await flushPlayback()
 
-    expect(FakeAudio.instances).toHaveLength(2)
+    expect(audio.play).toHaveBeenCalledTimes(2)
     expect(fetchBodies).not.toContain(queuedText)
 
     await act(async () => {
-      FakeAudio.instances[1].onended!()
+      audio.onended!()
     })
     await flushPlayback()
 
@@ -673,7 +775,7 @@ describe('TTSProvider message queue', () => {
     })
     await flushPlayback()
 
-    expect(FakeAudio.instances).toHaveLength(2)
+    expect(audio.play).toHaveBeenCalledTimes(2)
     expect(ttsRef.current!.state).toBe('idle')
   })
 })

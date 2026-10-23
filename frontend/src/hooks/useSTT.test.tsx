@@ -377,6 +377,33 @@ describe('useSTT builtin provider lifecycle', () => {
     })
   })
 
+  it('reports starting until the recognizer reports that capture began', async () => {
+    const { result } = renderHook(() => useSTT())
+    let resolveStart!: () => void
+    mockRecognizer.start.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveStart = resolve
+      }),
+    )
+
+    let startPromise: Promise<boolean> | undefined
+    act(() => {
+      startPromise = result.current.startRecording()
+    })
+
+    expect(result.current.isStarting).toBe(true)
+
+    await act(async () => {
+      registeredCallbacks.onStart[0]()
+      resolveStart()
+      await startPromise
+    })
+
+    expect(result.current.isStarting).toBe(false)
+    expect(result.current.isRecording).toBe(true)
+    expect(result.current.state).toBe('listening')
+  })
+
   it('onStart callback sets isRecording=true and state=listening', async () => {
     const { result } = renderHook(() => useSTT())
 

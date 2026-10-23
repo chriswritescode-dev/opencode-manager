@@ -2,6 +2,7 @@
 import { createContext, useEffect, useMemo, useState, useCallback, type ReactNode } from 'react'
 import { useSession, signIn, signUp, signOut, authClient, type AuthUser } from '@/lib/auth-client'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { getLoginRedirectTarget } from '@/lib/auth-loaders'
 
 interface AuthConfig {
   enabledProviders: string[]
@@ -37,6 +38,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [config, setConfig] = useState<AuthConfig | null>(null)
   const navigate = useNavigate()
   const location = useLocation()
+  const redirectTarget = useMemo(
+    () => getLoginRedirectTarget(location.search),
+    [location.search],
+  )
 
   useEffect(() => {
     const fetchConfig = async () => {
@@ -64,19 +69,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
       return { error: result.error.message || 'Sign in failed' }
     }
     await refetch()
-    const from = (location.state as { from?: string })?.from || '/'
-    navigate(from, { replace: true })
+    navigate(redirectTarget, { replace: true })
     return {}
-  }, [refetch, navigate, location])
+  }, [refetch, navigate, redirectTarget])
 
   const signInWithProvider = useCallback(async (provider: 'github' | 'google' | 'discord') => {
     try {
-      await signIn.social({ provider, callbackURL: '/' })
+      await signIn.social({ provider, callbackURL: redirectTarget })
       return {}
     } catch (err) {
       return { error: err instanceof Error ? err.message : 'OAuth sign in failed' }
     }
-  }, [])
+  }, [redirectTarget])
 
   const signInWithPasskey = useCallback(async () => {
     try {
@@ -85,13 +89,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return { error: result.error.message || 'Passkey sign in failed' }
       }
       await refetch()
-      const from = (location.state as { from?: string })?.from || '/'
-      navigate(from, { replace: true })
+      navigate(redirectTarget, { replace: true })
       return {}
     } catch (err) {
       return { error: err instanceof Error ? err.message : 'Passkey sign in failed' }
     }
-  }, [refetch, navigate, location])
+  }, [refetch, navigate, redirectTarget])
 
   const signUpWithEmail = useCallback(async (email: string, password: string, name: string) => {
     const result = await signUp.email({ email, password, name })
@@ -99,9 +102,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       return { error: result.error.message || 'Sign up failed' }
     }
     await refetch()
-    navigate('/', { replace: true })
+    navigate(redirectTarget, { replace: true })
     return {}
-  }, [refetch, navigate])
+  }, [refetch, navigate, redirectTarget])
 
   const addPasskey = useCallback(async (name?: string) => {
     const result = await authClient.passkey.addPasskey({ name })

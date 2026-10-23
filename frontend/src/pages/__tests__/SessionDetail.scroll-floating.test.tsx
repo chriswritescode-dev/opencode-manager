@@ -316,22 +316,13 @@ describe('SessionDetail scroll floating button', () => {
       }
     )
 
-    mocks.PromptInput.mockImplementation((props: { onPromptChange?: (hasContent: boolean) => void; showScrollButton?: boolean; onScrollToBottom: () => void }) => {
+    mocks.PromptInput.mockImplementation((props: { onPromptChange?: (hasContent: boolean) => void }) => {
       const { onPromptChange } = props
       useEffect(() => {
         onPromptChange?.(opts.promptContent ?? false)
       }, [onPromptChange])
 
-      return (
-        <div>
-          <span>MockedPromptInput</span>
-          {props.showScrollButton && (
-            <button type="button" title="Scroll to bottom" aria-label="Scroll to bottom" onClick={props.onScrollToBottom}>
-              Latest
-            </button>
-          )}
-        </div>
-      )
+      return <div>MockedPromptInput</div>
     })
 
     const queryClient = createQueryClient()
@@ -348,44 +339,46 @@ describe('SessionDetail scroll floating button', () => {
     return Object.assign(render(buildTree()), { buildTree })
   }
 
-  it('passes scroll button state to PromptInput when showScrollButton is true', async () => {
+  it('shows the jump to latest button while scrolled up on mobile', async () => {
     renderWith({ mobile: true, showScrollButton: true })
 
-    await waitFor(() => {
-      expect(screen.getByTitle('Scroll to bottom')).toBeInTheDocument()
-    })
-    expect(screen.getByLabelText('Scroll to bottom')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Jump to latest' })).toBeInTheDocument()
   })
 
-  it('still passes scroll button state when content height is below tall threshold', async () => {
-    renderWith({ mobile: true, showScrollButton: true })
+  it('shows the jump to latest button while scrolled up on desktop', async () => {
+    renderWith({ mobile: false, showScrollButton: true })
 
-    await waitFor(() => {
-      expect(screen.getByLabelText('Scroll to bottom')).toBeInTheDocument()
-    })
+    expect(await screen.findByRole('button', { name: 'Jump to latest' })).toBeInTheDocument()
   })
 
-  it('does NOT pass scroll button state when mobile + tall content but no showScrollButton', async () => {
+  it('shows the jump to latest button even when the prompt has content', async () => {
+    renderWith({ mobile: true, showScrollButton: true, promptContent: true })
+
+    expect(await screen.findByRole('button', { name: 'Jump to latest' })).toBeInTheDocument()
+  })
+
+  it('hides the jump to latest button while at the bottom of the transcript', async () => {
     renderWith({ mobile: true, showScrollButton: false })
 
     await waitFor(() => expect(screen.getByText('MockedPromptInput')).toBeInTheDocument())
-    expect(screen.queryByLabelText('Scroll to bottom')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Jump to latest' })).not.toBeInTheDocument()
   })
 
-  it('passes scroll button state on desktop for PromptInput desktop handling', async () => {
-    renderWith({ mobile: false, showScrollButton: true })
+  it('no longer passes scroll button state to PromptInput', async () => {
+    renderWith({ mobile: true, showScrollButton: true })
 
-    await waitFor(() => {
-      expect(screen.getByLabelText('Scroll to bottom')).toBeInTheDocument()
-    })
+    await screen.findByRole('button', { name: 'Jump to latest' })
+
+    const props = mocks.PromptInput.mock.calls.at(-1)?.[0] as Record<string, unknown>
+    expect(props.showScrollButton).toBeUndefined()
   })
 
-  it('passes scroll button state even when the prompt has content', async () => {
-    renderWith({ mobile: true, showScrollButton: true, promptContent: true })
+  it('scrolls to the bottom when the jump to latest button is clicked', async () => {
+    renderWith({ mobile: true, showScrollButton: true })
 
-    await waitFor(() => {
-      expect(screen.getByLabelText('Scroll to bottom')).toBeInTheDocument()
-    })
+    fireEvent.click(await screen.findByRole('button', { name: 'Jump to latest' }))
+
+    expect(mockScrollToBottom).toHaveBeenCalledTimes(1)
   })
 
   it('shows clear button for prompt content only when session is idle', async () => {
@@ -415,17 +408,6 @@ describe('SessionDetail scroll floating button', () => {
 
     await waitFor(() => expect(screen.getByText('MockedPromptInput')).toBeInTheDocument())
     expect(screen.queryByTitle('Stop')).not.toBeInTheDocument()
-  })
-
-  it('clicking PromptInput scroll button calls scrollToBottom from useAutoScroll', async () => {
-    renderWith({ mobile: true, showScrollButton: true })
-
-    await waitFor(() => {
-      expect(screen.getByLabelText('Scroll to bottom')).toBeInTheDocument()
-    })
-
-    fireEvent.click(screen.getByLabelText('Scroll to bottom'))
-    expect(mockScrollToBottom).toHaveBeenCalledTimes(1)
   })
 
   it('does NOT disable PromptInput when SSE is disconnected', async () => {

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 import { KeyboardShortcuts } from './KeyboardShortcuts'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { DEFAULT_DIRECT_SHORTCUTS, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_LEADER_KEY } from '@/api/types/settings'
 
 const { updateSettings, parseTuiKeybindConfig, applyTuiKeybindImport, showToast } = vi.hoisted(() => ({
@@ -18,7 +19,10 @@ const { updateSettings, parseTuiKeybindConfig, applyTuiKeybindImport, showToast 
   },
 }))
 
-vi.mock('@/hooks/useMobile', () => ({ useMobile: () => false }))
+vi.mock('@/hooks/useMobile', () => ({
+  useMobile: () => false,
+  useSwipeBack: () => ({ bind: vi.fn(), swipeProgress: 0, swipeStyles: {} }),
+}))
 vi.mock('@/hooks/useSettings', () => ({
   useSettings: () => ({
     preferences: { keyboardShortcuts: { customAction: 'Alt+J' } },
@@ -26,7 +30,10 @@ vi.mock('@/hooks/useSettings', () => ({
     updateSettings,
   }),
 }))
-vi.mock('@/lib/tuiKeybindImport', () => ({ parseTuiKeybindConfig, applyTuiKeybindImport }))
+vi.mock('@/lib/tuiKeybindImport', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/tuiKeybindImport')>('@/lib/tuiKeybindImport')
+  return { parseTuiKeybindConfig, applyTuiKeybindImport, applyRecordedShortcut: actual.applyRecordedShortcut }
+})
 vi.mock('@/lib/toast', () => ({ showToast }))
 
 const getFileInput = (container: HTMLElement) => {
@@ -94,6 +101,69 @@ describe('KeyboardShortcuts layout', () => {
     fireEvent.click(within(row).getByTitle('Clear shortcut'))
     expect(updateSettings).toHaveBeenCalledWith({ keyboardShortcuts: expect.objectContaining({ customAction: '' }) })
     expect(within(row).getByRole('button', { name: 'Not set' })).toBeInTheDocument()
+  })
+
+  it('cancels recording on Escape without saving a binding', () => {
+    render(<KeyboardShortcuts />)
+    fireEvent.click(screen.getByRole('button', { name: /Alt\+J/ }))
+    const input = screen.getByPlaceholderText('Press keys...')
+
+    expect(fireEvent.keyDown(input, { key: 'Escape' })).toBe(false)
+
+    expect(screen.queryByPlaceholderText('Press keys...')).not.toBeInTheDocument()
+    expect(updateSettings).not.toHaveBeenCalled()
+  })
+
+  it('cancels recording a leader key on Escape without binding Escape as the leader', () => {
+    render(<KeyboardShortcuts />)
+    fireEvent.click(screen.getByRole('button', { name: DEFAULT_LEADER_KEY }))
+    const input = screen.getByPlaceholderText('Press keys...')
+
+    fireEvent.keyDown(input, { key: 'Escape' })
+
+    expect(screen.queryByPlaceholderText('Press keys...')).not.toBeInTheDocument()
+    expect(updateSettings).not.toHaveBeenCalled()
+  })
+
+  it('keeps an open Radix dialog open when Escape cancels recording', () => {
+    const onOpenChange = vi.fn()
+    render(
+      <Dialog open onOpenChange={onOpenChange}>
+        <DialogContent>
+          <DialogTitle>Settings</DialogTitle>
+          <KeyboardShortcuts />
+        </DialogContent>
+      </Dialog>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Alt\+J/ }))
+    fireEvent.keyDown(screen.getByPlaceholderText('Press keys...'), { key: 'Escape' })
+
+    expect(screen.queryByPlaceholderText('Press keys...')).not.toBeInTheDocument()
+    expect(updateSettings).not.toHaveBeenCalled()
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+  })
+
+  it('unbinds the action already using the recorded binding and names it in a toast', () => {
+    render(<KeyboardShortcuts />)
+    fireEvent.click(screen.getByRole('button', { name: /Alt\+J/ }))
+    fireEvent.keyDown(screen.getByPlaceholderText('Press keys...'), { key: 't', ctrlKey: true })
+
+    expect(updateSettings).toHaveBeenCalledWith({
+      keyboardShortcuts: expect.objectContaining({ customAction: 'Ctrl+T', variantCycle: '' }),
+      directShortcuts: [...DEFAULT_DIRECT_SHORTCUTS, 'customAction'],
+    })
+    expect(showToast.info).toHaveBeenCalledWith('Shortcut conflict resolved', {
+      description: 'Unbound to avoid conflicts: variant cycle',
+    })
+  })
+
+  it('resets custom shortcuts and the leader key to the defaults', () => {
+    render(<KeyboardShortcuts />)
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }))
+
+    expect(updateSettings).toHaveBeenCalledWith({ keyboardShortcuts: {}, directShortcuts: [], leaderKey: '' })
+    expect(showToast.success).toHaveBeenCalledWith('Keyboard shortcuts reset to defaults')
   })
 })
 

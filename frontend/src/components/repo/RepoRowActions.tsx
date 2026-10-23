@@ -97,7 +97,8 @@ export function RepoRowActions({
   }
 
   const canCreateWorktree = isReady && !repo.isWorktree && Boolean(repo.repoUrl)
-  const deleteLabel = repo.isLocal ? 'Unlink Repository' : 'Delete Repository'
+  const isUnlinkableLocalRepo = Boolean(repo.isLocal && !repo.isWorktree)
+  const deleteLabel = isUnlinkableLocalRepo ? 'Unlink Repository' : 'Delete Repository'
 
   const handleDownload = async (options: { includeGit?: boolean; includePaths?: string[] }) => {
     try {
@@ -158,7 +159,7 @@ export function RepoRowActions({
               ) : (
                 <Trash2 className="w-4 h-4 mr-2" />
               )}
-              {repo.isLocal ? 'Unlink' : 'Delete'}
+              {isUnlinkableLocalRepo ? 'Unlink' : 'Delete'}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

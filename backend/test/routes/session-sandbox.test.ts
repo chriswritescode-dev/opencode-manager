@@ -22,13 +22,20 @@ function createTestDb(): Database {
 
 function createTestApp(
   db: Database,
-  options: { parents?: Record<string, string | null>; sandboxEnabled?: boolean } = {},
+  options: { parents?: Record<string, string | null>; sandboxEnabled?: boolean; sessionGetError?: Error } = {},
 ): Hono {
   const settingsService = new SettingsService(db)
   if (options.sandboxEnabled) {
     settingsService.updateSettings({ sandbox: { enabled: true } })
   }
-  const client = createFakeSessionPermissionClient({ parents: options.parents ?? {} })
+  const client = createFakeSessionPermissionClient({
+    parents: options.parents ?? {},
+    getSession: options.sessionGetError
+      ? async () => {
+          throw options.sessionGetError
+        }
+      : undefined,
+  })
   const service = new SessionSandboxService(db, new SessionAncestry(client), settingsService, {
     removeSessionSandbox: async () => undefined,
   })
@@ -94,6 +101,34 @@ describe('session sandbox routes', () => {
       lockedReason: 'child',
       available: true,
     })
+  })
+
+  it('GET returns 404 when the session does not exist on OpenCode', async () => {
+    const notFound = Object.assign(new Error('Session not found: ses_missing'), { _tag: 'SessionNotFoundError' })
+    const app = createTestApp(db, { sessionGetError: notFound })
+
+    const res = await app.request('/session-sandbox/ses_missing')
+
+    expect(res.status).toBe(404)
+    await expect(res.json()).resolves.toMatchObject({ error: 'Session not found: ses_missing' })
+  })
+
+  it('GET returns 400 when the session id is malformed', async () => {
+    const invalid = Object.assign(new Error('Expected a string starting with "ses"'), { _tag: 'InvalidRequestError' })
+    const app = createTestApp(db, { sessionGetError: invalid })
+
+    const res = await app.request('/session-sandbox/nope')
+
+    expect(res.status).toBe(400)
+    await expect(res.json()).resolves.toMatchObject({ error: 'Expected a string starting with "ses"' })
+  })
+
+  it('GET keeps returning 500 for unexpected upstream failures', async () => {
+    const app = createTestApp(db, { sessionGetError: new Error('upstream unavailable') })
+
+    const res = await app.request('/session-sandbox/ses_root')
+
+    expect(res.status).toBe(500)
   })
 
   it('PUT stores a value and GET reads it back', async () => {

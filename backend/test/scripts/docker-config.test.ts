@@ -78,6 +78,13 @@ describe('entrypoint library wiring', () => {
     const dockerfile = read(dockerfilePath)
     expect(dockerfile).not.toMatch(/chmod \+x \/usr\/local\/lib\/ocm\/container-user\.sh/)
   })
+
+  it('runs the entrypoint under tini so orphaned processes are reaped', () => {
+    const dockerfile = read(dockerfilePath)
+    expect(dockerfile).toMatch(/^\s+tini \\$/m)
+    expect(dockerfile).toContain('ENTRYPOINT ["/usr/bin/tini", "--", "/docker-entrypoint.sh"]')
+    expect(read(composePath)).not.toContain('init: true')
+  })
 })
 
 describe('microsandbox runtime install', () => {

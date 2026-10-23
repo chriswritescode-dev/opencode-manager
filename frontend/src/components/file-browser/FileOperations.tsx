@@ -57,7 +57,7 @@ export const FileOperations = memo(function FileOperations({ onUpload, onCreate 
       {isMobile ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" aria-label="Upload files">
               <Upload className="w-4 h-4" />
             </Button>
           </DropdownMenuTrigger>
@@ -73,7 +73,7 @@ export const FileOperations = memo(function FileOperations({ onUpload, onCreate 
           </DropdownMenuContent>
         </DropdownMenu>
       ) : (
-        <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+        <Button variant="outline" size="sm" aria-label="Upload files" onClick={() => fileInputRef.current?.click()}>
           <Upload className="w-4 h-4" />
           <span className="hidden sm:inline ml-1">Upload</span>
         </Button>
@@ -81,7 +81,7 @@ export const FileOperations = memo(function FileOperations({ onUpload, onCreate 
 
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
         <DialogTrigger asChild>
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" aria-label="Create file or folder">
             <Plus className="w-4 h-4" />
           </Button>
         </DialogTrigger>

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 const tts = {
   speakMessage: vi.fn(),
   stop: vi.fn(),
+  unlock: vi.fn(),
   isEnabled: true,
   isPlaying: false,
   isLoading: false,

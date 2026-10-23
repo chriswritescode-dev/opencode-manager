@@ -22,8 +22,8 @@ export function usePermissionModeToggle(
       : lockedReason === 'schedule'
         ? "Scheduled runs use the schedule's permission configuration"
         : isAuto
-          ? 'Permissions: accept everything'
-          : 'Permissions: ask every time'
+          ? 'Permissions: auto-accept all'
+          : 'Permissions: follow configured rules'
 
   const toggle = () => {
     if (disabled) return

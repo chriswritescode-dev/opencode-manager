@@ -110,7 +110,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
     updateParams((p) => {
       p.delete('mobileTab')
       p.set('settings', 'open')
-      p.set('settingsTab', 'account')
+      p.delete('settingsTab')
     }, 'replace')
   }
 

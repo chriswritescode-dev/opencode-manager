@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput, type PromptInputHandle } from './PromptInput'
+import { useComposerDraftStore } from '@/stores/composerDraftStore'
 import { BUILTIN_COMMANDS } from '@/lib/builtinCommands'
 import { createCommandActionsMock, stubMatchMedia, createVoiceConversationControllerMock } from '@/test/test-utils'
 
@@ -147,7 +148,6 @@ describe('PromptInput command submission', () => {
   const defaultProps = {
     directory: '/test',
     sessionID: 'test-session',
-    showScrollButton: false,
     isSessionActive: false,
     isStreamingResponse: false,
     onScrollToBottom: vi.fn(),
@@ -174,6 +174,7 @@ describe('PromptInput command submission', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    useComposerDraftStore.setState({ drafts: {} })
     mocks.useVoiceConversation.mockReturnValue(createVoiceConversationControllerMock())
     mocks.runCommand.mockResolvedValue(undefined)
     mocks.switchSessionModel.mockResolvedValue(undefined)
@@ -496,7 +497,7 @@ describe('PromptInput command submission', () => {
     expect(screen.queryByTestId('composer-mode-badge')).not.toBeInTheDocument()
   })
 
-  it('clears attachments and exits bash mode on Escape while idle', async () => {
+  it('exits bash mode on Escape while idle and keeps the attachments', async () => {
     const { container } = renderComponent()
 
     const input = await screen.findByPlaceholderText('Send a message...')
@@ -510,7 +511,7 @@ describe('PromptInput command submission', () => {
 
     expect(input).toHaveValue('')
     expect(screen.queryByTestId('composer-mode-badge')).not.toBeInTheDocument()
-    expect(screen.queryByText('pic.png')).not.toBeInTheDocument()
+    expect(screen.getByText('pic.png')).toBeInTheDocument()
   })
 
   it('keeps attachments and clears only the text when a built-in command is submitted', async () => {

@@ -12,7 +12,7 @@ import { PendingActionsGroup } from "@/components/notifications/PendingActionsGr
 import { LinkedServersNav } from "@/components/navigation/LinkedServersNav";
 import { ToolSidePanel } from "@/components/navigation/ToolSidePanel";
 import { useDialogParam } from "@/hooks/useDialogParam";
-import { useMobile } from "@/hooks/useMobile";
+import { useToolPanelLayout } from "@/hooks/useToolPanelLayout";
 import { useSidebarServerSelection } from "@/hooks/useSidebarServerSelection";
 import { useToolPanel } from "@/hooks/useToolPanel";
 
@@ -20,8 +20,8 @@ export function Repos() {
   const navigate = useNavigate();
   const [addRepoOpen, setAddRepoOpen] = useState(false);
   const [fileBrowserOpen, setFileBrowserOpen] = useDialogParam('files');
-  const docked = !useMobile();
-  const toolPanel = useToolPanel(docked);
+  const { docked, showRail } = useToolPanelLayout();
+  const toolPanel = useToolPanel(showRail);
   const [selectedServerId] = useSidebarServerSelection();
   const isLocalServer = selectedServerId === LOCAL_OPENCODE_SERVER_ID;
 
@@ -92,7 +92,7 @@ export function Repos() {
         />
       ) : null}
     </div>
-      {isLocalServer && docked ? <ToolSidePanel panel={toolPanel} filesBasePath="" allowNavigateAboveBase /> : null}
+      {isLocalServer && showRail ? <ToolSidePanel panel={toolPanel} filesBasePath="" allowNavigateAboveBase /> : null}
     </div>
   );
 }

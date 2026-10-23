@@ -122,7 +122,11 @@ export function Sidebar({
       style={!collapsed && width !== undefined ? { width } : undefined}
       aria-label={ariaLabel}
     >
-      {onToggle && <SidebarCollapseToggle collapsed={collapsed} onToggle={onToggle} />}
+      {onToggle && (
+        <div className={cn('flex h-9 shrink-0 items-center pt-1', collapsed ? 'justify-center' : 'justify-end px-1.5')}>
+          <SidebarCollapseToggle collapsed={collapsed} onToggle={onToggle} />
+        </div>
+      )}
       {showResizeHandle && (
         <div
           role="separator"
@@ -132,13 +136,18 @@ export function Sidebar({
           aria-valuenow={width}
           aria-valuemin={SIDEBAR_MIN_WIDTH}
           aria-valuemax={SIDEBAR_MAX_WIDTH}
-          className="absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none bg-transparent hover:bg-highlight/30 focus-visible:bg-highlight/30 focus-visible:outline-none"
+          className="group absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none bg-transparent focus-visible:outline-none"
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerEnd}
           onPointerCancel={handlePointerEnd}
           onKeyDown={handleKeyDown}
-        />
+        >
+          <span
+            aria-hidden="true"
+            className="absolute inset-y-0 right-0.5 w-0.5 rounded-full bg-muted-foreground/30 transition-all duration-150 group-hover:w-1 group-hover:bg-highlight group-focus-visible:w-1 group-focus-visible:bg-highlight"
+          />
+        </div>
       )}
       {children}
     </aside>
@@ -231,41 +240,22 @@ export interface SidebarCollapseToggleProps {
 }
 
 export function SidebarCollapseToggle({ collapsed, onToggle }: SidebarCollapseToggleProps) {
+  const Chevron = collapsed ? ChevronRight : ChevronLeft
+
   return (
     <button
       type="button"
       onClick={onToggle}
       className={cn(
-        'group absolute -right-3 top-1/2 z-20 h-16 w-6 -translate-y-1/2',
-        'flex items-center justify-center bg-transparent',
+        'inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors',
+        'hover:bg-accent hover:text-foreground',
         'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background'
       )}
       title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
       aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
       aria-expanded={!collapsed}
     >
-      <span aria-hidden="true" className="relative flex items-center justify-center">
-        <span
-          className={cn(
-            'h-8 w-1 rounded-full bg-highlight/60 transition-colors duration-150',
-            'group-hover:bg-highlight group-focus-visible:bg-highlight'
-          )}
-        />
-        <ChevronLeft
-          className={cn(
-            'absolute left-full ml-0.5 h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity duration-150',
-            'group-hover:opacity-100 group-focus-visible:opacity-100',
-            collapsed && 'hidden'
-          )}
-        />
-        <ChevronRight
-          className={cn(
-            'absolute left-full ml-0.5 h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity duration-150',
-            'group-hover:opacity-100 group-focus-visible:opacity-100',
-            !collapsed && 'hidden'
-          )}
-        />
-      </span>
+      <Chevron aria-hidden="true" className="h-4 w-4" />
     </button>
   )
 }

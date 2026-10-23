@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useParams, useNavigate, Navigate, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { getRepo } from "@/api/repos";
+import { repoQueryOptions } from "@/lib/repoQuery";
 import { MessageThread } from "@/components/message/MessageThread";
 import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
 import { FloatingTTSButton } from '@/components/message/FloatingTTSButton'
-import { X, CornerUpLeft, GitBranch } from "lucide-react";
+import { X, CornerUpLeft, GitBranch, ArrowDown } from "lucide-react";
 import { SquareFill } from "@/components/ui/square-fill";
 import { Header } from "@/components/ui/header";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +15,7 @@ import { FetchError } from '@/api/fetchWrapper'
 
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Button } from "@/components/ui/button";
+import { NotFoundState } from "@/components/ui/not-found-state";
 import { ContextUsageIndicator } from "@/components/session/ContextUsageIndicator";
 import { useSession, useInterruptSession, useUpdateSession, useCreateSession } from "@/hooks/useOpenCode";
 import { useSessionTranscript } from "@/hooks/useSessionTranscript";
@@ -29,6 +30,7 @@ import { useShortcutActions } from "@/contexts/KeyboardShortcutsContext";
 import { useSettingsDialog } from "@/hooks/useSettingsDialog";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useMobile } from "@/hooks/useMobile";
+import { useToolPanelLayout } from "@/hooks/useToolPanelLayout";
 import { useVisualViewport } from "@/hooks/useVisualViewport";
 import { useTTS } from "@/hooks/useTTS";
 import { getAssistantText, getLatestPlayableAssistantMessage, useAutoPlayLastResponse } from "@/hooks/useAutoPlayLastResponse";
@@ -113,16 +115,8 @@ async function fetchCompleteSessionHistory(sessionID: string, serverId?: string)
   }
 }
 
-function SessionRouteFallback({ message, backTo, backLabel }: { message: string; backTo: string; backLabel: string }) {
-  const navigate = useNavigate();
-  return (
-    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-background via-background to-background">
-      <div className="flex flex-col items-center gap-3 text-center">
-        <span className="text-muted-foreground">{message}</span>
-        <Button variant="outline" size="sm" onClick={() => navigate(backTo)}>{backLabel}</Button>
-      </div>
-    </div>
-  );
+function isSessionNotFoundError(error: unknown): boolean {
+  return error instanceof FetchError && (error.statusCode === 400 || error.statusCode === 404)
 }
 
 export function SessionDetail() {
@@ -153,6 +147,7 @@ export function SessionDetail() {
   const [selectedFilePath, setSelectedFilePath] = useState<string | undefined>();
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [hasPromptContent, setHasPromptContent] = useState(false);
+  const [hasComposerSuggestions, setHasComposerSuggestions] = useState(false);
   const [isVoiceConversationActive, setIsVoiceConversationActive] = useState(false);
   const [minimizedFormId, setMinimizedFormId] = useState<string | null>(null);
   const [sideQuestion, setSideQuestion] = useState<{ id: number; question: string } | null>(null);
@@ -161,8 +156,8 @@ export function SessionDetail() {
   const [forkPickerLoading, setForkPickerLoading] = useState(false);
 
   const isMobile = useMobile();
-  const docked = !isMobile;
-  const sidePanel = useToolPanel(docked);
+  const { docked, showRail } = useToolPanelLayout();
+  const sidePanel = useToolPanel(showRail);
   const { keyboardHeight } = useVisualViewport();
   const inputBottomOffset = isMobile ? keyboardHeight : 0;
   const promptOverlayObserverRef = useRef<ResizeObserver | null>(null);
@@ -186,10 +181,8 @@ export function SessionDetail() {
   }, []);
 
   const { data: repo, isLoading: repoLoading } = useQuery({
-    queryKey: ["repo", repoId],
-    queryFn: () => getRepo(repoId),
+    ...repoQueryOptions(repoId),
     enabled: id !== undefined && !isRemoteServer,
-    retry: (failureCount, error) => !(error instanceof FetchError && error.statusCode === 404) && failureCount < 3,
   });
 
   useRepoActivity(repoId, Boolean(repo) && !isRemoteServer);
@@ -351,7 +344,7 @@ export function SessionDetail() {
 
   useEffect(() => {
     if (!sessionId) return;
-    if (!(sessionQueryError instanceof FetchError) || sessionQueryError.statusCode !== 404) return;
+    if (!isSessionNotFoundError(sessionQueryError)) return;
     forgetPendingActionsForSession(sessionId);
   }, [sessionId, sessionQueryError, forgetPendingActionsForSession]);
 
@@ -746,13 +739,13 @@ export function SessionDetail() {
   }
 
   if (!isAssistantSession && !isRemoteServer && !repo) {
-    return <SessionRouteFallback message="Repository not found" backTo="/" backLabel="Back to repositories" />;
+    return <NotFoundState message="Repository not found" backTo="/" backLabel="Back to repositories" />;
   }
 
-  if (sessionQueryError instanceof FetchError && sessionQueryError.statusCode === 404) {
+  if (isSessionNotFoundError(sessionQueryError)) {
     const listTab = new URLSearchParams(location.search).get('repoTab') ?? undefined;
     return (
-      <SessionRouteFallback
+      <NotFoundState
         message="Session not found"
         backTo={isRemoteServer ? remoteProjectBackPath : getSessionListPath(repoId, isAssistantSession, listTab)}
         backLabel={isRemoteServer ? 'Back to projects' : 'Back to sessions'}
@@ -763,7 +756,7 @@ export function SessionDetail() {
   if (isRemoteServer) {
     if (sessionQueryError) {
       return (
-        <SessionRouteFallback
+        <NotFoundState
           message="Failed to load session"
           backTo={remoteProjectBackPath}
           backLabel="Back to projects"
@@ -908,7 +901,8 @@ export function SessionDetail() {
             <div
               ref={promptOverlayRef}
               className={cn(
-                "relative pointer-events-auto",
+                "relative",
+                isFormOpen && "pointer-events-auto",
                 isFormSheetOpen
                   ? "flex w-full flex-1 min-h-0 flex-col"
                   : cn("w-full md:w-[94%] md:max-w-4xl", isFormOpen && "flex max-h-full min-h-0 flex-col"),
@@ -924,7 +918,7 @@ export function SessionDetail() {
                       onSpeakVisible={handleSpeakVisibleMessages}
                     />
                   )}
-                  {hasPromptContent && !isSessionActive && (
+                  {hasPromptContent && !isSessionActive && !hasComposerSuggestions && (
                     <button
                       onMouseDown={(e) => e.preventDefault()}
                       onTouchEnd={(e) => {
@@ -951,6 +945,18 @@ export function SessionDetail() {
                     </button>
                   )}
                 </div>
+              )}
+              {showScrollButton && !isFormSheetOpen && (
+                <button
+                  type="button"
+                  aria-label="Jump to latest"
+                  title="Jump to latest"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={scrollToBottom}
+                  className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 size-11 rounded-full bg-card text-foreground border border-border shadow-md flex items-center justify-center transition-all duration-200 active:scale-95 hover:bg-accent"
+                >
+                  <ArrowDown className="w-5 h-5" />
+                </button>
               )}
               {minimizedForm && (
                 <MinimizedFormIndicator
@@ -983,11 +989,12 @@ export function SessionDetail() {
                 </div>
                 <SessionTranscriptContext.Provider value={transcriptSnapshot}>
                   <PromptInput
+                    key={sessionId}
                     ref={promptInputRef}
                     directory={sessionDirectory}
                     sessionID={sessionId}
                     onVoiceConversationActiveChange={setIsVoiceConversationActive}
-                    showScrollButton={showScrollButton}
+                    onSuggestionsOpenChange={setHasComposerSuggestions}
                     isSessionActive={isSessionActive}
                     isStreamingResponse={isStreamingResponse}
                     onScrollToBottom={scrollToBottom}
@@ -1000,7 +1007,7 @@ export function SessionDetail() {
           </div>
         )}
       </div>
-      {docked && (
+      {showRail && (
         <ToolSidePanel
           panel={sidePanel}
           repoId={isRemoteServer ? undefined : repoId}

@@ -286,3 +286,25 @@ export function applyTuiKeybindImport(
     ? { keyboardShortcuts, directShortcuts, leaderKey: imported.leaderKey, cleared }
     : { keyboardShortcuts, directShortcuts, cleared }
 }
+
+/**
+ * Applies one recorded binding to the current shortcut preferences, unbinding any other action that used the same
+ * key in the same leader/direct mode. Conflict resolution is the same as the TUI import.
+ */
+export function applyRecordedShortcut(
+  action: string,
+  shortcut: string,
+  leader: boolean,
+  current: { keyboardShortcuts: Record<string, string>; directShortcuts: string[] },
+): { keyboardShortcuts: Record<string, string>; directShortcuts: string[]; cleared: string[] } {
+  const typedAction = action as KeyboardShortcutAction
+  return applyTuiKeybindImport(
+    {
+      shortcuts: { [typedAction]: shortcut },
+      leaderActions: leader ? [typedAction] : [],
+      directActions: leader ? [] : [typedAction],
+      skipped: [],
+    },
+    current,
+  )
+}

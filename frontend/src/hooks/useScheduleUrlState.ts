@@ -35,7 +35,7 @@ function parseNullableInt(value: string | null): number | null {
 }
 
 export function useScheduleUrlState(): UseScheduleUrlStateReturn {
-  const { searchParams, updateParams } = useUrlParams()
+  const { searchParams, updateParams, closePushedParams } = useUrlParams()
 
   const scheduleTab = useMemo<ScheduleTab>(() => {
     const tabParam = searchParams.get('scheduleTab')
@@ -129,17 +129,17 @@ export function useScheduleUrlState(): UseScheduleUrlStateReturn {
   }, [openEntityDialog])
 
   const closeDialog = useCallback(() => {
-    replaceUrlParams((p) => {
+    closePushedParams((p) => {
       p.delete('scheduleDialog')
     })
-  }, [replaceUrlParams])
+  }, [closePushedParams])
 
   const closePromptDialog = useCallback(() => {
-    replaceUrlParams((p) => {
+    closePushedParams((p) => {
       p.delete('promptDialog')
       p.delete('templateId')
     })
-  }, [replaceUrlParams])
+  }, [closePushedParams])
 
   const selectRun = useCallback((id: number | null) => {
     replaceUrlParams((p) => {

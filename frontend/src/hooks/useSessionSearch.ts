@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useSessionsAcrossDirectories } from '@/hooks/useOpenCode'
+import { useWalkthroughHelperSessionIds } from '@/hooks/useChangeWalkthrough'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { selectRootSessions } from '@/components/session/session-partition'
 import { getSessionKey } from '@/lib/sessionKey'
@@ -48,14 +49,15 @@ export function useSessionSearch(directories: string[], options: UseSessionSearc
   })
 
   const directorySet = useMemo(() => new Set(directories), [directories])
+  const helperSessionIds = useWalkthroughHelperSessionIds()
 
   const rootSessions = useMemo(
     () =>
       selectRootSessions(sessions ?? [], {
         directories: project ? undefined : directorySet,
         keyFn: getSessionKey,
-      }),
-    [sessions, directorySet, project],
+      }).filter((session) => !helperSessionIds.has(session.id)),
+    [sessions, directorySet, project, helperSessionIds],
   )
 
   const filteredSessions = useMemo(() => {

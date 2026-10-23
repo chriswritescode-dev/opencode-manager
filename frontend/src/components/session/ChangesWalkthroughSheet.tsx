@@ -49,6 +49,7 @@ function walkthroughErrorMessage(error: unknown): string {
 interface ChangesWalkthroughContextValue {
   isLoading: boolean
   walkthrough: ChangeWalkthrough | null
+  hasChanges: boolean
   stale: boolean
   generating: boolean
   running: boolean
@@ -239,6 +240,7 @@ export function ChangesWalkthroughProvider({
   const value: ChangesWalkthroughContextValue = {
     isLoading: stateQuery.isLoading,
     walkthrough,
+    hasChanges: state?.hasChanges ?? true,
     stale,
     generating,
     running,
@@ -309,6 +311,7 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
   const {
     isLoading,
     walkthrough,
+    hasChanges,
     stale,
     generating,
     running,
@@ -325,6 +328,7 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
 
   const artifactPath = walkthrough?.artifactPath ?? null
   const published = walkthrough?.publishedAt != null && artifactPath !== null
+  const noChanges = !hasChanges && !generating && !published
   const artifactUrl = artifactPath === null ? null : getFileApiUrl(artifactPath, { params: { raw: true } })
   const walkthroughSessionId = walkthrough?.walkthroughSessionId ?? null
 
@@ -346,7 +350,7 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
       <WalkthroughSourceInputs />
 
-      {error ? <p className="text-sm text-destructive">{walkthroughErrorMessage(error)}</p> : null}
+      {error && !noChanges ? <p className="text-sm text-destructive">{walkthroughErrorMessage(error)}</p> : null}
 
       {stale && !generating ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2">
@@ -367,12 +371,23 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
       ) : null}
 
       {!isLoading && !walkthrough && !generating ? (
-        <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Build an interactive walkthrough of {describeWalkthroughSource(source)}.
-          </p>
-          <Button onClick={generate}>Generate walkthrough</Button>
-        </div>
+        noChanges ? (
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-foreground">
+              {source.kind === 'session' ? 'No changes in this session' : 'No changes to walk through'}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              A walkthrough covers changed files. Change something, then generate one.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Build an interactive walkthrough of {describeWalkthroughSource(source)}.
+            </p>
+            <Button onClick={generate}>Generate walkthrough</Button>
+          </div>
+        )
       ) : null}
 
       {generating && !published ? (
@@ -426,7 +441,7 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
         </div>
       ) : null}
 
-      {walkthroughSessionId && !generating && !running ? (
+      {published && walkthroughSessionId && !generating && !running ? (
         <form
           className="space-y-2"
           onSubmit={(event) => {

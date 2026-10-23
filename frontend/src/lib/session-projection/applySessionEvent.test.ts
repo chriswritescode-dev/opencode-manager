@@ -233,7 +233,6 @@ describe('applySessionEvent', () => {
         type: 'compaction',
         status: 'running',
         summary: 'Summarizing',
-        recent: 'previous turn',
       },
     ])
 
@@ -245,7 +244,6 @@ describe('applySessionEvent', () => {
         type: 'compaction',
         status: 'completed',
         summary: 'Summarizing the previous turn.',
-        recent: 'previous turn',
         reason: 'auto',
         cost: 0.02,
         tokens: { input: 900, output: 60, reasoning: 0, cache: { read: 0, write: 0 } },

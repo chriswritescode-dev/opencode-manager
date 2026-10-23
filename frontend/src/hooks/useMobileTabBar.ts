@@ -10,7 +10,7 @@ interface UseMobileTabBarReturn {
 }
 
 export function useMobileTabBar(): UseMobileTabBarReturn {
-  const { searchParams, updateParams } = useUrlParams()
+  const { searchParams, updateParams, closePushedParams } = useUrlParams()
 
   const openSheet = useMemo<MobileSheetKey | null>(() => {
     const v = searchParams.get('mobileTab')
@@ -22,8 +22,8 @@ export function useMobileTabBar(): UseMobileTabBarReturn {
   }, [updateParams])
 
   const close = useCallback(() => {
-    updateParams((p) => p.delete('mobileTab'), 'replace')
-  }, [updateParams])
+    closePushedParams((p) => p.delete('mobileTab'))
+  }, [closePushedParams])
 
   return { openSheet, open, close }
 }

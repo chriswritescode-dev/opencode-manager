@@ -132,6 +132,50 @@ describe('ScheduleJobDialog — permission config', () => {
     expect(getAllowQuestionsSwitch()).not.toBeChecked()
   })
 
+  it('names each form switch after its visible label', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <ScheduleJobDialog
+        open
+        onOpenChange={vi.fn()}
+        onSubmit={vi.fn()}
+        isSaving={false}
+      />,
+      { wrapper: createWrapper() },
+    )
+
+    await navigateToGeneralTab(user)
+
+    expect(screen.getByRole('switch', { name: 'Enabled' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('switch', { name: 'Allow access outside the working directory' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: 'Allow questions' })).toBeInTheDocument()
+  })
+
+  it('names the missing required fields while Create schedule is disabled', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <ScheduleJobDialog
+        open
+        onOpenChange={vi.fn()}
+        onSubmit={vi.fn()}
+        isSaving={false}
+      />,
+      { wrapper: createWrapper() },
+    )
+
+    expect(screen.getByRole('button', { name: 'Create schedule' })).toBeDisabled()
+    expect(screen.getByText('Required: name, prompt')).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('Name'), 'Test Job')
+
+    expect(screen.getByText('Required: prompt')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Create schedule' })).toBeDisabled()
+  })
+
   it('initializes permission config from an existing job', async () => {
     const onSubmit = vi.fn()
     const onOpenChange = vi.fn()

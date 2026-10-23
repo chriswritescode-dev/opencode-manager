@@ -51,7 +51,7 @@ export function SettingsDisclosure({
       >
         <div className="flex items-center gap-2 min-w-0">
           {icon}
-          <h3 className="text-sm font-semibold truncate">{title}</h3>
+          <h3 className="text-sm font-semibold">{title}</h3>
           {meta}
         </div>
         <ChevronDown className={cn('h-4 w-4 shrink-0 transition-transform', isOpen && 'rotate-180')} />

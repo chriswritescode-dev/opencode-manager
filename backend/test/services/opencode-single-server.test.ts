@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vite
 const createOpenCodeClientMock = vi.hoisted(() => vi.fn(() => ({
   api: {
     server: {
-      info: vi.fn().mockResolvedValue({ version: '2.0.15', pid: 1234, urls: ['http://127.0.0.1:5551'], paths: { tmp: '/tmp' } }),
+      info: vi.fn().mockResolvedValue({ version: '2.1.2', pid: 1234, urls: ['http://127.0.0.1:5551'], paths: { tmp: '/tmp' } }),
     },
   },
   forwardRaw: vi.fn(),
@@ -335,7 +335,7 @@ describe('OpenCodeServerManager - server auth', () => {
     }))
     execSyncMock.mockImplementation((cmd: string) => {
       if (cmd.includes('lsof')) return spawnMock.mock.calls.length > 0 ? '1234\n' : ''
-      if (cmd.includes('opencode --version')) return '2.0.15\n'
+      if (cmd.includes('opencode --version')) return '2.1.2\n'
       throw new Error('not found')
     })
     setOpenCodeEnv({ host: '0.0.0.0', password: 'envpassword123' })
@@ -363,7 +363,7 @@ describe('OpenCodeServerManager - server auth', () => {
     }))
     execSyncMock.mockImplementation((cmd: string) => {
       if (cmd.includes('lsof')) return spawnMock.mock.calls.length > 0 ? '1234\n' : ''
-      if (cmd.includes('opencode --version')) return '2.0.15\n'
+      if (cmd.includes('opencode --version')) return '2.1.2\n'
       throw new Error('not found')
     })
     setOpenCodeEnv({ host: '0.0.0.0', password: '' })
@@ -401,7 +401,7 @@ describe('OpenCodeServerManager - server auth', () => {
     }))
     execSyncMock.mockImplementation((cmd: string) => {
       if (cmd.includes('lsof')) return spawnMock.mock.calls.length > 0 ? '1234\n' : ''
-      if (cmd.includes('opencode --version')) return '2.0.15\n'
+      if (cmd.includes('opencode --version')) return '2.1.2\n'
       throw new Error('not found')
     })
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
@@ -520,7 +520,7 @@ describe('OpenCodeServerManager - server auth', () => {
     }))
     execSyncMock.mockImplementation((cmd: string) => {
       if (cmd.includes('lsof')) return spawnMock.mock.calls.length > 0 ? '1234\n' : ''
-      if (cmd.includes('opencode --version')) return '2.0.15\n'
+      if (cmd.includes('opencode --version')) return '2.1.2\n'
       throw new Error('not found')
     })
     const savedEnv = snapshotMicrosandboxEnv()
@@ -763,7 +763,7 @@ describe('OpenCodeServerManager - server auth', () => {
     let capturedSignal: AbortSignal | undefined
     const info = vi.fn(async (options: { signal?: AbortSignal }) => {
       capturedSignal = options.signal
-      return { version: '2.0.15', pid: 1234, urls: ['http://127.0.0.1:5551'], paths: { tmp: '/tmp' } }
+      return { version: '2.1.2', pid: 1234, urls: ['http://127.0.0.1:5551'], paths: { tmp: '/tmp' } }
     })
     createOpenCodeClientMock.mockImplementationOnce(() => ({
       api: { server: { info } },
@@ -793,7 +793,7 @@ describe('OpenCodeServerManager - server auth', () => {
       capturedSignal = options.signal
       queueMicrotask(() => emitExit(1, null))
       return new Promise((resolve) => {
-        setTimeout(() => resolve({ version: '2.0.15', pid: 1234, urls: [], paths: { tmp: '/tmp' } }), 0)
+        setTimeout(() => resolve({ version: '2.1.2', pid: 1234, urls: [], paths: { tmp: '/tmp' } }), 0)
       })
     })
     createOpenCodeClientMock.mockImplementationOnce(() => ({
@@ -842,7 +842,7 @@ describe('OpenCodeServerManager - server auth', () => {
     }))
     execSyncMock.mockImplementation((cmd: string) => {
       if (cmd.includes('lsof')) return spawnMock.mock.calls.length > 0 ? '1234\n' : ''
-      if (cmd.includes('opencode --version')) return '2.0.15\n'
+      if (cmd.includes('opencode --version')) return '2.1.2\n'
       throw new Error('not found')
     })
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
@@ -930,7 +930,7 @@ describe('OpenCodeServerManager - server auth', () => {
     }))
     execSyncMock.mockImplementation((cmd: string) => {
       if (cmd.includes('lsof')) return spawnMock.mock.calls.length > 0 ? '1234\n' : ''
-      if (cmd.includes('opencode --version')) return '2.0.15\n'
+      if (cmd.includes('opencode --version')) return '2.1.2\n'
       throw new Error('not found')
     })
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
@@ -1016,7 +1016,7 @@ describe('OpenCodeServerManager - server auth', () => {
     }))
     execSyncMock.mockImplementation((cmd: string) => {
       if (cmd.includes('lsof')) return spawnMock.mock.calls.length > 0 ? '1234\n' : ''
-      if (cmd.includes('opencode --version')) return '2.0.15\n'
+      if (cmd.includes('opencode --version')) return '2.1.2\n'
       throw new Error('not found')
     })
     manager.setDatabase(createPasswordDb(null))
@@ -1129,7 +1129,7 @@ describe('OpenCodeServerManager - server auth', () => {
     }))
     execSyncMock.mockImplementation((cmd: string) => {
       if (cmd.includes('lsof')) return spawnMock.mock.calls.length > 0 ? '1234\n' : ''
-      if (cmd.includes('opencode --version')) return '2.0.15\n'
+      if (cmd.includes('opencode --version')) return '2.1.2\n'
       throw new Error('not found')
     })
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
@@ -1179,7 +1179,7 @@ describe('OpenCodeServerManager - server auth', () => {
         if (cmd.includes('lsof')) {
           return spawnMock.mock.calls.length > 0 ? '1234\n' : '9999\n'
         }
-        if (cmd.includes('opencode --version')) return '2.0.15\n'
+        if (cmd.includes('opencode --version')) return '2.1.2\n'
         throw new Error('not found')
       })
       const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
@@ -1926,7 +1926,7 @@ describe('OpenCodeServerManager - server auth', () => {
         if (cmd.includes('lsof')) {
           return spawnMock.mock.calls.length > 0 ? '1234\n' : '9999\n'
         }
-        if (cmd.includes('opencode --version')) return '2.0.15\n'
+        if (cmd.includes('opencode --version')) return '2.1.2\n'
         throw new Error('not found')
       })
       readFileSyncMock.mockReturnValue(procStatStringWithGroup(9999, '42'))
@@ -1983,7 +1983,7 @@ describe('OpenCodeServerManager - server auth', () => {
       }))
       execSyncMock.mockImplementation((cmd: string) => {
         if (cmd.includes('lsof')) return spawnMock.mock.calls.length > 0 ? '1234\n' : ''
-        if (cmd.includes('opencode --version')) return '2.0.15\n'
+        if (cmd.includes('opencode --version')) return '2.1.2\n'
         throw new Error('not found')
       })
       readdirSyncMock.mockReturnValue(['10001'])
@@ -2062,7 +2062,7 @@ describe('OpenCodeServerManager - server auth', () => {
       }))
       execSyncMock.mockImplementation((cmd: string) => {
         if (cmd.includes('lsof')) return ''
-        if (cmd.includes('opencode --version')) return '2.0.15\n'
+        if (cmd.includes('opencode --version')) return '2.1.2\n'
         throw new Error('not found')
       })
       readdirSyncMock.mockReturnValue(['10001'])
@@ -2125,7 +2125,7 @@ describe('OpenCodeServerManager - server auth', () => {
       }))
       execSyncMock.mockImplementation((cmd: string) => {
         if (cmd.includes('lsof')) return spawnMock.mock.calls.length > 0 ? '1234\n' : ''
-        if (cmd.includes('opencode --version')) return '2.0.15\n'
+        if (cmd.includes('opencode --version')) return '2.1.2\n'
         throw new Error('not found')
       })
       readFileSyncMock.mockImplementation((filePath: string) => {
@@ -2181,7 +2181,7 @@ describe('OpenCodeServerManager - server auth', () => {
       }))
       execSyncMock.mockImplementation((cmd: string) => {
         if (cmd.includes('lsof')) return '9999\n'
-        if (cmd.includes('opencode --version')) return '2.0.15\n'
+        if (cmd.includes('opencode --version')) return '2.1.2\n'
         throw new Error('not found')
       })
       readFileSyncMock.mockReturnValue(procStatStringWithGroup(9999, '42'))
@@ -2223,7 +2223,7 @@ describe('OpenCodeServerManager - server auth', () => {
       }))
       execSyncMock.mockImplementation((cmd: string) => {
         if (cmd.includes('lsof')) return '9998\n'
-        if (cmd.includes('opencode --version')) return '2.0.15\n'
+        if (cmd.includes('opencode --version')) return '2.1.2\n'
         throw new Error('not found')
       })
       killSpy.mockImplementation(((pid: number, signal?: number | string) => {
@@ -2260,7 +2260,7 @@ describe('OpenCodeServerManager - server auth', () => {
       }))
       execSyncMock.mockImplementation((cmd: string) => {
         if (cmd.includes('lsof')) return '9997\n'
-        if (cmd.includes('opencode --version')) return '2.0.15\n'
+        if (cmd.includes('opencode --version')) return '2.1.2\n'
         throw new Error('not found')
       })
       killSpy.mockImplementation(((pid: number, signal?: number | string) => {
@@ -2292,7 +2292,7 @@ describe('OpenCodeServerManager - server auth', () => {
       }))
       execSyncMock.mockImplementation((cmd: string) => {
         if (cmd.includes('lsof')) return spawnMock.mock.calls.length > 0 ? '8888\n' : ''
-        if (cmd.includes('opencode --version')) return '2.0.15\n'
+        if (cmd.includes('opencode --version')) return '2.1.2\n'
         throw new Error('not found')
       })
       killSpy.mockImplementation(((pid: number, signal?: number | string) => {
@@ -2965,7 +2965,7 @@ describe('OpenCodeServerManager - server auth', () => {
     }))
     execSyncMock.mockImplementation((cmd: string) => {
       if (cmd.includes('lsof')) return ''
-      if (cmd.includes('opencode --version')) return '2.0.15\n'
+      if (cmd.includes('opencode --version')) return '2.1.2\n'
       throw new Error('not found')
     })
     installManagedPluginsMock.mockRejectedValueOnce(new Error('readonly filesystem'))
@@ -2997,7 +2997,7 @@ describe('OpenCodeServerManager - server auth', () => {
     }))
     execSyncMock.mockImplementation((cmd: string) => {
       if (cmd.includes('lsof')) return spawnMock.mock.calls.length > 0 ? '1234\n' : ''
-      if (cmd.includes('opencode --version')) return '2.0.15\n'
+      if (cmd.includes('opencode --version')) return '2.1.2\n'
       throw new Error('not found')
     })
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
@@ -3028,7 +3028,7 @@ describe('OpenCodeServerManager - server auth', () => {
     }))
     execSyncMock.mockImplementation((cmd: string) => {
       if (cmd.includes('lsof')) return spawnMock.mock.calls.length > 0 ? '1234\n' : ''
-      if (cmd.includes('opencode --version')) return '2.0.15\n'
+      if (cmd.includes('opencode --version')) return '2.1.2\n'
       throw new Error('not found')
     })
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
@@ -3056,7 +3056,7 @@ describe('OpenCodeServerManager - server auth', () => {
     }))
     execSyncMock.mockImplementation((cmd: string) => {
       if (cmd.includes('lsof')) return spawnMock.mock.calls.length > 0 ? '1234\n' : ''
-      if (cmd.includes('opencode --version')) return '2.0.15\n'
+      if (cmd.includes('opencode --version')) return '2.1.2\n'
       throw new Error('not found')
     })
     restoreQuarantinedOpenCodePluginsMock.mockRejectedValueOnce(new Error('readonly filesystem'))
@@ -3087,7 +3087,7 @@ describe('OpenCodeServerManager - server auth', () => {
     }))
     execSyncMock.mockImplementation((cmd: string) => {
       if (cmd.includes('lsof')) return ''
-      if (cmd.includes('opencode --version')) return '2.0.15\n'
+      if (cmd.includes('opencode --version')) return '2.1.2\n'
       throw new Error('not found')
     })
     installManagedPluginsMock.mockRejectedValueOnce(new Error('readonly filesystem'))
@@ -3119,7 +3119,7 @@ describe('OpenCodeServerManager - server auth', () => {
     }))
     execSyncMock.mockImplementation((cmd: string) => {
       if (cmd.includes('lsof')) return spawnMock.mock.calls.length > 0 ? '1234\n' : ''
-      if (cmd.includes('opencode --version')) return '2.0.15\n'
+      if (cmd.includes('opencode --version')) return '2.1.2\n'
       throw new Error('not found')
     })
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
@@ -3155,7 +3155,7 @@ describe('OpenCodeServerManager - server auth', () => {
     await expect(manager.start()).rejects.toThrow('OpenCode 1.18.32 is not supported')
 
     expect(spawnMock).not.toHaveBeenCalled()
-    expect(manager.getLastStartupError()).toContain('requires OpenCode >=2.0.15 <3.0.0')
+    expect(manager.getLastStartupError()).toContain('requires OpenCode >=2.1.2 <3.0.0')
     expect(manager.isLastStartupErrorNonRecoverable()).toBe(true)
   })
 
@@ -3164,7 +3164,7 @@ describe('OpenCodeServerManager - server auth', () => {
       isEnabled: () => false,
     }))
     execSyncMock.mockImplementation((cmd: string) => {
-      if (cmd.includes('opencode --version')) return 'opencode v2.0.15\n'
+      if (cmd.includes('opencode --version')) return 'opencode v2.1.2\n'
       throw new Error('not found')
     })
     const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
@@ -3174,7 +3174,7 @@ describe('OpenCodeServerManager - server auth', () => {
     await manager.start()
 
     expect(spawnMock).toHaveBeenCalled()
-    expect(manager.getVersion()).toBe('2.0.15')
+    expect(manager.getVersion()).toBe('2.1.2')
     expect(manager.isVersionSupported()).toBe(true)
   })
 
@@ -3195,7 +3195,7 @@ describe('OpenCodeServerManager - server auth', () => {
               marked = true
               manager.markRestartPending()
             }
-            return { version: '2.0.15', pid: 1234, urls: [], paths: { tmp: '/tmp' } }
+            return { version: '2.1.2', pid: 1234, urls: [], paths: { tmp: '/tmp' } }
           }),
         },
       },
@@ -3399,7 +3399,7 @@ describe('ConfigReloadError', () => {
 })
 
 describe('OpenCodeServerManager - checkHealth', () => {
-  const serverInfo = { version: '2.0.15', pid: 1234, urls: ['http://127.0.0.1:5551'], paths: { tmp: '/tmp' } }
+  const serverInfo = { version: '2.1.2', pid: 1234, urls: ['http://127.0.0.1:5551'], paths: { tmp: '/tmp' } }
 
   it('probes GET /api/info through the API client and returns true for a ServerInfo response', async () => {
     const { opencodeServerManager } = await import('../../src/services/opencode-single-server')

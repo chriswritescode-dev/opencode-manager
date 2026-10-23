@@ -4,6 +4,7 @@ import { passkey } from '@better-auth/passkey'
 import { Database } from 'bun:sqlite'
 import { ENV, getTrustedOrigins } from '@opencode-manager/shared/config/env'
 import { AUTH_COOKIE_PREFIX } from './cookies'
+import { AUTH_SOCKET_IP_HEADER } from './client-ip'
 
 export type AuthInstance = ReturnType<typeof createAuth>
 
@@ -90,6 +91,9 @@ export function createAuth(db: Database) {
     advanced: {
       cookiePrefix: AUTH_COOKIE_PREFIX,
       useSecureCookies: ENV.AUTH.SECURE_COOKIES,
+      ipAddress: {
+        ipAddressHeaders: [AUTH_SOCKET_IP_HEADER],
+      },
     },
   })
 

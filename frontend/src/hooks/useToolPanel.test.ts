@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
-import { render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, useLocation } from 'react-router-dom'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { isPanelTool, toggleToolDialogParams, toggleToolPanelParams, useToolPanel } from './useToolPanel'
 
-describe('activity tool', () => {
-  it('is a panel tool', () => {
+describe('activity tool', () => {  it('is a panel tool', () => {
     expect(isPanelTool('activity')).toBe(true)
   })
 
@@ -75,8 +74,7 @@ describe('toggleToolPanelParams', () => {
 })
 
 describe('toggleToolDialogParams', () => {
-  it('opens a dialog, clears mobileTab and other tools owned params', () => {
-    const params = new URLSearchParams('mobileTab=more&previewPort=3000&previewPath=%2Fx&keep=1')
+  it('opens a dialog, clears mobileTab and other tools owned params', () => {    const params = new URLSearchParams('mobileTab=more&previewPort=3000&previewPath=%2Fx&keep=1')
 
     toggleToolDialogParams(params, 'terminal')
 
@@ -108,5 +106,100 @@ describe('toggleToolDialogParams', () => {
     expect(params.has('terminalDirectory')).toBe(false)
     expect(params.has('previewPort')).toBe(false)
     expect(params.get('keep')).toBe('1')
+  })
+})
+
+describe('panel history entries', () => {
+  function PanelHarness() {
+    const { activeTool, toggleTool, closePanel } = useToolPanel(true)
+    const location = useLocation()
+    const navigate = useNavigate()
+
+    return createElement(
+      'div',
+      null,
+      createElement('span', { 'data-testid': 'activeTool' }, activeTool ?? ''),
+      createElement('span', { 'data-testid': 'search' }, location.search),
+      createElement('span', { 'data-testid': 'pathname' }, location.pathname),
+      createElement('button', { onClick: () => toggleTool('files') }, 'open files'),
+      createElement('button', { onClick: () => toggleTool('terminal') }, 'open terminal'),
+      createElement('button', { onClick: closePanel }, 'close'),
+      createElement('button', { onClick: () => navigate(-1) }, 'back'),
+    )
+  }
+
+  it('closing a panel the rail opened goes back instead of leaving a dead history entry', () => {
+    render(
+      createElement(
+        MemoryRouter,
+        { initialEntries: ['/repos/1', '/repos/1/sessions/ses_1'], initialIndex: 1 },
+        createElement(PanelHarness),
+      ),
+    )
+
+    fireEvent.click(screen.getByText('open files'))
+    expect(screen.getByTestId('search').textContent).toBe('?panel=files')
+
+    fireEvent.click(screen.getByText('close'))
+    expect(screen.getByTestId('search').textContent).toBe('')
+
+    fireEvent.click(screen.getByText('back'))
+    expect(screen.getByTestId('pathname').textContent).toBe('/repos/1')
+  })
+
+  it('closing the active tool from the rail goes back instead of replacing the entry', () => {
+    render(
+      createElement(
+        MemoryRouter,
+        { initialEntries: ['/repos/1/sessions/ses_1'], initialIndex: 0 },
+        createElement(PanelHarness),
+      ),
+    )
+
+    fireEvent.click(screen.getByText('open files'))
+    expect(screen.getByTestId('activeTool').textContent).toBe('files')
+
+    fireEvent.click(screen.getByText('open files'))
+    expect(screen.getByTestId('activeTool').textContent).toBe('')
+    expect(screen.getByTestId('search').textContent).toBe('')
+  })
+
+  it('switching tools keeps one history entry and closing returns to before the panel opened', () => {
+    render(
+      createElement(
+        MemoryRouter,
+        { initialEntries: ['/repos/2', '/repos/2/sessions/ses_1'], initialIndex: 1 },
+        createElement(PanelHarness),
+      ),
+    )
+
+    fireEvent.click(screen.getByText('open files'))
+    fireEvent.click(screen.getByText('open terminal'))
+    expect(screen.getByTestId('search').textContent).toBe('?panel=terminal')
+
+    fireEvent.click(screen.getByText('close'))
+    expect(screen.getByTestId('search').textContent).toBe('')
+
+    fireEvent.click(screen.getByText('back'))
+    expect(screen.getByTestId('pathname').textContent).toBe('/repos/2')
+  })
+
+  it('closing a deep-linked panel replaces the entry instead of leaving the route', () => {
+    render(
+      createElement(
+        MemoryRouter,
+        { initialEntries: ['/repos/2', '/repos/2/sessions/ses_1?panel=files'], initialIndex: 1 },
+        createElement(PanelHarness),
+      ),
+    )
+
+    expect(screen.getByTestId('activeTool').textContent).toBe('files')
+
+    fireEvent.click(screen.getByText('close'))
+    expect(screen.getByTestId('search').textContent).toBe('')
+    expect(screen.getByTestId('pathname').textContent).toBe('/repos/2/sessions/ses_1')
+
+    fireEvent.click(screen.getByText('back'))
+    expect(screen.getByTestId('pathname').textContent).toBe('/repos/2')
   })
 })

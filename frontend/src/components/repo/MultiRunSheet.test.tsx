@@ -317,6 +317,25 @@ describe('MultiRunSheet', () => {
       expect(screen.getByText('1/5 selected')).toBeInTheDocument()
     })
 
+    it('names the missing required fields while Launch is disabled', async () => {
+      const user = userEvent.setup()
+      renderSheet()
+      await openNewRun(user)
+
+      expect(screen.getByRole('button', { name: 'Launch' })).toBeDisabled()
+      expect(screen.getByText('Required: group name, prompt, at least one model')).toBeInTheDocument()
+
+      await user.type(screen.getByLabelText('Group name'), 'Sweep')
+
+      expect(screen.getByText('Required: prompt, at least one model')).toBeInTheDocument()
+
+      await user.type(screen.getByLabelText('Prompt'), 'go')
+      await user.click(screen.getByRole('checkbox', { name: 'GPT-4o' }))
+
+      expect(screen.queryByText(/^Required:/)).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Launch' })).toBeEnabled()
+    })
+
     it('caps model selection at five', async () => {
       const user = userEvent.setup()
       renderSheet()

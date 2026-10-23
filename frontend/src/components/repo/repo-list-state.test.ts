@@ -7,6 +7,7 @@ import {
   dedupeRepos,
   filterReposBySearch,
   filterReposByMode,
+  getRepoListEmptyMessage,
   sortRepos,
   groupReposIntoSections,
   countAttentionItems,
@@ -348,6 +349,24 @@ describe('repo-list-state', () => {
       ]
       const result = groupReposIntoSections(repos, 'all', 'recent')
       expect(result.length).toBeGreaterThanOrEqual(1)
+    })
+  })
+
+  describe('getRepoListEmptyMessage', () => {
+    it('prefers a search-aware message when a query is active', () => {
+      const sections = [{ title: 'Recent', repos: [], emptyMessage: 'No recently accessed repositories' }]
+
+      expect(getRepoListEmptyMessage(sections, 'zzzz-nomatch')).toBe('No repositories found matching "zzzz-nomatch"')
+    })
+
+    it('falls back to the section empty message without a query', () => {
+      const sections = [{ title: 'Needs Attention', repos: [], emptyMessage: 'No repositories need attention' }]
+
+      expect(getRepoListEmptyMessage(sections, '   ')).toBe('No repositories need attention')
+    })
+
+    it('falls back to the generic message when no section has one', () => {
+      expect(getRepoListEmptyMessage([], '')).toBe('No repositories found')
     })
   })
 

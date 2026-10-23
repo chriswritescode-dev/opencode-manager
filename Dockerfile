@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-venv \
+    tini \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
@@ -62,7 +63,7 @@ FROM base AS runner
 # an arm64 host builds the amd64 platform; 0.12.7 is the newest verified-good
 # release, so re-verify a bump there before moving it.
 ARG UV_VERSION=0.12.7
-ARG OPENCODE_VERSION=2.0.15
+ARG OPENCODE_VERSION=2.1.2
 ARG MICROSANDBOX_VERSION=0.7.2
 ARG PLAYWRIGHT_VERSION=1.63.0
 # Bump TOOLS_CACHEBUST (e.g. via --build-arg) to force a fresh uv/opencode
@@ -155,5 +156,5 @@ EXPOSE 5003 5004 5100 5101 5102 5103
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
   CMD curl -f http://localhost:5003/api/health || exit 1
 
-ENTRYPOINT ["/docker-entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/docker-entrypoint.sh"]
 CMD ["bun", "backend/src/index.ts"]

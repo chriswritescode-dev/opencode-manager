@@ -46,7 +46,7 @@ const generatingWalkthrough: ChangeWalkthrough = {
 }
 
 function state(overrides: Partial<ChangeWalkthroughState> = {}): ChangeWalkthroughState {
-  return { walkthrough, currentDiffHash: 'hash-1', stale: false, generating: false, running: false, error: null, ...overrides }
+  return { walkthrough, currentDiffHash: 'hash-1', hasChanges: true, stale: false, generating: false, running: false, error: null, ...overrides }
 }
 
 function createWrapper() {
@@ -488,6 +488,37 @@ describe('ChangesWalkthroughSheet', () => {
       await screen.findByText('The walkthrough session did not publish within 15 minutes'),
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Generate walkthrough' })).toBeEnabled()
+  })
+
+  it('shows an upfront empty state when the session has no changes', async () => {
+    mocks.getChangeWalkthrough.mockResolvedValue(
+      state({ walkthrough: null, currentDiffHash: 'e3b0c44298fc1c149afbf4c8996fb924', hasChanges: false }),
+    )
+    renderSheet()
+
+    expect(await screen.findByText('No changes in this session')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Generate walkthrough' })).not.toBeInTheDocument()
+  })
+
+  it('hides the refine form until a walkthrough is published', async () => {
+    mocks.getChangeWalkthrough.mockResolvedValue(
+      state({
+        walkthrough: {
+          ...walkthrough,
+          status: 'failed',
+          artifactPath: null,
+          publishedAt: null,
+          error: { message: 'The walkthrough session did not publish within 15 minutes', code: 'WALKTHROUGH_TIMEOUT' },
+        },
+        error: { message: 'The walkthrough session did not publish within 15 minutes', code: 'WALKTHROUGH_TIMEOUT' },
+      }),
+    )
+    renderSheet()
+
+    expect(
+      await screen.findByText('The walkthrough session did not publish within 15 minutes'),
+    ).toBeInTheDocument()
+    expect(screen.queryByLabelText('Refine walkthrough')).not.toBeInTheDocument()
   })
 
   it.each([

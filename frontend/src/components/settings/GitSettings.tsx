@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { randomId } from '@/lib/utils'
 import type { GitCredential, GitIdentity, GitIdentityProfile, UserPreferences } from '@/api/types/settings'
+import { isValidGitIdentityEmail } from '@opencode-manager/shared'
 import { listRepos, updateRepoGitCredential } from '@/api/repos'
 import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 
@@ -191,6 +192,9 @@ export function GitSettings() {
   }
 
   const saveAll = async () => {
+    if (![gitIdentity, ...gitIdentities].every((identity) => isValidGitIdentityEmail(identity.email))) {
+      return
+    }
     setIsSaving(true)
     try {
       showToast.loading('Saving git configuration...', { id: 'git-config' })
@@ -265,7 +269,7 @@ export function GitSettings() {
                     value={gitIdentity.name}
                     onChange={(e) => updateIdentity('name', e.target.value)}
                     disabled={isSaving}
-                    className="bg-background border-border text-foreground placeholder:text-muted-foreground"
+                    className="bg-background border-border text-foreground placeholder:text-placeholder"
                   />
                 </div>
                 <div className="space-y-2">
@@ -277,8 +281,13 @@ export function GitSettings() {
                     value={gitIdentity.email}
                     onChange={(e) => updateIdentity('email', e.target.value)}
                     disabled={isSaving}
-                    className="bg-background border-border text-foreground placeholder:text-muted-foreground"
+                    aria-invalid={!isValidGitIdentityEmail(gitIdentity.email)}
+                    aria-describedby={!isValidGitIdentityEmail(gitIdentity.email) ? 'git-email-error' : undefined}
+                    className="bg-background border-border text-foreground placeholder:text-placeholder"
                   />
+                  {!isValidGitIdentityEmail(gitIdentity.email) && (
+                    <p id="git-email-error" className="text-xs text-destructive">Enter a valid email address</p>
+                  )}
                 </div>
               </div>
             </div>
@@ -439,7 +448,7 @@ export function GitSettings() {
                           value={identity.name}
                           onChange={(e) => updateSavedIdentity(index, 'name', e.target.value)}
                           disabled={isSaving}
-                          className="bg-background border-border text-foreground placeholder:text-muted-foreground"
+                          className="bg-background border-border text-foreground placeholder:text-placeholder"
                         />
                       </div>
                       <div className="space-y-2">
@@ -451,8 +460,13 @@ export function GitSettings() {
                           value={identity.email}
                           onChange={(e) => updateSavedIdentity(index, 'email', e.target.value)}
                           disabled={isSaving}
-                          className="bg-background border-border text-foreground placeholder:text-muted-foreground"
+                          aria-invalid={!isValidGitIdentityEmail(identity.email)}
+                          aria-describedby={!isValidGitIdentityEmail(identity.email) ? `git-identity-${index}-email-error` : undefined}
+                          className="bg-background border-border text-foreground placeholder:text-placeholder"
                         />
+                        {!isValidGitIdentityEmail(identity.email) && (
+                          <p id={`git-identity-${index}-email-error`} className="text-xs text-destructive">Enter a valid email address</p>
+                        )}
                       </div>
                     </div>
                   </div>

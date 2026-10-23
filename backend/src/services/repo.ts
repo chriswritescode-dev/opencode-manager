@@ -27,30 +27,52 @@ const GIT_CLONE_TIMEOUT = 300000
 const DEFAULT_DISCOVERY_MAX_DEPTH = 4
 const DISCOVERY_SKIP_DIRECTORIES = new Set(['.git', 'node_modules'])
 
-function enhanceCloneError(error: unknown, repoUrl: string, originalMessage: string): Error {
+export class RepoInputError extends Error {
+  readonly statusCode: 400
+
+  constructor(message: string) {
+    super(message)
+    this.name = 'RepoInputError'
+    this.statusCode = 400
+  }
+}
+
+function notFoundOrDeniedMessage(repoUrl: string): string {
+  return `Repository not found or access denied: ${repoUrl}. Check the URL and add credentials in Settings > Git Credentials if it is private.`
+}
+
+function enhanceCloneError(repoUrl: string, originalMessage: string): RepoInputError {
   const message = originalMessage.toLowerCase()
-  
-  if (message.includes('authentication failed') || message.includes('could not authenticate') || message.includes('invalid credentials')) {
-    return new Error(`Authentication failed for ${repoUrl}. Please add your credentials in Settings > Git Credentials.`)
-  }
-  
-  if (message.includes('repository not found') || message.includes('404')) {
-    return new Error(`Repository not found: ${repoUrl}. Check the URL and ensure you have access to it.`)
-  }
-  
-  if (isSSHUrl(repoUrl) && message.includes('permission denied')) {
-    return new Error(`Access denied to ${repoUrl}. Please add your SSH credentials in Settings > Git Credentials and ensure your SSH key has access to this repository.`)
-  }
-  
-  if (isGitHubHttpsUrl(repoUrl) && (message.includes('permission denied') || message.includes('fatal'))) {
-    return new Error(`Access denied to ${repoUrl}. Please add your credentials in Settings > Git Credentials and ensure you have proper access.`)
-  }
-  
+
   if (message.includes('timed out')) {
-    return new Error(`Clone timed out for ${repoUrl}. The repository might be too large or there could be network issues. Try again or verify the repository exists.`)
+    return new RepoInputError(`Clone timed out for ${repoUrl}. The repository might be too large or there could be network issues.`)
   }
-  
-  return error instanceof Error ? error : new Error(originalMessage)
+
+  if (message.includes('could not resolve host') || message.includes('network is unreachable')) {
+    return new RepoInputError(`Repository not reachable: ${repoUrl}. Check the URL and your network connection.`)
+  }
+
+  if (message.includes('repository not found') || message.includes('not found') || message.includes('does not exist') || message.includes('404')) {
+    return new RepoInputError(notFoundOrDeniedMessage(repoUrl))
+  }
+
+  if (message.includes('permission denied')) {
+    return isSSHUrl(repoUrl)
+      ? new RepoInputError(`Access denied to ${repoUrl}. Add your SSH credentials in Settings > Git Credentials and ensure your SSH key has access.`)
+      : new RepoInputError(notFoundOrDeniedMessage(repoUrl))
+  }
+
+  if (message.includes('authentication failed') || message.includes('could not authenticate') || message.includes('invalid credentials') || message.includes('could not read username')) {
+    return isGitHubHttpsUrl(repoUrl)
+      ? new RepoInputError(notFoundOrDeniedMessage(repoUrl))
+      : new RepoInputError(`Authentication failed for ${repoUrl}. Check your credentials in Settings > Git Credentials.`)
+  }
+
+  if (message.includes('not a git repository') || message.includes('fatal:')) {
+    return new RepoInputError(notFoundOrDeniedMessage(repoUrl))
+  }
+
+  return new RepoInputError(`Could not clone ${repoUrl}. Check the URL and your access to it.`)
 }
 
 async function hasCommits(repoPath: string, env: Record<string, string>): Promise<boolean> {
@@ -258,12 +280,12 @@ async function registerExistingLocalRepo(
 
   const exists = await pathExists(normalizedSourcePath)
   if (!exists) {
-    throw new Error(`No such file or directory: '${normalizedSourcePath}'`)
+    throw new RepoInputError(`No such directory: '${normalizedSourcePath}'`)
   }
 
   const isGitRepo = await isValidGitRepo(normalizedSourcePath, env)
   if (!isGitRepo) {
-    throw new Error(`Directory exists but is not a valid Git repository. Use folder discovery to scan nested repositories.`)
+    throw new RepoInputError(`Directory is not a valid Git repository: '${normalizedSourcePath}'.`)
   }
 
   if (branch) {
@@ -317,11 +339,11 @@ export async function discoverLocalRepos(
 }> {
   const normalizedRootPath = normalizeAbsolutePath(rootPath)
   const rootStats = await fs.stat(normalizedRootPath).catch((error: unknown) => {
-    throw new Error(`Failed to access '${normalizedRootPath}': ${getErrorMessage(error)}`)
+    throw new RepoInputError(`Failed to access '${normalizedRootPath}': ${getErrorMessage(error)}`)
   })
 
   if (!rootStats.isDirectory()) {
-    throw new Error(`Path is not a directory: '${normalizedRootPath}'`)
+    throw new RepoInputError(`Path is not a directory: '${normalizedRootPath}'`)
   }
 
   const repoPaths: string[] = []
@@ -687,7 +709,7 @@ export async function cloneRepo(
           try {
             await executeCommand(['git', 'clone', normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env, timeout: GIT_CLONE_TIMEOUT })
           } catch (cloneError: unknown) {
-            throw enhanceCloneError(cloneError, normalizedRepoUrl, getErrorMessage(cloneError))
+            throw enhanceCloneError(normalizedRepoUrl, getErrorMessage(cloneError))
           }
           
           let localBranchExists = 'missing'
@@ -704,7 +726,7 @@ export async function cloneRepo(
             await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'checkout', branch])
           }
         } else {
-          throw enhanceCloneError(error, normalizedRepoUrl, getErrorMessage(error))
+          throw enhanceCloneError(normalizedRepoUrl, getErrorMessage(error))
         }
       }
     } else {
@@ -801,7 +823,7 @@ export async function cloneRepo(
           try {
             await executeCommand(['git', 'clone', normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env, timeout: GIT_CLONE_TIMEOUT })
           } catch (cloneError: unknown) {
-            throw enhanceCloneError(cloneError, normalizedRepoUrl, getErrorMessage(cloneError))
+            throw enhanceCloneError(normalizedRepoUrl, getErrorMessage(cloneError))
           }
           
           let localBranchExists = 'missing'
@@ -818,7 +840,7 @@ export async function cloneRepo(
             await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'checkout', branch])
           }
         } else {
-          throw enhanceCloneError(error, normalizedRepoUrl, getErrorMessage(error))
+          throw enhanceCloneError(normalizedRepoUrl, getErrorMessage(error))
         }
       }
     }
@@ -876,6 +898,14 @@ export async function switchBranch(
   }
 }
 
+async function assertValidBranchName(branch: string): Promise<void> {
+  try {
+    await executeCommand(['git', 'check-ref-format', '--branch', branch], { silent: true })
+  } catch {
+    throw new RepoInputError(`Invalid branch name: '${branch}'.`)
+  }
+}
+
 export async function createBranch(database: Database, gitAuthService: GitAuthService, repoId: number, branch: string): Promise<void> {
   const repo = getRepoById(database, repoId)
   if (!repo) {
@@ -890,6 +920,8 @@ export async function createBranch(database: Database, gitAuthService: GitAuthSe
       .replace(/^refs\/heads\//, '')
       .replace(/^refs\/remotes\//, '')
       .replace(/^origin\//, '')
+
+    await assertValidBranchName(sanitizedBranch)
 
     logger.info(`Creating new branch: ${sanitizedBranch} in ${repo.localPath}`)
     await executeCommand(['git', '-C', repoPath, 'checkout', '-b', sanitizedBranch], { env })
@@ -944,6 +976,19 @@ export async function resolveMainCheckoutPath(worktreePath: string): Promise<str
   }
 }
 
+async function removeWorkspaceAlias(aliasPath: string): Promise<void> {
+  try {
+    const stats = await fs.lstat(aliasPath)
+    if (stats.isSymbolicLink()) {
+      await fs.unlink(aliasPath)
+    }
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error
+    }
+  }
+}
+
 export async function deleteRepoFiles(database: Database, repoId: number): Promise<void> {
   const repo = getRepoById(database, repoId)
   if (!repo) {
@@ -959,9 +1004,14 @@ export async function deleteRepoFiles(database: Database, repoId: number): Promi
     if (baseRepoPath) {
       await removeWorktree(baseRepoPath, fullPath)
     }
+
+    await executeCommand(['rm', '-rf', repo.localPath], getReposPath())
+  } else if (repo.isLocal) {
+    await removeWorkspaceAlias(fullPath)
+  } else {
+    await executeCommand(['rm', '-rf', repo.localPath], getReposPath())
   }
 
-  await executeCommand(['rm', '-rf', repo.localPath], getReposPath())
   deleteRepo(database, repoId)
 }
 

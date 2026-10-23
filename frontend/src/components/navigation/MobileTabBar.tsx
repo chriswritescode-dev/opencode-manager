@@ -159,6 +159,7 @@ function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideR
       icon: Menu,
       onClick: () => open('more'),
       active: openSheet === 'more',
+      badge: !showsSchedules && unreadScheduleCount > 0,
     },
   ]
 }
@@ -213,7 +214,11 @@ const TabBarRow = memo(function TabBarRow({ tabs }: TabBarRowProps) {
             <div className="relative">
               <Icon className="w-5 h-5" />
               {tab.badge && (
-                <span className="absolute -top-0.5 -right-1 w-2 h-2 rounded-full bg-highlight ring-2 ring-card animate-pulse" />
+                <span
+                  aria-hidden="true"
+                  data-unread-badge
+                  className="absolute -top-0.5 -right-1 w-2 h-2 rounded-full bg-highlight ring-2 ring-card animate-pulse"
+                />
               )}
             </div>
             <span className="leading-none">{tab.label}</span>

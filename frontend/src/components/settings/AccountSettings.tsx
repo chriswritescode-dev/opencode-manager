@@ -164,7 +164,7 @@ export function AccountSettings() {
                   <CardTitle className="text-base sm:text-lg">Profile</CardTitle>
                 </div>
                 {!editingProfile && (
-                  <Button variant="ghost" size="sm" onClick={() => setEditingProfile(true)} className="h-8">
+                  <Button variant="ghost" size="sm" onClick={() => setEditingProfile(true)} aria-label="Edit profile" className="h-8">
                     <Edit2 className="h-3.5 w-3.5" />
                   </Button>
                 )}

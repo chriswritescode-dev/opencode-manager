@@ -11,6 +11,7 @@ import { useSttAvailability } from '@/hooks/useSTT'
 import { useUserBash } from '@/stores/userBashStore'
 import { useSessionAgentStore } from '@/stores/sessionAgentStore'
 import { useSendErrorStore } from '@/stores/sendErrorStore'
+import { useComposerDraftStore, type ComposerDraft } from '@/stores/composerDraftStore'
 import { useRecentCommandsStore } from '@/stores/recentCommandsStore'
 import { useHasBackgroundActivity } from '@/stores/sessionStatusStore'
 import { useTouchTapSelect } from '@/hooks/useTouchTapSelect'
@@ -19,10 +20,10 @@ import { FINE_POINTER_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
 
 import { usePermissions } from '@/contexts/EventContext'
 import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
-import { ArrowDown, Upload, X, Mic, Target } from 'lucide-react'
+import { Upload, X, Mic, Target } from 'lucide-react'
 
 import { SquareFill } from '@/components/ui/square-fill'
-import { IconToggleButton, getIconToggleButtonClassName } from '@/components/ui/icon-toggle-button'
+import { IconToggleButton } from '@/components/ui/icon-toggle-button'
 
 import { PromptSuggestions, type PromptSuggestion } from './PromptSuggestions'
 import { ComposerActivityBar } from './ComposerActivityBar'
@@ -38,7 +39,7 @@ import { detectMentionTrigger, parsePromptToInput, getFilename, getDirectory, ty
 import { matchText, rankByMatch, type MatchRange } from '@/lib/fuzzyMatch'
 import { getNextPrimaryAgentId } from '@/lib/primaryAgents'
 import { getNextFavoriteModel } from '@/lib/favoriteModels'
-import { cn, randomId } from '@/lib/utils'
+import { randomId } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
 import { findModelInfo, isSameModelSelection } from '@opencode-manager/shared/opencode'
 import { isOpenSessionGoal } from '@opencode-manager/shared/schemas'
@@ -63,6 +64,16 @@ const revokeBlobUrls = (attachments: ImageAttachment[]) => {
       URL.revokeObjectURL(attachment.dataUrl)
     }
   })
+}
+
+const runAfterSend = async (send: Promise<unknown>, onSent: () => void, onFailed?: () => void) => {
+  try {
+    await send
+  } catch {
+    onFailed?.()
+    return
+  }
+  onSent()
 }
 
 const ACCEPTED_FILE_TYPES = [...ACCEPTED_IMAGE_TYPES, "application/pdf"]
@@ -119,7 +130,7 @@ interface PromptInputProps {
   directory?: string
   sessionID: string
   onVoiceConversationActiveChange?: (active: boolean) => void
-  showScrollButton?: boolean
+  onSuggestionsOpenChange?: (open: boolean) => void
   isSessionActive?: boolean
   isStreamingResponse?: boolean
   onScrollToBottom: () => void
@@ -131,20 +142,21 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   directory,
   sessionID,
   onVoiceConversationActiveChange,
-  showScrollButton,
+  onSuggestionsOpenChange,
   isSessionActive = false,
   isStreamingResponse = false,
   onScrollToBottom,
   commandActions,
   onPromptChange
 }, ref) {
-  const [prompt, setPrompt] = useState('')
-  const [isBashMode, setIsBashMode] = useState(false)
+  const [restoredDraft] = useState(() => useComposerDraftStore.getState().getDraft(sessionID))
+  const [prompt, setPrompt] = useState(restoredDraft.prompt)
+  const [isBashMode, setIsBashMode] = useState(restoredDraft.isBashMode)
   const [isGoalArmed, setIsGoalArmed] = useState(false)
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [suggestionQuery, setSuggestionQuery] = useState('')
-  const [attachedFiles, setAttachedFiles] = useState(new Map<string, FileAttachmentInfo>())
-  const [imageAttachments, setImageAttachments] = useState<ImageAttachment[]>([])
+  const [attachedFiles, setAttachedFiles] = useState(restoredDraft.attachedFiles)
+  const [imageAttachments, setImageAttachments] = useState(restoredDraft.imageAttachments)
   const [isDragging, setIsDragging] = useState(false)
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false)
   const [showMentionSuggestions, setShowMentionSuggestions] = useState(false)
@@ -183,6 +195,18 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     imageAttachmentsRef.current = imageAttachments
   }, [attachedFiles, imageAttachments, prompt])
 
+  const saveDraft = useComposerDraftStore((state) => state.saveDraft)
+  const clearDraft = useComposerDraftStore((state) => state.clearDraft)
+  const clearDraftIfUnchanged = useComposerDraftStore((state) => state.clearDraftIfUnchanged)
+
+  useEffect(() => {
+    if (prompt === '' && !isBashMode && attachedFiles.size === 0 && imageAttachments.length === 0) {
+      clearDraft(sessionID)
+      return
+    }
+    saveDraft(sessionID, { prompt, isBashMode, attachedFiles, imageAttachments })
+  }, [sessionID, prompt, isBashMode, attachedFiles, imageAttachments, saveDraft, clearDraft])
+
   const clearSubmittedPrompt = useCallback((submittedPrompt: string, submittedAttachedFiles: Map<string, FileAttachmentInfo>, submittedImageAttachments: ImageAttachment[], options?: { keepAttachments?: boolean }) => {
     if (
       promptRef.current !== submittedPrompt ||
@@ -199,6 +223,11 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       setImageAttachments([])
     }
   }, [])
+
+  const completeSubmittedDraft = useCallback((submitted: ComposerDraft, options?: { keepAttachments?: boolean }) => {
+    clearDraftIfUnchanged(sessionID, submitted, options)
+    clearSubmittedPrompt(submitted.prompt, submitted.attachedFiles, submitted.imageAttachments, options)
+  }, [sessionID, clearDraftIfUnchanged, clearSubmittedPrompt])
 
   const pendingConfirmClearRef = useRef<{
     prompt: string
@@ -246,6 +275,10 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   
   const { data: agents = [] } = useAgents(directory)
   const { data: skills = [] } = useSkills(directory)
+  const mentionableAgents = useMemo(
+    () => agents.filter((agent) => !agent.hidden && agent.mode !== 'primary'),
+    [agents],
+  )
   const agentNames = useMemo(() => agents.map((agent) => agent.name), [agents])
   const skillIds = useMemo(() => skills.map((skill) => skill.id), [skills])
   const failedPrompt = useSendErrorStore((state) => state.errors[sessionID]?.failedPrompt)
@@ -269,7 +302,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   }, [failedPrompt])
   
   const mentionSuggestions = useMemo((): PromptSuggestion<MentionItem>[] => {
-    const agentMatches = rankByMatch(agents, mentionQuery, {
+    const agentMatches = rankByMatch(mentionableAgents, mentionQuery, {
       getName: (agent) => agent.name,
       getDescription: (agent) => agent.description,
     }).map(({ item, tier, ranges }) => ({
@@ -321,7 +354,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     return [...agentMatches, ...skillMatches, ...fileMatches]
       .sort((a, b) => a.tier - b.tier)
       .map(({ suggestion }) => suggestion)
-  }, [agents, skills, searchResults, mentionQuery])
+  }, [mentionableAgents, skills, searchResults, mentionQuery])
 
   const commandSuggestions = useMemo((): PromptSuggestion<CommandInfo>[] =>
     searchCommands(suggestionQuery).map(({ item, ranges }) => ({
@@ -357,15 +390,13 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     if (isStreamingResponse) {
       onScrollToBottom()
       const parsed = parsePromptToInput(prompt, attachedFiles, agentNames, skillIds, imageAttachments)
-      const submittedPrompt = prompt
-      const submittedAttachedFiles = attachedFiles
-      const submittedImageAttachments = imageAttachments
+      const submitted: ComposerDraft = { prompt, isBashMode, attachedFiles, imageAttachments }
       if (isGoalArmed && !isBashMode && !isExactCommandPrompt(prompt)) {
         const goalStarted = await startArmedGoal(parsed.text)
         if (!goalStarted) return
       }
-      sendPrompt.mutate(
-        {
+      void runAfterSend(
+        sendPrompt.mutateAsync({
           sessionID,
           text: parsed.text,
           files: parsed.files,
@@ -374,10 +405,8 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
           model: modelRef ?? undefined,
           agent: currentMode,
           delivery: 'queue',
-        },
-        {
-          onSuccess: () => clearSubmittedPrompt(submittedPrompt, submittedAttachedFiles, submittedImageAttachments)
-        }
+        }),
+        () => completeSubmittedDraft(submitted),
       )
       setStoredAgent(sessionID, currentMode)
       return
@@ -388,19 +417,15 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     if (isBashMode) {
       const command = prompt.startsWith('!') ? prompt.slice(1) : prompt
       addUserBashCommand(command)
-      const submittedPrompt = prompt
-      sendShell.mutate(
-        {
-          sessionID,
-          command,
+      const submitted: ComposerDraft = { prompt, isBashMode, attachedFiles, imageAttachments }
+      void runAfterSend(
+        sendShell.mutateAsync({ sessionID, command }),
+        () => {
+          clearDraftIfUnchanged(sessionID, submitted, { keepAttachments: true })
+          if (promptRef.current !== submitted.prompt) return
+          setPrompt('')
+          setIsBashMode(false)
         },
-        {
-          onSuccess: () => {
-            if (promptRef.current !== submittedPrompt) return
-            setPrompt('')
-            setIsBashMode(false)
-          }
-        }
       )
       setStoredAgent(sessionID, currentMode)
       return
@@ -415,9 +440,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       if (command) {
         recordCommand(command.name)
         const parsed = parsePromptToInput(commandPrompt.args?.trim() || '', attachedFiles, agentNames, skillIds, imageAttachments)
-        const submittedPrompt = prompt
-        const submittedAttachedFiles = attachedFiles
-        const submittedImageAttachments = imageAttachments
+        const submitted: ComposerDraft = { prompt, isBashMode, attachedFiles, imageAttachments }
 
         void executeCommand(command, {
           text: parsed.text,
@@ -426,22 +449,20 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
           skills: parsed.skills,
         }).then((shouldClear) => {
           if (!shouldClear) return
-          const keepAttachments = isBuiltinCommand(command) && (submittedAttachedFiles.size > 0 || submittedImageAttachments.length > 0)
+          const keepAttachments = isBuiltinCommand(command) && (submitted.attachedFiles.size > 0 || submitted.imageAttachments.length > 0)
           if (keepAttachments) {
-            clearSubmittedPrompt(submittedPrompt, submittedAttachedFiles, submittedImageAttachments, { keepAttachments: true })
+            completeSubmittedDraft(submitted, { keepAttachments: true })
             showToast.info('Built-in commands do not use attachments; they were kept')
             return
           }
-          clearSubmittedPrompt(submittedPrompt, submittedAttachedFiles, submittedImageAttachments)
+          completeSubmittedDraft(submitted)
         })
         return
       }
     }
 
     const parsed = parsePromptToInput(prompt, attachedFiles, agentNames, skillIds, imageAttachments)
-    const submittedPrompt = prompt
-    const submittedAttachedFiles = attachedFiles
-    const submittedImageAttachments = imageAttachments
+    const submitted: ComposerDraft = { prompt, isBashMode, attachedFiles, imageAttachments }
 
     if (isGoalArmed) {
       const goalStarted = await startArmedGoal(parsed.text)
@@ -449,13 +470,13 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     }
 
     pendingConfirmClearRef.current = {
-      prompt: submittedPrompt,
-      files: submittedAttachedFiles,
-      images: submittedImageAttachments
+      prompt: submitted.prompt,
+      files: submitted.attachedFiles,
+      images: submitted.imageAttachments
     }
 
-    sendPrompt.mutate(
-      {
+    void runAfterSend(
+      sendPrompt.mutateAsync({
         sessionID,
         text: parsed.text,
         files: parsed.files,
@@ -463,16 +484,14 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
         skills: parsed.skills,
         model: modelRef ?? undefined,
         agent: currentMode,
+      }),
+      () => {
+        pendingConfirmClearRef.current = null
+        completeSubmittedDraft(submitted)
       },
-      {
-        onSuccess: () => {
-          pendingConfirmClearRef.current = null
-          clearSubmittedPrompt(submittedPrompt, submittedAttachedFiles, submittedImageAttachments)
-        },
-        onError: () => {
-          pendingConfirmClearRef.current = null
-        }
-      }
+      () => {
+        pendingConfirmClearRef.current = null
+      },
     )
 
     onScrollToBottom()
@@ -735,7 +754,10 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (isBashMode && e.key === 'Escape') {
       e.preventDefault()
-      resetPrompt()
+      if (prompt === '!' || prompt === '') {
+        setIsBashMode(false)
+        setPrompt('')
+      }
       return
     }
 
@@ -815,8 +837,6 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
         textareaRef.current?.blur()
       }
       handleSubmit()
-    } else if (e.key === 'Escape' && !isSessionActive) {
-      resetPrompt()
     }
   }
 
@@ -1063,6 +1083,12 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   })
   const isCommandListOpen = showSuggestions && commandSuggestions.length > 0
   const isMentionListOpen = showMentionSuggestions && mentionSuggestions.length > 0
+  const isSuggestionListOpen = isCommandListOpen || isMentionListOpen
+
+  useEffect(() => {
+    onSuggestionsOpenChange?.(isSuggestionListOpen)
+  }, [isSuggestionListOpen, onSuggestionsOpenChange])
+
   const composerMode: ComposerMode | null = isBashMode
     ? 'bash'
     : isMentionListOpen
@@ -1071,9 +1097,8 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
         ? 'command'
         : null
   const composerModeStyle = composerMode ? COMPOSER_MODE_STYLES[composerMode] : null
-  const isTakeoverOpen = isMobile && (isCommandListOpen || isMentionListOpen)
+  const isTakeoverOpen = isMobile && isSuggestionListOpen
   const showStopButton = isSessionActive
-  const showMobileScrollButton = isMobile && showScrollButton
   const hasOpenGoal = isOpenSessionGoal(sessionGoal)
   const lockedReason = permissionMode?.lockedReason ?? null
   const goalButtonLabel = lockedReason === 'schedule'
@@ -1279,6 +1304,7 @@ return (
               <span className="max-w-[120px] truncate">{attachment.filename}</span>
               <button
                 type="button"
+                aria-label={`Remove ${attachment.filename}`}
                 onClick={() => removeImageAttachment(attachment.id)}
                 className="p-0.5 rounded hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground"
               >
@@ -1333,15 +1359,6 @@ return (
           )}
         </div>
         <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
-            {!isMobile && (
-              <button
-                onClick={onScrollToBottom}
-                className={`p-2 rounded-lg bg-background/80 hover:bg-accent/90 text-primary hover:text-primary-hover transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border border-primary/20 backdrop-blur-md ring-1 ring-primary/15 ${showScrollButton && !hasPromptContent ? 'visible' : 'invisible'}`}
-                title="Scroll to bottom"
-              >
-                <ArrowDown className="w-6 h-6" />
-              </button>
-            )}
 {showStopButton && (
             <button
               onClick={handleStop}
@@ -1367,18 +1384,7 @@ return (
             <Upload className="w-5 h-5" />
           </button>
           {showVoiceMic && renderVoiceMic()}
-          {showMobileScrollButton ? (
-            <button
-              type="button"
-              aria-label="Scroll to bottom"
-              title="Scroll to bottom"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={onScrollToBottom}
-              className={cn(getIconToggleButtonClassName(false), 'flex items-center justify-center size-11 p-0')}
-            >
-              <ArrowDown className="w-5 h-5" />
-            </button>
-          ) : isMobile && directory && (
+          {isMobile && directory && (
             <ComposerToolsMenu
               sessionID={sessionID}
               directory={directory}

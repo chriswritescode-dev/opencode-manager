@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { GeneralSettings } from '@/components/settings/GeneralSettings'
 import { GitSettings } from '@/components/settings/GitSettings'
 import { OpenCodeServersSettings } from '@/components/settings/OpenCodeServersSettings'
@@ -25,6 +25,14 @@ import { DESKTOP_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
 
 type SettingsView = 'menu' | SettingsContentTab
 
+const NESTED_OVERLAY_SELECTOR = [
+  '[role="listbox"]',
+  '[role="menu"]',
+  '[data-radix-popper-content-wrapper]',
+  '[role="alertdialog"]',
+  '[role="dialog"]:not([data-settings-dialog])',
+].join(', ')
+
 function OpenCodeSettings({ onOpenVersionDialog }: { onOpenVersionDialog: () => void }) {
   const [authSectionsOpen, setAuthSectionsOpen] = useState(true)
   const toggleAuthSections = useCallback(() => setAuthSectionsOpen((open) => !open), [])
@@ -49,11 +57,12 @@ function OpenCodeSettings({ onOpenVersionDialog }: { onOpenVersionDialog: () => 
 }
 
 export function SettingsDialog() {
-  const { isOpen, close, activeTab, setActiveTab } = useSettingsDialog()
+  const { isOpen, close, activeTab, selectedTab, setActiveTab } = useSettingsDialog()
   const isDesktop = useMediaQuery(DESKTOP_MEDIA_QUERY)
   const [mobileView, setMobileView] = useState<SettingsView>('menu')
   const [isVersionDialogOpen, setIsVersionDialogOpen] = useState(false)
   const [sectionHistory, setSectionHistory] = useState<SettingsView[]>([])
+  const syncedTabRef = useRef<SettingsContentTab | null>(null)
 
   const pushSectionHistory = useCallback((view: SettingsView) => {
     if (view === 'menu') return
@@ -88,25 +97,34 @@ export function SettingsDialog() {
 
   useEffect(() => {
     if (!isOpen) {
+      syncedTabRef.current = null
       setMobileView('menu')
       setSectionHistory([])
       return
     }
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isVersionDialogOpen) {
-        const target = e.target
-        if (target instanceof Element) {
-          const closestDialog = target.closest('[role="dialog"]')
-          if (closestDialog && !closestDialog.hasAttribute('data-settings-dialog')) {
-            return
-          }
-        }
-        close()
-      }
+      if (e.key !== 'Escape' || e.defaultPrevented || isVersionDialogOpen) return
+      if (e.target instanceof Element && e.target.closest(NESTED_OVERLAY_SELECTOR)) return
+      close()
     }
-    document.addEventListener('keydown', handleKeyDown, { capture: true })
-    return () => document.removeEventListener('keydown', handleKeyDown, { capture: true })
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
   }, [isOpen, close, isVersionDialogOpen])
+
+  useEffect(() => {
+    if (!isOpen || isDesktop) return
+    if (!selectedTab) {
+      if (syncedTabRef.current === null) return
+      syncedTabRef.current = null
+      setMobileView('menu')
+      setSectionHistory([])
+      return
+    }
+    if (syncedTabRef.current === selectedTab) return
+    syncedTabRef.current = selectedTab
+    setMobileView(selectedTab)
+    pushSectionHistory(selectedTab)
+  }, [isOpen, isDesktop, selectedTab, pushSectionHistory])
 
   const menuItems: Array<{ id: SettingsContentTab; icon: LucideIcon; label: string; description: string }> = [
     { id: 'account', icon: User, label: 'Account', description: 'Profile, passkeys, and sign out' },
@@ -147,6 +165,7 @@ export function SettingsDialog() {
           data-settings-dialog
         >
          <DialogTitle className="sr-only">Settings</DialogTitle>
+         {isDesktop && (
          <div className="hidden sm:flex sm:h-full sm:min-h-0 sm:flex-col">
            <div className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-background px-4">
              <h2 className="text-lg font-semibold text-foreground">Settings</h2>
@@ -191,12 +210,14 @@ export function SettingsDialog() {
               <TabsContent key="opencode" value="opencode" className="mt-0 px-0">
                 <OpenCodeSettings onOpenVersionDialog={() => setIsVersionDialogOpen(true)} />
               </TabsContent>
-              <TabsContent key="logs" value="logs" className="mt-0 h-full min-h-0 px-0">{isDesktop && <LogsViewer />}</TabsContent>
+              <TabsContent key="logs" value="logs" className="mt-0 h-full min-h-0 px-0"><LogsViewer /></TabsContent>
               <TabsContent key="providers" value="providers" className="mt-0 px-0 max-w-7xl"><ProviderSettings /></TabsContent>
             </div>
           </Tabs>
         </div>
+        )}
 
+        {!isDesktop && (
         <div className="sm:hidden flex flex-col h-full min-h-0">
            <div className="flex-shrink-0 bg-gradient-to-b from-background via-background to-transparent border-b border-border backdrop-blur-sm px-3 py-3 flex items-center justify-between">
              <div className="flex items-center gap-2 flex-1">
@@ -205,12 +226,13 @@ export function SettingsDialog() {
                     variant="ghost"
                     size="icon"
                     onClick={handleSettingsBack}
+                    aria-label="Back"
                     className="text-muted-foreground hover:text-foreground min-w-[44px] min-h-[44px]"
                   >
                     <ChevronLeft className="w-6 h-6" />
                   </Button>
                 )}
-               <h2 className="text-xl font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
+               <h2 className="min-w-0 text-xl font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
                  {mobileView === 'menu' ? 'Settings' : menuItems.find(item => item.id === mobileView)?.label}
                </h2>
              </div>
@@ -259,9 +281,10 @@ export function SettingsDialog() {
                    <OpenCodeSettings key="opencode" onOpenVersionDialog={() => setIsVersionDialogOpen(true)} />
                 )}
               {mobileView === 'providers' && <div key="providers"><ProviderSettings /></div>}
-              {mobileView === 'logs' && !isDesktop && <div key="logs" className="h-full min-h-0"><LogsViewer /></div>}
+              {mobileView === 'logs' && <div key="logs" className="h-full min-h-0"><LogsViewer /></div>}
            </div>
         </div>
+        )}
 
       </DialogContent>
       <VersionSelectDialog

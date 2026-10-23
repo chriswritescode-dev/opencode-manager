@@ -53,7 +53,7 @@ export function Schedules() {
               <Plus className="w-4 h-4 mr-2" />
               New Schedule
             </Button>
-            <Button onClick={openNewJob} size="sm" className="sm:hidden h-10 w-10 p-0">
+            <Button onClick={openNewJob} aria-label="New schedule" size="sm" className="sm:hidden h-10 w-10 p-0">
               <Plus className="w-5 h-5" />
             </Button>
           </Header.Actions>

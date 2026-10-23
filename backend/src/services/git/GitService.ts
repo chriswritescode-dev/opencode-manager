@@ -176,12 +176,13 @@ export class GitService {
       }
 
       const repoPath = path.resolve(repo.fullPath)
+      const revision = branch?.trim() || 'HEAD'
       const logArgs = [
         'git',
         '-C',
         repoPath,
         'log',
-        branch?.trim() || 'HEAD',
+        revision,
         `-n`,
         String(limit),
         '--format=%H|%an|%ae|%at|%s'
@@ -210,7 +211,7 @@ export class GitService {
         }
       }
 
-      const unpushedCommits = await this.getUnpushedCommitHashes(repoPath, logEnv)
+      const unpushedCommits = await this.getUnpushedCommitHashes(repoPath, revision, logEnv, limit)
 
       return commits.map(commit => ({
         ...commit,
@@ -858,6 +859,9 @@ export class GitService {
 
       return { ahead: ahead || 0, behind: behind || 0 }
     } catch (error) {
+      if (isNoUpstreamError(error as Error)) {
+        return { ahead: 0, behind: 0 }
+      }
       logger.warn(`Could not get branch status for repo ${repoId}, returning zeros:`, error)
       return { ahead: 0, behind: 0 }
     }
@@ -1515,16 +1519,18 @@ export class GitService {
   }
 
   private async isCommitUnpushed(repoPath: string, commitHash: string, env: Record<string, string>): Promise<boolean> {
-    const unpushedHashes = await this.getUnpushedCommitHashes(repoPath, env)
+    const unpushedHashes = await this.getUnpushedCommitHashes(repoPath, 'HEAD', env)
     return unpushedHashes.has(commitHash)
   }
 
-  private async getUnpushedCommitHashes(repoPath: string, env: Record<string, string>): Promise<Set<string>> {
+  private async getUnpushedCommitHashes(repoPath: string, revision: string, env: Record<string, string>, limit?: number): Promise<Set<string>> {
     try {
-      const output = await executeCommand(
-        ['git', '-C', repoPath, 'log', '--not', '--remotes', '--format=%H'],
-        { env, silent: true }
-      )
+      const args = ['git', '-C', repoPath, 'log', revision, '--not', '--remotes']
+      if (limit !== undefined) {
+        args.push('-n', String(limit))
+      }
+      args.push('--format=%H')
+      const output = await executeCommand(args, { env, silent: true })
       const hashes = output.trim().split('\n').filter(Boolean)
       return new Set(hashes)
     } catch {

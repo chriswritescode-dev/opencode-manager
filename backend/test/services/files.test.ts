@@ -93,6 +93,15 @@ describe('files service', () => {
       expect(await getRawFileMetadata(`${relativeRoot}/meta-dir`)).toBeNull()
     })
 
+    it('sniffs an unknown extension and reports binary content', async () => {
+      const bytes = Buffer.from(Array.from({ length: 512 }, (_, index) => (index * 37 + 11) % 256))
+      await writeFile(resolveTempPath(`${relativeRoot}/payload.unknownext`), bytes)
+
+      const metadata = await getRawFileMetadata(`${relativeRoot}/payload.unknownext`)
+
+      expect(metadata?.mimeType).toBe('application/octet-stream')
+    })
+
     it('rejects with 404 when the file is missing', async () => {
       await expect(getRawFileMetadata(`${relativeRoot}/missing.htm`)).rejects.toEqual({
         message: 'File or directory not found',
@@ -132,6 +141,32 @@ describe('files service', () => {
 
       expect(result.mimeType).toBe('text/plain')
       expect(Buffer.from(result.content ?? '', 'base64').toString('utf8')).toBe('mystery')
+    })
+
+    it('reports an unknown extension with text content as text', async () => {
+      await writeLines(`${relativeRoot}/plain.foo`, 'still text')
+
+      const result = await getFile(`${relativeRoot}/plain.foo`)
+
+      expect(result.mimeType).toBe('text/plain')
+    })
+
+    it('reports an unknown extension with binary content as binary', async () => {
+      const bytes = Buffer.from(Array.from({ length: 2930 }, (_, index) => (index * 37 + 11) % 256))
+      await writeFile(resolveTempPath(`${relativeRoot}/blob.bin`), bytes)
+
+      const result = await getFile(`${relativeRoot}/blob.bin`)
+
+      expect(result.mimeType).toBe('application/octet-stream')
+      expect(result.content).toBe(bytes.toString('base64'))
+    })
+
+    it('reports an empty unknown extension as text', async () => {
+      await writeLines(`${relativeRoot}/empty.foo`, '')
+
+      const result = await getFile(`${relativeRoot}/empty.foo`)
+
+      expect(result.mimeType).toBe('text/plain')
     })
 
     it('maps .htm files to text/html', async () => {
@@ -324,6 +359,15 @@ describe('files service', () => {
       expect(result.lines).toEqual(['l3', 'l4', 'l5'])
       expect(result.endLine).toBe(5)
       expect(result.hasMore).toBe(false)
+    })
+
+    it('reports binary content for an unknown extension', async () => {
+      const bytes = Buffer.from(Array.from({ length: 512 }, (_, index) => (index * 37 + 11) % 256))
+      await writeFile(resolveTempPath(`${relativeRoot}/blob.unknownext`), bytes)
+
+      const result = await getFileRange(`${relativeRoot}/blob.unknownext`, 0, 5)
+
+      expect(result.mimeType).toBe('application/octet-stream')
     })
 
     it('rejects with 404 when the file is missing', async () => {

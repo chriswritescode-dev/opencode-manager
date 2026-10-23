@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect, type ReactNode } from 'react'
 import { useSettings } from '@/hooks/useSettings'
+import { useAuth } from '@/hooks/useAuth'
 import { API_BASE_URL } from '@/config'
 import { TTSContext, type TTSState, type TTSConfig, type TTSEndReason, type SpeakMessageOptions } from './tts-context'
 import { sanitizeForTTS } from '@/lib/utils'
@@ -17,6 +18,9 @@ export {
 const SENTENCE_REGEX = /(?<=[.!?])\s+/
 const SENTENCES_PER_CHUNK = 2
 const QUEUE_PAUSE_MS = 600
+const PLAYBACK_BLOCKED_MESSAGE = 'Audio playback was blocked by the browser'
+const SILENT_WAV_DATA_URI =
+  'data:audio/wav;base64,UklGRsQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YaAAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA'
 
 interface QueuedMessage {
   messageId: string
@@ -24,7 +28,17 @@ interface QueuedMessage {
 }
 
 interface SpeechRequest {
-  onEnd?: (reason: TTSEndReason) => void
+  onEnd?: (reason: TTSEndReason, error?: string) => void
+}
+
+function isNotAllowedError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false
+  return (error as { name?: unknown }).name === 'NotAllowedError'
+}
+
+function playbackErrorMessage(error: unknown, fallback: string): string {
+  if (isNotAllowedError(error)) return PLAYBACK_BLOCKED_MESSAGE
+  return error instanceof Error && error.message ? error.message : fallback
 }
 
 function splitIntoChunks(text: string): string[] {
@@ -45,7 +59,8 @@ interface TTSProviderProps {
 }
 
 export function TTSProvider({ children }: TTSProviderProps) {
-  const { preferences } = useSettings()
+  const { isAuthenticated } = useAuth()
+  const { preferences } = useSettings('default', { enabled: isAuthenticated })
   const [state, setState] = useState<TTSState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [currentText, setCurrentText] = useState<string | null>(null)
@@ -54,6 +69,8 @@ export function TTSProvider({ children }: TTSProviderProps) {
   const [isPaused, setIsPaused] = useState(false)
   
   const abortControllerRef = useRef<AbortController | null>(null)
+  const playerRef = useRef<HTMLAudioElement | null>(null)
+  const unlockedRef = useRef(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const playbackIdRef = useRef(0)
   const currentObjectUrlRef = useRef<string | null>(null)
@@ -90,6 +107,13 @@ export function TTSProvider({ children }: TTSProviderProps) {
     return webSpeechSynthRef.current;
   }, []);
 
+  const getPlayer = useCallback((): HTMLAudioElement => {
+    if (!playerRef.current) {
+      playerRef.current = new Audio()
+    }
+    return playerRef.current
+  }, [])
+
   const cleanup = useCallback(() => {
     if (audioRef.current) {
       audioRef.current.onended = null
@@ -119,16 +143,16 @@ export function TTSProvider({ children }: TTSProviderProps) {
     chunkIndexRef.current = 0
   }, [])
 
-  const settleSpeechRequest = useCallback((reason: TTSEndReason) => {
+  const settleSpeechRequest = useCallback((reason: TTSEndReason, error?: string) => {
     const request = speechRequestRef.current
     speechRequestRef.current = null
-    request?.onEnd?.(reason)
+    request?.onEnd?.(reason, error)
   }, [])
 
-  const beginSpeechRequest = useCallback((onEnd?: (reason: TTSEndReason) => void) => {
+  const beginSpeechRequest = useCallback((onEnd?: (reason: TTSEndReason, error?: string) => void) => {
     const previous = speechRequestRef.current
     speechRequestRef.current = { onEnd }
-    previous?.onEnd?.('stopped')
+    previous?.onEnd?.('stopped', undefined)
   }, [])
 
   const clearAdvanceTimer = useCallback(() => {
@@ -164,15 +188,18 @@ export function TTSProvider({ children }: TTSProviderProps) {
     resetPlayback()
   }, [clearQueue, resetPlayback, settleSpeechRequest])
 
-  const failPlayback = useCallback(() => {
+  const failPlayback = useCallback((message: string) => {
+    cleanup()
     clearQueue()
     busyRef.current = false
     activeProviderRef.current = null
     pausedRef.current = false
     setIsPaused(false)
     setActiveMessageId(null)
-    settleSpeechRequest('error')
-  }, [clearQueue, settleSpeechRequest])
+    setError(message)
+    setState('error')
+    settleSpeechRequest('error', message)
+  }, [cleanup, clearQueue, settleSpeechRequest])
 
   const advanceQueue = useCallback((playbackId: number) => {
     if (playbackIdRef.current !== playbackId) return
@@ -302,69 +329,53 @@ export function TTSProvider({ children }: TTSProviderProps) {
 
       const url = URL.createObjectURL(blob)
       currentObjectUrlRef.current = url
-      const audio = new Audio(url)
-      audioRef.current = audio
+      const player = getPlayer()
+      audioRef.current = player
 
-      audio.onended = () => {
+      player.onended = () => {
         if (playbackIdRef.current !== playbackId) return
         if (currentObjectUrlRef.current === url) {
           URL.revokeObjectURL(url)
           currentObjectUrlRef.current = null
         }
-        if (audioRef.current === audio) {
+        if (audioRef.current === player) {
           audioRef.current = null
         }
         playChunk(index + 1, playbackId)
       }
 
-      audio.onerror = () => {
+      player.onerror = () => {
         if (playbackIdRef.current !== playbackId) return
-        if (currentObjectUrlRef.current === url) {
-          URL.revokeObjectURL(url)
-          currentObjectUrlRef.current = null
-        }
-        if (audioRef.current === audio) {
-          audioRef.current = null
-        }
-        failPlayback()
-        setError('Audio playback failed')
-        setState('error')
+        failPlayback('Audio playback failed')
       }
 
+      player.src = url
       setState('playing')
       if (!pausedRef.current) {
-        await audio.play()
+        await player.play()
       }
     } catch (err) {
       if (playbackIdRef.current !== playbackId) return
-      failPlayback()
-      setError(err instanceof Error ? err.message : 'TTS failed')
-      setState('error')
+      failPlayback(playbackErrorMessage(err, 'TTS failed'))
     }
-  }, [getChunkAudio, prefetchChunk, advanceQueue, failPlayback, settleSpeechRequest])
+  }, [getPlayer, getChunkAudio, prefetchChunk, advanceQueue, failPlayback, settleSpeechRequest])
 
   // Builtin Web Speech synthesis - takes explicit config and optional messageId
   const speakBuiltinWithConfig = useCallback(async (text: string, config: TTSConfig, messageId: string | null = null): Promise<boolean> => {
     if (!isWebSpeechSupported()) {
-      failPlayback()
-      setError('Web Speech API not supported in this browser')
-      setState('error')
+      failPlayback('Web Speech API not supported in this browser')
       return false
     }
 
     if (!text?.trim()) {
-      failPlayback()
-      setError('No text provided')
-      setState('error')
+      failPlayback('No text provided')
       return false
     }
 
     const sanitizedText = sanitizeForTTS(text)
     
     if (!sanitizedText?.trim()) {
-      failPlayback()
-      setError('No readable content after sanitization')
-      setState('error')
+      failPlayback('No readable content after sanitization')
       return false
     }
 
@@ -394,9 +405,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
 
     synth.onError((err) => {
       if (playbackIdRef.current !== playbackId) return
-      failPlayback()
-      setError(err)
-      setState('error')
+      failPlayback(err)
     })
 
     try {
@@ -416,9 +425,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
       return true
     } catch (err) {
       if (playbackIdRef.current !== playbackId) return false
-      failPlayback()
-      setError(err instanceof Error ? err.message : 'TTS failed')
-      setState('error')
+      failPlayback(err instanceof Error && err.message ? err.message : 'TTS failed')
       return false
     }
   }, [resetPlayback, advanceQueue, failPlayback, getSynthesizer, settleSpeechRequest])
@@ -449,9 +456,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
 
   const playWithConfig = useCallback(async (text: string, config: TTSConfig, messageId: string | null = null): Promise<boolean> => {
     if (!config.enabled) {
-      failPlayback()
-      setError('TTS is not enabled')
-      setState('error')
+      failPlayback('TTS is not enabled')
       return false
     }
 
@@ -459,34 +464,26 @@ export function TTSProvider({ children }: TTSProviderProps) {
 
     if (configIsBuiltin) {
       if (!isWebSpeechSupported()) {
-        failPlayback()
-        setError('Web Speech API not supported in this browser')
-        setState('error')
+        failPlayback('Web Speech API not supported in this browser')
         return false
       }
       return speakBuiltinWithConfig(text, config, messageId)
     }
 
     if (!config.apiKey) {
-      failPlayback()
-      setError('API key not configured')
-      setState('error')
+      failPlayback('API key not configured')
       return false
     }
 
     if (!config.voice || !config.model) {
-      failPlayback()
-      setError('Voice or model not configured')
-      setState('error')
+      failPlayback('Voice or model not configured')
       return false
     }
 
     const sanitizedText = sanitizeForTTS(text)
     
     if (!sanitizedText?.trim()) {
-      failPlayback()
-      setError('No readable content after sanitization')
-      setState('error')
+      failPlayback('No readable content after sanitization')
       return false
     }
 
@@ -511,9 +508,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
     const config = buildStoredConfig()
 
     if (!config) {
-      failPlayback()
-      setError('TTS is not configured')
-      setState('error')
+      failPlayback('TTS is not configured')
       return false
     }
 
@@ -547,9 +542,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
     const config = buildStoredConfig()
 
     if (!config) {
-      failPlayback()
-      setError('TTS is not configured')
-      setState('error')
+      failPlayback('TTS is not configured')
       return false
     }
 
@@ -587,11 +580,29 @@ export function TTSProvider({ children }: TTSProviderProps) {
     if (!audio) return
 
     void audio.play().catch((err: unknown) => {
-      failPlayback()
-      setError(err instanceof Error ? err.message : 'TTS failed')
-      setState('error')
+      failPlayback(playbackErrorMessage(err, 'TTS failed'))
     })
   }, [getSynthesizer, failPlayback])
+
+  const unlock = useCallback(() => {
+    if (isBuiltin) return
+    if (unlockedRef.current) return
+    if (audioRef.current || busyRef.current) return
+
+    const player = getPlayer()
+    player.onended = null
+    player.onerror = null
+    player.src = SILENT_WAV_DATA_URI
+
+    void player.play().then(() => {
+      unlockedRef.current = true
+      if (audioRef.current !== null) return
+      if (player.src !== SILENT_WAV_DATA_URI) return
+      player.pause()
+      player.removeAttribute('src')
+      player.load()
+    }).catch(() => {})
+  }, [isBuiltin, getPlayer])
 
   const queueMessage = useCallback((messageId: string, text: string) => {
     if (messageId === activeMessageId || queueRef.current.some((item) => item.messageId === messageId)) {
@@ -614,6 +625,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
     stop,
     pause,
     resume,
+    unlock,
     state,
     error,
     currentText,

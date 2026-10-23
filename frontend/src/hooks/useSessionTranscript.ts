@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { FetchError } from '@opencode-manager/shared'
 import { sessionIDFromEvent, type V2Event } from '@opencode-manager/shared/opencode'
 import { buildServerDirectoryKey, LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { listSessionMessages, readSessionSnapshot } from '@/api/opencode'
@@ -95,6 +96,9 @@ export function useSessionTranscript(sessionID: string, directory: string) {
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     refetchInterval: isStreamHealthy ? false : TRANSCRIPT_FALLBACK_POLL_INTERVAL_MS,
+    retry: (failureCount, error) =>
+      !(error instanceof FetchError && (error.statusCode === 400 || error.statusCode === 404))
+      && failureCount < 3,
   })
 
   const fetchOlder = useCallback(async () => {

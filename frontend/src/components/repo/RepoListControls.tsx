@@ -8,6 +8,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuCheckboxItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { useMobile } from "@/hooks/useMobile";
@@ -73,7 +74,10 @@ export function RepoListControls({
 
   const currentSortLabel =
     SORT_OPTIONS.find((s) => s.value === sortMode)?.label ?? "Recent";
-  const inSelectionMode = selectedCount > 0;
+  const activeFilterLabel =
+    FILTER_OPTIONS.find((option) => option.value === filterMode)?.label ?? "All";
+  const showActiveFilter = isMobile && filterMode !== "recent";
+  const inSelectionMode = selectionMode || selectedCount > 0;
 
   const getDeleteLabel = () => {
     if (hasLocalRepos && !hasClonedRepos) {
@@ -85,14 +89,14 @@ export function RepoListControls({
   if (inSelectionMode) {
     return (
       <div className="px-2 md:px-0">
-        <div className="flex items-center gap-2 bg-accent/50 rounded-md p-2">
-          <span className="text-sm font-medium text-foreground shrink-0 min-w-[80px]">
+        <div className="flex items-center gap-1.5 bg-accent/50 rounded-md p-2">
+          <span className="text-sm font-medium text-foreground shrink-0">
             {selectedCount} selected
           </span>
           <Button
             variant="ghost"
             onClick={onSelectAll}
-            className="shrink-0 h-9 text-xs"
+            className="shrink-0 h-8 px-2 text-xs"
             size="sm"
           >
             {allVisibleSelected ? "Unselect All" : "Select All"}
@@ -100,7 +104,8 @@ export function RepoListControls({
           <Button
             variant="ghost"
             onClick={onDelete}
-            className="shrink-0 h-9 text-xs text-destructive hover:text-destructive"
+            disabled={selectedCount === 0}
+            className="shrink-0 h-8 px-2 text-xs text-destructive hover:text-destructive"
             size="sm"
           >
             <Trash2 className="w-3 h-3 mr-1" />
@@ -108,11 +113,13 @@ export function RepoListControls({
           </Button>
           <Button
             variant="ghost"
-            size="icon"
             onClick={onClearSelection}
-            className="shrink-0 size-9 ml-auto text-destructive hover:text-destructive"
+            aria-label="Done selecting repositories"
+            className="shrink-0 h-8 px-2 text-xs gap-1 ml-auto"
+            size="sm"
           >
-            <X className="w-4 h-4" />
+            <X className="w-3.5 h-3.5" />
+            Done
           </Button>
         </div>
       </div>
@@ -150,7 +157,7 @@ export function RepoListControls({
                 <SlidersHorizontal className="w-4 h-4" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuContent align="end" className="w-52">
               <DropdownMenuCheckboxItem
                 checked={selectionMode}
                 onCheckedChange={(checked) =>
@@ -160,6 +167,21 @@ export function RepoListControls({
                 Select repositories
               </DropdownMenuCheckboxItem>
               <DropdownMenuSeparator />
+              <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+              {SORT_OPTIONS.map((option) => (
+                <DropdownMenuItem
+                  key={option.value}
+                  onClick={() => {
+                    onSortModeChange(option.value);
+                    setShowMenu(false);
+                  }}
+                  className={sortMode === option.value ? "bg-accent" : ""}
+                >
+                  {option.label}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>Filter</DropdownMenuLabel>
               {FILTER_OPTIONS.map((option) => {
                 const count =
                   option.value === "attention"
@@ -213,6 +235,21 @@ export function RepoListControls({
           </DropdownMenu>
         )}
       </div>
+
+      {showActiveFilter && (
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => onFilterModeChange("recent")}
+            aria-label={`Clear filter: ${activeFilterLabel}`}
+            className="h-7 gap-1 rounded-full px-2.5 text-xs"
+          >
+            {activeFilterLabel}
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      )}
 
       {!isMobile && (
         <div className="flex items-center gap-2 overflow-x-auto pb-1 -mb-1">

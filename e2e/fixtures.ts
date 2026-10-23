@@ -4,18 +4,6 @@ import path from 'node:path'
 import { test as base, expect, request as playwrightRequest, type Page } from '@playwright/test'
 import { BASE_URL, E2E_TMP, STORAGE_STATE } from './env'
 
-const UNAUTHENTICATED_BOOTSTRAP_ENDPOINTS = [
-  '/api/settings',
-  '/api/schedules/all/runs/unread',
-  '/api/repos',
-  '/api/sse/stream',
-]
-
-function isIgnoredConsoleError(text: string): boolean {
-  if (!text.includes('401 (Unauthorized)')) return false
-  return UNAUTHENTICATED_BOOTSTRAP_ENDPOINTS.some((endpoint) => text.includes(endpoint))
-}
-
 export interface RepoFixture {
   id: number
   name: string
@@ -48,7 +36,6 @@ export const test = base.extend<{ page: Page }, WorkerFixtures>({
       if (message.type() !== 'error') return
       const url = message.location().url
       const text = `${message.text()}${url ? ` (${url})` : ''}`
-      if (isIgnoredConsoleError(text)) return
       errors.push(`console.error: ${text}`)
     })
 

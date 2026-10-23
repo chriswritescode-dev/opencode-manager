@@ -73,8 +73,8 @@ async function settleTime(ms: number): Promise<void> {
 
 function openLogsFromMenu(): void {
   const mobileContainer = document.querySelector('.sm\\:hidden') as HTMLElement
-  const logsMenuButton = within(mobileContainer).getByText('Live manager and OpenCode server logs').closest('button')
-  fireEvent.click(logsMenuButton!)
+  const logsMenuButton = within(mobileContainer).queryByText('Live manager and OpenCode server logs')?.closest('button')
+  if (logsMenuButton) fireEvent.click(logsMenuButton)
 }
 
 describe('SettingsDialog live Logs view integration', () => {

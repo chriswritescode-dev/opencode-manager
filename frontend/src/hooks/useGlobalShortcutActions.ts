@@ -2,15 +2,23 @@ import { useCallback, useMemo } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
-import { getRepo } from '@/api/repos'
+import { repoQueryOptions } from '@/lib/repoQuery'
 import { buildToolItems, toolKeyOf } from '@/components/navigation/moreDrawerItems'
 import { useShortcutActions } from '@/contexts/KeyboardShortcutsContext'
 import { dialogSearch } from '@/hooks/useDialogParam'
 import { sessionQueryOptions, useCreateSession } from '@/hooks/useOpenCode'
 import { useMobile } from '@/hooks/useMobile'
 import { useSettingsDialog } from '@/hooks/useSettingsDialog'
+import { useSidebarCollapsed } from '@/hooks/useSidebarCollapsed'
 import { useUrlParams } from '@/hooks/useUrlParams'
-import { toggleToolDialogParams, toggleToolPanelParams, type PanelTool } from '@/hooks/useToolPanel'
+import {
+  clearToolPanelParams,
+  panelToolParam,
+  resolveToolPanelToggle,
+  toggleToolDialogParams,
+  toggleToolPanelParams,
+  type PanelTool,
+} from '@/hooks/useToolPanel'
 import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import {
   getAssistantPath,
@@ -29,7 +37,7 @@ import {
 export function useGlobalShortcutActions(): void {
   const { pathname } = useLocation()
   const navigate = useNavigate()
-  const { updateParams } = useUrlParams()
+  const { searchParams, updateParams, closePushedParams } = useUrlParams()
   const { open: openSettings } = useSettingsDialog()
   const isMobile = useMobile()
   const serverId = useRouteOpenCodeServerId()
@@ -38,8 +46,7 @@ export function useGlobalShortcutActions(): void {
   const repoId = isAssistantPath(pathname) ? ASSISTANT_REPO_ID : parseRepoRoute(pathname).repoId
 
   const { data: repo } = useQuery({
-    queryKey: ['repo', repoId],
-    queryFn: () => getRepo(repoId as number),
+    ...repoQueryOptions(repoId as number),
     enabled: repoId !== null,
   })
 
@@ -59,20 +66,26 @@ export function useGlobalShortcutActions(): void {
   }, serverId)
 
   const toolItems = useMemo(() => buildToolItems(pathname), [pathname])
-  const hasFilesTool = toolItems.some((item) => toolKeyOf(item) === 'files')
+  const [, toggleSidebarCollapsed] = useSidebarCollapsed()
 
   const toggleRouteTool = useCallback((tool: PanelTool) => {
     if (toolItems.some((item) => toolKeyOf(item) === tool)) {
-      updateParams((params) => {
-        if (isMobile) toggleToolDialogParams(params, tool)
-        else toggleToolPanelParams(params, tool)
-      }, 'push')
+      if (isMobile) {
+        updateParams((params) => toggleToolDialogParams(params, tool), 'push')
+        return
+      }
+      const action = resolveToolPanelToggle(panelToolParam(searchParams), tool)
+      if (action === 'close') {
+        closePushedParams(clearToolPanelParams)
+        return
+      }
+      updateParams((params) => toggleToolPanelParams(params, tool), action === 'switch' ? 'replace' : 'push')
       return
     }
     if (isRemoteRoute || tool === 'files') return
     const host = repoId !== null ? getRepoPath(repoId) : getAssistantPath()
     navigate(`${host}${dialogSearch(tool)}`)
-  }, [toolItems, isMobile, updateParams, navigate, repoId, isRemoteRoute])
+  }, [toolItems, isMobile, searchParams, updateParams, closePushedParams, navigate, repoId, isRemoteRoute])
 
   const newSession = sessionDirectory && !createSession.isPending
     ? () => createSession.mutate({})
@@ -82,7 +95,7 @@ export function useGlobalShortcutActions(): void {
     settings: openSettings,
     toggleTerminal: () => toggleRouteTool('terminal'),
     toggleSourceControl: () => toggleRouteTool('sourceControl'),
-    toggleSidebar: hasFilesTool ? () => toggleRouteTool('files') : undefined,
+    toggleSidebar: isMobile ? undefined : toggleSidebarCollapsed,
     newSession,
   }, 'global')
 }

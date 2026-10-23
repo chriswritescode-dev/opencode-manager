@@ -188,6 +188,22 @@ describe('VoiceConversationBar', () => {
     expect(screen.getByRole('button', { name: 'Sending' })).toHaveAttribute('aria-busy', 'true')
   })
 
+  it('shows the failure reason and its fix instead of a bare retry', () => {
+    renderBar(
+      buildController({
+        phase: 'paused',
+        label: 'Microphone access denied. Please allow microphone permissions.',
+        hint: 'Allow microphone access, then tap to retry',
+        orbLabel: 'Resume voice conversation',
+      }),
+    )
+
+    expect(
+      screen.getByText('Microphone access denied. Please allow microphone permissions.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Allow microphone access, then tap to retry')).toBeInTheDocument()
+  })
+
   it('shows the notice when there is one and keeps the reserved hint line empty', () => {
     renderBar(
       buildController({

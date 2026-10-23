@@ -82,6 +82,9 @@ function labelInput(
     isEndpointing: false,
     isPlaybackPaused: false,
     sessionBusy: false,
+    error: null,
+    failureSource: null,
+    isStartingCapture: false,
     ...overrides,
   }
 }
@@ -95,6 +98,7 @@ describe('reduceVoiceConversation', () => {
         phase: 'working',
         pauseReason: null,
         error: null,
+        failureSource: null,
         sawBusy: true,
         baselineId: 'b1',
       })
@@ -111,6 +115,7 @@ describe('reduceVoiceConversation', () => {
         phase: 'listening',
         pauseReason: null,
         error: null,
+        failureSource: null,
         sawBusy: false,
         baselineId: null,
       })
@@ -180,6 +185,7 @@ describe('reduceVoiceConversation', () => {
         phase: 'paused',
         pauseReason: 'error',
         error: 'network down',
+        failureSource: 'send',
       })
     })
 
@@ -192,6 +198,7 @@ describe('reduceVoiceConversation', () => {
         phase: 'paused',
         pauseReason: 'error',
         error: 'not delivered',
+        failureSource: 'send',
       })
     })
   })
@@ -366,25 +373,34 @@ describe('reduceVoiceConversation', () => {
 
   describe('error', () => {
     it.each<VoicePhase>(['listening', 'sending', 'working', 'speaking', 'recording', 'paused'])(
-      'pauses with the failure message from %s',
+      'pauses with the failure message and its source from %s',
       (phase) => {
         const state = conversation({ phase })
         expect(
-          reduceVoiceConversation(state, { type: 'error', message: 'mic unavailable' }),
+          reduceVoiceConversation(state, {
+            type: 'error',
+            message: 'mic unavailable',
+            source: 'capture',
+          }),
         ).toEqual({
           ...state,
           phase: 'paused',
           pauseReason: 'error',
           error: 'mic unavailable',
+          failureSource: 'capture',
         })
       },
     )
 
     it('is ignored while voice mode is off', () => {
       const state = conversation()
-      expect(reduceVoiceConversation(state, { type: 'error', message: 'mic unavailable' })).toBe(
-        state,
-      )
+      expect(
+        reduceVoiceConversation(state, {
+          type: 'error',
+          message: 'mic unavailable',
+          source: 'capture',
+        }),
+      ).toBe(state)
     })
   })
 
@@ -668,6 +684,11 @@ describe('voiceConversationLabel', () => {
   it.each<[string, Partial<VoiceConversationLabelInput>, string]>([
     ['listening while recording', { phase: 'listening' }, 'Listening'],
     ['listening while finalizing', { phase: 'listening', isEndpointing: true }, 'Listening'],
+    [
+      'listening before capture begins',
+      { phase: 'listening', isStartingCapture: true },
+      'Starting…',
+    ],
     ['sending', { phase: 'sending' }, 'Sending…'],
     ['working', { phase: 'working' }, 'Working'],
     [
@@ -678,8 +699,28 @@ describe('voiceConversationLabel', () => {
     ['speaking while the session is idle', { phase: 'speaking' }, 'Speaking'],
     ['speaking while the session is busy', { phase: 'speaking', sessionBusy: true }, 'Speaking'],
     ['recording a queued message', { phase: 'recording' }, 'Adding to queue'],
+    [
+      'recording a queued message before capture begins',
+      { phase: 'recording', isStartingCapture: true },
+      'Starting…',
+    ],
     ['paused after silence', { phase: 'paused', pauseReason: 'no-speech' }, "Didn't catch that"],
     ['paused after a failure', { phase: 'paused', pauseReason: 'error' }, 'Something went wrong'],
+    [
+      'paused after a failure with a reason',
+      {
+        phase: 'paused',
+        pauseReason: 'error',
+        error: 'Microphone access denied. Please allow microphone permissions.',
+        failureSource: 'capture',
+      },
+      'Microphone access denied. Please allow microphone permissions.',
+    ],
+    [
+      'paused after a failure with a blank reason',
+      { phase: 'paused', pauseReason: 'error', error: '   ' },
+      'Something went wrong',
+    ],
     ['paused by the user', { phase: 'paused', pauseReason: 'user' }, 'Paused'],
     [
       'paused by the user while a reply is held',
@@ -712,6 +753,7 @@ describe('voiceConversationHint', () => {
   it.each<[string, Partial<VoiceConversationLabelInput>, string]>([
     ['listening while recording', { phase: 'listening' }, 'Tap to send'],
     ['listening while finalizing', { phase: 'listening', isEndpointing: true }, ''],
+    ['listening before capture begins', { phase: 'listening', isStartingCapture: true }, ''],
     ['sending', { phase: 'sending' }, ''],
     ['working', { phase: 'working' }, 'Tap to add a message'],
     ['working with a pending approval', { phase: 'working', pendingApproval: true }, ''],
@@ -722,8 +764,28 @@ describe('voiceConversationHint', () => {
       'Tap to add a message',
     ],
     ['recording a queued message', { phase: 'recording' }, 'Tap to queue'],
+    [
+      'recording a queued message before capture begins',
+      { phase: 'recording', isStartingCapture: true },
+      '',
+    ],
     ['paused after silence', { phase: 'paused', pauseReason: 'no-speech' }, 'Tap to talk'],
     ['paused after a failure', { phase: 'paused', pauseReason: 'error' }, 'Tap to retry'],
+    [
+      'paused after a microphone failure',
+      { phase: 'paused', pauseReason: 'error', failureSource: 'capture' },
+      'Allow microphone access, then tap to retry',
+    ],
+    [
+      'paused after a send failure',
+      { phase: 'paused', pauseReason: 'error', failureSource: 'send' },
+      'Tap to retry',
+    ],
+    [
+      'paused after a playback failure',
+      { phase: 'paused', pauseReason: 'error', failureSource: 'playback' },
+      'Tap to retry',
+    ],
     ['paused by the user', { phase: 'paused', pauseReason: 'user' }, 'Tap to talk'],
     [
       'paused by the user while a reply is held',

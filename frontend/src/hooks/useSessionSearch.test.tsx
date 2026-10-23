@@ -2,6 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 import { useSessionSearch } from './useSessionSearch'
 
+const helperSessionIdsRef = vi.hoisted(() => ({ current: new Set<string>() }))
+
+vi.mock('@/hooks/useChangeWalkthrough', () => ({
+  useWalkthroughHelperSessionIds: () => helperSessionIdsRef.current,
+}))
+
 const { sessionsData, lastArgsRef, flagsRef } = vi.hoisted(() => ({
   sessionsData: [] as Array<{ id: string; title: string; location: { directory: string }; parentID?: string; time: { updated: number } }>,
   lastArgsRef: { current: undefined as { directories: string[]; options?: { search?: string; limit?: number; keepPreviousResults?: boolean; allDirectories?: boolean; project?: { id: string; subpath: string } } } | undefined },
@@ -39,6 +45,7 @@ describe('useSessionSearch', () => {
       { id: 'ses_beta', title: 'beta task', location: { directory: '/w/a' }, time: { updated: 1 } },
     )
     lastArgsRef.current = undefined
+    helperSessionIdsRef.current = new Set()
     flagsRef.current = { hasNextPage: false, isFetchingNextPage: false, isFetchNextPageError: false, isPlaceholderData: false, isError: false }
   })
 
@@ -110,6 +117,20 @@ describe('useSessionSearch', () => {
 
     expect(lastArgsRef.current?.options?.project).toEqual({ id: 'proj_x', subpath: '' })
     expect(result.current.filteredSessions.map((session) => session.id)).toEqual(['ses_root', 'ses_wt'])
+  })
+
+  it('hides walkthrough helper sessions from the session list', () => {
+    sessionsData.splice(
+      0,
+      sessionsData.length,
+      { id: 'ses_user', title: 'user task', location: { directory: '/w/a' }, time: { updated: 2 } },
+      { id: 'ses_walk', title: 'Walkthrough · user task', location: { directory: '/w/a' }, time: { updated: 1 } },
+    )
+    helperSessionIdsRef.current = new Set(['ses_walk'])
+
+    const { result } = renderHook(() => useSessionSearch(['/w/a']))
+
+    expect(result.current.filteredSessions.map((session) => session.id)).toEqual(['ses_user'])
   })
 
   it('passes isError through from useSessionsAcrossDirectories', () => {

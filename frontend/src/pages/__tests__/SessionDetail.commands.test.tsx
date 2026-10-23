@@ -831,4 +831,28 @@ describe('SessionDetail command actions', () => {
     expect(content).not.toContain('middle-marker')
     expect(content).not.toContain('newest-marker')
   })
+
+  it('hides the floating Clear button while composer suggestions are open', async () => {
+    renderSessionDetail()
+    await waitFor(() => expect(mocks.promptInputProps).not.toBeNull())
+
+    act(() => {
+      (mocks.promptInputProps?.onPromptChange as (hasContent: boolean) => void)(true)
+    })
+    expect(screen.getByRole('button', { name: 'Clear' })).toBeInTheDocument()
+
+    act(() => {
+      (mocks.promptInputProps?.onSuggestionsOpenChange as (open: boolean) => void)(true)
+    })
+    expect(screen.queryByRole('button', { name: 'Clear' })).not.toBeInTheDocument()
+  })
+
+  it('leaves the composer pointer events to the page so a modal menu can lock them', async () => {
+    renderSessionDetail()
+    await waitFor(() => expect(mocks.promptInputProps).not.toBeNull())
+
+    const wrapper = screen.getByTestId('prompt-overlay').firstElementChild as HTMLElement
+    expect(wrapper).toHaveClass('relative')
+    expect(wrapper).not.toHaveClass('pointer-events-auto')
+  })
 })

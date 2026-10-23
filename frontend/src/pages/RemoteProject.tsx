@@ -6,7 +6,7 @@ import { useCreateSession } from '@/hooks/useOpenCode'
 import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
 import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 import { useSSE } from '@/hooks/useSSE'
-import { useMobile } from '@/hooks/useMobile'
+import { useToolPanelLayout } from '@/hooks/useToolPanelLayout'
 import { useToolPanel } from '@/hooks/useToolPanel'
 import { useDialogParam } from '@/hooks/useDialogParam'
 import { useTerminalDialogParam, useTerminalDirectoryParam } from '@/hooks/useOpenTerminal'
@@ -35,8 +35,8 @@ function RemoteProjectContent({ serverId, directory }: { serverId: string; direc
   const [sourceControlOpen, setSourceControlOpen] = useDialogParam('sourceControl')
   const [terminalOpen, setTerminalOpen] = useTerminalDialogParam()
   const terminalDirectory = useTerminalDirectoryParam()
-  const docked = !useMobile()
-  const toolPanel = useToolPanel(docked)
+  const { docked, showRail } = useToolPanelLayout()
+  const toolPanel = useToolPanel(showRail)
 
   const server = servers.find((candidate) => candidate.id === serverId)
   const isDisabled = server !== undefined && !server.enabled
@@ -167,7 +167,7 @@ function RemoteProjectContent({ serverId, directory }: { serverId: string; direc
         </div>
       </div>
 
-      {docked && directory ? (
+      {showRail && directory ? (
         <ToolSidePanel
           panel={toolPanel}
           filesBasePath={directory}

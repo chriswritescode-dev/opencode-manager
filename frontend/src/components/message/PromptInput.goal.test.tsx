@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput } from './PromptInput'
+import { useComposerDraftStore } from '@/stores/composerDraftStore'
 import { createCommandActionsMock, stubMatchMedia, createVoiceConversationControllerMock } from '@/test/test-utils'
 
 const mocks = vi.hoisted(() => ({
@@ -41,8 +42,8 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/hooks/useOpenCode')>()
   return {
     ...actual,
-    useSendPrompt: () => ({ mutate: mocks.sendPrompt, isPending: false }),
-    useSendShell: () => ({ mutate: mocks.sendShell, isPending: false }),
+    useSendPrompt: () => ({ mutate: mocks.sendPrompt, mutateAsync: mocks.sendPrompt, isPending: false }),
+    useSendShell: () => ({ mutate: mocks.sendShell, mutateAsync: mocks.sendShell, isPending: false }),
     useInterruptSession: () => ({ mutate: mocks.interrupt }),
     useAgents: () => ({ data: mocks.agents }),
     useSkills: () => ({ data: mocks.skills }),
@@ -145,7 +146,6 @@ describe('PromptInput goal mode', () => {
   const defaultProps = {
     directory: '/test',
     sessionID: 'test-session',
-    showScrollButton: false,
     isSessionActive: false,
     isStreamingResponse: false,
     onScrollToBottom: vi.fn(),
@@ -164,10 +164,13 @@ describe('PromptInput goal mode', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    useComposerDraftStore.setState({ drafts: {} })
     mocks.useVoiceConversation.mockReturnValue(createVoiceConversationControllerMock())
     mocks.useSessionGoal.mockReturnValue({ data: null })
     mocks.useSessionPermissionMode.mockReturnValue({ data: undefined })
     mocks.startGoal.mockResolvedValue({ id: 1 })
+    mocks.sendPrompt.mockResolvedValue({ id: 'inbox_1' })
+    mocks.sendShell.mockResolvedValue({ id: 'shell_1' })
     mocks.agents = []
     mocks.useMobile.mockReturnValue(false)
     mocks.useSTT.mockReturnValue({
@@ -265,7 +268,6 @@ describe('PromptInput goal mode', () => {
     }))
     await waitFor(() => expect(mocks.sendPrompt).toHaveBeenCalledWith(
       expect.objectContaining({ delivery: 'queue' }),
-      expect.anything(),
     ))
     expect(mocks.startGoal.mock.invocationCallOrder[0]).toBeLessThan(mocks.sendPrompt.mock.invocationCallOrder[0])
   })
