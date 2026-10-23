@@ -476,6 +476,37 @@ describe('SessionDetail command actions', () => {
     })
   })
 
+  it('opens the sessions picker dialog from the sessions command on desktop', async () => {
+    const { SessionPickerDialog } = await import('@/components/session/SessionPickerDialog')
+
+    renderSessionDetail()
+    const showSessions = await commandHandler('showSessions')
+
+    act(() => {
+      showSessions()
+    })
+
+    const props = vi.mocked(SessionPickerDialog).mock.calls.at(-1)?.[0] as Record<string, unknown>
+    expect(props).toMatchObject({ open: true })
+  })
+
+  it('opens the mobile sessions sheet instead of the dialog from the sessions command', async () => {
+    const { SessionPickerDialog } = await import('@/components/session/SessionPickerDialog')
+    mocks.useMobile.mockReturnValue(true)
+    const captured = { search: { current: '' }, pathname: { current: '' } }
+
+    renderSessionDetail(captured)
+    const showSessions = await commandHandler('showSessions')
+
+    act(() => {
+      showSessions()
+    })
+
+    await waitFor(() => expect(captured.search.current).toBe('?mobileTab=sessions'))
+    const props = vi.mocked(SessionPickerDialog).mock.calls.at(-1)?.[0] as Record<string, unknown>
+    expect(props).toMatchObject({ open: false })
+  })
+
   it('shows the error toast when the transcript fetch fails', async () => {
     mocks.listSessionMessages.mockRejectedValueOnce(new Error('page fetch failed'))
     mocks.copyTextToClipboard.mockImplementation(async (content: string | Promise<string>) => {

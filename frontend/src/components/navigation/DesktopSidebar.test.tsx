@@ -11,12 +11,19 @@ import * as useAuthModule from '@/hooks/useAuth'
 vi.mock('@/hooks/useDesktop')
 vi.mock('@/hooks/useSidebarCollapsed')
 vi.mock('@/hooks/useAuth')
+vi.mock('@/api/repos', () => ({
+  listRepos: vi.fn().mockResolvedValue([]),
+}))
 vi.mock('@/hooks/useOpenCodeServers', () => ({
   useOpenCodeServers: () => ({ servers: [], isLoading: false }),
   useOpenCodeServerStatuses: () => ({ statuses: [], statusById: {}, isLoading: false }),
 }))
 vi.mock('@/components/navigation/DesktopSessionTree', () => ({
   DesktopSessionTree: () => <div data-testid="session-tree" />,
+}))
+vi.mock('@/components/session/SessionPickerDialog', () => ({
+  SessionPickerDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="sessions-picker-dialog" /> : null,
 }))
 
 function LocationDisplay() {
@@ -166,7 +173,7 @@ describe('DesktopSidebar', () => {
     for (const label of ['Home', 'Settings', 'Logout']) {
       expect(screen.getByText(label)).toBeInTheDocument()
     }
-    for (const label of ['Menu', 'Repos', 'Files', 'MCP', 'Skills', 'Schedules', 'All Schedules', 'Source Control', 'Terminal', 'Walkthrough', 'Preview']) {
+    for (const label of ['Menu', 'Files', 'MCP', 'Skills', 'Schedules', 'All Schedules', 'Source Control', 'Terminal', 'Walkthrough', 'Preview']) {
       expect(screen.queryByText(label)).toBeNull()
     }
   })
@@ -263,7 +270,7 @@ describe('DesktopSidebar', () => {
 
     expect(screen.queryByRole('button', { name: /Switch server/ })).toBeNull()
   })
-  it('renders home, repos and account items and no session tree when collapsed', () => {
+  it('renders home, sessions and account items and no session tree when collapsed', () => {
     vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
     vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([true, vi.fn()])
     vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
@@ -276,8 +283,26 @@ describe('DesktopSidebar', () => {
 
     expect(screen.queryByTestId('session-tree')).toBeNull()
     expect(screen.getByText('Home')).toBeInTheDocument()
-    expect(screen.getByText('Repos')).toBeInTheDocument()
+    expect(screen.getByText('Sessions')).toBeInTheDocument()
     expect(screen.getByText('Settings')).toBeInTheDocument()
     expect(screen.queryByText('Files')).toBeNull()
+  })
+
+  it('opens the sessions picker dialog from the collapsed Sessions item', () => {
+    vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
+    vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([true, vi.fn()])
+    vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
+      isAuthenticated: true,
+      isLoading: false,
+      logout: vi.fn(),
+    } as any)
+
+    render(<DesktopSidebar />, { wrapper: createWrapper(['/repos/5']) })
+
+    expect(screen.queryByTestId('sessions-picker-dialog')).toBeNull()
+
+    fireEvent.click(screen.getByText('Sessions'))
+
+    expect(screen.getByTestId('sessions-picker-dialog')).toBeInTheDocument()
   })
 })

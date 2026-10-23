@@ -6,8 +6,9 @@ import { useSidebarWidth } from '@/hooks/useSidebarWidth'
 import { useAuth } from '@/hooks/useAuth'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { useOpenNavItem } from '@/hooks/useOpenNavItem'
+import { useSessionPickerRouteScope } from '@/hooks/useSessionPickerRouteScope'
 import { buildNavModel, type MoreDrawerItem, type NavPrimaryCta } from '@/components/navigation/moreDrawerItems'
-import { RepoQuickSwitchSheet } from '@/components/navigation/RepoQuickSwitchSheet'
+import { SessionPickerDialog } from '@/components/session/SessionPickerDialog'
 import { DesktopSessionTree } from '@/components/navigation/DesktopSessionTree'
 import { LinkedServersNav } from '@/components/navigation/LinkedServersNav'
 import {
@@ -15,9 +16,47 @@ import {
   SidebarSection,
   SidebarItem,
 } from '@/components/ui/sidebar'
-import { FolderGit2 } from 'lucide-react'
+import { getRepoPath, getServerSessionPath, getSessionPath } from '@/lib/navigation'
+import { List } from 'lucide-react'
 
 const FOOTER_ITEM_KEYS = new Set(['home', 'settings', 'logout'])
+
+function DesktopSessionsPicker({ onDismiss }: { onDismiss: () => void }) {
+  const navigate = useNavigate()
+  const { currentRepo, activeSessionID, remote } = useSessionPickerRouteScope(true)
+
+  return (
+    <SessionPickerDialog
+      open
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onDismiss()
+      }}
+      currentRepo={currentRepo}
+      activeSessionID={activeSessionID}
+      remote={remote}
+      onSelectSession={(session, sessionRepo) => {
+        navigate(getSessionPath(sessionRepo.id, session.id))
+        onDismiss()
+      }}
+      onSelectRemoteSession={(session, serverId) => {
+        navigate(getServerSessionPath(serverId, session.id))
+        onDismiss()
+      }}
+      onDeleteActiveSession={() => {
+        onDismiss()
+        if (currentRepo) navigate(getRepoPath(currentRepo.id))
+      }}
+      onSelectRepo={(selectedRepo) => {
+        navigate(getRepoPath(selectedRepo.id))
+        onDismiss()
+      }}
+      onNavigate={(path) => {
+        navigate(path)
+        onDismiss()
+      }}
+    />
+  )
+}
 
 export function DesktopSidebar() {
   const location = useLocation()
@@ -26,7 +65,7 @@ export function DesktopSidebar() {
   const openNavItem = useOpenNavItem()
   const [collapsed, toggle] = useSidebarCollapsed()
   const [sidebarWidth, setSidebarWidth] = useSidebarWidth()
-  const [repoSwitcherOpen, setRepoSwitcherOpen] = useState(false)
+  const [sessionsOpen, setSessionsOpen] = useState(false)
   const { isAuthenticated, isLoading, logout } = useAuth()
 
   const isDesktop = useDesktop()
@@ -51,15 +90,15 @@ export function DesktopSidebar() {
         p.set('settingsTab', 'account')
         p.delete('mobileTab')
       }, 'push')
-    } else if (item.key === 'repos') {
-      setRepoSwitcherOpen(true)
+    } else if (item.key === 'sessions') {
+      setSessionsOpen(true)
     }
   }
 
   const footerItems = items.filter((item) => FOOTER_ITEM_KEYS.has(item.key))
   const collapsedItems: MoreDrawerItem[] = [
     footerItems[0],
-    { key: 'repos', label: 'Repos', icon: FolderGit2 },
+    { key: 'sessions', label: 'Sessions', icon: List },
     ...footerItems.slice(1),
   ]
 
@@ -133,10 +172,7 @@ export function DesktopSidebar() {
         )}
       </Sidebar>
 
-      <RepoQuickSwitchSheet
-        isOpen={repoSwitcherOpen}
-        onClose={() => setRepoSwitcherOpen(false)}
-      />
+      {sessionsOpen && <DesktopSessionsPicker onDismiss={() => setSessionsOpen(false)} />}
     </>
   )
 }

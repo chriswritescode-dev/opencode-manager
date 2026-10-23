@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   fetchNextPage: vi.fn(),
   deleteSessionMock: vi.fn(),
   deletedSessionServerId: null as string | null,
+  createSessionDirectories: [] as string[],
   togglePinMock: vi.fn(),
   getOpenCodeLocation: vi.fn(),
   sessionPins: [] as Array<{ sessionId: string; directory: string; pinnedAt: number }>,
@@ -42,6 +43,12 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/hooks/useSettings', () => ({
   useSettings: () => ({ preferences: mocks.preferences }),
+}))
+
+vi.mock('@/api/repos', () => ({
+  listRepos: vi.fn().mockResolvedValue([]),
+  createRepo: vi.fn(),
+  discoverRepos: vi.fn(),
 }))
 
 vi.mock('@/api/opencode', async (importOriginal) => {
@@ -87,6 +94,13 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
         isPending: false,
       }
     },
+    useCreateSession: (directory: string, onSuccess?: (session: { id: string }) => void) => ({
+      mutate: () => {
+        mocks.createSessionDirectories.push(directory)
+        onSuccess?.({ id: 'ses_new' })
+      },
+      isPending: false,
+    }),
   }
 })
 
@@ -202,7 +216,7 @@ const openProjectsTab = () => {
 }
 
 const openActiveTab = () => {
-  fireEvent.mouseDown(screen.getByRole('tab', { name: 'Active' }))
+  fireEvent.mouseDown(screen.getByRole('tab', { name: 'Activity' }))
 }
 
 describe('SessionPickerDialog', () => {
@@ -212,6 +226,7 @@ describe('SessionPickerDialog', () => {
     localStorage.clear()
     mocks.deleteSessionMock.mockResolvedValue(undefined)
     mocks.deletedSessionServerId = null
+    mocks.createSessionDirectories.length = 0
     mocks.locationData = {
       directory: '/w/a',
       project: { id: 'global', directory: '/w/a', canonical: '/w/a' },
@@ -305,6 +320,7 @@ describe('SessionPickerDialog', () => {
 
     expect(mocks.lastDirectories).toEqual(['/w/a'])
     expect(mocks.lastAllDirectories).toBe(false)
+    expect(screen.getByRole('tab', { name: 'This project' })).toBeInTheDocument()
     expect(screen.getByText('Alpha session')).toBeInTheDocument()
     expect(screen.queryByText('Beta session')).not.toBeInTheDocument()
 
@@ -313,6 +329,7 @@ describe('SessionPickerDialog', () => {
     expect(mocks.lastDirectories).toEqual(['/w/a', '/w/b'])
     expect(mocks.lastAllDirectories).toBe(true)
     expect(localStorage.getItem('oc:session-picker:all-projects')).toBe('true')
+    expect(screen.getByRole('tab', { name: 'All sessions' })).toBeInTheDocument()
     expect(screen.getByText('Beta session')).toBeInTheDocument()
     expect(screen.getByText('alpha')).toBeInTheDocument()
     expect(screen.getByText('beta')).toBeInTheDocument()
@@ -321,6 +338,97 @@ describe('SessionPickerDialog', () => {
     expect(mocks.lastDirectories).toEqual(['/w/a'])
     expect(mocks.lastAllDirectories).toBe(false)
     expect(localStorage.getItem('oc:session-picker:all-projects')).toBe('false')
+    expect(screen.getByRole('tab', { name: 'This project' })).toBeInTheDocument()
+  })
+
+  it('toggles the scope when the selected sessions tab is clicked again', async () => {
+    const user = userEvent.setup()
+    renderPicker()
+
+    await user.click(screen.getByRole('tab', { name: 'This project' }))
+
+    expect(screen.getByRole('tab', { name: 'All sessions', selected: true })).toBeInTheDocument()
+    expect(localStorage.getItem('oc:session-picker:all-projects')).toBe('true')
+
+    await user.click(screen.getByRole('tab', { name: 'All sessions' }))
+
+    expect(screen.getByRole('tab', { name: 'This project', selected: true })).toBeInTheDocument()
+    expect(localStorage.getItem('oc:session-picker:all-projects')).toBe('false')
+  })
+
+  it('selects the sessions tab without toggling the scope when it was not selected', async () => {
+    const user = userEvent.setup()
+    renderPicker()
+
+    await user.click(screen.getByRole('tab', { name: 'Activity' }))
+    await user.click(screen.getByRole('tab', { name: 'This project' }))
+
+    expect(screen.getByRole('tab', { name: 'This project', selected: true })).toBeInTheDocument()
+    expect(localStorage.getItem('oc:session-picker:all-projects')).toBeNull()
+  })
+
+  it('toggles the scope with Enter on the focused selected sessions tab', async () => {
+    const user = userEvent.setup()
+    renderPicker()
+
+    act(() => {
+      screen.getByRole('tab', { name: 'This project' }).focus()
+    })
+    await user.keyboard('{Enter}')
+
+    expect(screen.getByRole('tab', { name: 'All sessions', selected: true })).toBeInTheDocument()
+  })
+
+  it('labels the sessions tab Sessions and lists every project without a current repo', () => {
+    mocks.sessionsData = [
+      session('ses_a', 'Alpha session', '/w/a', 2000),
+      session('ses_b', 'Beta session', '/w/b', 1000),
+    ]
+
+    renderPicker({ currentRepo: undefined })
+
+    expect(screen.getByRole('tab', { name: 'Sessions', selected: true })).toBeInTheDocument()
+    expect(mocks.lastDirectories).toEqual(['/w/a', '/w/b'])
+    expect(mocks.lastAllDirectories).toBe(true)
+    expect(screen.getByText('Beta session')).toBeInTheDocument()
+    expect(localStorage.getItem('oc:session-picker:all-projects')).toBeNull()
+  })
+
+  it('starts a new session in the current repo from the sessions tab header action', () => {
+    const onNavigate = vi.fn()
+    renderPicker({ onNavigate })
+
+    fireEvent.click(screen.getByRole('button', { name: 'New session in alpha' }))
+
+    expect(mocks.createSessionDirectories).toEqual(['/w/a'])
+    expect(onNavigate).toHaveBeenCalledWith('/repos/1/sessions/ses_new')
+  })
+
+  it('opens the add repository dialog from the projects tab header action', async () => {
+    renderPicker()
+
+    openProjectsTab()
+    fireEvent.click(await screen.findByRole('button', { name: 'Add repository' }))
+
+    expect(await screen.findByRole('dialog', { name: 'Add Repository' })).toBeInTheDocument()
+  })
+
+  it('starts a new session in a project row and marks a repo that is not ready', async () => {
+    const onNavigate = vi.fn()
+    mocks.repos = [
+      repo(1, 'alpha', '/w/a'),
+      { ...repo(2, 'beta', '/w/b'), cloneStatus: 'cloning' },
+    ]
+    renderPicker({ onNavigate })
+
+    openProjectsTab()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New session in alpha' }))
+
+    expect(mocks.createSessionDirectories).toEqual(['/w/a'])
+    expect(onNavigate).toHaveBeenCalledWith('/repos/1/sessions/ses_new')
+    expect(screen.queryByRole('button', { name: 'New session in beta' })).not.toBeInTheDocument()
+    expect(screen.getByText('Not ready')).toBeInTheDocument()
   })
 
   it('lists project sessions across worktrees and labels them with the folder name', async () => {
@@ -556,11 +664,11 @@ describe('SessionPickerDialog', () => {
     expect(screen.getByRole('option', { name: /Active session/ })).toHaveAttribute('aria-selected', 'true')
   })
 
-  it('renders an Active/Sessions/Projects tab switcher and defaults to the sessions tab', () => {
+  it('renders an Activity/Sessions/Projects tab switcher and defaults to the sessions tab', () => {
     renderPicker()
 
-    expect(screen.getByRole('tab', { name: 'Sessions' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('tab', { name: 'Active' })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('tab', { name: 'This project' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'false')
     expect(screen.getByRole('tab', { name: 'Projects' })).toHaveAttribute('aria-selected', 'false')
     expect(combobox()).toHaveAttribute('placeholder', 'Search sessions...')
   })
@@ -568,7 +676,7 @@ describe('SessionPickerDialog', () => {
   it('exposes a tabpanel labelled by the active tab and swaps panels on tab switch', async () => {
     renderPicker()
 
-    const sessionsPanel = screen.getByRole('tabpanel', { name: 'Sessions' })
+    const sessionsPanel = screen.getByRole('tabpanel', { name: 'This project' })
     expect(sessionsPanel).toHaveAttribute('data-state', 'active')
     expect(screen.queryByRole('tabpanel', { name: 'Projects' })).not.toBeInTheDocument()
 
@@ -576,7 +684,7 @@ describe('SessionPickerDialog', () => {
 
     const projectsPanel = await screen.findByRole('tabpanel', { name: 'Projects' })
     expect(projectsPanel).toHaveAttribute('data-state', 'active')
-    expect(screen.queryByRole('tabpanel', { name: 'Sessions' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tabpanel', { name: 'This project' })).not.toBeInTheDocument()
   })
 
   it('focuses the projects search input after clicking the Projects tab and filters on typing', async () => {
@@ -713,19 +821,19 @@ describe('SessionPickerDialog', () => {
     expect(screen.getByText('No projects found')).toBeInTheDocument()
   })
 
-  it('cycles Active, Sessions and Projects with the default Ctrl+S binding', async () => {
+  it('cycles Activity, Sessions and Projects with the default Ctrl+S binding', async () => {
     renderPicker()
 
-    expect(screen.getByRole('tab', { name: 'Sessions', selected: true })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'This project', selected: true })).toBeInTheDocument()
 
     fireEvent.keyDown(combobox(), { key: 's', ctrlKey: true })
     expect(await screen.findByRole('tab', { name: 'Projects', selected: true })).toBeInTheDocument()
 
     fireEvent.keyDown(combobox(), { key: 's', ctrlKey: true })
-    expect(await screen.findByRole('tab', { name: 'Active', selected: true })).toBeInTheDocument()
+    expect(await screen.findByRole('tab', { name: 'Activity', selected: true })).toBeInTheDocument()
 
     fireEvent.keyDown(combobox(), { key: 's', ctrlKey: true })
-    expect(await screen.findByRole('tab', { name: 'Sessions', selected: true })).toBeInTheDocument()
+    expect(await screen.findByRole('tab', { name: 'This project', selected: true })).toBeInTheDocument()
   })
 
   it('honors a configured switch binding and shows it in the footer', async () => {
@@ -756,7 +864,7 @@ describe('SessionPickerDialog', () => {
 
     fireEvent.keyDown(combobox(), { key: 'o', ctrlKey: true })
 
-    expect(screen.getByRole('tab', { name: 'Sessions', selected: true })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'This project', selected: true })).toBeInTheDocument()
   })
 
   it('resets to the sessions tab when the dialog reopens', async () => {
@@ -787,7 +895,7 @@ describe('SessionPickerDialog', () => {
     fireEvent.click(screen.getByText('open-picker'))
 
     await waitFor(() =>
-      expect(screen.getByRole('tab', { name: 'Sessions' })).toHaveAttribute('aria-selected', 'true'),
+      expect(screen.getByRole('tab', { name: 'This project' })).toHaveAttribute('aria-selected', 'true'),
     )
   })
 
@@ -918,7 +1026,7 @@ describe('SessionPickerDialog', () => {
       })
 
       expect(screen.queryByRole('tab', { name: 'Projects' })).not.toBeInTheDocument()
-      expect(screen.getByRole('tab', { name: 'Active' })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'Activity' })).toBeInTheDocument()
 
       const row = await screen.findByRole('option', { name: /Remote session/ })
       expect(row).toHaveTextContent('Kitchen')

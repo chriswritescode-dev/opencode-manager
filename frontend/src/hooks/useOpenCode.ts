@@ -177,7 +177,7 @@ export const useSessionsAcrossDirectories = (
         }
       : undefined,
     getNextPageParam: (lastPage) => lastPage.nextParam,
-    enabled: uniqueDirectories.length > 0,
+    enabled: uniqueDirectories.length > 0 || allDirectories,
     staleTime: 10000,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,

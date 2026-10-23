@@ -30,6 +30,7 @@ import { useShortcutActions } from "@/contexts/KeyboardShortcutsContext";
 import { useSettingsDialog } from "@/hooks/useSettingsDialog";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useMobile } from "@/hooks/useMobile";
+import { useMobileTabBar } from "@/hooks/useMobileTabBar";
 import { useToolPanelLayout } from "@/hooks/useToolPanelLayout";
 import { useVisualViewport } from "@/hooks/useVisualViewport";
 import { useTTS } from "@/hooks/useTTS";
@@ -156,6 +157,7 @@ export function SessionDetail() {
   const [forkPickerLoading, setForkPickerLoading] = useState(false);
 
   const isMobile = useMobile();
+  const { open: openMobileSheet } = useMobileTabBar();
   const { docked, showRail } = useToolPanelLayout();
   const sidePanel = useToolPanel(showRail);
   const { keyboardHeight } = useVisualViewport();
@@ -368,7 +370,13 @@ export function SessionDetail() {
     enabled: !isVoiceConversationActive,
   });
 
-  const handleShowSessionsDialog = useCallback(() => setSessionsDialogOpen(true), []);
+  const handleShowSessionsDialog = useCallback(() => {
+    if (isMobile) {
+      openMobileSheet('sessions');
+      return;
+    }
+    setSessionsDialogOpen(true);
+  }, [isMobile, openMobileSheet]);
   const handleShowMcpDialog = useCallback(() => setMcpDialogOpen(true), [setMcpDialogOpen]);
   const handleShowSkillsDialog = useCallback(() => setSkillsDialogOpen(true), [setSkillsDialogOpen]);
   const handleShowWalkthrough = useCallback((source?: WalkthroughSource) => {
@@ -1055,6 +1063,10 @@ export function SessionDetail() {
         }}
         onSelectRepo={(selectedRepo) => {
           navigate(getRepoPath(selectedRepo.id))
+          setSessionsDialogOpen(false)
+        }}
+        onNavigate={(path) => {
+          navigate(path)
           setSessionsDialogOpen(false)
         }}
       />
