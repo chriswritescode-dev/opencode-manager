@@ -1,5 +1,10 @@
 import type { WSContext, WSEvents } from 'hono/ws'
 import { getErrorMessage } from './error-utils'
+import {
+  registerSessionConnection,
+  SESSION_CONNECTION_CLOSE_CODE,
+  SESSION_CONNECTION_CLOSE_REASON,
+} from '../services/session-connections'
 
 export interface WebSocketPeer {
   send(data: string | Uint8Array<ArrayBuffer>): void
@@ -25,6 +30,10 @@ export interface PendingUpstream {
 export interface ConnectUpstreamOptions {
   protocols?: string[]
   timeoutMs?: number
+}
+
+export interface BridgedSocketEventsOptions {
+  sessionId?: string
 }
 
 export const MAX_PEER_BUFFERED_BYTES = 4 * 1024 * 1024
@@ -320,13 +329,21 @@ export function connectUpstreamWebSocket(
 
 export function createBridgedSocketEvents(
   openBridge: (peer: WebSocketPeer) => WebSocketBridge | Promise<WebSocketBridge>,
+  options: BridgedSocketEventsOptions = {},
 ): WSEvents {
   let bridge: WebSocketBridge | undefined
   let closed = false
   let connectPromise: Promise<void> = Promise.resolve()
+  let unregisterSession: (() => void) | undefined
 
   return {
     onOpen(_event, ws) {
+      if (options.sessionId !== undefined) {
+        const sessionId = options.sessionId
+        unregisterSession = registerSessionConnection(sessionId, () => {
+          ws.close(SESSION_CONNECTION_CLOSE_CODE, SESSION_CONNECTION_CLOSE_REASON)
+        })
+      }
       connectPromise = (async () => {
         const connected = await openBridge(toWebSocketPeer(ws))
         if (closed) {
@@ -346,6 +363,8 @@ export function createBridgedSocketEvents(
     },
     onClose() {
       closed = true
+      unregisterSession?.()
+      unregisterSession = undefined
       bridge?.close()
     },
   }

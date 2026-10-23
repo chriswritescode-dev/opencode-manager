@@ -6,7 +6,7 @@ import { serve } from '@hono/node-server'
 import { createNodeWebSocket } from '@hono/node-ws'
 
 export interface StartWebSocketServerOptions {
-  app: Hono
+  app: Hono<any, any, any>
   register?: (app: Hono, upgradeWebSocket: UpgradeWebSocket) => void
   injectWebSocket?: (server: Server) => void
 }

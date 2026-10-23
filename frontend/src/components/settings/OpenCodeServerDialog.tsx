@@ -12,7 +12,7 @@ import {
   type OpenCodeServerLink,
   type OpenCodeServerTestResult,
 } from '@opencode-manager/shared/schemas'
-import { haveSameUrlOrigin } from '@opencode-manager/shared/utils'
+import { haveSameUrlOrigin, isLoopbackHost, isPrivateNetworkHost } from '@opencode-manager/shared/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -84,26 +84,14 @@ const serverFormSchema = z.object({
 
 type ServerFormValues = z.infer<typeof serverFormSchema>
 
-function isPrivateHost(hostname: string): boolean {
-  const host = hostname.toLowerCase()
-  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') return true
-  const octets = host.split('.').map((part) => Number(part))
-  if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
-    return false
-  }
-  const [first, second] = octets
-  return (
-    first === 10 ||
-    (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168) ||
-    (first === 169 && second === 254)
-  )
-}
-
 function sendsCredentialsInClear(baseUrl: string): boolean {
   try {
     const url = new URL(baseUrl)
-    return url.protocol === 'http:' && !isPrivateHost(url.hostname)
+    return (
+      url.protocol === 'http:' &&
+      !isLoopbackHost(url.hostname) &&
+      !isPrivateNetworkHost(url.hostname)
+    )
   } catch {
     return false
   }

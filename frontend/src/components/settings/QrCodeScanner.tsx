@@ -19,21 +19,24 @@ interface QrCodeScannerProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onResult: (text: string) => void
+  title?: string
+  description?: string
+  fallbackHint?: string
 }
 
-function describeCameraError(error: unknown): string {
+function describeCameraError(error: unknown, fallbackHint: string): string {
   if (error instanceof DOMException) {
     if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
-      return 'Camera permission was denied. Allow camera access for this site or paste the pairing link instead.'
+      return `Camera permission was denied. Allow camera access for this site. ${fallbackHint}`
     }
     if (error.name === 'NotFoundError' || error.name === 'OverconstrainedError') {
-      return 'No camera was found on this device. Paste the pairing link instead.'
+      return `No camera was found on this device. ${fallbackHint}`
     }
     if (error.name === 'NotReadableError') {
-      return 'The camera is already in use by another application. Paste the pairing link instead.'
+      return `The camera is already in use by another application. ${fallbackHint}`
     }
   }
-  return 'The camera could not be started. Paste the pairing link instead.'
+  return `The camera could not be started. ${fallbackHint}`
 }
 
 function fitScanDimensions(width: number, height: number): { width: number; height: number } {
@@ -45,7 +48,14 @@ function fitScanDimensions(width: number, height: number): { width: number; heig
   return { width: Math.round(width * scale), height: Math.round(height * scale) }
 }
 
-export function QrCodeScanner({ open, onOpenChange, onResult }: QrCodeScannerProps) {
+export function QrCodeScanner({
+  open,
+  onOpenChange,
+  onResult,
+  title = 'Scan pairing QR code',
+  description = 'Point the camera at the QR code shown by the OpenCode server you want to link.',
+  fallbackHint = 'Paste the pairing link instead.',
+}: QrCodeScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const decoderRef = useRef<QrDecoder | null>(null)
   const onResultRef = useRef(onResult)
@@ -126,12 +136,12 @@ export function QrCodeScanner({ open, onOpenChange, onResult }: QrCodeScannerPro
 
     const startCamera = async () => {
       if (!navigator.mediaDevices?.getUserMedia) {
-        setError('Camera access is not available in this browser. Paste the pairing link instead.')
+        setError(`Camera access is not available in this browser. ${fallbackHint}`)
         setIsStarting(false)
         return
       }
       if (!window.isSecureContext) {
-        setError('Camera access requires a secure (HTTPS) connection. Paste the pairing link instead.')
+        setError(`Camera access requires a secure (HTTPS) connection. ${fallbackHint}`)
         setIsStarting(false)
         return
       }
@@ -139,7 +149,7 @@ export function QrCodeScanner({ open, onOpenChange, onResult }: QrCodeScannerPro
         await loadDecoder()
       } catch {
         if (cancelled) return
-        setError('The QR decoder could not be loaded. Paste the pairing link instead.')
+        setError(`The QR decoder could not be loaded. ${fallbackHint}`)
         setIsStarting(false)
         return
       }
@@ -161,7 +171,7 @@ export function QrCodeScanner({ open, onOpenChange, onResult }: QrCodeScannerPro
         frameId = requestAnimationFrame(scanFrame)
       } catch (cameraError) {
         if (cancelled) return
-        setError(describeCameraError(cameraError))
+        setError(describeCameraError(cameraError, fallbackHint))
         setIsStarting(false)
       }
     }
@@ -172,16 +182,14 @@ export function QrCodeScanner({ open, onOpenChange, onResult }: QrCodeScannerPro
       cancelled = true
       stopCamera()
     }
-  }, [open, onOpenChange])
+  }, [open, onOpenChange, fallbackHint])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Scan pairing QR code</DialogTitle>
-          <DialogDescription>
-            Point the camera at the QR code shown by the OpenCode server you want to link.
-          </DialogDescription>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">
