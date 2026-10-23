@@ -7,6 +7,8 @@ interface UseAutoPlayLastResponseParams {
   sessionId: string
   lastAssistantMessage: SessionMessageInfo | undefined
   lastAssistantText: string
+  /** Whether a finished reply may start playing; false while hands-free voice owns playback. */
+  enabled?: boolean
 }
 
 interface PlayableAssistantMessage {
@@ -15,7 +17,7 @@ interface PlayableAssistantMessage {
 }
 
 export function getAssistantText(message: SessionMessageInfo | undefined): string {
-  return message?.type === 'assistant' ? assistantText(message.content) : ''
+  return message?.type === 'assistant' ? assistantText(message.content, { stripThink: true }) : ''
 }
 
 export function getLatestPlayableAssistantMessage(messages: SessionMessageInfo[] | undefined): PlayableAssistantMessage | undefined {
@@ -34,6 +36,7 @@ export function useAutoPlayLastResponse({
   sessionId,
   lastAssistantMessage,
   lastAssistantText,
+  enabled = true,
 }: UseAutoPlayLastResponseParams): void {
   const { queueMessage, isEnabled: ttsEnabled, isPlaying, isLoading, activeMessageId } = useTTS()
   const { preferences } = useSettings()
@@ -70,10 +73,19 @@ export function useAutoPlayLastResponse({
   }, [sessionId])
   
   useEffect(() => {
+    if (!enabled) {
+      if (lastAssistantMessage && isMessageCompleted(lastAssistantMessage)) {
+        hasInitializedRef.current = true
+        lastSpokenIdRef.current = lastAssistantMessage.id
+        lastKnownCompletedRef.current[lastAssistantMessage.id] = true
+      }
+      return
+    }
+
     if (!ttsEnabled || !autoPlayEnabled) {
       return
     }
-    
+
     if (!lastAssistantMessage) {
       return
     }
@@ -119,6 +131,7 @@ export function useAutoPlayLastResponse({
       }
     }
   }, [
+    enabled,
     ttsEnabled,
     autoPlayEnabled,
     lastAssistantMessage,

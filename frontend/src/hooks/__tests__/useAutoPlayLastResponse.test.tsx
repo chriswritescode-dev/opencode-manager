@@ -27,7 +27,7 @@ interface MockTTSReturn {
   activeMessageId: string | null
 }
 
-import { getLatestPlayableAssistantMessage, useAutoPlayLastResponse } from '../useAutoPlayLastResponse'
+import { getAssistantText, getLatestPlayableAssistantMessage, useAutoPlayLastResponse } from '../useAutoPlayLastResponse'
 
 const createMessage = (
   id: string,
@@ -145,6 +145,139 @@ describe('useAutoPlayLastResponse', () => {
     )
 
     expect(mockQueueMessage).not.toHaveBeenCalled()
+  })
+
+  it('does NOT call queueMessage while auto-play is disabled', () => {
+    setup()
+
+    const { rerender } = renderHook(
+      (props) => useAutoPlayLastResponse(props),
+      {
+        initialProps: {
+          sessionId: 'test-session',
+          lastAssistantMessage: createMessage('1'),
+          lastAssistantText: 'Test text',
+          enabled: false,
+        },
+      },
+    )
+
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: createMessage('1', Date.now()),
+      lastAssistantText: 'Test text',
+      enabled: false,
+    })
+
+    expect(mockQueueMessage).not.toHaveBeenCalled()
+  })
+
+  it('does NOT queue a reply that completed while voice mode owned playback when enabled turns back on', () => {
+    setup()
+
+    const baselineMessage = createMessage('0', Date.now())
+    const streamingMessage = createMessage('1')
+    const completedMessage = createMessage('1', Date.now())
+    const { rerender } = renderHook(
+      (props) => useAutoPlayLastResponse(props),
+      {
+        initialProps: {
+          sessionId: 'test-session',
+          lastAssistantMessage: baselineMessage,
+          lastAssistantText: 'Earlier reply',
+          enabled: true,
+        },
+      },
+    )
+
+    expect(mockQueueMessage).not.toHaveBeenCalled()
+
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: streamingMessage,
+      lastAssistantText: 'Read by voice mode',
+      enabled: false,
+    })
+
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: completedMessage,
+      lastAssistantText: 'Read by voice mode',
+      enabled: false,
+    })
+
+    expect(mockQueueMessage).not.toHaveBeenCalled()
+
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: completedMessage,
+      lastAssistantText: 'Read by voice mode',
+      enabled: true,
+    })
+
+    expect(mockQueueMessage).not.toHaveBeenCalled()
+  })
+
+  it('queues a reply that was still streaming when voice mode handed playback back, once it completes', () => {
+    setup()
+
+    const streamingMessage = createMessage('1')
+    const { rerender } = renderHook(
+      (props) => useAutoPlayLastResponse(props),
+      {
+        initialProps: {
+          sessionId: 'test-session',
+          lastAssistantMessage: streamingMessage,
+          lastAssistantText: 'Test text',
+          enabled: false,
+        },
+      },
+    )
+
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: streamingMessage,
+      lastAssistantText: 'Test text',
+      enabled: true,
+    })
+
+    expect(mockQueueMessage).not.toHaveBeenCalled()
+
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: createMessage('1', Date.now()),
+      lastAssistantText: 'Test text',
+      enabled: true,
+    })
+
+    expect(mockQueueMessage).toHaveBeenCalledTimes(1)
+    expect(mockQueueMessage).toHaveBeenCalledWith('1', 'Test text')
+  })
+
+  it('queues a reply with its inline think block stripped', () => {
+    setup()
+
+    const streamingMessage = createMessage('1', undefined, 'The answer is ready <think>hidden reasoning</think> and verified')
+    const { rerender } = renderHook(
+      (props) => useAutoPlayLastResponse(props),
+      {
+        initialProps: {
+          sessionId: 'test-session',
+          lastAssistantMessage: streamingMessage,
+          lastAssistantText: getAssistantText(streamingMessage),
+        },
+      },
+    )
+
+    const completedMessage = createMessage('1', Date.now(), 'The answer is ready <think>hidden reasoning</think> and verified')
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: completedMessage,
+      lastAssistantText: getAssistantText(completedMessage),
+    })
+
+    expect(mockQueueMessage).toHaveBeenCalledTimes(1)
+    expect(mockQueueMessage).toHaveBeenCalledWith('1', 'The answer is ready and verified')
   })
 
   it('does NOT call queueMessage on mount when last message was already time.completed', () => {

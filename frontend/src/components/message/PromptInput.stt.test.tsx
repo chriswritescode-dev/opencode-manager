@@ -1,8 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, act, waitFor, within } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput } from './PromptInput'
-import { createCommandActionsMock } from '@/test/test-utils'
+import {
+  SessionTranscriptContext,
+  type SessionTranscriptSnapshot,
+} from '@/contexts/session-transcript-context'
+import {
+  createCommandActionsMock,
+  createVoiceConversationControllerMock,
+} from '@/test/test-utils'
+import type {
+  UseVoiceConversationInput,
+  VoiceConversationController,
+} from '@/hooks/useVoiceConversation'
+import type { SessionMessageInfo } from '@opencode-manager/shared/opencode'
 
 const createTestQueryClient = () => new QueryClient({
   defaultOptions: {
@@ -13,27 +25,23 @@ const createTestQueryClient = () => new QueryClient({
 })
 
 const mocks = vi.hoisted(() => ({
-  useSTT: vi.fn(),
+  useSttAvailability: vi.fn(),
+  useVoiceConversation: vi.fn(),
   useMobile: vi.fn(),
-  useOpenCode: vi.fn(),
-  useCommands: vi.fn(),
-  useCommandHandler: vi.fn(),
-  useFileSearch: vi.fn(),
-  useModelSelection: vi.fn(),
-  useVariants: vi.fn(),
-  useSessionAgent: vi.fn(),
-  useAgents: vi.fn(),
   useSendPromptMutate: vi.fn(),
+  useSendPromptMutateAsync: vi.fn(),
   sendPromptPending: vi.fn(() => false),
   useUserBash: vi.fn(),
   useSessionAgentStore: vi.fn(),
   useSendErrorStore: vi.fn(),
-  useSettings: vi.fn(),
-  EventContext: vi.fn(),
 }))
 
 vi.mock('@/hooks/useSTT', () => ({
-  useSTT: mocks.useSTT,
+  useSttAvailability: mocks.useSttAvailability,
+}))
+
+vi.mock('@/hooks/useVoiceConversation', () => ({
+  useVoiceConversation: mocks.useVoiceConversation,
 }))
 
 vi.mock('@/hooks/useMobile', () => ({
@@ -41,35 +49,48 @@ vi.mock('@/hooks/useMobile', () => ({
 }))
 
 vi.mock('@/hooks/useOpenCode', () => ({
-  useSendPrompt: () => ({ mutate: mocks.useSendPromptMutate, isPending: mocks.sendPromptPending() }),
-  useInterruptSession: () => ({ mutate: vi.fn() }),
+  useSendPrompt: () => ({
+    mutate: mocks.useSendPromptMutate,
+    mutateAsync: mocks.useSendPromptMutateAsync,
+    isPending: mocks.sendPromptPending(),
+  }),
+  useInterruptSession: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
   useSendShell: () => ({ mutate: vi.fn(), isPending: false }),
   useAgents: () => ({ data: [] }),
   useSkills: () => ({ data: [] }),
 }))
 
 vi.mock('@/hooks/useCommands', () => ({
-  useCommands: mocks.useCommands,
+  useCommands: () => ({ searchCommands: () => [], findCommand: vi.fn(), recentNames: [] }),
 }))
 
 vi.mock('@/hooks/useCommandHandler', () => ({
-  useCommandHandler: mocks.useCommandHandler,
+  useCommandHandler: () => ({ executeCommand: vi.fn() }),
 }))
 
 vi.mock('@/hooks/useFileSearch', () => ({
-  useFileSearch: mocks.useFileSearch,
+  useFileSearch: () => ({ files: [] }),
 }))
 
 vi.mock('@/hooks/useModelSelection', () => ({
-  useModelSelection: mocks.useModelSelection,
+  useModelSelection: () => ({
+    model: null,
+    modelString: 'test-model',
+    setModel: vi.fn(),
+    setActiveAgent: vi.fn(),
+    recentModels: [],
+    favoriteModels: [],
+    toggleFavorite: vi.fn(),
+    isModelReady: true,
+  }),
 }))
 
 vi.mock('@/hooks/useVariants', () => ({
-  useVariants: mocks.useVariants,
+  useVariants: () => ({ hasVariants: false, currentVariant: null, cycleVariant: vi.fn() }),
 }))
 
 vi.mock('@/hooks/useSessionAgent', () => ({
-  useSessionAgent: mocks.useSessionAgent,
+  useSessionAgent: () => ({ agent: 'default' }),
 }))
 
 vi.mock('@/stores/userBashStore', () => ({
@@ -89,7 +110,6 @@ vi.mock('@/contexts/EventContext', () => ({
     hasForSession: vi.fn().mockReturnValue(false),
     setShowDialog: vi.fn(),
   }),
-  EventContext: mocks.EventContext,
 }))
 
 vi.mock('@/components/agent/AgentQuickSelect', () => ({
@@ -125,32 +145,12 @@ vi.mock('./PromptSuggestions', () => ({
   PromptSuggestions: () => null,
 }))
 
-interface MockSTTReturn {
-  isRecording: boolean
-  isProcessing: boolean
-  isSupported: boolean
-  isEnabled: boolean
-  interimTranscript: string
-  transcript: string
-  startRecording: ReturnType<typeof vi.fn>
-  stopRecording: ReturnType<typeof vi.fn>
-  abortRecording: ReturnType<typeof vi.fn>
-  reset: ReturnType<typeof vi.fn>
-  clear: ReturnType<typeof vi.fn>
-}
-
-describe('PromptInput STT Gesture Tests', () => {
-  const mockStartRecording = vi.fn()
-  const mockStopRecording = vi.fn()
-  const mockAbortRecording = vi.fn()
-  const mockReset = vi.fn()
-  const mockClear = vi.fn()
+describe('PromptInput voice conversation', () => {
   const mockSetAgent = vi.fn()
 
   const defaultProps = {
     directory: '/test',
     sessionID: 'test-session',
-    repoId: 1,
     showScrollButton: false,
     isSessionActive: false,
     isStreamingResponse: false,
@@ -159,619 +159,402 @@ describe('PromptInput STT Gesture Tests', () => {
     onPromptChange: vi.fn(),
   }
 
+  const createUserMessage = (id: string, text: string): SessionMessageInfo => ({
+    id,
+    type: 'user',
+    text,
+    time: { created: 1000 },
+  } as SessionMessageInfo)
+
+  const buildSnapshot = (overrides: Partial<SessionTranscriptSnapshot> = {}): SessionTranscriptSnapshot => ({
+    messages: [],
+    pending: [],
+    status: 'idle',
+    ...overrides,
+  })
+
+  const renderComponent = (
+    overrides: Partial<typeof defaultProps> = {},
+    snapshotOverrides: Partial<SessionTranscriptSnapshot> = {},
+  ) => {
+    const queryClient = createTestQueryClient()
+    const tree = (
+      nextOverrides: Partial<typeof defaultProps>,
+      snapshot = buildSnapshot(snapshotOverrides),
+    ) => (
+      <QueryClientProvider client={queryClient}>
+        <SessionTranscriptContext.Provider value={snapshot}>
+          <PromptInput {...defaultProps} {...overrides} {...nextOverrides} />
+        </SessionTranscriptContext.Provider>
+      </QueryClientProvider>
+    )
+    const view = render(tree({}))
+    return {
+      ...view,
+      rerenderWith: (nextOverrides: Partial<typeof defaultProps>) => {
+        view.rerender(tree(nextOverrides, buildSnapshot(snapshotOverrides)))
+      },
+    }
+  }
+
+  const setVoiceController = (
+    controller: Partial<VoiceConversationController> = {},
+    capturedText = 'half a sentence',
+  ) => {
+    mocks.useVoiceConversation.mockImplementation((input: UseVoiceConversationInput) =>
+      createVoiceConversationControllerMock({
+        ...controller,
+        editInTextBox: () => input.onEditInTextBox(capturedText),
+      }),
+    )
+  }
+
+  const voiceInput = (): UseVoiceConversationInput => {
+    const call = mocks.useVoiceConversation.mock.calls.at(-1)
+    if (!call) throw new Error('useVoiceConversation was not called')
+    return call[0] as UseVoiceConversationInput
+  }
+
+  const promptInput = () => screen.getByPlaceholderText('Send a message...')
+  const voiceMic = () => screen.queryByRole('button', { name: 'Start voice conversation' })
+
   beforeEach(() => {
     vi.clearAllMocks()
-    mockStartRecording.mockResolvedValue(true)
-    mockStopRecording.mockReturnValue(undefined)
-    mockAbortRecording.mockReturnValue(undefined)
-    mockReset.mockReturnValue(undefined)
-    mockClear.mockReturnValue(undefined)
-    mockSetAgent.mockClear()
     mocks.useSendPromptMutate.mockImplementation((_variables, options) => {
       options?.onSuccess?.()
     })
+    mocks.useSendPromptMutateAsync.mockResolvedValue({ id: 'inbox_1' })
     mocks.sendPromptPending.mockReturnValue(false)
-
     mocks.useMobile.mockReturnValue(true)
-    mocks.useSTT.mockReturnValue({
-      isRecording: false,
-      isProcessing: false,
-      isSupported: true,
-      isEnabled: true,
-      interimTranscript: '',
-      transcript: '',
-      startRecording: mockStartRecording,
-      stopRecording: mockStopRecording,
-      abortRecording: mockAbortRecording,
-      reset: mockReset,
-      clear: mockClear,
-    } as unknown as MockSTTReturn)
-
-    mocks.useCommands.mockReturnValue({ searchCommands: () => [], findCommand: vi.fn(), recentNames: [] })
-    mocks.useCommandHandler.mockReturnValue({ executeCommand: vi.fn() })
-    mocks.useFileSearch.mockReturnValue({ files: [] })
-    mocks.useModelSelection.mockReturnValue({
-      model: null,
-      modelString: 'test-model',
-      setModel: vi.fn(),
-      setActiveAgent: vi.fn(),
-      recentModels: [],
-      favoriteModels: [],
-      toggleFavorite: vi.fn(),
-      isModelReady: true,
-    })
-    mocks.useVariants.mockReturnValue({
-      hasVariants: false,
-      currentVariant: null,
-      cycleVariant: vi.fn(),
-    })
-    mocks.useSessionAgent.mockReturnValue({ agent: 'default' })
-    mocks.useAgents.mockReturnValue({ data: [] })
+    mocks.useSttAvailability.mockReturnValue({ isEnabled: true, isSupported: true })
+    setVoiceController()
     mocks.useUserBash.mockImplementation((selector) => selector({ addUserBashCommand: vi.fn() }))
     mocks.useSessionAgentStore.mockImplementation((selector) => selector({ setAgent: mockSetAgent }))
     mocks.useSendErrorStore.mockImplementation((selector) => selector({ errors: {} }))
   })
 
-  const renderComponent = (sttOverrides: Partial<MockSTTReturn> = {}) => {
-    const queryClient = createTestQueryClient()
-    mocks.useSTT.mockReturnValue({
-      isRecording: false,
-      isProcessing: false,
-      isSupported: true,
-      isEnabled: true,
-      interimTranscript: '',
-      transcript: '',
-      startRecording: mockStartRecording,
-      stopRecording: mockStopRecording,
-      abortRecording: mockAbortRecording,
-      reset: mockReset,
-      clear: mockClear,
-      ...sttOverrides,
-    } as unknown as MockSTTReturn)
-    return render(
-      <QueryClientProvider client={queryClient}>
-        <PromptInput {...defaultProps} />
-      </QueryClientProvider>
-    )
-  }
-
-  const getMobileVoiceButton = () => {
-    const allButtons = screen.getAllByRole('button')
-    const voiceButtons = allButtons.filter((btn) => {
-      const title = (btn.getAttribute('title') || '').toLowerCase()
-      return title.includes('tap to speak') || title.includes('tap to transcribe') || title.includes('hold to speak') || title.includes('release')
-    })
-    if (voiceButtons.length === 0) {
-      throw new Error('No voice button found. Available buttons: ' + allButtons.map(b => b.getAttribute('title')).join(', '))
-    }
-    const mobileButton = voiceButtons.find((btn) => btn.getAttribute('data-voice-variant') === 'mobile')
-    return mobileButton || voiceButtons[0]
-  }
-
-  const getMobileVoiceButtonContainer = () => {
-    const mobileButton = getMobileVoiceButton()
-    const container = mobileButton.parentElement
-    if (!container) {
-      throw new Error('Mobile voice button container not found')
-    }
-    return container
-  }
-
-  describe('quick tap behavior', () => {
-    it('keeps submitted text until send succeeds', async () => {
-      mocks.useSendPromptMutate.mockImplementation(() => undefined)
-      renderComponent()
-
-      const input = screen.getByPlaceholderText('Send a message...')
-      fireEvent.change(input, { target: { value: 'retry me' } })
-      fireEvent.click(screen.getByTitle('Send'))
-
-      expect(input).toHaveValue('retry me')
-    })
-
-    it('clears submitted text after send success', async () => {
-      renderComponent()
-
-      const input = screen.getByPlaceholderText('Send a message...')
-      fireEvent.change(input, { target: { value: 'sent message' } })
-      fireEvent.click(screen.getByTitle('Send'))
-
-      await waitFor(() => {
-        expect(input).toHaveValue('')
-      })
-    })
-
-    it('clears submitted text once the server confirms it is processing', async () => {
-      mocks.useSendPromptMutate.mockImplementation(() => undefined)
-      const queryClient = createTestQueryClient()
-      const { rerender } = render(
-        <QueryClientProvider client={queryClient}>
-          <PromptInput {...defaultProps} />
-        </QueryClientProvider>,
-      )
-
-      const input = screen.getByPlaceholderText('Send a message...')
-      fireEvent.change(input, { target: { value: 'do the thing' } })
-      fireEvent.click(screen.getByTitle('Send'))
-
-      expect(input).toHaveValue('do the thing')
-
-      rerender(
-        <QueryClientProvider client={queryClient}>
-          <PromptInput {...defaultProps} isStreamingResponse />
-        </QueryClientProvider>,
-      )
-
-      await waitFor(() => {
-        expect(input).toHaveValue('')
-      })
-    })
-
-    it('allows queuing a follow-up while a non-queued send is pending', async () => {
-      mocks.sendPromptPending.mockReturnValue(true)
-      render(
-        <QueryClientProvider client={createTestQueryClient()}>
-          <PromptInput {...defaultProps} isStreamingResponse />
-        </QueryClientProvider>,
-      )
-
-      const input = screen.getByPlaceholderText('Send a message...')
-      fireEvent.change(input, { target: { value: 'follow-up' } })
-
-      const queueButton = screen.getByTitle('Queue message')
-      expect(queueButton).not.toBeDisabled()
-
-      fireEvent.click(queueButton)
-
-      const [callArgs] = mocks.useSendPromptMutate.mock.calls[0] as [{ text: string }, unknown]
-      expect(callArgs.text).toBe('follow-up')
-    })
-
-    it('restores a failed queued prompt when the input is empty', async () => {
-      const queryClient = createTestQueryClient()
-      const { rerender } = render(
-        <QueryClientProvider client={queryClient}>
-          <PromptInput {...defaultProps} isStreamingResponse />
-        </QueryClientProvider>,
-      )
-
-      const input = screen.getByPlaceholderText('Send a message...')
-      fireEvent.change(input, { target: { value: 'queued message' } })
-      fireEvent.click(screen.getByTitle('Queue message'))
-
-      const [callArgs] = mocks.useSendPromptMutate.mock.calls[0] as [{ text: string }, unknown]
-      expect(callArgs.text).toBe('queued message')
-
-      await waitFor(() => {
-        expect(input).toHaveValue('')
-      })
-
-      mocks.useSendErrorStore.mockImplementation((selector) => selector({
-        errors: {
-          'test-session': {
-            sessionID: 'test-session',
-            title: 'Error',
-            message: 'Queued send failed',
-            failedPrompt: 'queued message',
-          },
-        },
-      }))
-
-      rerender(
-        <QueryClientProvider client={queryClient}>
-          <PromptInput {...defaultProps} />
-        </QueryClientProvider>,
-      )
-
-      await waitFor(() => {
-        expect(screen.getByPlaceholderText('Send a message...')).toHaveValue('queued message')
-      })
-    })
-
-    it('clears the restored prompt when the send error resolves', async () => {
-      const queryClient = createTestQueryClient()
-      mocks.useSendErrorStore.mockImplementation((selector) => selector({
-        errors: {
-          'test-session': {
-            sessionID: 'test-session',
-            title: 'Connection Failed',
-            message: 'Could not connect.',
-            failedPrompt: 'recovered prompt',
-            kind: 'network',
-          },
-        },
-      }))
-
-      const { rerender } = render(
-        <QueryClientProvider client={queryClient}>
-          <PromptInput {...defaultProps} />
-        </QueryClientProvider>,
-      )
-
-      await waitFor(() => {
-        expect(screen.getByPlaceholderText('Send a message...')).toHaveValue('recovered prompt')
-      })
-
-      mocks.useSendErrorStore.mockImplementation((selector) => selector({ errors: {} }))
-
-      rerender(
-        <QueryClientProvider client={queryClient}>
-          <PromptInput {...defaultProps} />
-        </QueryClientProvider>,
-      )
-
-      await waitFor(() => {
-        expect(screen.getByPlaceholderText('Send a message...')).toHaveValue('')
-      })
-    })
-
-    it('keeps stop available while active with prompt content', async () => {
-      render(
-        <QueryClientProvider client={createTestQueryClient()}>
-          <PromptInput {...defaultProps} isSessionActive />
-        </QueryClientProvider>
-      )
-
-      const input = screen.getByPlaceholderText('Send a message...')
-      fireEvent.change(input, { target: { value: 'draft while active' } })
-
-      expect(screen.getAllByTitle('Stop').length).toBeGreaterThan(0)
-    })
-
-    it('quick tap starts recording through click only', async () => {
-      mockStartRecording.mockResolvedValue(true)
-
-      renderComponent()
-
-      const container = getMobileVoiceButtonContainer()
-      const button = getMobileVoiceButton()
-
-      await act(async () => {
-        fireEvent.pointerDown(container)
-        fireEvent.pointerUp(container)
-        fireEvent.click(button)
-        await new Promise(resolve => setTimeout(resolve, 10))
-      })
-
-      await waitFor(() => {
-        expect(mockStartRecording).toHaveBeenCalledTimes(1)
-      })
-
-      expect(mockStopRecording).not.toHaveBeenCalled()
-    })
-
-    it('quick tap does not start recording on pointerdown alone', async () => {
-      mockStartRecording.mockResolvedValue(true)
-
-      renderComponent()
-
-      const container = getMobileVoiceButtonContainer()
-      const button = getMobileVoiceButton()
-
-      await act(async () => {
-        fireEvent.pointerDown(container)
-        fireEvent.pointerUp(container)
-        await new Promise(resolve => setTimeout(resolve, 10))
-      })
-
-      expect(mockStartRecording).not.toHaveBeenCalled()
-
-      await act(async () => {
-        fireEvent.click(button)
-        await new Promise(resolve => setTimeout(resolve, 10))
-      })
-
-      await waitFor(() => {
-        expect(mockStartRecording).toHaveBeenCalledTimes(1)
-      })
-    })
-
-    it('pointer down while recording starts a drag gesture', async () => {
-      renderComponent({ isRecording: true })
-
-      const container = getMobileVoiceButtonContainer()
-
-      await act(async () => {
-        fireEvent.pointerDown(container)
-      })
-
-      expect(mockStartRecording).not.toHaveBeenCalled()
-      expect(mockStopRecording).not.toHaveBeenCalled()
-    })
-
-    it('second tap while recording stops', async () => {
-      renderComponent({ isRecording: true })
-
-      const container = getMobileVoiceButtonContainer()
-      const button = getMobileVoiceButton()
-
-      await act(async () => {
-        fireEvent.pointerDown(container)
-        fireEvent.pointerUp(container)
-        fireEvent.click(button)
-        await new Promise(resolve => setTimeout(resolve, 10))
-      })
-
-      await waitFor(() => {
-        expect(mockStopRecording).toHaveBeenCalledTimes(1)
-      })
-      expect(mockStartRecording).not.toHaveBeenCalled()
-    })
-
-    it('component sets up outside press handler when recording', async () => {
-      renderComponent({ isRecording: true })
-
-      expect(document.body.onclick).toBeDefined()
-    })
-
-    it('failed start clears toggling state', async () => {
-      mockStartRecording.mockResolvedValue(false)
-
-      renderComponent()
-
-      const button = getMobileVoiceButton()
-
-      await act(async () => {
-        fireEvent.pointerDown(button)
-        fireEvent.pointerUp(button)
-        fireEvent.click(button)
-        await new Promise(resolve => setTimeout(resolve, 10))
-      })
-
-      await waitFor(() => {
-        expect(mockStartRecording).toHaveBeenCalledTimes(1)
-      })
-    })
-
-    it('renders mobile mic even when showScrollButton is true and no voice feedback is active', async () => {
+  describe('microphone availability', () => {
+    it('shows the microphone on mobile when speech-to-text is enabled and supported', () => {
       mocks.useMobile.mockReturnValue(true)
 
-      render(
-        <QueryClientProvider client={createTestQueryClient()}>
-          <PromptInput {...defaultProps} showScrollButton={true} />
-        </QueryClientProvider>
-      )
-
-      const allButtons = screen.getAllByRole('button')
-      const voiceButtons = allButtons.filter((btn) => {
-        const title = (btn.getAttribute('title') || '').toLowerCase()
-        return title.includes('tap to speak') || title.includes('tap to transcribe') || title.includes('hold to speak')
-      })
-
-      expect(voiceButtons.length).toBeGreaterThan(0)
-    })
-
-    it('renders the mobile scroll-to-bottom button when showScrollButton is true', async () => {
-      mocks.useMobile.mockReturnValue(true)
-
-      render(
-        <QueryClientProvider client={createTestQueryClient()}>
-          <PromptInput {...defaultProps} showScrollButton={true} />
-        </QueryClientProvider>
-      )
-
-      expect(screen.getByRole('button', { name: 'Scroll to bottom' })).toBeInTheDocument()
-      expect(screen.queryByText('Latest')).not.toBeInTheDocument()
-    })
-  })
-
-  describe('mobile voice vs submit button', () => {
-    const queryMobileVoiceButton = () => {
-      const voiceButtons = screen.getAllByRole('button').filter((btn) => {
-        const title = (btn.getAttribute('title') || '').toLowerCase()
-        return title.includes('tap to speak') || title.includes('tap to transcribe') || title.includes('hold to speak') || title.includes('release')
-      })
-      return voiceButtons.find((btn) => btn.getAttribute('data-voice-variant') === 'mobile') ?? null
-    }
-
-    it('shows the mobile mic and no submit button when the prompt is empty', () => {
       renderComponent()
 
-      expect(queryMobileVoiceButton()).not.toBeNull()
-      expect(screen.queryByTitle('Send')).not.toBeInTheDocument()
+      expect(voiceMic()).toBeInTheDocument()
     })
 
-    it('shows the submit button and keeps the mobile mic once the prompt has content', () => {
-      renderComponent()
-
-      fireEvent.change(screen.getByPlaceholderText('Send a message...'), { target: { value: 'hello' } })
-
-      expect(screen.getByTitle('Send')).toBeInTheDocument()
-      expect(queryMobileVoiceButton()).not.toBeNull()
-    })
-
-    it('keeps the mobile mic visible while recording even with prompt content', () => {
-      renderComponent({ isRecording: true })
-
-      fireEvent.change(screen.getByPlaceholderText('Send a message...'), { target: { value: 'hello' } })
-
-      expect(queryMobileVoiceButton()).not.toBeNull()
-    })
-  })
-
-  describe('in-row mobile voice recorder', () => {
-    const renderRecorder = (sttOverrides: Partial<MockSTTReturn> = {}) => {
-      const queryClient = createTestQueryClient()
-      const buildTree = (overrides: Partial<MockSTTReturn>) => {
-        mocks.useSTT.mockReturnValue({
-          isRecording: false,
-          isProcessing: false,
-          isSupported: true,
-          isEnabled: true,
-          interimTranscript: '',
-          transcript: '',
-          startRecording: mockStartRecording,
-          stopRecording: mockStopRecording,
-          abortRecording: mockAbortRecording,
-          reset: mockReset,
-          clear: mockClear,
-          ...overrides,
-        } as unknown as MockSTTReturn)
-        return (
-          <QueryClientProvider client={queryClient}>
-            <PromptInput {...defaultProps} onPromptChange={(hasContent) => defaultProps.onPromptChange(hasContent)} />
-          </QueryClientProvider>
-        )
-      }
-
-      const view = render(buildTree(sttOverrides))
-      return { rerender: (overrides: Partial<MockSTTReturn>) => view.rerender(buildTree(overrides)) }
-    }
-
-    const getControlsRow = () => screen.getByTestId('composer-controls-row')
-
-    it('swaps the controls row for discard, strip, mic and send while recording', () => {
-      renderComponent({ isRecording: true })
-
-      const row = getControlsRow()
-
-      expect(within(row).getByRole('button', { name: 'Discard recording' })).toBeInTheDocument()
-      expect(within(row).getByRole('button', { name: 'Send recording' })).toBeInTheDocument()
-      expect(within(row).getByText('0:00')).toBeInTheDocument()
-      expect(within(row).getByRole('status')).toHaveTextContent('‹ discard · send ›')
-    })
-
-    it('hides the mobile insert keys and renders nothing above the mic', () => {
-      renderComponent({ isRecording: true })
-
-      fireEvent.focus(screen.getByPlaceholderText('Send a message...'))
-
-      expect(screen.queryByRole('toolbar', { name: 'Insert' })).not.toBeInTheDocument()
-      expect(getMobileVoiceButtonContainer().children).toHaveLength(1)
-    })
-
-    it('stops recording and marks the transcript for auto-send when send is tapped', async () => {
-      const view = renderRecorder({ isRecording: true })
-
-      fireEvent.click(screen.getByRole('button', { name: 'Send recording' }))
-
-      expect(mockStopRecording).toHaveBeenCalledTimes(1)
-
-      view.rerender({ isRecording: false, isProcessing: true })
-
-      expect(screen.getByText('Transcribing & sending…')).toBeInTheDocument()
-
-      view.rerender({ isRecording: false, isProcessing: false, transcript: 'hello there' })
-
-      await waitFor(() => {
-        const [variables] = mocks.useSendPromptMutate.mock.calls[0] as [{ text: string }]
-        expect(variables.text).toBe('hello there')
-      })
-    })
-
-    it('upgrades a transcription in progress to send when send is tapped', async () => {
-      const view = renderRecorder({ isRecording: false, isProcessing: true })
-
-      expect(screen.getByText('Transcribing…')).toBeInTheDocument()
-
-      fireEvent.click(screen.getByRole('button', { name: 'Send recording' }))
-
-      expect(mockStopRecording).not.toHaveBeenCalled()
-
-      view.rerender({ isRecording: false, isProcessing: false, transcript: 'upgraded text' })
-
-      await waitFor(() => {
-        const [variables] = mocks.useSendPromptMutate.mock.calls[0] as [{ text: string }]
-        expect(variables.text).toBe('upgraded text')
-      })
-    })
-
-    it('aborts recording when discard is tapped', () => {
-      renderComponent({ isRecording: true })
-      mockAbortRecording.mockClear()
-
-      const discardButton = screen.getByRole('button', { name: 'Discard recording' })
-
-      fireEvent.pointerDown(discardButton)
-      fireEvent.click(discardButton)
-
-      expect(mockAbortRecording).toHaveBeenCalledTimes(1)
-      expect(mockStopRecording).not.toHaveBeenCalled()
-    })
-
-    it('arms send on a right drag and sends on release', async () => {
-      renderComponent({ isRecording: true })
-
-      const container = getMobileVoiceButtonContainer()
-
-      await act(async () => {
-        fireEvent.pointerDown(container, { clientX: 100 })
-        fireEvent.pointerMove(container, { clientX: 130 })
-      })
-
-      expect(screen.getByText('Release to send')).toBeInTheDocument()
-      expect(mockStopRecording).not.toHaveBeenCalled()
-
-      await act(async () => {
-        fireEvent.pointerUp(container, { clientX: 130 })
-      })
-
-      expect(mockStopRecording).toHaveBeenCalledTimes(1)
-    })
-
-    it('arms discard on a left drag past the threshold and aborts on release', async () => {
-      renderComponent({ isRecording: true })
-      mockAbortRecording.mockClear()
-
-      const container = getMobileVoiceButtonContainer()
-
-      await act(async () => {
-        fireEvent.pointerDown(container, { clientX: 200 })
-        fireEvent.pointerMove(container, { clientX: 100 })
-      })
-
-      expect(screen.getByText('Release to discard')).toBeInTheDocument()
-
-      await act(async () => {
-        fireEvent.pointerUp(container, { clientX: 100 })
-      })
-
-      expect(mockAbortRecording).toHaveBeenCalledTimes(1)
-      expect(mockStopRecording).not.toHaveBeenCalled()
-    })
-
-    it('does not restart recording when the mic is tapped right after a drag-to-discard release', async () => {
-      const view = renderRecorder({ isRecording: true })
-      mockAbortRecording.mockClear()
-      mockStartRecording.mockClear()
-
-      const container = getMobileVoiceButtonContainer()
-
-      await act(async () => {
-        fireEvent.pointerDown(container, { clientX: 200 })
-        fireEvent.pointerMove(container, { clientX: 100 })
-      })
-
-      expect(screen.getByText('Release to discard')).toBeInTheDocument()
-
-      await act(async () => {
-        fireEvent.pointerUp(container, { clientX: 100 })
-      })
-
-      expect(mockAbortRecording).toHaveBeenCalledTimes(1)
-
-      view.rerender({ isRecording: false })
-
-      expect(screen.queryByRole('button', { name: 'Discard recording' })).not.toBeInTheDocument()
-
-      await act(async () => {
-        fireEvent.click(getMobileVoiceButton())
-        await new Promise(resolve => setTimeout(resolve, 10))
-      })
-
-      expect(mockStartRecording).not.toHaveBeenCalled()
-      expect(screen.queryByRole('button', { name: 'Discard recording' })).not.toBeInTheDocument()
-    })
-
-    it('leaves the desktop composer without the recorder row', () => {
+    it('shows the microphone on desktop when speech-to-text is enabled and supported', () => {
       mocks.useMobile.mockReturnValue(false)
 
-      renderComponent({ isRecording: true })
+      renderComponent()
 
-      expect(screen.queryByRole('button', { name: 'Discard recording' })).not.toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: 'Send recording' })).not.toBeInTheDocument()
-      expect(screen.queryByText('Release to send')).not.toBeInTheDocument()
-      expect(document.querySelector('[data-voice-variant="desktop"]')).not.toBeNull()
+      expect(voiceMic()).toBeInTheDocument()
     })
+
+    it('hides the microphone when speech-to-text is disabled', () => {
+      mocks.useSttAvailability.mockReturnValue({ isEnabled: false, isSupported: true })
+
+      renderComponent()
+
+      expect(voiceMic()).toBeNull()
+    })
+
+    it('hides the microphone when the browser cannot capture speech', () => {
+      mocks.useSttAvailability.mockReturnValue({ isEnabled: true, isSupported: false })
+
+      renderComponent()
+
+      expect(voiceMic()).toBeNull()
+    })
+
+    it('starts the conversation when the microphone is pressed', () => {
+      const controller = createVoiceConversationControllerMock()
+      mocks.useVoiceConversation.mockReturnValue(controller)
+
+      renderComponent()
+      fireEvent.click(voiceMic() as HTMLElement)
+
+      expect(controller.start).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it('passes the published transcript to the voice conversation', () => {
+    const messages = [createUserMessage('msg_voice_1', 'hello there')]
+
+    renderComponent({}, { messages, status: 'busy' })
+
+    expect(mocks.useVoiceConversation).toHaveBeenCalledWith(
+      expect.objectContaining({ messages, status: 'busy' }),
+    )
+  })
+
+  describe('while a conversation is active', () => {
+    it('replaces the composer with the conversation bar and keeps the draft after exit', () => {
+      const onVoiceConversationActiveChange = vi.fn()
+      const view = renderComponent({ onVoiceConversationActiveChange })
+
+      fireEvent.change(promptInput(), { target: { value: 'keep this draft' } })
+
+      setVoiceController({ isActive: true, phase: 'listening', label: 'Listening' })
+      view.rerenderWith({})
+
+      expect(screen.queryByPlaceholderText('Send a message...')).toBeNull()
+      expect(screen.getByText('Listening')).toBeInTheDocument()
+      expect(onVoiceConversationActiveChange).toHaveBeenLastCalledWith(true)
+
+      setVoiceController()
+      view.rerenderWith({})
+
+      expect(promptInput()).toHaveValue('keep this draft')
+      expect(onVoiceConversationActiveChange).toHaveBeenLastCalledWith(false)
+    })
+
+    it('moves the captured transcript into the text box', () => {
+      setVoiceController({ isActive: true, phase: 'listening', canEditInTextBox: true }, 'dictated words')
+
+      const view = renderComponent()
+      fireEvent.click(screen.getByRole('button', { name: 'Edit in text box' }))
+
+      setVoiceController()
+      view.rerenderWith({})
+
+      expect(promptInput()).toHaveValue('dictated words')
+    })
+
+    it('appends the captured transcript after an existing draft', () => {
+      const view = renderComponent()
+
+      fireEvent.change(promptInput(), { target: { value: 'draft' } })
+
+      setVoiceController({ isActive: true, phase: 'listening', canEditInTextBox: true }, 'dictated words')
+      view.rerenderWith({})
+      fireEvent.click(screen.getByRole('button', { name: 'Edit in text box' }))
+
+      setVoiceController()
+      view.rerenderWith({})
+
+      expect(promptInput()).toHaveValue('draft dictated words')
+    })
+
+    it('focuses the text box with the cursor after the transcript once the conversation closes', async () => {
+      const view = renderComponent({ onVoiceConversationActiveChange: vi.fn() })
+
+      fireEvent.change(promptInput(), { target: { value: 'draft' } })
+
+      setVoiceController({ isActive: true, phase: 'listening', canEditInTextBox: true }, 'dictated words')
+      view.rerenderWith({})
+      fireEvent.click(screen.getByRole('button', { name: 'Edit in text box' }))
+
+      setVoiceController()
+      view.rerenderWith({})
+
+      await waitFor(() => {
+        const input = promptInput() as HTMLTextAreaElement
+        expect(input).toHaveFocus()
+        expect(input.selectionStart).toBe('draft dictated words'.length)
+        expect(input.selectionEnd).toBe('draft dictated words'.length)
+      })
+    })
+  })
+
+  describe('sending a voice turn', () => {
+    it('queues the turn while the session is busy and leaves the draft untouched', async () => {
+      const view = renderComponent()
+
+      fireEvent.change(promptInput(), { target: { value: 'my draft' } })
+
+      await voiceInput().sendTurn('add a retry', { busy: true })
+
+      expect(mocks.useSendPromptMutateAsync).toHaveBeenCalledWith({
+        sessionID: 'test-session',
+        text: 'add a retry',
+        model: undefined,
+        agent: 'default',
+        delivery: 'queue',
+      })
+      view.rerenderWith({})
+      expect(promptInput()).toHaveValue('my draft')
+      expect(mockSetAgent).toHaveBeenCalledWith('test-session', 'default')
+    })
+
+    it('sends the turn without a delivery while the session is idle', async () => {
+      renderComponent()
+
+      await voiceInput().sendTurn('add a retry', { busy: false })
+
+      expect(mocks.useSendPromptMutateAsync).toHaveBeenCalledWith({
+        sessionID: 'test-session',
+        text: 'add a retry',
+        model: undefined,
+        agent: 'default',
+      })
+    })
+
+    it('rejects when the send fails so the conversation can report it', async () => {
+      mocks.useSendPromptMutateAsync.mockRejectedValue(new Error('offline'))
+      renderComponent()
+
+      await expect(voiceInput().sendTurn('add a retry', { busy: false })).rejects.toThrow('offline')
+    })
+  })
+})
+
+describe('PromptInput submission', () => {
+  const defaultProps = {
+    directory: '/test',
+    sessionID: 'test-session',
+    showScrollButton: false,
+    isSessionActive: false,
+    isStreamingResponse: false,
+    onScrollToBottom: vi.fn(),
+    commandActions: createCommandActionsMock(),
+    onPromptChange: vi.fn(),
+  }
+
+  const renderComponent = (initialOverrides: Partial<typeof defaultProps> = {}) => {
+    const queryClient = createTestQueryClient()
+    const tree = (overrides: Partial<typeof defaultProps> = {}) => (
+      <QueryClientProvider client={queryClient}>
+        <PromptInput {...defaultProps} {...initialOverrides} {...overrides} />
+      </QueryClientProvider>
+    )
+    const view = render(tree())
+    return { ...view, rerenderWith: (overrides: Partial<typeof defaultProps>) => view.rerender(tree(overrides)) }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useSendPromptMutate.mockImplementation((_variables, options) => {
+      options?.onSuccess?.()
+    })
+    mocks.sendPromptPending.mockReturnValue(false)
+    mocks.useMobile.mockReturnValue(true)
+    mocks.useSttAvailability.mockReturnValue({ isEnabled: true, isSupported: true })
+    mocks.useVoiceConversation.mockReturnValue(createVoiceConversationControllerMock())
+    mocks.useUserBash.mockImplementation((selector) => selector({ addUserBashCommand: vi.fn() }))
+    mocks.useSessionAgentStore.mockImplementation((selector) => selector({ setAgent: vi.fn() }))
+    mocks.useSendErrorStore.mockImplementation((selector) => selector({ errors: {} }))
+  })
+
+  it('keeps submitted text until send succeeds', () => {
+    mocks.useSendPromptMutate.mockImplementation(() => undefined)
+    renderComponent()
+
+    const input = screen.getByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: 'retry me' } })
+    fireEvent.click(screen.getByTitle('Send'))
+
+    expect(input).toHaveValue('retry me')
+  })
+
+  it('clears submitted text after send success', async () => {
+    renderComponent()
+
+    const input = screen.getByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: 'sent message' } })
+    fireEvent.click(screen.getByTitle('Send'))
+
+    await waitFor(() => {
+      expect(input).toHaveValue('')
+    })
+  })
+
+  it('clears submitted text once the server confirms it is processing', async () => {
+    mocks.useSendPromptMutate.mockImplementation(() => undefined)
+    const view = renderComponent()
+
+    const input = screen.getByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: 'do the thing' } })
+    fireEvent.click(screen.getByTitle('Send'))
+
+    expect(input).toHaveValue('do the thing')
+
+    view.rerenderWith({ isStreamingResponse: true })
+
+    await waitFor(() => {
+      expect(input).toHaveValue('')
+    })
+  })
+
+  it('allows queuing a follow-up while a non-queued send is pending', () => {
+    mocks.sendPromptPending.mockReturnValue(true)
+    renderComponent({ isStreamingResponse: true })
+
+    const input = screen.getByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: 'follow-up' } })
+
+    const queueButton = screen.getByTitle('Queue message')
+    expect(queueButton).not.toBeDisabled()
+
+    fireEvent.click(queueButton)
+
+    const [callArgs] = mocks.useSendPromptMutate.mock.calls[0] as [{ text: string }, unknown]
+    expect(callArgs.text).toBe('follow-up')
+  })
+
+  it('restores a failed queued prompt when the input is empty', async () => {
+    const view = renderComponent({ isStreamingResponse: true })
+
+    const input = screen.getByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: 'queued message' } })
+    fireEvent.click(screen.getByTitle('Queue message'))
+
+    const [callArgs] = mocks.useSendPromptMutate.mock.calls[0] as [{ text: string }, unknown]
+    expect(callArgs.text).toBe('queued message')
+
+    await waitFor(() => {
+      expect(input).toHaveValue('')
+    })
+
+    mocks.useSendErrorStore.mockImplementation((selector) => selector({
+      errors: {
+        'test-session': {
+          sessionID: 'test-session',
+          title: 'Error',
+          message: 'Queued send failed',
+          failedPrompt: 'queued message',
+        },
+      },
+    }))
+
+    view.rerenderWith({})
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Send a message...')).toHaveValue('queued message')
+    })
+  })
+
+  it('clears the restored prompt when the send error resolves', async () => {
+    mocks.useSendErrorStore.mockImplementation((selector) => selector({
+      errors: {
+        'test-session': {
+          sessionID: 'test-session',
+          title: 'Connection Failed',
+          message: 'Could not connect.',
+          failedPrompt: 'recovered prompt',
+          kind: 'network',
+        },
+      },
+    }))
+
+    const view = renderComponent()
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Send a message...')).toHaveValue('recovered prompt')
+    })
+
+    mocks.useSendErrorStore.mockImplementation((selector) => selector({ errors: {} }))
+    view.rerenderWith({})
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Send a message...')).toHaveValue('')
+    })
+  })
+
+  it('keeps stop available while active with prompt content', () => {
+    renderComponent({ isSessionActive: true })
+
+    fireEvent.change(screen.getByPlaceholderText('Send a message...'), { target: { value: 'draft while active' } })
+
+    expect(screen.getAllByTitle('Stop').length).toBeGreaterThan(0)
   })
 })

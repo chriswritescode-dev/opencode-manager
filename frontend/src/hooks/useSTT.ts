@@ -1,12 +1,48 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useSettings } from '@/hooks/useSettings'
-import { getWebSpeechRecognizer, isWebRecognitionSupported, appendTranscriptSegment, type SpeechRecognitionOptions, type SpeechRecognitionResult, type RecognitionState } from '@/lib/webSpeechRecognizer'
+import { getWebSpeechRecognizer, isWebRecognitionSupported, appendTranscriptSegment, type SpeechRecognitionOptions, type SpeechRecognitionResult, type RecognitionState, type SttEndpointingOptions, type SttEndOfSpeechReason } from '@/lib/webSpeechRecognizer'
 import { AudioRecorder } from '@/lib/audioRecorder'
 import { sttApi } from '@/api/stt'
 import { FetchError } from '@/api/fetchWrapper'
-import { DEFAULT_STT_CONFIG } from '@/api/types/settings'
+import { DEFAULT_STT_CONFIG, type STTConfig } from '@/api/types/settings'
 
 const STT_START_TIMEOUT_MS = 10_000
+
+/** Whether the user's speech-to-text configuration can capture in this browser. */
+export interface SttAvailability {
+  /** Whether speech-to-text is enabled in the user's voice settings. */
+  isEnabled: boolean
+  /** Whether the configured speech-to-text provider can capture in this browser. */
+  isSupported: boolean
+}
+
+function resolveSttAvailability(config: STTConfig): SttAvailability {
+  const isExternalProvider = config.provider === 'external'
+  return {
+    isEnabled: config.enabled,
+    isSupported: isExternalProvider ? AudioRecorder.isSupported() : isWebRecognitionSupported(),
+  }
+}
+
+/**
+ * Reads whether speech-to-text can capture, without creating a recorder.
+ *
+ * @returns The enabled flag from the user's voice settings and the browser support of its provider.
+ */
+export function useSttAvailability(): SttAvailability {
+  const { preferences } = useSettings()
+  return resolveSttAvailability(preferences?.stt ?? DEFAULT_STT_CONFIG)
+}
+
+export interface StartRecordingOptions {
+  /** Enables automatic end-of-speech for the browser provider. Ignored by the external provider. */
+  endpointing?: SttEndpointingOptions
+  /**
+   * Called when the browser provider ends the capture by itself. Receives the
+   * final transcript so a caller can send it without waiting for a render.
+   */
+  onEndOfSpeech?: (reason: SttEndOfSpeechReason, finalText: string) => void
+}
 
 export function useSTT(userId = 'default') {
   const { preferences } = useSettings(userId)
@@ -17,6 +53,7 @@ export function useSTT(userId = 'default') {
   const [transcript, setTranscript] = useState('')
   const [interimTranscript, setInterimTranscript] = useState('')
   const [state, setState] = useState<RecognitionState>('idle')
+  const [isEndpointing, setIsEndpointing] = useState(false)
 
   const recognizer = useRef(getWebSpeechRecognizer())
   const audioRecorder = useRef<AudioRecorder | null>(null)
@@ -34,13 +71,9 @@ export function useSTT(userId = 'default') {
     userIdRef.current = userId
   }, [userId])
 
-  const isEnabled = preferences?.stt?.enabled ?? false
   const config = preferences?.stt ?? DEFAULT_STT_CONFIG
   const isExternalProvider = config.provider === 'external'
-
-  const isSupported = isExternalProvider 
-    ? AudioRecorder.isSupported()
-    : isWebRecognitionSupported()
+  const { isEnabled, isSupported } = resolveSttAvailability(config)
 
   const flashError = useCallback((message: string) => {
     setIsError(true)
@@ -56,6 +89,7 @@ export function useSTT(userId = 'default') {
   const resetToIdle = useCallback((clearInterim = false) => {
     setIsRecording(false)
     setIsProcessing(false)
+    setIsEndpointing(false)
     setState('idle')
     if (clearInterim) setInterimTranscript('')
   }, [])
@@ -247,7 +281,7 @@ export function useSTT(userId = 'default') {
     [clearStartupTimeout, abortAndResetOnTimeout],
   )
 
-  const startRecording = useCallback(async (): Promise<boolean> => {
+  const startRecording = useCallback(async (options?: StartRecordingOptions): Promise<boolean> => {
     if (!isSupported) {
       setError('Speech recognition is not supported in this browser')
       setIsError(true)
@@ -260,10 +294,14 @@ export function useSTT(userId = 'default') {
       return false
     }
 
+    const endpointing = isExternalProvider ? undefined : options?.endpointing
+    const onEndOfSpeech = endpointing ? options?.onEndOfSpeech : undefined
+
     setTranscript('')
     setInterimTranscript('')
     setIsError(false)
     setError(null)
+    setIsEndpointing(Boolean(endpointing))
     lastProcessedBlobRef.current = null
 
     const startOpId = ++startOpIdRef.current
@@ -279,14 +317,30 @@ export function useSTT(userId = 'default') {
       }
       return started
     } else {
-      const options: SpeechRecognitionOptions = {
+      const recognitionOptions: SpeechRecognitionOptions = {
         language: config.language,
         interimResults: true,
         maxAlternatives: 1,
       }
 
+      if (endpointing) {
+        recognitionOptions.inactivityTimeoutMs = endpointing.pauseMs
+        recognitionOptions.endpointing = endpointing
+      }
+
+      if (onEndOfSpeech) {
+        recognitionOptions.onEndOfSpeech = (reason, finalText) => {
+          if (finalText) setTranscript(finalText)
+          onEndOfSpeech(reason, finalText)
+        }
+      }
+
       setIsProcessing(true)
-      return runStartupWithTimeout(() => recognizer.current.start(options), startOpId)
+      const started = await runStartupWithTimeout(() => recognizer.current.start(recognitionOptions), startOpId)
+      if (!started && startOpIdRef.current === startOpId) {
+        setIsEndpointing(false)
+      }
+      return started
     }
   }, [isSupported, isEnabled, isExternalProvider, config.language, clearStartupTimeout, ensureAudioRecorder, runStartupWithTimeout])
 
@@ -346,6 +400,7 @@ export function useSTT(userId = 'default') {
     transcript,
     interimTranscript,
     state,
+    isEndpointing,
     isSupported,
     isEnabled,
     isExternalProvider,

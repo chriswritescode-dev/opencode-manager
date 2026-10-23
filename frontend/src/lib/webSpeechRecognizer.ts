@@ -4,10 +4,35 @@ export interface SpeechRecognitionResult {
   confidence: number;
 }
 
+/**
+ * Why a capture session ended without the caller stopping it.
+ */
+export type SttEndOfSpeechReason = 'pause' | 'no-speech';
+
+/**
+ * Client-side endpointing budget for one capture session.
+ */
+export interface SttEndpointingOptions {
+  /** Silence after speech, in milliseconds, that ends the session. */
+  pauseMs: number;
+  /** Silence from capture start, in milliseconds, before any speech is heard. */
+  noSpeechTimeoutMs: number;
+}
+
 export interface SpeechRecognitionOptions {
   language?: string;
   interimResults?: boolean;
   maxAlternatives?: number;
+  /** Silences after a result that stop capture. Defaults to 2000. */
+  inactivityTimeoutMs?: number;
+  /** Enables automatic end-of-speech reporting. Omit for tap-to-stop behavior. */
+  endpointing?: SttEndpointingOptions;
+  /**
+   * Called at most once per session when the capture stops itself. The final
+   * transcript accumulated so far is passed with it so callers do not have to
+   * wait for a state update. Never called for a manual stop or abort.
+   */
+  onEndOfSpeech?: (reason: SttEndOfSpeechReason, finalText: string) => void;
 }
 
 export type RecognitionState = 'idle' | 'listening' | 'processing' | 'error';
@@ -66,6 +91,9 @@ declare global {
 }
 
 const WEB_SPEECH_INACTIVITY_TIMEOUT_MS = 2000;
+const MAX_TRANSPARENT_RESTARTS = 5;
+const MIN_RESTART_SESSION_MS = 250;
+const RESTART_FAILED_MESSAGE = 'Speech recognition stopped unexpectedly. Please try again.';
 
 export function appendTranscriptSegment(current: string, segment: string): string {
   const trimmedCurrent = current.trim();
@@ -83,7 +111,22 @@ export class WebSpeechRecognizer {
   private onEndCallbacks: (() => void)[] = [];
   private onStartCallbacks: (() => void)[] = [];
   private finalTranscript = '';
+  private interimTranscript = '';
   private inactivityTimeoutRef: ReturnType<typeof setTimeout> | null = null;
+  private noSpeechTimeoutRef: ReturnType<typeof setTimeout> | null = null;
+  private noSpeechDeadlineAt: number | null = null;
+  private inactivityTimeoutMs = WEB_SPEECH_INACTIVITY_TIMEOUT_MS;
+  private endpointing: SttEndpointingOptions | null = null;
+  private endOfSpeechHandler: ((reason: SttEndOfSpeechReason, finalText: string) => void) | null = null;
+  private pendingEndOfSpeechReason: SttEndOfSpeechReason | null = null;
+  private endOfSpeechEmitted = false;
+  private restartCount = 0;
+  private restartStartedAt = 0;
+  private sessionHadSpeech = false;
+  private awaitingRestart = false;
+  private stopRequested = false;
+  private fatalErrorRaised = false;
+  private suppressStartCallbacks = false;
 
   private clearInactivityTimeout(): void {
     if (this.inactivityTimeoutRef !== null) {
@@ -92,14 +135,94 @@ export class WebSpeechRecognizer {
     }
   }
 
+  private clearNoSpeechTimeout(): void {
+    if (this.noSpeechTimeoutRef !== null) {
+      clearTimeout(this.noSpeechTimeoutRef);
+      this.noSpeechTimeoutRef = null;
+    }
+  }
+
+  private accumulatedTranscript(): string {
+    const interim = this.interimTranscript.trim();
+    return interim ? appendTranscriptSegment(this.finalTranscript, interim) : this.finalTranscript;
+  }
+
+  private emitEndOfSpeech(reason: SttEndOfSpeechReason): void {
+    if (this.endOfSpeechEmitted) return;
+    this.endOfSpeechEmitted = true;
+    this.endOfSpeechHandler?.(reason, this.accumulatedTranscript());
+  }
+
+  private hasNoSpeechBudgetRemaining(): boolean {
+    return this.noSpeechDeadlineAt !== null && Date.now() < this.noSpeechDeadlineAt;
+  }
+
+  private scheduleNoSpeechTimeout(): void {
+    this.clearNoSpeechTimeout();
+
+    if (this.noSpeechDeadlineAt === null) return;
+
+    const remainingMs = Math.max(0, this.noSpeechDeadlineAt - Date.now());
+
+    this.noSpeechTimeoutRef = setTimeout(() => {
+      this.noSpeechTimeoutRef = null;
+      if (this.endOfSpeechEmitted || this.finalTranscript) return;
+      if (!this.isListening && !this.awaitingRestart) return;
+      this.emitEndOfSpeech('no-speech');
+      this.stop();
+    }, remainingMs);
+  }
+
+  private canRestartCapture(): boolean {
+    if (this.endOfSpeechEmitted) return false;
+    if (this.restartCount >= MAX_TRANSPARENT_RESTARTS) return false;
+
+    const endedTooSoon =
+      this.restartCount > 0 &&
+      !this.sessionHadSpeech &&
+      Date.now() - this.restartStartedAt < MIN_RESTART_SESSION_MS;
+
+    return !endedTooSoon;
+  }
+
+  private restartCapture(): 'restarted' | 'blocked' | 'failed' {
+    if (!this.recognition || !this.canRestartCapture()) return 'blocked';
+
+    this.restartCount += 1;
+    this.restartStartedAt = Date.now();
+    this.isListening = true;
+    this.state = 'listening';
+    this.awaitingRestart = false;
+    this.stopRequested = false;
+    this.fatalErrorRaised = false;
+    this.sessionHadSpeech = false;
+    this.suppressStartCallbacks = true;
+
+    try {
+      this.recognition.start();
+      return 'restarted';
+    } catch {
+      this.suppressStartCallbacks = false;
+      this.isListening = false;
+      this.endpointing = null;
+      this.endOfSpeechHandler = null;
+      this.endOfSpeechEmitted = true;
+      this.onErrorCallbacks.forEach((cb) => cb(RESTART_FAILED_MESSAGE));
+      return 'failed';
+    }
+  }
+
   private resetInactivityTimeout(): void {
     this.clearInactivityTimeout();
     if (this.isListening) {
       this.inactivityTimeoutRef = setTimeout(() => {
-        if (this.isListening) {
-          this.stop();
+        this.inactivityTimeoutRef = null;
+        if (!this.isListening) return;
+        if (this.endpointing) {
+          this.pendingEndOfSpeechReason = 'pause';
         }
-      }, WEB_SPEECH_INACTIVITY_TIMEOUT_MS);
+        this.stop();
+      }, this.inactivityTimeoutMs);
     }
   }
 
@@ -117,10 +240,20 @@ export class WebSpeechRecognizer {
       this.recognition.onstart = () => {
         this.isListening = true;
         this.state = 'listening';
+        this.sessionHadSpeech = false;
+        this.scheduleNoSpeechTimeout();
+
+        if (this.suppressStartCallbacks) {
+          this.suppressStartCallbacks = false;
+          return;
+        }
+
         this.onStartCallbacks.forEach((cb) => cb());
       };
 
       this.recognition.onresult = (event: SpeechRecognitionEvent) => {
+        this.clearNoSpeechTimeout();
+        this.sessionHadSpeech = true;
         let interimTranscript = '';
 
         for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -142,6 +275,8 @@ export class WebSpeechRecognizer {
           }
         }
 
+        this.interimTranscript = interimTranscript;
+
         if (interimTranscript) {
           this.onInterimResultCallbacks.forEach((cb) => cb(this.finalTranscript + ' ' + interimTranscript));
         }
@@ -151,8 +286,30 @@ export class WebSpeechRecognizer {
 
       this.recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
         this.clearInactivityTimeout();
+
+        if (this.endpointing && event.error === 'no-speech') {
+          if (this.hasNoSpeechBudgetRemaining() && !this.endOfSpeechEmitted) {
+            this.awaitingRestart = true;
+            this.isListening = false;
+            return;
+          }
+
+          this.fatalErrorRaised = true;
+          this.clearNoSpeechTimeout();
+          this.state = 'error';
+          this.isListening = false;
+          this.pendingEndOfSpeechReason = null;
+          this.emitEndOfSpeech('no-speech');
+          this.endpointing = null;
+          this.endOfSpeechHandler = null;
+          return;
+        }
+
+        this.clearNoSpeechTimeout();
         this.state = 'error';
         this.isListening = false;
+        this.pendingEndOfSpeechReason = null;
+        this.fatalErrorRaised = true;
 
         let errorMsg = event.error || 'Unknown error';
 
@@ -179,8 +336,34 @@ export class WebSpeechRecognizer {
 
       this.recognition.onend = () => {
         this.clearInactivityTimeout();
+
+        const reason = this.pendingEndOfSpeechReason;
+        this.pendingEndOfSpeechReason = null;
+
+        if (reason) {
+          this.emitEndOfSpeech(reason);
+        } else if (this.endpointing && !this.stopRequested && !this.fatalErrorRaised) {
+          if (this.awaitingRestart) {
+            const outcome = this.hasNoSpeechBudgetRemaining() ? this.restartCapture() : 'blocked';
+            if (outcome === 'restarted') return;
+            if (outcome === 'blocked') this.emitEndOfSpeech('no-speech');
+          } else if (this.accumulatedTranscript()) {
+            this.emitEndOfSpeech('pause');
+          } else if (this.hasNoSpeechBudgetRemaining()) {
+            const outcome = this.restartCapture();
+            if (outcome === 'restarted') return;
+            if (outcome === 'blocked') this.emitEndOfSpeech('no-speech');
+          } else {
+            this.emitEndOfSpeech('no-speech');
+          }
+        }
+
+        this.clearNoSpeechTimeout();
         this.isListening = false;
         this.state = 'idle';
+        this.endpointing = null;
+        this.endOfSpeechHandler = null;
+        this.awaitingRestart = false;
         this.onEndCallbacks.forEach((cb) => cb());
       };
     }
@@ -209,7 +392,26 @@ export class WebSpeechRecognizer {
       }
 
       this.finalTranscript = '';
+      this.interimTranscript = '';
       this.state = 'listening';
+      this.clearInactivityTimeout();
+      this.clearNoSpeechTimeout();
+      this.inactivityTimeoutMs =
+        options.inactivityTimeoutMs ?? options.endpointing?.pauseMs ?? WEB_SPEECH_INACTIVITY_TIMEOUT_MS;
+      this.endpointing = options.endpointing ?? null;
+      this.endOfSpeechHandler = options.onEndOfSpeech ?? null;
+      this.pendingEndOfSpeechReason = null;
+      this.endOfSpeechEmitted = false;
+      this.restartCount = 0;
+      this.restartStartedAt = 0;
+      this.sessionHadSpeech = false;
+      this.awaitingRestart = false;
+      this.stopRequested = false;
+      this.fatalErrorRaised = false;
+      this.suppressStartCallbacks = false;
+
+      const noSpeechTimeoutMs = this.endpointing?.noSpeechTimeoutMs ?? 0;
+      this.noSpeechDeadlineAt = noSpeechTimeoutMs > 0 ? Date.now() + noSpeechTimeoutMs : null;
 
       if (options.language) {
         this.recognition.lang = options.language;
@@ -258,7 +460,10 @@ export class WebSpeechRecognizer {
   }
 
   stop(): void {
+    this.stopRequested = true;
+    this.awaitingRestart = false;
     this.clearInactivityTimeout();
+    this.clearNoSpeechTimeout();
     if (this.recognition) {
       try {
         this.recognition.stop();
@@ -270,7 +475,10 @@ export class WebSpeechRecognizer {
   }
 
   abort(): void {
+    this.stopRequested = true;
+    this.awaitingRestart = false;
     this.clearInactivityTimeout();
+    this.clearNoSpeechTimeout();
     if (this.recognition) {
       try {
         this.recognition.abort();
@@ -282,6 +490,11 @@ export class WebSpeechRecognizer {
     this.state = 'idle';
     this.isListening = false;
     this.finalTranscript = '';
+    this.interimTranscript = '';
+    this.endpointing = null;
+    this.endOfSpeechHandler = null;
+    this.pendingEndOfSpeechReason = null;
+    this.endOfSpeechEmitted = true;
   }
 
   isCurrentlyListening(): boolean {
@@ -314,6 +527,14 @@ export class WebSpeechRecognizer {
 
   clearCallbacks(): void {
     this.clearInactivityTimeout();
+    this.clearNoSpeechTimeout();
+    this.endpointing = null;
+    this.endOfSpeechHandler = null;
+    this.pendingEndOfSpeechReason = null;
+    this.endOfSpeechEmitted = true;
+    this.noSpeechDeadlineAt = null;
+    this.awaitingRestart = false;
+    this.suppressStartCallbacks = false;
     this.onResultCallbacks = [];
     this.onInterimResultCallbacks = [];
     this.onErrorCallbacks = [];

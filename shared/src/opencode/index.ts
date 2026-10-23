@@ -125,6 +125,42 @@ export {
   parseOpenCodeVersionOutput,
 } from './release'
 
+export {
+  DEFAULT_VOICE_PAUSE_MS,
+  VOICE_NO_SPEECH_TIMEOUT_MS,
+  VOICE_PAUSE_OPTIONS_MS,
+  VOICE_PAUSE_STORAGE_KEY,
+  formatVoicePauseMs,
+  isVoicePauseOption,
+  normalizeVoicePauseMs,
+  parseVoicePauseMs,
+} from './voicePauseSetting'
+
+export {
+  INITIAL_VOICE_CONVERSATION_STATE,
+  VOICE_MODE_INSTRUCTIONS,
+  VOICE_MODE_INSTRUCTION_KEY,
+  findNextUnspokenMessage,
+  hasIncompleteAssistant,
+  hasSpokenMessage,
+  isVoiceTurnComplete,
+  listUnspokenMessages,
+  reduceVoiceConversation,
+  voiceConversationHint,
+  voiceConversationLabel,
+} from './voiceConversation'
+
+export type {
+  VoiceConversationEvent,
+  VoiceConversationLabelInput,
+  VoiceConversationState,
+  VoicePauseReason,
+  VoicePhase,
+  VoiceSessionStatus,
+  VoiceSpokenMessage,
+  VoiceTurnCompletionInput,
+} from './voiceConversation'
+
 export { OPENCODE_LIFECYCLE_STATES, OPENCODE_RECOVERY_ACTIONS } from './lifecycle'
 
 export type { OpenCodeLifecycleState, OpenCodeLifecycleStatus, OpenCodeRecoveryAction } from './lifecycle'

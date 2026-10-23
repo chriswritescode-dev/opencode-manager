@@ -3,10 +3,11 @@ import { render, screen, fireEvent, waitFor, within, act } from '@testing-librar
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput } from './PromptInput'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
-import { createCommandActionsMock } from '@/test/test-utils'
+import { createCommandActionsMock, createVoiceConversationControllerMock } from '@/test/test-utils'
 
 const mocks = vi.hoisted(() => ({
   useSTT: vi.fn(),
+  useVoiceConversation: vi.fn(),
   useMobile: vi.fn(),
   useCommands: vi.fn(),
   useCommandHandler: vi.fn(),
@@ -23,7 +24,11 @@ const mocks = vi.hoisted(() => ({
   setShowDialog: vi.fn(),
 }))
 
-vi.mock('@/hooks/useSTT', () => ({ useSTT: mocks.useSTT }))
+vi.mock('@/hooks/useSTT', () => ({
+  useSTT: mocks.useSTT,
+  useSttAvailability: () => ({ isEnabled: true, isSupported: true }),
+}))
+vi.mock('@/hooks/useVoiceConversation', () => ({ useVoiceConversation: mocks.useVoiceConversation }))
 vi.mock('@/hooks/useMobile', () => ({ useMobile: mocks.useMobile }))
 vi.mock('@/hooks/useCommands', () => ({ useCommands: mocks.useCommands }))
 vi.mock('@/hooks/useCommandHandler', () => ({ useCommandHandler: mocks.useCommandHandler }))
@@ -88,7 +93,7 @@ const createTestQueryClient = () => new QueryClient({
 const defaultProps = {
   directory: '/test',
   sessionID: 'test-session',
-  showScrollButton: false,
+    showScrollButton: false,
   isSessionActive: false,
   isStreamingResponse: false,
   onScrollToBottom: vi.fn(),
@@ -106,11 +111,12 @@ describe('PromptInput composer layout', () => {
   const promptInput = () => screen.getByPlaceholderText('Send a message...')
   const submitButton = () => document.querySelector('[data-submit-prompt]')
   const controlsRow = () => screen.getByTestId('composer-controls-row')
-  const mobileVoiceButton = () => document.querySelector('[data-voice-variant="mobile"]')
+  const voiceMicButton = () => screen.queryByRole('button', { name: 'Start voice conversation' })
   const keyButtons = () => screen.queryAllByRole('toolbar', { name: 'Insert' })
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.useVoiceConversation.mockReturnValue(createVoiceConversationControllerMock())
     mocks.hasPendingPermission.mockReturnValue(false)
     mocks.useMobile.mockReturnValue(false)
     mocks.useSTT.mockReturnValue({
@@ -328,7 +334,7 @@ describe('PromptInput composer layout', () => {
       fireEvent.focus(promptInput())
 
       const actions = controlsRow().lastElementChild as HTMLElement
-      expect(actions).toContainElement(mobileVoiceButton() as HTMLElement)
+      expect(actions).toContainElement(voiceMicButton() as HTMLElement)
       expect(actions).toContainElement(screen.getByTestId('composer-tools-menu'))
     })
   })
@@ -362,15 +368,15 @@ describe('PromptInput composer layout', () => {
       fireEvent.change(promptInput(), { target: { value: 'hello' } })
 
       expect(submitButton()).not.toBeNull()
-      expect(mobileVoiceButton()).not.toBeNull()
-      expect(controlsRow().lastElementChild).toContainElement(mobileVoiceButton() as HTMLElement)
+      expect(voiceMicButton()).not.toBeNull()
+      expect(controlsRow().lastElementChild).toContainElement(voiceMicButton() as HTMLElement)
     })
 
     it('hides the mic while a permission is pending', () => {
       mocks.hasPendingPermission.mockReturnValue(true)
       renderComponent()
 
-      expect(mobileVoiceButton()).toBeNull()
+      expect(voiceMicButton()).toBeNull()
       expect(screen.getByTitle('View pending permission')).toBeInTheDocument()
     })
   })
@@ -380,13 +386,13 @@ describe('PromptInput composer layout', () => {
       mocks.useMobile.mockReturnValue(true)
       renderComponent()
 
-      const micBeforeFocus = mobileVoiceButton() as HTMLElement
+      const micBeforeFocus = voiceMicButton() as HTMLElement
       expect(micBeforeFocus).toHaveClass('min-h-11', 'min-w-11')
       expect(micBeforeFocus).not.toHaveClass('min-h-[44px]')
 
       fireEvent.focus(promptInput())
 
-      const micAfterFocus = mobileVoiceButton() as HTMLElement
+      const micAfterFocus = voiceMicButton() as HTMLElement
       expect(micAfterFocus).toHaveClass('min-h-11', 'min-w-11')
       expect(micAfterFocus).not.toHaveClass('min-h-[44px]')
     })

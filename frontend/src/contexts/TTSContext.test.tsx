@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
 
 const webSpeech = vi.hoisted(() => ({
   stop: vi.fn(),
+  pause: vi.fn(),
+  resume: vi.fn(),
   clearCallbacks: vi.fn(),
   waitForVoices: vi.fn(() => Promise.resolve()),
   onEnd: vi.fn(),
@@ -300,6 +302,234 @@ describe('TTSProvider playback isolation', () => {
     for (const count of fetchCounts.values()) {
       expect(count).toBe(1)
     }
+  })
+})
+
+describe('TTSProvider message completion', () => {
+  it('reports completion once after the last chunk finishes', async () => {
+    setPreferences()
+    renderProvider()
+    const onEnd = vi.fn()
+
+    await act(async () => {
+      await ttsRef.current!.speakMessage('A', textA, { onEnd })
+    })
+
+    for (let index = 0; index < 3; index += 1) {
+      await waitFor(() => expect(FakeAudio.instances.length).toBeGreaterThan(index))
+      const audio = FakeAudio.instances[index]
+      await waitFor(() => expect(audio.paused).toBe(false))
+      expect(onEnd).not.toHaveBeenCalled()
+      await act(async () => {
+        audio.onended!()
+      })
+    }
+
+    await waitFor(() => expect(onEnd).toHaveBeenCalledTimes(1))
+    expect(onEnd).toHaveBeenCalledWith('completed')
+    expect(ttsRef.current!.state).toBe('idle')
+  })
+
+  it('reports a stop once and ignores the stale chunk end', async () => {
+    setPreferences()
+    renderProvider()
+    const onEnd = vi.fn()
+
+    await act(async () => {
+      await ttsRef.current!.speakMessage('A', textA, { onEnd })
+    })
+
+    await waitFor(() => expect(FakeAudio.instances.length).toBeGreaterThanOrEqual(1))
+    const firstAudio = FakeAudio.instances[0]
+    await waitFor(() => expect(firstAudio.paused).toBe(false))
+    const staleOnended = firstAudio.onended
+
+    await act(async () => {
+      ttsRef.current!.stop()
+    })
+
+    expect(onEnd).toHaveBeenCalledTimes(1)
+    expect(onEnd).toHaveBeenCalledWith('stopped')
+
+    await act(async () => {
+      staleOnended!()
+    })
+
+    expect(onEnd).toHaveBeenCalledTimes(1)
+    expect(ttsRef.current!.state).toBe('idle')
+  })
+
+  it('reports the replaced message as stopped without settling the new one', async () => {
+    setPreferences()
+    renderProvider()
+    const onEndA = vi.fn()
+    const onEndB = vi.fn()
+
+    await act(async () => {
+      await ttsRef.current!.speakMessage('A', textA, { onEnd: onEndA })
+    })
+
+    await waitFor(() => expect(FakeAudio.instances.length).toBeGreaterThanOrEqual(1))
+    const firstAudio = FakeAudio.instances[0]
+    await waitFor(() => expect(firstAudio.paused).toBe(false))
+    const staleOnended = firstAudio.onended
+
+    await act(async () => {
+      await ttsRef.current!.speakMessage('B', textB, { onEnd: onEndB })
+    })
+
+    expect(onEndA).toHaveBeenCalledTimes(1)
+    expect(onEndA).toHaveBeenCalledWith('stopped')
+    expect(onEndB).not.toHaveBeenCalled()
+
+    await act(async () => {
+      staleOnended!()
+    })
+
+    expect(onEndA).toHaveBeenCalledTimes(1)
+    expect(onEndB).not.toHaveBeenCalled()
+    expect(ttsRef.current!.activeMessageId).toBe('B')
+  })
+
+  it('clears the paused state and reports a stop when stopped while paused', async () => {
+    setPreferences()
+    renderProvider()
+    const onEnd = vi.fn()
+
+    await act(async () => {
+      await ttsRef.current!.speakMessage('A', textA, { onEnd })
+    })
+
+    await waitFor(() => expect(FakeAudio.instances.length).toBeGreaterThanOrEqual(1))
+    const firstAudio = FakeAudio.instances[0]
+    await waitFor(() => expect(firstAudio.paused).toBe(false))
+
+    await act(async () => {
+      ttsRef.current!.pause()
+    })
+
+    expect(ttsRef.current!.isPaused).toBe(true)
+
+    await act(async () => {
+      ttsRef.current!.stop()
+    })
+
+    expect(ttsRef.current!.isPaused).toBe(false)
+    expect(onEnd).toHaveBeenCalledTimes(1)
+    expect(onEnd).toHaveBeenCalledWith('stopped')
+  })
+})
+
+describe('TTSProvider pause and resume', () => {
+  it('pauses the current chunk and resumes it without restarting the message', async () => {
+    setPreferences()
+    renderProvider()
+
+    await act(async () => {
+      await ttsRef.current!.speakMessage('A', textA)
+    })
+
+    await waitFor(() => expect(FakeAudio.instances.length).toBeGreaterThanOrEqual(1))
+    const firstAudio = FakeAudio.instances[0]
+    await waitFor(() => expect(firstAudio.paused).toBe(false))
+    const instanceCount = FakeAudio.instances.length
+
+    await act(async () => {
+      ttsRef.current!.pause()
+    })
+
+    expect(ttsRef.current!.isPaused).toBe(true)
+    expect(ttsRef.current!.isPlaying).toBe(true)
+    expect(firstAudio.pause).toHaveBeenCalled()
+    expect(firstAudio.paused).toBe(true)
+
+    const playCallsWhilePaused = firstAudio.play.mock.calls.length
+
+    await act(async () => {
+      ttsRef.current!.resume()
+    })
+
+    expect(ttsRef.current!.isPaused).toBe(false)
+    expect(firstAudio.play.mock.calls.length).toBe(playCallsWhilePaused + 1)
+    expect(firstAudio.paused).toBe(false)
+    expect(FakeAudio.instances).toHaveLength(instanceCount)
+    expect(fetchBodies.filter((text) => text === 'Alpha one. Alpha two.')).toHaveLength(1)
+  })
+
+  it('holds the next chunk until resumed when paused between chunks', async () => {
+    setPreferences()
+    renderProvider()
+
+    await act(async () => {
+      await ttsRef.current!.speakMessage('A', textA)
+    })
+
+    await waitFor(() => expect(FakeAudio.instances.length).toBeGreaterThanOrEqual(1))
+    const firstAudio = FakeAudio.instances[0]
+    await waitFor(() => expect(firstAudio.paused).toBe(false))
+
+    await act(async () => {
+      ttsRef.current!.pause()
+    })
+
+    await act(async () => {
+      firstAudio.onended!()
+    })
+
+    await waitFor(() => expect(FakeAudio.instances.length).toBeGreaterThanOrEqual(2))
+    const secondAudio = FakeAudio.instances[1]
+
+    expect(secondAudio.play).not.toHaveBeenCalled()
+    expect(secondAudio.paused).toBe(true)
+    expect(ttsRef.current!.isPaused).toBe(true)
+    expect(ttsRef.current!.activeMessageId).toBe('A')
+
+    await act(async () => {
+      ttsRef.current!.resume()
+    })
+
+    expect(secondAudio.play).toHaveBeenCalledTimes(1)
+    expect(secondAudio.paused).toBe(false)
+    expect(ttsRef.current!.isPaused).toBe(false)
+  })
+
+  it('delegates pause and resume to the synthesizer for builtin playback', async () => {
+    setPreferences({ provider: 'builtin' })
+    renderProvider()
+
+    let releaseSpeech: () => void = () => {}
+    webSpeech.speakChunked.mockImplementationOnce(
+      () => new Promise<void>((resolve) => {
+        releaseSpeech = resolve
+      }),
+    )
+
+    await act(async () => {
+      void ttsRef.current!.speakWithConfig('Hello from builtin speech.', builtinConfig)
+    })
+
+    await waitFor(() => expect(ttsRef.current!.isPlaying).toBe(true))
+
+    await act(async () => {
+      ttsRef.current!.pause()
+    })
+
+    expect(webSpeech.pause).toHaveBeenCalledTimes(1)
+    expect(ttsRef.current!.isPaused).toBe(true)
+
+    await act(async () => {
+      ttsRef.current!.resume()
+    })
+
+    expect(webSpeech.resume).toHaveBeenCalledTimes(1)
+    expect(ttsRef.current!.isPaused).toBe(false)
+
+    await act(async () => {
+      releaseSpeech()
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(ttsRef.current!.isIdle).toBe(true))
   })
 })
 

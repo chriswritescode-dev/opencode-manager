@@ -4,13 +4,16 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useSettings } from '@/hooks/useSettings'
 import { useSTT } from '@/hooks/useSTT'
+import { useVoicePauseSetting } from '@/hooks/useVoicePauseSetting'
 import { isWebRecognitionSupported, getAvailableLanguages } from '@/lib/webSpeechRecognizer'
 import { sttApi } from '@/api/stt'
 import { Mic, Loader2, XCircle, CheckCircle2, RefreshCw, Eye, EyeOff, MicOff } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Combobox } from '@/components/ui/combobox'
 import { DEFAULT_STT_CONFIG } from '@/api/types/settings'
+import { VOICE_PAUSE_OPTIONS_MS, formatVoicePauseMs } from '@opencode-manager/shared/opencode'
 
 const sttFormSchema = z.object({
   enabled: z.boolean(),
@@ -35,9 +38,15 @@ const sttFormSchema = z.object({
 
 type STTFormValues = z.infer<typeof sttFormSchema>
 
+const voicePauseOptions = VOICE_PAUSE_OPTIONS_MS.map((ms) => ({
+  value: String(ms),
+  label: formatVoicePauseMs(ms),
+}))
+
 export function STTSettings() {
   const { preferences, updateSettings } = useSettings()
   const { startRecording, stopRecording, abortRecording, isRecording, isProcessing, transcript, interimTranscript, error: sttError, isExternalProvider } = useSTT()
+  const { pauseMs, setPauseMs } = useVoicePauseSetting()
 
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [isTesting, setIsTesting] = useState(false)
@@ -375,6 +384,21 @@ export function STTSettings() {
                       </FormItem>
                     )}
                   />
+
+                  <FormItem>
+                    <Label>Pause before sending</Label>
+                    <Combobox
+                      value={String(pauseMs)}
+                      onChange={(value) => setPauseMs(Number(value))}
+                      options={voicePauseOptions}
+                      placeholder="Select pause..."
+                      allowCustomValue={false}
+                      ariaLabel="Pause before sending"
+                    />
+                    <p className="text-sm text-muted-foreground">
+                      Voice conversation sends after this much silence. Uses your browser's speech recognition; other providers send when you tap.
+                    </p>
+                  </FormItem>
                 </>
               )}
 

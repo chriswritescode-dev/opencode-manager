@@ -74,6 +74,8 @@ function mockHooks(preferences: UserPreferences = buildPreferences()) {
     speakMessage: vi.fn(),
     queueMessage: vi.fn(),
     stop: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn(),
     state: 'idle',
     error: null,
     currentText: null,
@@ -83,6 +85,7 @@ function mockHooks(preferences: UserPreferences = buildPreferences()) {
     isPlaying: false,
     isLoading: false,
     isIdle: true,
+    isPaused: false,
   })
   vi.mocked(useTTSDiscovery).mockReturnValue({
     refreshModels: vi.fn(),

@@ -176,11 +176,23 @@ body {
 }
 
 @theme {
-  --animate-voice-wave-bar: voice-wave-bar 0.9s ease-in-out infinite;
+  --animate-voice-orb-breathe: voice-orb-breathe 2.6s ease-in-out infinite;
+  --animate-voice-orb-work: voice-orb-work 1.8s ease-in-out infinite;
+  --animate-voice-orb-speak: voice-orb-speak 0.7s ease-in-out infinite;
 
-  @keyframes voice-wave-bar {
-    0%, 100% { transform: scaleY(0.25); }
-    50% { transform: scaleY(1); }
+  @keyframes voice-orb-breathe {
+    0%, 100% { transform: scale(0.96); }
+    50% { transform: scale(1.04); }
+  }
+
+  @keyframes voice-orb-work {
+    0%, 100% { transform: scale(0.94); }
+    50% { transform: scale(1); }
+  }
+
+  @keyframes voice-orb-speak {
+    0%, 100% { transform: scale(0.9); }
+    50% { transform: scale(1); }
   }
 }
 

@@ -5,7 +5,34 @@ import { renderHook } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { vi } from 'vitest'
 import type { useSettings } from '@/hooks/useSettings'
+import type { VoiceConversationController } from '@/hooks/useVoiceConversation'
 import { BUILTIN_COMMAND_ACTIONS, type CommandActions } from '@/lib/builtinCommands'
+
+export function createVoiceConversationControllerMock(
+  overrides: Partial<VoiceConversationController> = {},
+): VoiceConversationController {
+  return {
+    isActive: false,
+    phase: 'off',
+    label: 'Voice conversation',
+    hint: '',
+    orbLabel: 'Voice conversation',
+    liveTranscript: '',
+    canEditInTextBox: false,
+    canStopAgent: false,
+    hasHeldReading: false,
+    isEndpointing: false,
+    notice: null,
+    start: vi.fn(),
+    exit: vi.fn(),
+    editInTextBox: vi.fn(),
+    tapOrb: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn(),
+    stopAgent: vi.fn(),
+    ...overrides,
+  }
+}
 
 export function createCommandActionsMock(): CommandActions {
   return Object.fromEntries(

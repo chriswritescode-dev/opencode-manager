@@ -56,6 +56,7 @@ import { useSessionStatus } from "@/stores/sessionStatusStore";
 import type { PageCommandActions } from "@/lib/builtinCommands";
 import { useRedoMessage, useUndoMessage } from "@/hooks/useUndoMessage";
 import { usePermissions, useForms } from "@/contexts/EventContext";
+import { SessionTranscriptContext, type SessionTranscriptSnapshot } from "@/contexts/session-transcript-context";
 import type { FormInfo, SessionMessageInfo } from "@opencode-manager/shared/opencode";
 import type { SkillFileInfo } from "@opencode-manager/shared";
 import { formatOpenCodeModelRef } from "@opencode-manager/shared/opencode";
@@ -152,6 +153,7 @@ export function SessionDetail() {
   const [selectedFilePath, setSelectedFilePath] = useState<string | undefined>();
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [hasPromptContent, setHasPromptContent] = useState(false);
+  const [isVoiceConversationActive, setIsVoiceConversationActive] = useState(false);
   const [minimizedFormId, setMinimizedFormId] = useState<string | null>(null);
   const [sideQuestion, setSideQuestion] = useState<{ id: number; question: string } | null>(null);
   const [messagePickerMode, setMessagePickerMode] = useState<'fork' | 'timeline' | null>(null);
@@ -273,6 +275,11 @@ export function SessionDetail() {
     [transcriptMessages, session?.revert?.messageID],
   );
 
+  const transcriptSnapshot = useMemo<SessionTranscriptSnapshot>(
+    () => ({ messages, pending: pendingPrompts, status: transcriptStatus }),
+    [messages, pendingPrompts, transcriptStatus],
+  );
+
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
 
@@ -365,6 +372,7 @@ export function SessionDetail() {
     sessionId: sessionId ?? '',
     lastAssistantMessage,
     lastAssistantText,
+    enabled: !isVoiceConversationActive,
   });
 
   const handleShowSessionsDialog = useCallback(() => setSessionsDialogOpen(true), []);
@@ -908,7 +916,7 @@ export function SessionDetail() {
             >
               {!isFormSheetOpen && (
                 <div className="absolute bottom-full right-[3%] md:right-0 mb-2 z-50 flex flex-col items-end gap-2">
-                  {ttsEnabled && !hasPromptContent && !isSessionActive && latestPlayableAssistant && (
+                  {ttsEnabled && !isVoiceConversationActive && !hasPromptContent && !isSessionActive && latestPlayableAssistant && (
                     <FloatingTTSButton
                       messageId={latestPlayableAssistant.messageId}
                       content={latestPlayableAssistant.text}
@@ -973,17 +981,20 @@ export function SessionDetail() {
                     onChildSessionClick={handleChildSessionClick}
                   />
                 </div>
-                <PromptInput
-                  ref={promptInputRef}
-                  directory={sessionDirectory}
-                  sessionID={sessionId}
-                  showScrollButton={showScrollButton}
-                  isSessionActive={isSessionActive}
-                  isStreamingResponse={isStreamingResponse}
-                  onScrollToBottom={scrollToBottom}
-                  commandActions={commandActions}
-                  onPromptChange={setHasPromptContent}
-                />
+                <SessionTranscriptContext.Provider value={transcriptSnapshot}>
+                  <PromptInput
+                    ref={promptInputRef}
+                    directory={sessionDirectory}
+                    sessionID={sessionId}
+                    onVoiceConversationActiveChange={setIsVoiceConversationActive}
+                    showScrollButton={showScrollButton}
+                    isSessionActive={isSessionActive}
+                    isStreamingResponse={isStreamingResponse}
+                    onScrollToBottom={scrollToBottom}
+                    commandActions={commandActions}
+                    onPromptChange={setHasPromptContent}
+                  />
+                </SessionTranscriptContext.Provider>
               </div>
             </div>
           </div>
