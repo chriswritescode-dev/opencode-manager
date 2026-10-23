@@ -39,6 +39,7 @@ const harness = vi.hoisted(() => ({
   abortRecording: vi.fn(),
   speakMessage: vi.fn(),
   ttsStop: vi.fn(),
+  ttsUnlock: vi.fn(),
   ttsPause: vi.fn(),
   ttsResume: vi.fn(),
   sendTurn: vi.fn(),
@@ -80,6 +81,7 @@ const ttsValue = {
   error: null as string | null,
   speakMessage: harness.speakMessage,
   stop: harness.ttsStop,
+  unlock: harness.ttsUnlock,
   pause: harness.ttsPause,
   resume: harness.ttsResume,
 }
@@ -118,9 +120,9 @@ async function endOfSpeech(reason: SttEndOfSpeechReason, finalText: string) {
   })
 }
 
-function speechEndHandler(callIndex = 0): (reason: TTSEndReason) => void {
+function speechEndHandler(callIndex = 0): (reason: TTSEndReason, error?: string) => void {
   const options = harness.speakMessage.mock.calls[callIndex]?.[2] as
-    | { onEnd?: (reason: TTSEndReason) => void }
+    | { onEnd?: (reason: TTSEndReason, error?: string) => void }
     | undefined
   if (!options?.onEnd) throw new Error('speakMessage was not called with an onEnd handler')
   return options.onEnd
@@ -202,6 +204,7 @@ describe('useVoiceConversation', () => {
 
     await waitFor(() => expect(result.current.phase).toBe('listening'))
     expect(result.current.isActive).toBe(true)
+    expect(harness.ttsUnlock).toHaveBeenCalledTimes(1)
     expect(result.current.label).toBe('Listening')
     expect(harness.startRecording).toHaveBeenCalledTimes(1)
     expect(lastStartOptions().endpointing).toEqual({ pauseMs: 1200, noSpeechTimeoutMs: 10_000 })
@@ -283,6 +286,7 @@ describe('useVoiceConversation', () => {
 
     act(() => result.current.tapOrb())
     await waitFor(() => expect(result.current.phase).toBe('recording'))
+    expect(harness.ttsUnlock).toHaveBeenCalledTimes(2)
     expect(harness.startRecording).toHaveBeenCalledTimes(1)
     expect(result.current.label).toBe('Adding to queue')
 
@@ -546,12 +550,34 @@ describe('useVoiceConversation', () => {
     rerender(createProps({ messages: [assistantMessage('msg_1', 'Done')] }))
     await waitFor(() => expect(result.current.phase).toBe('speaking'))
 
+    act(() => speechEndHandler(0)('error', 'Audio playback was blocked by the browser'))
+
+    expect(result.current.phase).toBe('paused')
+    expect(result.current.label).toBe(
+      'Reading the reply failed: Audio playback was blocked by the browser',
+    )
+    expect(result.current.hint).toBe('Tap to retry')
+    expect(harness.startRecording).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the failure label plain when the player reports no detail', async () => {
+    const { result, rerender } = renderHook(
+      (props: UseVoiceConversationInput) => useVoiceConversation(props),
+      { initialProps: createProps() },
+    )
+
+    act(() => result.current.start())
+    await waitFor(() => expect(result.current.phase).toBe('listening'))
+    await endOfSpeech('pause', 'hello there')
+    await waitFor(() => expect(result.current.phase).toBe('working'))
+
+    rerender(createProps({ messages: [assistantMessage('msg_1', 'Done')] }))
+    await waitFor(() => expect(result.current.phase).toBe('speaking'))
+
     act(() => speechEndHandler(0)('error'))
 
     expect(result.current.phase).toBe('paused')
     expect(result.current.label).toBe('Reading the reply failed')
-    expect(result.current.hint).toBe('Tap to retry')
-    expect(harness.startRecording).toHaveBeenCalledTimes(1)
   })
 
   it('marks a reply with nothing to read as heard and listens again', async () => {

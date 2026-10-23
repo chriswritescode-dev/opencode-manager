@@ -48,6 +48,7 @@ vi.mock('@/hooks/useTTS', () => ({
   useTTS: () => ({
     speakMessage: vi.fn(),
     stop: vi.fn(),
+    unlock: vi.fn(),
     isEnabled: false,
     isPlaying: false,
     isLoading: false,

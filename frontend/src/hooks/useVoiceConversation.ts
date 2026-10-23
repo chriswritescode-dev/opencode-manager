@@ -543,12 +543,16 @@ export function useVoiceConversation(
       speakingIdRef.current = message.id
       spokenIdsRef.current.add(message.id)
       void latestRef.current.tts.speakMessage(message.id, message.text, {
-        onEnd: (reason) => {
+        onEnd: (reason, error) => {
           if (speakTokenRef.current !== token) return
           if (reason === 'error') {
             speakTokenRef.current += 1
             speakingIdRef.current = null
-            dispatch({ type: 'error', message: REPLY_READ_FAILED_MESSAGE, source: 'playback' })
+            dispatch({
+              type: 'error',
+              message: error ? `${REPLY_READ_FAILED_MESSAGE}: ${error}` : REPLY_READ_FAILED_MESSAGE,
+              source: 'playback',
+            })
             return
           }
           speakingIdRef.current = null
@@ -706,6 +710,7 @@ export function useVoiceConversation(
     }
     const latest = latestRef.current
     if (latest.tts.isPlaying) latest.tts.stop()
+    latest.tts.unlock()
     fireImpactHaptic()
     invalidateTurn()
     instructionEpochRef.current += 1
@@ -851,6 +856,7 @@ export function useVoiceConversation(
   const tapOrb = useCallback(() => {
     const phase = phaseRef.current
     const latest = latestRef.current
+    latest.tts.unlock()
     switch (phase) {
       case 'listening':
         void endTurnRef.current?.()

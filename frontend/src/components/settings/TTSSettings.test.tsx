@@ -76,6 +76,7 @@ function mockHooks(preferences: UserPreferences = buildPreferences()) {
     stop: vi.fn(),
     pause: vi.fn(),
     resume: vi.fn(),
+    unlock: vi.fn(),
     state: 'idle',
     error: null,
     currentText: null,
