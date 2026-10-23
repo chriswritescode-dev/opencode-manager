@@ -11,12 +11,19 @@ interface PairingQrCodeProps {
 
 export function PairingQrCode({ value, label, blurred = false }: PairingQrCodeProps) {
   const [renderSvg, setRenderSvg] = useState<RenderSvg | null>(null)
+  const [loadFailed, setLoadFailed] = useState(false)
 
   useEffect(() => {
     let active = true
-    void import('uqr').then((module) => {
-      if (active) setRenderSvg(() => module.renderSVG)
-    })
+    const loadRenderer = async () => {
+      try {
+        const module = await import('uqr')
+        if (active) setRenderSvg(() => module.renderSVG)
+      } catch {
+        if (active) setLoadFailed(true)
+      }
+    }
+    void loadRenderer()
     return () => {
       active = false
     }
@@ -30,6 +37,14 @@ export function PairingQrCode({ value, label, blurred = false }: PairingQrCodePr
       return null
     }
   }, [renderSvg, value])
+
+  if (loadFailed) {
+    return (
+      <p className="text-sm text-destructive">
+        The QR code could not be loaded. Reload the page and try again.
+      </p>
+    )
+  }
 
   if (!renderSvg) return null
 
