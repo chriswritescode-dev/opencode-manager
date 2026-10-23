@@ -12,6 +12,7 @@ import type { OpenCodeClient } from '../services/opencode/client'
 import { getAgentsMdPath } from '@opencode-manager/shared/config/env'
 import {
   UserPreferencesSchema,
+  isValidGitIdentityEmail,
   type SandboxPreferences,
   type UserPreferences,
 } from '../types/settings'
@@ -299,9 +300,38 @@ function spawnWithTimeout(args: string[], timeoutMs: number, env?: Record<string
   return { output, timedOut: false }
 }
 
+const trimGitIdentityEmail = <T extends { email: string }>(identity: T): T => ({
+  ...identity,
+  email: identity.email.trim(),
+})
+
 const UpdateSettingsSchema = z.object({
   preferences: UserPreferencesSchema.partial(),
-})
+}).superRefine(({ preferences }, ctx) => {
+  if (preferences.gitIdentity && !isValidGitIdentityEmail(preferences.gitIdentity.email)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['preferences', 'gitIdentity', 'email'],
+      message: 'Invalid email address',
+    })
+  }
+
+  preferences.gitIdentities?.forEach((identity, index) => {
+    if (!isValidGitIdentityEmail(identity.email)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['preferences', 'gitIdentities', index, 'email'],
+        message: 'Invalid email address',
+      })
+    }
+  })
+}).transform(({ preferences }) => ({
+  preferences: {
+    ...preferences,
+    ...(preferences.gitIdentity ? { gitIdentity: trimGitIdentityEmail(preferences.gitIdentity) } : {}),
+    ...(preferences.gitIdentities ? { gitIdentities: preferences.gitIdentities.map(trimGitIdentityEmail) } : {}),
+  },
+}))
 
 const CreateCustomCommandSchema = z.object({
   name: z.string().min(1).max(255),

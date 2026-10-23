@@ -1555,7 +1555,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
   })
 
   describe('PATCH / - git identity validation', () => {
-    it.each(['not-an-email', 'missing@tld', 'two words@example.com'])('rejects the email %s with 400', async (email) => {
+    it.each(['not-an-email', 'two words@example.com', '<agent>@example.com'])('rejects the email %s with 400', async (email) => {
       const res = await settingsApp.fetch(new Request('http://localhost/', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -1568,29 +1568,85 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(mockUpdateSettings).not.toHaveBeenCalled()
     })
 
-    it('accepts an empty email and a valid email', async () => {
+    it('reports the rejected field path for the default identity email', async () => {
+      const res = await settingsApp.fetch(new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { gitIdentity: { name: 'Agent', email: 'bad' } } }),
+      }))
+      const json = await res.json() as { details: Array<{ path: Array<string | number>; message: string }> }
+
+      expect(res.status).toBe(400)
+      expect(json.details).toContainEqual(expect.objectContaining({
+        path: ['preferences', 'gitIdentity', 'email'],
+        message: 'Invalid email address',
+      }))
+      expect(mockUpdateSettings).not.toHaveBeenCalled()
+    })
+
+    it.each(['', 'agent@example.com', 'root@localhost', 'root@box'])('accepts the email %s', async (email) => {
       mockGetSettings.mockReturnValue({
         preferences: { gitIdentity: { name: 'Agent', email: '' } },
         updatedAt: 1,
       })
       mockUpdateSettings.mockReturnValue({
-        preferences: { gitIdentity: { name: 'Agent', email: 'agent@example.com' } },
+        preferences: { gitIdentity: { name: 'Agent', email } },
         updatedAt: 2,
       })
 
-      const emptyRes = await settingsApp.fetch(new Request('http://localhost/', {
+      const res = await settingsApp.fetch(new Request('http://localhost/', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preferences: { gitIdentity: { name: 'Agent', email: '' } } }),
+        body: JSON.stringify({ preferences: { gitIdentity: { name: 'Agent', email } } }),
       }))
-      expect(emptyRes.status).toBe(200)
 
-      const validRes = await settingsApp.fetch(new Request('http://localhost/', {
+      expect(res.status).toBe(200)
+      expect(mockUpdateSettings).toHaveBeenCalledWith({ gitIdentity: { name: 'Agent', email } }, 'default')
+    })
+
+    it('trims identity emails before saving', async () => {
+      mockGetSettings.mockReturnValue({
+        preferences: { gitIdentity: { name: 'Agent', email: '' }, gitIdentities: [] },
+        updatedAt: 1,
+      })
+      mockUpdateSettings.mockReturnValue({
+        preferences: {
+          gitIdentity: { name: 'Root', email: 'root@box' },
+          gitIdentities: [{ id: 'work', name: 'Work', email: 'agent@example.com' }],
+        },
+        updatedAt: 2,
+      })
+
+      const res = await settingsApp.fetch(new Request('http://localhost/', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preferences: { gitIdentity: { name: 'Agent', email: 'agent@example.com' } } }),
+        body: JSON.stringify({
+          preferences: {
+            gitIdentity: { name: 'Root', email: '  root@box  ' },
+            gitIdentities: [{ id: 'work', name: 'Work', email: ' agent@example.com ' }],
+          },
+        }),
       }))
-      expect(validRes.status).toBe(200)
+
+      expect(res.status).toBe(200)
+      expect(mockUpdateSettings).toHaveBeenCalledWith({
+        gitIdentity: { name: 'Root', email: 'root@box' },
+        gitIdentities: [{ id: 'work', name: 'Work', email: 'agent@example.com' }],
+      }, 'default')
+    })
+
+    it('passes preferences through unchanged when no identity fields are present', async () => {
+      mockGetSettings.mockReturnValue({ preferences: { theme: 'dark', mode: 'build' }, updatedAt: 1 })
+      mockUpdateSettings.mockReturnValue({ preferences: { theme: 'light', mode: 'plan' }, updatedAt: 2 })
+
+      const res = await settingsApp.fetch(new Request('http://localhost/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { theme: 'light', mode: 'plan' } }),
+      }))
+
+      expect(res.status).toBe(200)
+      expect(mockUpdateSettings).toHaveBeenCalledWith({ theme: 'light', mode: 'plan' }, 'default')
     })
 
     it('rejects an invalid email in a saved identity profile', async () => {
@@ -1598,11 +1654,16 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          preferences: { gitIdentities: [{ id: 'a', name: 'Alpha', email: 'not-an-email' }] },
+          preferences: { gitIdentities: [{ id: 'a', name: 'Alpha', email: 'bad' }] },
         }),
       }))
+      const json = await res.json() as { details: Array<{ path: Array<string | number>; message: string }> }
 
       expect(res.status).toBe(400)
+      expect(json.details).toContainEqual(expect.objectContaining({
+        path: ['preferences', 'gitIdentities', 0, 'email'],
+        message: 'Invalid email address',
+      }))
       expect(mockUpdateSettings).not.toHaveBeenCalled()
     })
   })
