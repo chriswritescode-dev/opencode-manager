@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput } from './PromptInput'
-import { createCommandActionsMock } from '@/test/test-utils'
+import { createCommandActionsMock, createVoiceConversationControllerMock } from '@/test/test-utils'
 
 const mocks = vi.hoisted(() => ({
   sendPrompt: vi.fn(),
@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   agents: [] as Array<{ name: string; description?: string }>,
   skills: [] as Array<{ id: string; name: string; description?: string }>,
   useSTT: vi.fn(),
+  useVoiceConversation: vi.fn(),
   useMobile: vi.fn(),
   useCommands: vi.fn(),
   useFileSearch: vi.fn(),
@@ -45,7 +46,11 @@ vi.mock('@/hooks/useOpenCode', async () => {
   }
 })
 
-vi.mock('@/hooks/useSTT', () => ({ useSTT: mocks.useSTT }))
+vi.mock('@/hooks/useSTT', () => ({
+  useSTT: mocks.useSTT,
+  useSttAvailability: () => ({ isEnabled: true, isSupported: true }),
+}))
+vi.mock('@/hooks/useVoiceConversation', () => ({ useVoiceConversation: mocks.useVoiceConversation }))
 vi.mock('@/hooks/useMobile', () => ({ useMobile: mocks.useMobile }))
 vi.mock('@/hooks/useCommands', () => ({ useCommands: mocks.useCommands }))
 vi.mock('@/hooks/useFileSearch', () => ({ useFileSearch: mocks.useFileSearch }))
@@ -128,6 +133,9 @@ describe('PromptInput agent mention submission', () => {
   const defaultProps = {
     directory: '/test',
     sessionID: 'test-session',
+    messages: [],
+    pending: [],
+    transcriptStatus: 'idle' as const,
     showScrollButton: false,
     isSessionActive: false,
     isStreamingResponse: false,
@@ -148,6 +156,7 @@ describe('PromptInput agent mention submission', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.useVoiceConversation.mockReturnValue(createVoiceConversationControllerMock())
     mocks.sendPrompt.mockResolvedValue({
       id: 'inbox_1',
       sessionID: 'test-session',

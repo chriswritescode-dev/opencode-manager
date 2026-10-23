@@ -147,6 +147,31 @@ describe('useAutoPlayLastResponse', () => {
     expect(mockQueueMessage).not.toHaveBeenCalled()
   })
 
+  it('does NOT call queueMessage while auto-play is disabled', () => {
+    setup()
+
+    const { rerender } = renderHook(
+      (props) => useAutoPlayLastResponse(props),
+      {
+        initialProps: {
+          sessionId: 'test-session',
+          lastAssistantMessage: createMessage('1'),
+          lastAssistantText: 'Test text',
+          enabled: false,
+        },
+      },
+    )
+
+    rerender({
+      sessionId: 'test-session',
+      lastAssistantMessage: createMessage('1', Date.now()),
+      lastAssistantText: 'Test text',
+      enabled: false,
+    })
+
+    expect(mockQueueMessage).not.toHaveBeenCalled()
+  })
+
   it('does NOT call queueMessage on mount when last message was already time.completed', () => {
     setup()
 

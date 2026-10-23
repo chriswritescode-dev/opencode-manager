@@ -119,6 +119,27 @@ describe('useSTT external provider lifecycle', () => {
     expect(mockRecorder.start).toHaveBeenCalledTimes(1)
   })
 
+  it('stays tap-to-send with the external provider even when endpointing is requested', async () => {
+    const { result } = renderHook(() => useSTT())
+    const onEndOfSpeech = vi.fn()
+
+    let started: boolean | undefined
+    await act(async () => {
+      started = await result.current.startRecording({
+        endpointing: { pauseMs: 800, noSpeechTimeoutMs: 5000 },
+        onEndOfSpeech,
+      })
+    })
+
+    const recognizerInstance = mocks.getWebSpeechRecognizer.mock.results[0].value as { start: ReturnType<typeof vi.fn> }
+
+    expect(started).toBe(true)
+    expect(result.current.isEndpointing).toBe(false)
+    expect(mockRecorder.start).toHaveBeenCalledTimes(1)
+    expect(recognizerInstance.start).not.toHaveBeenCalled()
+    expect(onEndOfSpeech).not.toHaveBeenCalled()
+  })
+
   it('clears processing without an error when no speech is detected', async () => {
     const { result } = renderHook(() => useSTT())
 
@@ -450,5 +471,137 @@ describe('useSTT builtin provider lifecycle', () => {
     expect(result.current.isRecording).toBe(false)
     expect(result.current.isProcessing).toBe(false)
     expect(result.current.state).toBe('idle')
+  })
+
+  it('keeps the default start options when endpointing is not requested', async () => {
+    const { result } = renderHook(() => useSTT())
+
+    await act(async () => {
+      await result.current.startRecording()
+    })
+
+    expect(result.current.isEndpointing).toBe(false)
+    expect(mockRecognizer.start).toHaveBeenCalledWith({
+      language: 'en-US',
+      interimResults: true,
+      maxAlternatives: 1,
+    })
+  })
+
+  it('applies endpointing to the browser provider and clears it when capture ends', async () => {
+    const { result } = renderHook(() => useSTT())
+    const endpointing = { pauseMs: 800, noSpeechTimeoutMs: 5000 }
+
+    let started: boolean | undefined
+    await act(async () => {
+      started = await result.current.startRecording({ endpointing, onEndOfSpeech: vi.fn() })
+    })
+
+    expect(started).toBe(true)
+    expect(result.current.isEndpointing).toBe(true)
+    expect(mockRecognizer.start).toHaveBeenCalledWith({
+      language: 'en-US',
+      interimResults: true,
+      maxAlternatives: 1,
+      inactivityTimeoutMs: 800,
+      endpointing,
+      onEndOfSpeech: expect.any(Function),
+    })
+
+    act(() => {
+      registeredCallbacks.onStart[0]()
+    })
+
+    expect(result.current.isRecording).toBe(true)
+    expect(result.current.isEndpointing).toBe(true)
+
+    act(() => {
+      registeredCallbacks.onEnd[0]()
+    })
+
+    expect(result.current.isEndpointing).toBe(false)
+  })
+
+  it('delivers the final transcript when the recognizer reports a pause endpoint', async () => {
+    const { result } = renderHook(() => useSTT())
+    const onEndOfSpeech = vi.fn()
+
+    await act(async () => {
+      await result.current.startRecording({
+        endpointing: { pauseMs: 800, noSpeechTimeoutMs: 5000 },
+        onEndOfSpeech,
+      })
+    })
+
+    const startOptions = mockRecognizer.start.mock.calls[0][0] as {
+      onEndOfSpeech: (reason: string, finalText: string) => void
+    }
+
+    act(() => {
+      registeredCallbacks.onStart[0]()
+      registeredCallbacks.onResult[0]({ transcript: 'hello world', isFinal: true, confidence: 1 })
+    })
+
+    act(() => {
+      startOptions.onEndOfSpeech('pause', 'hello world')
+      registeredCallbacks.onEnd[0]()
+    })
+
+    expect(onEndOfSpeech).toHaveBeenCalledTimes(1)
+    expect(onEndOfSpeech).toHaveBeenCalledWith('pause', 'hello world')
+    expect(result.current.transcript).toBe('hello world')
+    expect(result.current.isEndpointing).toBe(false)
+    expect(result.current.isError).toBe(false)
+  })
+
+  it('reports a no-speech endpoint without surfacing an error', async () => {
+    const { result } = renderHook(() => useSTT())
+    const onEndOfSpeech = vi.fn()
+
+    await act(async () => {
+      await result.current.startRecording({
+        endpointing: { pauseMs: 800, noSpeechTimeoutMs: 1500 },
+        onEndOfSpeech,
+      })
+    })
+
+    const startOptions = mockRecognizer.start.mock.calls[0][0] as {
+      onEndOfSpeech: (reason: string, finalText: string) => void
+    }
+
+    act(() => {
+      registeredCallbacks.onStart[0]()
+      startOptions.onEndOfSpeech('no-speech', '')
+      registeredCallbacks.onEnd[0]()
+    })
+
+    expect(onEndOfSpeech).toHaveBeenCalledTimes(1)
+    expect(onEndOfSpeech).toHaveBeenCalledWith('no-speech', '')
+    expect(result.current.isError).toBe(false)
+    expect(result.current.error).toBeNull()
+    expect(result.current.transcript).toBe('')
+    expect(result.current.isEndpointing).toBe(false)
+  })
+
+  it('does not report end of speech for a manual stop or abort', async () => {
+    const { result } = renderHook(() => useSTT())
+    const onEndOfSpeech = vi.fn()
+
+    await act(async () => {
+      await result.current.startRecording({
+        endpointing: { pauseMs: 800, noSpeechTimeoutMs: 5000 },
+        onEndOfSpeech,
+      })
+    })
+
+    act(() => {
+      registeredCallbacks.onStart[0]()
+      result.current.stopRecording()
+      registeredCallbacks.onEnd[0]()
+      result.current.abortRecording()
+    })
+
+    expect(onEndOfSpeech).not.toHaveBeenCalled()
+    expect(result.current.isEndpointing).toBe(false)
   })
 })

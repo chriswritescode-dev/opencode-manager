@@ -273,6 +273,63 @@ export async function backgroundSession(sessionID: string, serverId?: string): P
   await callOpenCode((api) => api.session.background({ sessionID }), serverId)
 }
 
+/**
+ * Stores one instruction entry on a session, which the model is told about at
+ * the next step boundary.
+ *
+ * @param sessionID The session that receives the instruction.
+ * @param key Stable key of the instruction entry.
+ * @param text Instruction text stored under the key.
+ * @param serverId Server that owns the session, when it is not the local one.
+ */
+export async function putSessionInstruction(
+  sessionID: string,
+  key: string,
+  text: string,
+  serverId?: string,
+): Promise<void> {
+  await callOpenCode(
+    (api) => api.session.instructions.entry.put({ sessionID, key, value: text }),
+    serverId,
+  )
+}
+
+/**
+ * Removes one instruction entry from a session.
+ *
+ * @param sessionID The session that holds the instruction.
+ * @param key Stable key of the instruction entry.
+ * @param serverId Server that owns the session, when it is not the local one.
+ */
+export async function removeSessionInstruction(
+  sessionID: string,
+  key: string,
+  serverId?: string,
+): Promise<void> {
+  await callOpenCode(
+    (api) => api.session.instructions.entry.remove({ sessionID, key }),
+    serverId,
+  )
+}
+
+/**
+ * Lists the keys of the instruction entries a session holds.
+ *
+ * @param sessionID The session whose instruction keys are read.
+ * @param serverId Server that owns the session, when it is not the local one.
+ * @returns The stored instruction keys, in the order the server reports them.
+ */
+export async function listSessionInstructionKeys(
+  sessionID: string,
+  serverId?: string,
+): Promise<string[]> {
+  const entries = await callOpenCode(
+    (api) => api.session.instructions.entry.list({ sessionID }),
+    serverId,
+  )
+  return entries.map((entry) => entry.key)
+}
+
 export async function listShells(directory: string, serverId?: string): Promise<ShellInfo[]> {
   const { data } = await callOpenCode((api) => api.shell.list(openCodeLocation(directory)), serverId)
   return data

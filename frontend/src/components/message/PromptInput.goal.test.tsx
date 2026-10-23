@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput } from './PromptInput'
-import { createCommandActionsMock, stubMatchMedia } from '@/test/test-utils'
+import { createCommandActionsMock, stubMatchMedia, createVoiceConversationControllerMock } from '@/test/test-utils'
 
 const mocks = vi.hoisted(() => ({
   sendPrompt: vi.fn(),
@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
     dismiss: vi.fn(),
   },
   useSTT: vi.fn(),
+  useVoiceConversation: vi.fn(),
   useMobile: vi.fn(),
   useCommands: vi.fn(),
   useFileSearch: vi.fn(),
@@ -73,7 +74,11 @@ vi.mock('@/hooks/useSessionPermissionMode', () => ({
   useSessionPermissionMode: mocks.useSessionPermissionMode,
 }))
 
-vi.mock('@/hooks/useSTT', () => ({ useSTT: mocks.useSTT }))
+vi.mock('@/hooks/useSTT', () => ({
+  useSTT: mocks.useSTT,
+  useSttAvailability: () => ({ isEnabled: true, isSupported: true }),
+}))
+vi.mock('@/hooks/useVoiceConversation', () => ({ useVoiceConversation: mocks.useVoiceConversation }))
 vi.mock('@/hooks/useMobile', () => ({ useMobile: mocks.useMobile }))
 vi.mock('@/hooks/useCommands', () => ({ useCommands: mocks.useCommands }))
 vi.mock('@/hooks/useFileSearch', () => ({ useFileSearch: mocks.useFileSearch }))
@@ -140,6 +145,9 @@ describe('PromptInput goal mode', () => {
   const defaultProps = {
     directory: '/test',
     sessionID: 'test-session',
+    messages: [],
+    pending: [],
+    transcriptStatus: 'idle' as const,
     showScrollButton: false,
     isSessionActive: false,
     isStreamingResponse: false,
@@ -159,6 +167,7 @@ describe('PromptInput goal mode', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.useVoiceConversation.mockReturnValue(createVoiceConversationControllerMock())
     mocks.useSessionGoal.mockReturnValue({ data: null })
     mocks.useSessionPermissionMode.mockReturnValue({ data: undefined })
     mocks.startGoal.mockResolvedValue({ id: 1 })

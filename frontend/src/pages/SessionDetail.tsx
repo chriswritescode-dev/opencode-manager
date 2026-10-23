@@ -152,6 +152,7 @@ export function SessionDetail() {
   const [selectedFilePath, setSelectedFilePath] = useState<string | undefined>();
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [hasPromptContent, setHasPromptContent] = useState(false);
+  const [isVoiceConversationActive, setIsVoiceConversationActive] = useState(false);
   const [minimizedFormId, setMinimizedFormId] = useState<string | null>(null);
   const [sideQuestion, setSideQuestion] = useState<{ id: number; question: string } | null>(null);
   const [messagePickerMode, setMessagePickerMode] = useState<'fork' | 'timeline' | null>(null);
@@ -365,6 +366,7 @@ export function SessionDetail() {
     sessionId: sessionId ?? '',
     lastAssistantMessage,
     lastAssistantText,
+    enabled: !isVoiceConversationActive,
   });
 
   const handleShowSessionsDialog = useCallback(() => setSessionsDialogOpen(true), []);
@@ -908,7 +910,7 @@ export function SessionDetail() {
             >
               {!isFormSheetOpen && (
                 <div className="absolute bottom-full right-[3%] md:right-0 mb-2 z-50 flex flex-col items-end gap-2">
-                  {ttsEnabled && !hasPromptContent && !isSessionActive && latestPlayableAssistant && (
+                  {ttsEnabled && !isVoiceConversationActive && !hasPromptContent && !isSessionActive && latestPlayableAssistant && (
                     <FloatingTTSButton
                       messageId={latestPlayableAssistant.messageId}
                       content={latestPlayableAssistant.text}
@@ -977,6 +979,10 @@ export function SessionDetail() {
                   ref={promptInputRef}
                   directory={sessionDirectory}
                   sessionID={sessionId}
+                  messages={messages}
+                  pending={pendingPrompts}
+                  transcriptStatus={transcriptStatus}
+                  onVoiceConversationActiveChange={setIsVoiceConversationActive}
                   showScrollButton={showScrollButton}
                   isSessionActive={isSessionActive}
                   isStreamingResponse={isStreamingResponse}

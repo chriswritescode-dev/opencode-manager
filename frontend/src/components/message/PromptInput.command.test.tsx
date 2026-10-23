@@ -4,7 +4,7 @@ import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput, type PromptInputHandle } from './PromptInput'
 import { BUILTIN_COMMANDS } from '@/lib/builtinCommands'
-import { createCommandActionsMock, stubMatchMedia } from '@/test/test-utils'
+import { createCommandActionsMock, stubMatchMedia, createVoiceConversationControllerMock } from '@/test/test-utils'
 
 const mocks = vi.hoisted(() => ({
   runCommand: vi.fn(),
@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
     dismiss: vi.fn(),
   },
   useSTT: vi.fn(),
+  useVoiceConversation: vi.fn(),
   useMobile: vi.fn(),
   useCommands: vi.fn(),
   useFileSearch: vi.fn(),
@@ -57,7 +58,11 @@ vi.mock('@/hooks/useOpenCode', async () => {
   }
 })
 
-vi.mock('@/hooks/useSTT', () => ({ useSTT: mocks.useSTT }))
+vi.mock('@/hooks/useSTT', () => ({
+  useSTT: mocks.useSTT,
+  useSttAvailability: () => ({ isEnabled: true, isSupported: true }),
+}))
+vi.mock('@/hooks/useVoiceConversation', () => ({ useVoiceConversation: mocks.useVoiceConversation }))
 vi.mock('@/hooks/useMobile', () => ({ useMobile: mocks.useMobile }))
 vi.mock('@/hooks/useCommands', () => ({ useCommands: mocks.useCommands }))
 vi.mock('@/hooks/useFileSearch', () => ({ useFileSearch: mocks.useFileSearch }))
@@ -142,6 +147,9 @@ describe('PromptInput command submission', () => {
   const defaultProps = {
     directory: '/test',
     sessionID: 'test-session',
+    messages: [],
+    pending: [],
+    transcriptStatus: 'idle' as const,
     showScrollButton: false,
     isSessionActive: false,
     isStreamingResponse: false,
@@ -169,6 +177,7 @@ describe('PromptInput command submission', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.useVoiceConversation.mockReturnValue(createVoiceConversationControllerMock())
     mocks.runCommand.mockResolvedValue(undefined)
     mocks.switchSessionModel.mockResolvedValue(undefined)
     mocks.switchSessionAgent.mockResolvedValue(undefined)

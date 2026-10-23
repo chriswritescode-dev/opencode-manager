@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, useImperativeHandle, forwardRef, memo, useCallback, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { useState, useRef, useEffect, useMemo, useImperativeHandle, forwardRef, memo, useCallback, type KeyboardEvent } from 'react'
 import { useSendPrompt, useInterruptSession, useSendShell, useAgents, useSkills } from '@/hooks/useOpenCode'
 import { useCommands } from '@/hooks/useCommands'
 import { useCommandHandler } from '@/hooks/useCommandHandler'
@@ -6,7 +6,9 @@ import { useFileSearch } from '@/hooks/useFileSearch'
 import { useModelSelection } from '@/hooks/useModelSelection'
 import { useVariants } from '@/hooks/useVariants'
 import { useSessionAgent } from '@/hooks/useSessionAgent'
-import { useSTT } from '@/hooks/useSTT'
+import { useSttAvailability } from '@/hooks/useSTT'
+import { useVoiceConversation } from '@/hooks/useVoiceConversation'
+import { useVoicePauseSetting } from '@/hooks/useVoicePauseSetting'
 
 import { useUserBash } from '@/stores/userBashStore'
 import { useSessionAgentStore } from '@/stores/sessionAgentStore'
@@ -19,7 +21,7 @@ import { FINE_POINTER_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
 
 import { usePermissions } from '@/contexts/EventContext'
 import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
-import { ArrowDown, ArrowUp, Upload, X, Mic, MicOff, Target } from 'lucide-react'
+import { ArrowDown, Upload, X, Mic, Target } from 'lucide-react'
 
 import { SquareFill } from '@/components/ui/square-fill'
 import { IconToggleButton, getIconToggleButtonClassName } from '@/components/ui/icon-toggle-button'
@@ -28,7 +30,7 @@ import { PromptSuggestions, type PromptSuggestion } from './PromptSuggestions'
 import { ComposerActivityBar } from './ComposerActivityBar'
 import { ModelQuickSelect } from '@/components/model/ModelQuickSelect'
 import { AgentQuickSelect } from '@/components/agent/AgentQuickSelect'
-import { VoiceRecorderStrip, type VoiceRecorderStripState } from './VoiceRecorderStrip'
+import { VoiceConversationBar } from './VoiceConversationBar'
 import { PermissionModeToggle } from '@/components/session/PermissionModeToggle'
 import { SessionSandboxMenu } from '@/components/session/SessionSandboxMenu'
 import { ComposerToolsMenu } from './ComposerToolsMenu'
@@ -45,7 +47,7 @@ import { isOpenSessionGoal } from '@opencode-manager/shared/schemas'
 import { useProviders } from '@/hooks/useProviders'
 
 
-import type { CommandInfo } from '@opencode-manager/shared/opencode'
+import type { CommandInfo, SessionInboxInfo, SessionMessageInfo, VoiceSessionStatus } from '@opencode-manager/shared/opencode'
 import type { FileAttachmentInfo, ImageAttachment } from '@/api/types'
 import { isBuiltinCommand, type CommandActions, type PageCommandActions } from '@/lib/builtinCommands'
 
@@ -104,13 +106,6 @@ const COMPOSER_MODE_STYLES: Record<ComposerMode, { label: string, frame: string,
 const shiftRanges = (ranges: MatchRange[], offset: number): MatchRange[] =>
   ranges.map(([start, end]) => [start + offset, end + offset])
 
-const VOICE_SEND_DRAG_ARM_THRESHOLD = 24
-const VOICE_SEND_DRAG_DISARM_THRESHOLD = 8
-const VOICE_CANCEL_DRAG_ARM_THRESHOLD = 96
-const VOICE_CANCEL_DRAG_DISARM_THRESHOLD = VOICE_CANCEL_DRAG_ARM_THRESHOLD - 8
-const VOICE_CLICK_SUPPRESSION_MS = 400
-type VoiceButtonVariant = 'desktop' | 'mobile'
-
 
 export interface PromptInputHandle {
   setPromptValue: (value: string) => void
@@ -125,6 +120,10 @@ export interface PromptInputHandle {
 interface PromptInputProps {
   directory?: string
   sessionID: string
+  messages: SessionMessageInfo[]
+  pending: SessionInboxInfo[]
+  transcriptStatus: VoiceSessionStatus
+  onVoiceConversationActiveChange?: (active: boolean) => void
   showScrollButton?: boolean
   isSessionActive?: boolean
   isStreamingResponse?: boolean
@@ -136,6 +135,10 @@ interface PromptInputProps {
 export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(function PromptInput({ 
   directory,
   sessionID,
+  messages,
+  pending,
+  transcriptStatus,
+  onVoiceConversationActiveChange,
   showScrollButton,
   isSessionActive = false,
   isStreamingResponse = false,
@@ -158,44 +161,18 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0)
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0)
   const [localMode, setLocalMode] = useState<string | null>(null)
-  const [isTogglingRecording, setIsTogglingRecording] = useState(false)
-  const [isVoiceSendArmed, setIsVoiceSendArmed] = useState(false)
-  const [isVoiceCancelArmed, setIsVoiceCancelArmed] = useState(false)
-  const [isVoiceAutoSendPending, setIsVoiceAutoSendPending] = useState(false)
-  const [isVoiceAutoSendWaitingForTranscript, setIsVoiceAutoSendWaitingForTranscript] = useState(false)
-  const [voiceRecordingStartedAt, setVoiceRecordingStartedAt] = useState<number | null>(null)
   const [isPromptFocused, setIsPromptFocused] = useState(false)
   const promptBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingCommandSubmitRef = useRef(false)
-  const lastAddedTranscriptRef = useRef('')
-  const voiceGestureStartXRef = useRef<number | null>(null)
-  const voiceSendArmedRef = useRef(false)
-  const voiceCancelArmedRef = useRef(false)
-  const pendingVoiceAutoSubmitRef = useRef(false)
-  const ignoreVoiceClickUntilRef = useRef(0)
-  const voiceStartRequestRef = useRef(0)
   const handleSubmitRef = useRef<() => void>(() => {})
   const promptRef = useRef(prompt)
   const attachedFilesRef = useRef(attachedFiles)
   const imageAttachmentsRef = useRef(imageAttachments)
 
-  const {
-    isRecording,
-    isProcessing,
-    startRecording,
-    stopRecording,
-    abortRecording,
-    isSupported: sttSupported,
-    isEnabled: sttEnabled,
-    interimTranscript,
-    transcript,
-    clear: clearSTT,
-  } = useSTT()
+  const sttAvailability = useSttAvailability()
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const voiceButtonContainerRef = useRef<HTMLDivElement | null>(null)
-  const composerControlsRowRef = useRef<HTMLDivElement | null>(null)
   const hasFinePointer = useMediaQuery(FINE_POINTER_MEDIA_QUERY)
   const isMobile = useMobile()
 
@@ -205,18 +182,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     if (activeElement && activeElement !== document.body) return
     textareaRef.current?.focus()
   }, [hasFinePointer, sessionID])
-
-  const resetVoiceGestureState = useCallback(() => {
-    voiceGestureStartXRef.current = null
-    voiceSendArmedRef.current = false
-    voiceCancelArmedRef.current = false
-    pendingVoiceAutoSubmitRef.current = false
-    ignoreVoiceClickUntilRef.current = 0
-    setIsVoiceSendArmed(false)
-    setIsVoiceCancelArmed(false)
-    setIsVoiceAutoSendPending(false)
-    setIsVoiceAutoSendWaitingForTranscript(false)
-  }, [])
 
   useEffect(() => {
     promptRef.current = prompt
@@ -239,8 +204,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       revokeBlobUrls(submittedImageAttachments)
       setImageAttachments([])
     }
-    clearSTT()
-  }, [clearSTT])
+  }, [])
 
   const pendingConfirmClearRef = useRef<{
     prompt: string
@@ -262,7 +226,8 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
   const sessionAgent = useSessionAgent(sessionID, directory)
   const hasBackgroundActivity = useHasBackgroundActivity(sessionID)
-  const isLocalServer = isLocalOpenCodeServer(useOpenCodeServerId())
+  const serverId = useOpenCodeServerId()
+  const isLocalServer = isLocalOpenCodeServer(serverId)
   const currentMode = localMode ?? sessionAgent.agent
   const setStoredAgent = useSessionAgentStore((s) => s.setAgent)
   const sendPrompt = useSendPrompt(directory)
@@ -395,9 +360,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     if (!prompt.trim() && imageAttachments.length === 0) return
     if (startGoal.isPending) return
 
-    pendingVoiceAutoSubmitRef.current = false
-    setIsVoiceAutoSendPending(false)
-
     if (isStreamingResponse) {
       onScrollToBottom()
       const parsed = parsePromptToInput(prompt, attachedFiles, agentNames, skillIds, imageAttachments)
@@ -443,7 +405,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
             if (promptRef.current !== submittedPrompt) return
             setPrompt('')
             setIsBashMode(false)
-            clearSTT()
           }
         }
       )
@@ -527,8 +488,16 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
   handleSubmitRef.current = handleSubmit
 
+  const interruptTurn = useCallback(
+    (): Promise<void> =>
+      new Promise((resolve) => {
+        interruptSession.mutate(sessionID, { onSettled: () => resolve() })
+      }),
+    [interruptSession, sessionID],
+  )
+
   const handleStop = () => {
-    interruptSession.mutate(sessionID)
+    void interruptTurn()
   }
 
   const focusPromptAt = useCallback((cursorPosition: number) => {
@@ -616,298 +585,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     setMentionQuery('')
     setMentionRange(null)
   }
-
-  const startVoiceRecording = async () => {
-    if (isRecording || isProcessing || isTogglingRecording) {
-      return
-    }
-
-    const startRequestId = voiceStartRequestRef.current + 1
-    voiceStartRequestRef.current = startRequestId
-    pendingVoiceAutoSubmitRef.current = false
-    setIsVoiceAutoSendPending(false)
-    setIsVoiceAutoSendWaitingForTranscript(false)
-    setIsVoiceSendArmed(false)
-    voiceSendArmedRef.current = false
-    setIsVoiceCancelArmed(false)
-    voiceCancelArmedRef.current = false
-    setIsTogglingRecording(true)
-
-    const started = await startRecording()
-    if (voiceStartRequestRef.current !== startRequestId) {
-      setIsTogglingRecording(false)
-      if (started) {
-        abortRecording()
-      }
-      return
-    }
-
-    if (!started) {
-      setIsTogglingRecording(false)
-      return
-    }
-
-    if (typeof navigator !== 'undefined' && navigator.vibrate) {
-      navigator.vibrate(10)
-    }
-    textareaRef.current?.blur()
-  }
-
-  const handleVoiceClick = async () => {
-    if (Date.now() < ignoreVoiceClickUntilRef.current) {
-      return
-    }
-
-    if (isRecording) {
-      pendingVoiceAutoSubmitRef.current = false
-      setIsVoiceAutoSendPending(false)
-      setIsVoiceAutoSendWaitingForTranscript(false)
-      setIsVoiceSendArmed(false)
-      voiceSendArmedRef.current = false
-      setIsVoiceCancelArmed(false)
-      voiceCancelArmedRef.current = false
-      stopRecording()
-      return
-    }
-
-    await startVoiceRecording()
-  }
-
-  const cancelVoiceInput = useCallback(() => {
-    voiceStartRequestRef.current += 1
-    resetVoiceGestureState()
-    setIsTogglingRecording(false)
-
-    if (isRecording || isTogglingRecording || isProcessing) {
-      abortRecording()
-    }
-  }, [abortRecording, isProcessing, isRecording, isTogglingRecording, resetVoiceGestureState])
-
-  const clearVoiceGestureArmedState = useCallback(() => {
-    ignoreVoiceClickUntilRef.current = Date.now() + VOICE_CLICK_SUPPRESSION_MS
-    voiceSendArmedRef.current = false
-    voiceCancelArmedRef.current = false
-    setIsVoiceSendArmed(false)
-    setIsVoiceCancelArmed(false)
-  }, [])
-
-  const armVoiceAutoSend = useCallback(() => {
-    pendingVoiceAutoSubmitRef.current = true
-    setIsVoiceAutoSendPending(true)
-    setIsVoiceAutoSendWaitingForTranscript(true)
-
-    if (typeof navigator !== 'undefined' && navigator.vibrate) {
-      navigator.vibrate([10, 20, 10])
-    }
-  }, [])
-
-  const handleVoiceSendRequest = useCallback(() => {
-    clearVoiceGestureArmedState()
-    armVoiceAutoSend()
-
-    if (isRecording) {
-      stopRecording()
-    }
-  }, [armVoiceAutoSend, clearVoiceGestureArmedState, isRecording, stopRecording])
-
-  const handleVoicePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if ((event.pointerType === 'mouse' && event.button !== 0) || isProcessing || !isRecording) {
-      return
-    }
-
-    event.preventDefault()
-    voiceGestureStartXRef.current = event.clientX
-    voiceSendArmedRef.current = false
-    voiceCancelArmedRef.current = false
-    setIsVoiceSendArmed(false)
-    setIsVoiceCancelArmed(false)
-
-    if (event.currentTarget.setPointerCapture) {
-      event.currentTarget.setPointerCapture(event.pointerId)
-    }
-  }
-
-  const handleVoicePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!isRecording || voiceGestureStartXRef.current === null) {
-      return
-    }
-
-    event.preventDefault()
-    const deltaX = event.clientX - voiceGestureStartXRef.current
-    const nextIsSendArmed = voiceSendArmedRef.current
-      ? deltaX >= VOICE_SEND_DRAG_DISARM_THRESHOLD
-      : deltaX >= VOICE_SEND_DRAG_ARM_THRESHOLD
-    const nextIsCancelArmed = !nextIsSendArmed && (voiceCancelArmedRef.current
-      ? deltaX <= -VOICE_CANCEL_DRAG_DISARM_THRESHOLD
-      : deltaX <= -VOICE_CANCEL_DRAG_ARM_THRESHOLD)
-
-    if (nextIsSendArmed !== voiceSendArmedRef.current) {
-      voiceSendArmedRef.current = nextIsSendArmed
-      setIsVoiceSendArmed(nextIsSendArmed)
-
-      if (nextIsSendArmed && typeof navigator !== 'undefined' && navigator.vibrate) {
-        navigator.vibrate(10)
-      }
-    }
-
-    if (nextIsCancelArmed !== voiceCancelArmedRef.current) {
-      voiceCancelArmedRef.current = nextIsCancelArmed
-      setIsVoiceCancelArmed(nextIsCancelArmed)
-
-      if (nextIsCancelArmed && typeof navigator !== 'undefined' && navigator.vibrate) {
-        navigator.vibrate(10)
-      }
-    }
-  }
-
-  const handleVoicePointerEnd = (event: ReactPointerEvent<HTMLDivElement>, canceled = false) => {
-    if (event.currentTarget.releasePointerCapture && event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId)
-    }
-
-    if (voiceGestureStartXRef.current === null) {
-      return
-    }
-
-    event.preventDefault()
-    voiceGestureStartXRef.current = null
-
-    const wasSendArmed = voiceSendArmedRef.current
-    const wasCancelArmed = voiceCancelArmedRef.current
-    clearVoiceGestureArmedState()
-
-    if (canceled || (!wasSendArmed && !wasCancelArmed)) {
-      pendingVoiceAutoSubmitRef.current = false
-      setIsVoiceAutoSendPending(false)
-      setIsVoiceAutoSendWaitingForTranscript(false)
-      stopRecording()
-      return
-    }
-
-    if (wasCancelArmed) {
-      cancelVoiceInput()
-      ignoreVoiceClickUntilRef.current = Date.now() + VOICE_CLICK_SUPPRESSION_MS
-      return
-    }
-
-    handleVoiceSendRequest()
-  }
-
-  useEffect(() => {
-    const isVoiceFeedbackVisible = isRecording || isTogglingRecording || isProcessing || isVoiceAutoSendPending
-
-    if (!isVoiceFeedbackVisible) {
-      return
-    }
-
-    const handleOutsidePointerDown = (event: PointerEvent) => {
-      const target = event.target
-
-      if (!(target instanceof Node)) {
-        return
-      }
-
-      if (voiceButtonContainerRef.current?.contains(target)) {
-        return
-      }
-
-      if (isMobile && composerControlsRowRef.current?.contains(target)) {
-        return
-      }
-
-      if (isRecording) {
-        voiceGestureStartXRef.current = null
-        voiceSendArmedRef.current = false
-        voiceCancelArmedRef.current = false
-        pendingVoiceAutoSubmitRef.current = false
-        setIsVoiceSendArmed(false)
-        setIsVoiceCancelArmed(false)
-        setIsVoiceAutoSendPending(false)
-        setIsVoiceAutoSendWaitingForTranscript(false)
-        stopRecording()
-        return
-      }
-
-      if (isProcessing || isVoiceAutoSendPending) {
-        pendingVoiceAutoSubmitRef.current = false
-        setIsVoiceAutoSendPending(false)
-        setIsVoiceAutoSendWaitingForTranscript(false)
-        return
-      }
-
-      cancelVoiceInput()
-    }
-
-    document.addEventListener('pointerdown', handleOutsidePointerDown, true)
-
-    return () => {
-      document.removeEventListener('pointerdown', handleOutsidePointerDown, true)
-    }
-  }, [cancelVoiceInput, isMobile, isProcessing, isRecording, isTogglingRecording, isVoiceAutoSendPending, stopRecording])
-
-  useEffect(() => {
-    const textToUse = transcript || interimTranscript
-    if (!isRecording && textToUse && textToUse !== 'Processing...' && textToUse !== 'Recording...') {
-      const trimmedTranscript = textToUse.trim()
-      if (trimmedTranscript && trimmedTranscript !== lastAddedTranscriptRef.current) {
-        if (prompt === '' || prompt === 'Processing...' || prompt === 'Recording...') {
-          setPrompt(trimmedTranscript)
-        } else {
-          setPrompt(prev => `${prev} ${trimmedTranscript}`)
-        }
-        lastAddedTranscriptRef.current = trimmedTranscript
-
-        if (!pendingVoiceAutoSubmitRef.current) {
-          textareaRef.current?.focus()
-        } else {
-          setIsVoiceAutoSendWaitingForTranscript(false)
-        }
-      }
-    }
-  }, [isRecording, interimTranscript, transcript, prompt])
-
-  useEffect(() => {
-    if (isRecording && isTogglingRecording) {
-      setIsTogglingRecording(false)
-    }
-  }, [isRecording, isTogglingRecording])
-
-  useEffect(() => {
-    if (isTogglingRecording) {
-      lastAddedTranscriptRef.current = ''
-    }
-  }, [isTogglingRecording])
-
-  useEffect(() => {
-    setVoiceRecordingStartedAt(isRecording ? Date.now() : null)
-  }, [isRecording])
-
-  useEffect(() => {
-    if (!pendingVoiceAutoSubmitRef.current || isVoiceAutoSendWaitingForTranscript || isRecording || isProcessing || !prompt.trim()) {
-      return
-    }
-
-    pendingVoiceAutoSubmitRef.current = false
-    setIsVoiceAutoSendPending(false)
-    setIsVoiceAutoSendWaitingForTranscript(false)
-    handleSubmitRef.current()
-  }, [prompt, isRecording, isProcessing, isVoiceAutoSendWaitingForTranscript])
-
-  useEffect(() => {
-    if (!isVoiceAutoSendWaitingForTranscript || isRecording || isProcessing || !transcript.trim()) {
-      return
-    }
-
-    setIsVoiceAutoSendWaitingForTranscript(false)
-  }, [isRecording, isProcessing, transcript, isVoiceAutoSendWaitingForTranscript])
-
-  useEffect(() => {
-    if (pendingVoiceAutoSubmitRef.current && !isRecording && !isProcessing && !transcript.trim() && !interimTranscript.trim()) {
-      pendingVoiceAutoSubmitRef.current = false
-      setIsVoiceAutoSendPending(false)
-      setIsVoiceAutoSendWaitingForTranscript(false)
-    }
-  }, [isRecording, isProcessing, transcript, interimTranscript])
 
   const addImageAttachment = (file: File) => {
     try {
@@ -1186,13 +863,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     setImageAttachments([])
     closeSuggestions()
     setIsBashMode(false)
-    resetVoiceGestureState()
-    if (isRecording) {
-      abortRecording()
-    } else {
-      clearSTT()
-    }
-  }, [imageAttachments, clearSTT, isRecording, abortRecording, resetVoiceGestureState, closeSuggestions])
+  }, [imageAttachments, closeSuggestions])
 
   const updateSuggestionTriggers = (value: string, cursorPosition: number) => {
     const mentionTrigger = detectMentionTrigger(value, cursorPosition)
@@ -1422,104 +1093,67 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
           : 'Goal mode: the next message becomes the objective'
   const isGoalModeDisabled = lockedReason !== null || hasOpenGoal || isBashMode || startGoal.isPending
   const toggleGoalArmed = () => setIsGoalArmed((value) => !value)
-  const voiceFeedbackState: VoiceRecorderStripState | null = isTogglingRecording
-    ? 'starting'
-    : isProcessing
-      ? isVoiceAutoSendPending
-        ? 'sending'
-        : 'processing'
-      : isRecording
-        ? isVoiceCancelArmed
-          ? 'cancelArmed'
-          : isVoiceSendArmed
-            ? 'readyToSend'
-            : 'recording'
-        : isVoiceAutoSendPending
-          ? 'sending'
-          : null
-  const mobileVoiceRecorderState = isMobile ? voiceFeedbackState : null
+  const { pauseMs } = useVoicePauseSetting()
+
+  const sendVoiceTurn = useCallback(
+    async (text: string, options: { busy: boolean }): Promise<void> => {
+      await sendPrompt.mutateAsync({
+        sessionID,
+        text,
+        model: modelRef ?? undefined,
+        agent: currentMode,
+        ...(options.busy ? { delivery: 'queue' as const } : {}),
+      })
+      setStoredAgent(sessionID, currentMode)
+    },
+    [currentMode, modelRef, sendPrompt, sessionID, setStoredAgent],
+  )
+
+  const handleVoiceEditInTextBox = useCallback((text: string) => {
+    const dictated = text.trim()
+    if (!dictated) return
+    setPrompt((current) => (current.trim() ? `${current} ${dictated}` : dictated))
+    textareaRef.current?.focus()
+  }, [])
+
+  const voiceConversation = useVoiceConversation({
+    sessionID,
+    serverId,
+    messages,
+    pending,
+    status: transcriptStatus,
+    hasPendingApproval: hasPendingPermissionForSession,
+    pauseMs,
+    sendTurn: sendVoiceTurn,
+    interrupt: interruptTurn,
+    onEditInTextBox: handleVoiceEditInTextBox,
+  })
+
+  useEffect(() => {
+    onVoiceConversationActiveChange?.(voiceConversation.isActive)
+  }, [onVoiceConversationActiveChange, voiceConversation.isActive])
+
   const hasPromptContent = prompt.trim().length > 0 || imageAttachments.length > 0
-  const canUseMobileVoice = isMobile && sttEnabled && sttSupported && !hasPendingPermissionForSession
-  const showMobileKeys = isMobile && isPromptFocused && !hasPendingPermissionForSession && mobileVoiceRecorderState === null
-  const voiceButtonTitle = voiceFeedbackState === 'starting'
-    ? 'Starting microphone'
-    : voiceFeedbackState === 'sending'
-      ? 'Transcribing and sending speech'
-      : voiceFeedbackState === 'processing'
-        ? 'Transcribing speech'
-        : voiceFeedbackState === 'readyToSend'
-          ? 'Release to send'
-          : voiceFeedbackState === 'cancelArmed'
-            ? 'Release to discard'
-            : voiceFeedbackState === 'recording'
-              ? 'Tap to transcribe'
-              : 'Tap to speak'
+  const showVoiceMic = sttAvailability.isEnabled && sttAvailability.isSupported && !hasPendingPermissionForSession
+  const showMobileKeys = isMobile && isPromptFocused && !hasPendingPermissionForSession
 
-  const handleSendVoiceRecording = () => {
-    if (isRecording) {
-      handleVoiceSendRequest()
-      return
-    }
-
-    if (isProcessing && !isVoiceAutoSendPending) {
-      armVoiceAutoSend()
-    }
-  }
-
-
-
-  const renderVoiceButton = (variant: VoiceButtonVariant) => {
-    const isDesktop = variant === 'desktop'
-    const isBusy = isRecording || isTogglingRecording || (isProcessing && !isRecording)
-    const iconSizeClassName = isDesktop ? 'w-5 h-5' : 'w-6 h-6'
-    const spinnerClassName = `${iconSizeClassName} animate-spin rounded-full border-2 ${isDesktop ? 'border-muted-foreground' : 'border-foreground'} border-t-transparent`
-    const voiceGestureHandlers = isDesktop ? {} : {
-      onPointerDown: handleVoicePointerDown,
-      onPointerMove: handleVoicePointerMove,
-      onPointerUp: handleVoicePointerEnd,
-      onPointerCancel: (event: ReactPointerEvent<HTMLDivElement>) => handleVoicePointerEnd(event, true),
-    }
-    const buttonClassName = isDesktop
-      ? `hidden md:flex p-2 rounded-lg transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border items-center justify-center touch-none select-none ${
-        isBusy
-          ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground border-destructive/60 animate-pulse'
-          : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border'
-      }`
-      : `min-h-11 min-w-11 px-0 rounded-lg transition-all duration-150 flex items-center justify-center border touch-none select-none ${
-        isBusy
-          ? 'bg-success text-success-foreground border-success/70 shadow-lg shadow-success/40'
-          : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border active:bg-muted-foreground/30 active:scale-95'
-      }`
-
-    const containerClassName = isDesktop ? 'relative hidden md:block' : 'relative flex touch-none select-none'
-
-    return (
-      <div
-        ref={voiceButtonContainerRef}
-        className={containerClassName}
-        {...voiceGestureHandlers}
-      >
-        <button
-          type="button"
-          data-voice-variant={variant}
-          onClick={handleVoiceClick}
-          disabled={isProcessing}
-          className={buttonClassName}
-          title={voiceButtonTitle}
-        >
-          {isTogglingRecording && !isRecording ? (
-            <div className={spinnerClassName} />
-          ) : isProcessing && !isRecording ? (
-            <div className={spinnerClassName} />
-          ) : isRecording ? (
-            <MicOff className={iconSizeClassName} />
-          ) : (
-            <Mic className={iconSizeClassName} />
-          )}
-        </button>
-      </div>
-    )
-  }
+  const renderVoiceMic = () => (
+    <button
+      type="button"
+      aria-label="Start voice conversation"
+      title="Start voice conversation"
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={() => {
+        textareaRef.current?.blur()
+        voiceConversation.start()
+      }}
+      className={isMobile
+        ? 'min-h-11 min-w-11 px-0 rounded-lg transition-all duration-150 flex items-center justify-center border bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border active:bg-muted-foreground/30 active:scale-95'
+        : 'p-2 rounded-lg transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border flex items-center justify-center bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border'}
+    >
+      <Mic className={isMobile ? 'w-6 h-6' : 'w-5 h-5'} />
+    </button>
+  )
 
   const renderMobileKeys = () => (
     <div role="toolbar" aria-label="Insert" className="flex flex-nowrap items-center gap-1.5 min-w-0">
@@ -1565,16 +1199,8 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   }, [prompt, onPromptChange])
 
   useEffect(() => {
-    if (isRecording) {
-      abortRecording()
-    }
-    clearSTT()
-    resetVoiceGestureState()
-    lastAddedTranscriptRef.current = ''
-    setIsTogglingRecording(false)
     setLocalMode(null)
     setIsGoalArmed(false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentionally only run on sessionID change to avoid clearing transcript when recording state changes
   }, [sessionID])
 
   
@@ -1600,6 +1226,14 @@ return (
           {composerModeStyle.label}
         </span>
       )}
+      {voiceConversation.isActive ? (
+        <VoiceConversationBar
+          controller={voiceConversation}
+          hasPendingApproval={hasPendingPermissionForSession}
+          onViewApproval={() => setShowDialog(true)}
+        />
+      ) : (
+        <>
       <div className="flex items-end gap-1.5 md:gap-2 mb-1.5 md:mb-2">
         <textarea
           ref={textareaRef}
@@ -1662,28 +1296,10 @@ return (
         </div>
       )}
 
-      <div ref={composerControlsRowRef} data-testid="composer-controls-row" className="relative flex gap-1.5 md:gap-2 items-center justify-between">
+      <div data-testid="composer-controls-row" className="relative flex gap-1.5 md:gap-2 items-center justify-between">
         <ComposerActivityBar sessionID={sessionID} />
         <div className="flex flex-1 md:flex-initial gap-1.5 md:gap-2 items-center min-w-0">
-          {mobileVoiceRecorderState ? (
-            <>
-              <button
-                type="button"
-                aria-label="Discard recording"
-                title="Discard recording"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={cancelVoiceInput}
-                className={cn(
-                  getIconToggleButtonClassName(false),
-                  'flex items-center justify-center size-11 p-0 flex-shrink-0',
-                  isVoiceCancelArmed && 'bg-destructive hover:bg-destructive/90 text-destructive-foreground border-destructive',
-                )}
-              >
-                <X className="w-5 h-5" />
-              </button>
-              <VoiceRecorderStrip state={mobileVoiceRecorderState} startedAt={voiceRecordingStartedAt} />
-            </>
-          ) : showMobileKeys ? renderMobileKeys() : (
+          {showMobileKeys ? renderMobileKeys() : (
             <>
               <AgentQuickSelect
                 directory={directory}
@@ -1757,30 +1373,8 @@ return (
           >
             <Upload className="w-5 h-5" />
           </button>
-          {canUseMobileVoice && (
-            renderVoiceButton('mobile')
-          )}
-          {mobileVoiceRecorderState ? (
-            <button
-              type="button"
-              aria-label="Send recording"
-              title="Send recording"
-              disabled={mobileVoiceRecorderState === 'starting'}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={handleSendVoiceRecording}
-              className={cn(
-                getIconToggleButtonClassName(false),
-                'flex items-center justify-center size-11 p-0 flex-shrink-0',
-                isVoiceSendArmed && 'bg-success hover:bg-success/90 text-success-foreground border-success',
-              )}
-            >
-              {mobileVoiceRecorderState === 'sending' ? (
-                <div className="w-5 h-5 animate-spin rounded-full border-2 border-foreground border-t-transparent" />
-              ) : (
-                <ArrowUp className="w-5 h-5" />
-              )}
-            </button>
-          ) : showMobileScrollButton ? (
+          {showVoiceMic && renderVoiceMic()}
+          {showMobileScrollButton ? (
             <button
               type="button"
               aria-label="Scroll to bottom"
@@ -1802,12 +1396,13 @@ return (
               onAttachFile={openFilePicker}
             />
           )}
-          {!isMobile && sttEnabled && sttSupported && (
-            renderVoiceButton('desktop')
-          )}
         </div>
       </div>
+        </>
+      )}
 
+      {!voiceConversation.isActive && (
+        <>
       <PromptSuggestions
         isOpen={showSuggestions}
         items={commandSuggestions}
@@ -1833,6 +1428,8 @@ return (
           setMentionRange(null)
         }}
       />
+        </>
+      )}
     </div>
   )
 }))

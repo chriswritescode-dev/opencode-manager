@@ -4,10 +4,35 @@ export interface SpeechRecognitionResult {
   confidence: number;
 }
 
+/**
+ * Why a capture session ended without the caller stopping it.
+ */
+export type SttEndOfSpeechReason = 'pause' | 'no-speech';
+
+/**
+ * Client-side endpointing budget for one capture session.
+ */
+export interface SttEndpointingOptions {
+  /** Silence after speech, in milliseconds, that ends the session. */
+  pauseMs: number;
+  /** Silence from capture start, in milliseconds, before any speech is heard. */
+  noSpeechTimeoutMs: number;
+}
+
 export interface SpeechRecognitionOptions {
   language?: string;
   interimResults?: boolean;
   maxAlternatives?: number;
+  /** Silences after a result that stop capture. Defaults to 2000. */
+  inactivityTimeoutMs?: number;
+  /** Enables automatic end-of-speech reporting. Omit for tap-to-stop behavior. */
+  endpointing?: SttEndpointingOptions;
+  /**
+   * Called at most once per session when the capture stops itself. The final
+   * transcript accumulated so far is passed with it so callers do not have to
+   * wait for a state update. Never called for a manual stop or abort.
+   */
+  onEndOfSpeech?: (reason: SttEndOfSpeechReason, finalText: string) => void;
 }
 
 export type RecognitionState = 'idle' | 'listening' | 'processing' | 'error';
@@ -84,6 +109,12 @@ export class WebSpeechRecognizer {
   private onStartCallbacks: (() => void)[] = [];
   private finalTranscript = '';
   private inactivityTimeoutRef: ReturnType<typeof setTimeout> | null = null;
+  private noSpeechTimeoutRef: ReturnType<typeof setTimeout> | null = null;
+  private inactivityTimeoutMs = WEB_SPEECH_INACTIVITY_TIMEOUT_MS;
+  private endpointing: SttEndpointingOptions | null = null;
+  private endOfSpeechHandler: ((reason: SttEndOfSpeechReason, finalText: string) => void) | null = null;
+  private pendingEndOfSpeechReason: SttEndOfSpeechReason | null = null;
+  private endOfSpeechEmitted = false;
 
   private clearInactivityTimeout(): void {
     if (this.inactivityTimeoutRef !== null) {
@@ -92,14 +123,44 @@ export class WebSpeechRecognizer {
     }
   }
 
+  private clearNoSpeechTimeout(): void {
+    if (this.noSpeechTimeoutRef !== null) {
+      clearTimeout(this.noSpeechTimeoutRef);
+      this.noSpeechTimeoutRef = null;
+    }
+  }
+
+  private emitEndOfSpeech(reason: SttEndOfSpeechReason): void {
+    if (this.endOfSpeechEmitted) return;
+    this.endOfSpeechEmitted = true;
+    this.endOfSpeechHandler?.(reason, this.finalTranscript);
+  }
+
+  private scheduleNoSpeechTimeout(): void {
+    this.clearNoSpeechTimeout();
+    const noSpeechTimeoutMs = this.endpointing?.noSpeechTimeoutMs;
+
+    if (!noSpeechTimeoutMs || noSpeechTimeoutMs <= 0) return;
+
+    this.noSpeechTimeoutRef = setTimeout(() => {
+      this.noSpeechTimeoutRef = null;
+      if (!this.isListening || this.finalTranscript) return;
+      this.emitEndOfSpeech('no-speech');
+      this.stop();
+    }, noSpeechTimeoutMs);
+  }
+
   private resetInactivityTimeout(): void {
     this.clearInactivityTimeout();
     if (this.isListening) {
       this.inactivityTimeoutRef = setTimeout(() => {
-        if (this.isListening) {
-          this.stop();
+        this.inactivityTimeoutRef = null;
+        if (!this.isListening) return;
+        if (this.endpointing) {
+          this.pendingEndOfSpeechReason = 'pause';
         }
-      }, WEB_SPEECH_INACTIVITY_TIMEOUT_MS);
+        this.stop();
+      }, this.inactivityTimeoutMs);
     }
   }
 
@@ -117,10 +178,12 @@ export class WebSpeechRecognizer {
       this.recognition.onstart = () => {
         this.isListening = true;
         this.state = 'listening';
+        this.scheduleNoSpeechTimeout();
         this.onStartCallbacks.forEach((cb) => cb());
       };
 
       this.recognition.onresult = (event: SpeechRecognitionEvent) => {
+        this.clearNoSpeechTimeout();
         let interimTranscript = '';
 
         for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -151,8 +214,17 @@ export class WebSpeechRecognizer {
 
       this.recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
         this.clearInactivityTimeout();
+        this.clearNoSpeechTimeout();
         this.state = 'error';
         this.isListening = false;
+        this.pendingEndOfSpeechReason = null;
+
+        if (this.endpointing && event.error === 'no-speech') {
+          this.emitEndOfSpeech('no-speech');
+          this.endpointing = null;
+          this.endOfSpeechHandler = null;
+          return;
+        }
 
         let errorMsg = event.error || 'Unknown error';
 
@@ -179,8 +251,19 @@ export class WebSpeechRecognizer {
 
       this.recognition.onend = () => {
         this.clearInactivityTimeout();
+        this.clearNoSpeechTimeout();
         this.isListening = false;
         this.state = 'idle';
+
+        const reason = this.pendingEndOfSpeechReason;
+        this.pendingEndOfSpeechReason = null;
+        this.endpointing = null;
+
+        if (reason) {
+          this.emitEndOfSpeech(reason);
+        }
+        this.endOfSpeechHandler = null;
+
         this.onEndCallbacks.forEach((cb) => cb());
       };
     }
@@ -210,6 +293,14 @@ export class WebSpeechRecognizer {
 
       this.finalTranscript = '';
       this.state = 'listening';
+      this.clearInactivityTimeout();
+      this.clearNoSpeechTimeout();
+      this.inactivityTimeoutMs =
+        options.inactivityTimeoutMs ?? options.endpointing?.pauseMs ?? WEB_SPEECH_INACTIVITY_TIMEOUT_MS;
+      this.endpointing = options.endpointing ?? null;
+      this.endOfSpeechHandler = options.onEndOfSpeech ?? null;
+      this.pendingEndOfSpeechReason = null;
+      this.endOfSpeechEmitted = false;
 
       if (options.language) {
         this.recognition.lang = options.language;
@@ -259,6 +350,7 @@ export class WebSpeechRecognizer {
 
   stop(): void {
     this.clearInactivityTimeout();
+    this.clearNoSpeechTimeout();
     if (this.recognition) {
       try {
         this.recognition.stop();
@@ -271,6 +363,7 @@ export class WebSpeechRecognizer {
 
   abort(): void {
     this.clearInactivityTimeout();
+    this.clearNoSpeechTimeout();
     if (this.recognition) {
       try {
         this.recognition.abort();
@@ -282,6 +375,10 @@ export class WebSpeechRecognizer {
     this.state = 'idle';
     this.isListening = false;
     this.finalTranscript = '';
+    this.endpointing = null;
+    this.endOfSpeechHandler = null;
+    this.pendingEndOfSpeechReason = null;
+    this.endOfSpeechEmitted = true;
   }
 
   isCurrentlyListening(): boolean {
@@ -314,6 +411,11 @@ export class WebSpeechRecognizer {
 
   clearCallbacks(): void {
     this.clearInactivityTimeout();
+    this.clearNoSpeechTimeout();
+    this.endpointing = null;
+    this.endOfSpeechHandler = null;
+    this.pendingEndOfSpeechReason = null;
+    this.endOfSpeechEmitted = true;
     this.onResultCallbacks = [];
     this.onInterimResultCallbacks = [];
     this.onErrorCallbacks = [];

@@ -7,6 +7,8 @@ interface UseAutoPlayLastResponseParams {
   sessionId: string
   lastAssistantMessage: SessionMessageInfo | undefined
   lastAssistantText: string
+  /** Whether a finished reply may start playing; false while hands-free voice owns playback. */
+  enabled?: boolean
 }
 
 interface PlayableAssistantMessage {
@@ -34,6 +36,7 @@ export function useAutoPlayLastResponse({
   sessionId,
   lastAssistantMessage,
   lastAssistantText,
+  enabled = true,
 }: UseAutoPlayLastResponseParams): void {
   const { queueMessage, isEnabled: ttsEnabled, isPlaying, isLoading, activeMessageId } = useTTS()
   const { preferences } = useSettings()
@@ -70,7 +73,7 @@ export function useAutoPlayLastResponse({
   }, [sessionId])
   
   useEffect(() => {
-    if (!ttsEnabled || !autoPlayEnabled) {
+    if (!enabled || !ttsEnabled || !autoPlayEnabled) {
       return
     }
     
@@ -119,6 +122,7 @@ export function useAutoPlayLastResponse({
       }
     }
   }, [
+    enabled,
     ttsEnabled,
     autoPlayEnabled,
     lastAssistantMessage,
