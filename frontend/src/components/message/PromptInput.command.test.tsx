@@ -148,7 +148,6 @@ describe('PromptInput command submission', () => {
   const defaultProps = {
     directory: '/test',
     sessionID: 'test-session',
-    showScrollButton: false,
     isSessionActive: false,
     isStreamingResponse: false,
     onScrollToBottom: vi.fn(),

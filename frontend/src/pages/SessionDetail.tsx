@@ -5,7 +5,7 @@ import { repoQueryOptions } from "@/lib/repoQuery";
 import { MessageThread } from "@/components/message/MessageThread";
 import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
 import { FloatingTTSButton } from '@/components/message/FloatingTTSButton'
-import { X, CornerUpLeft, GitBranch } from "lucide-react";
+import { X, CornerUpLeft, GitBranch, ArrowDown } from "lucide-react";
 import { SquareFill } from "@/components/ui/square-fill";
 import { Header } from "@/components/ui/header";
 import { Badge } from "@/components/ui/badge";
@@ -946,6 +946,18 @@ export function SessionDetail() {
                   )}
                 </div>
               )}
+              {showScrollButton && !isFormSheetOpen && (
+                <button
+                  type="button"
+                  aria-label="Jump to latest"
+                  title="Jump to latest"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={scrollToBottom}
+                  className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 size-11 rounded-full bg-card text-foreground border border-border shadow-md flex items-center justify-center transition-all duration-200 active:scale-95 hover:bg-accent"
+                >
+                  <ArrowDown className="w-5 h-5" />
+                </button>
+              )}
               {minimizedForm && (
                 <MinimizedFormIndicator
                   form={minimizedForm}
@@ -983,7 +995,6 @@ export function SessionDetail() {
                     sessionID={sessionId}
                     onVoiceConversationActiveChange={setIsVoiceConversationActive}
                     onSuggestionsOpenChange={setHasComposerSuggestions}
-                    showScrollButton={showScrollButton}
                     isSessionActive={isSessionActive}
                     isStreamingResponse={isStreamingResponse}
                     onScrollToBottom={scrollToBottom}

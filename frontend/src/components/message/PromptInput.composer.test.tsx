@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput } from './PromptInput'
 import { useComposerDraftStore } from '@/stores/composerDraftStore'
@@ -94,7 +94,6 @@ const createTestQueryClient = () => new QueryClient({
 const defaultProps = {
   directory: '/test',
   sessionID: 'test-session',
-    showScrollButton: false,
   isSessionActive: false,
   isStreamingResponse: false,
   onScrollToBottom: vi.fn(),
@@ -281,55 +280,22 @@ describe('PromptInput composer layout', () => {
       expect(screen.getByTestId('model-quick-select')).toBeInTheDocument()
     })
 
-    it('swaps the composer tools button for a scroll-to-bottom arrow while scrolled up', () => {
-      renderComponent({ showScrollButton: true })
-
-      const actions = controlsRow().lastElementChild as HTMLElement
-      expect(within(actions).getByRole('button', { name: 'Scroll to bottom' })).toBeInTheDocument()
-      expect(screen.queryByTestId('composer-tools-menu')).not.toBeInTheDocument()
-      expect(within(controlsRow().firstElementChild as HTMLElement).getByTestId('agent-quick-select')).toBeInTheDocument()
-      expect(within(controlsRow().firstElementChild as HTMLElement).getByTestId('model-quick-select')).toBeInTheDocument()
-      expect(screen.queryByText('Latest')).not.toBeInTheDocument()
-    })
-
-    it('keeps the scroll-to-bottom arrow on the right while the prompt is focused', () => {
-      renderComponent({ showScrollButton: true })
-
-      fireEvent.focus(promptInput())
-
-      const keys = screen.getByRole('toolbar', { name: 'Insert' })
-      expect(within(keys).getByRole('button', { name: 'bash !' })).toBeInTheDocument()
-
-      const actions = controlsRow().lastElementChild as HTMLElement
-      expect(within(actions).getByRole('button', { name: 'Scroll to bottom' })).toBeInTheDocument()
-      expect(screen.queryByTestId('composer-tools-menu')).not.toBeInTheDocument()
-    })
-
-    it('keeps the scroll-to-bottom arrow while the prompt has text', () => {
-      renderComponent({ showScrollButton: true })
-
-      fireEvent.change(promptInput(), { target: { value: 'hello' } })
-
-      expect(screen.getByRole('button', { name: 'Scroll to bottom' })).toBeInTheDocument()
-    })
-
-    it('scrolls to the bottom from the swapped arrow and keeps the composer tools box size', () => {
-      const onScrollToBottom = vi.fn()
-      renderComponent({ showScrollButton: true, onScrollToBottom })
-
-      const arrow = screen.getByRole('button', { name: 'Scroll to bottom' })
-      expect(arrow).toHaveClass('size-11', 'p-0')
-
-      fireEvent.click(arrow)
-
-      expect(onScrollToBottom).toHaveBeenCalledTimes(1)
-    })
-
-    it('keeps the composer tools button while at the bottom of the transcript', () => {
-      renderComponent({ showScrollButton: false })
+    it('keeps the composer tools button at the bottom of the transcript', () => {
+      renderComponent()
 
       expect(screen.getByTestId('composer-tools-menu')).toBeInTheDocument()
       expect(screen.queryByRole('button', { name: 'Scroll to bottom' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Jump to latest' })).not.toBeInTheDocument()
+    })
+
+    it('keeps the composer tools button while the prompt has text', () => {
+      renderComponent()
+
+      fireEvent.change(promptInput(), { target: { value: 'hello' } })
+
+      expect(screen.getByTestId('composer-tools-menu')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Scroll to bottom' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Jump to latest' })).not.toBeInTheDocument()
     })
 
     it('keeps the voice button and composer tools on the right side of the controls row', () => {
@@ -340,24 +306,6 @@ describe('PromptInput composer layout', () => {
       const actions = controlsRow().lastElementChild as HTMLElement
       expect(actions).toContainElement(voiceMicButton() as HTMLElement)
       expect(actions).toContainElement(screen.getByTestId('composer-tools-menu'))
-    })
-  })
-
-  describe('desktop scroll button visibility', () => {
-    const desktopScrollButton = () => screen.getByTitle('Scroll to bottom')
-
-    it('hides the desktop scroll arrow once the prompt has text', () => {
-      renderComponent({ showScrollButton: true })
-
-      fireEvent.change(promptInput(), { target: { value: 'hello' } })
-
-      expect(desktopScrollButton()).toHaveClass('invisible')
-    })
-
-    it('shows the desktop scroll arrow while the prompt is empty', () => {
-      renderComponent({ showScrollButton: true })
-
-      expect(desktopScrollButton()).toHaveClass('visible')
     })
   })
 

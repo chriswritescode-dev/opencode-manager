@@ -92,7 +92,6 @@ const createTestQueryClient = () => new QueryClient({
 const defaultProps = {
   directory: '/test',
   sessionID: 'session-a',
-  showScrollButton: false,
   isSessionActive: false,
   isStreamingResponse: false,
   onScrollToBottom: vi.fn(),

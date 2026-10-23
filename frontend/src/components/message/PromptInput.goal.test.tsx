@@ -146,7 +146,6 @@ describe('PromptInput goal mode', () => {
   const defaultProps = {
     directory: '/test',
     sessionID: 'test-session',
-    showScrollButton: false,
     isSessionActive: false,
     isStreamingResponse: false,
     onScrollToBottom: vi.fn(),

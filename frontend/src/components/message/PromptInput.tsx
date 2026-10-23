@@ -20,10 +20,10 @@ import { FINE_POINTER_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
 
 import { usePermissions } from '@/contexts/EventContext'
 import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
-import { ArrowDown, Upload, X, Mic, Target } from 'lucide-react'
+import { Upload, X, Mic, Target } from 'lucide-react'
 
 import { SquareFill } from '@/components/ui/square-fill'
-import { IconToggleButton, getIconToggleButtonClassName } from '@/components/ui/icon-toggle-button'
+import { IconToggleButton } from '@/components/ui/icon-toggle-button'
 
 import { PromptSuggestions, type PromptSuggestion } from './PromptSuggestions'
 import { ComposerActivityBar } from './ComposerActivityBar'
@@ -39,7 +39,7 @@ import { detectMentionTrigger, parsePromptToInput, getFilename, getDirectory, ty
 import { matchText, rankByMatch, type MatchRange } from '@/lib/fuzzyMatch'
 import { getNextPrimaryAgentId } from '@/lib/primaryAgents'
 import { getNextFavoriteModel } from '@/lib/favoriteModels'
-import { cn, randomId } from '@/lib/utils'
+import { randomId } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
 import { findModelInfo, isSameModelSelection } from '@opencode-manager/shared/opencode'
 import { isOpenSessionGoal } from '@opencode-manager/shared/schemas'
@@ -131,7 +131,6 @@ interface PromptInputProps {
   sessionID: string
   onVoiceConversationActiveChange?: (active: boolean) => void
   onSuggestionsOpenChange?: (open: boolean) => void
-  showScrollButton?: boolean
   isSessionActive?: boolean
   isStreamingResponse?: boolean
   onScrollToBottom: () => void
@@ -144,7 +143,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   sessionID,
   onVoiceConversationActiveChange,
   onSuggestionsOpenChange,
-  showScrollButton,
   isSessionActive = false,
   isStreamingResponse = false,
   onScrollToBottom,
@@ -1101,7 +1099,6 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   const composerModeStyle = composerMode ? COMPOSER_MODE_STYLES[composerMode] : null
   const isTakeoverOpen = isMobile && isSuggestionListOpen
   const showStopButton = isSessionActive
-  const showMobileScrollButton = isMobile && showScrollButton
   const hasOpenGoal = isOpenSessionGoal(sessionGoal)
   const lockedReason = permissionMode?.lockedReason ?? null
   const goalButtonLabel = lockedReason === 'schedule'
@@ -1362,15 +1359,6 @@ return (
           )}
         </div>
         <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
-            {!isMobile && (
-              <button
-                onClick={onScrollToBottom}
-                className={`p-2 rounded-lg bg-background/80 hover:bg-accent/90 text-primary hover:text-primary-hover transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border border-primary/20 backdrop-blur-md ring-1 ring-primary/15 ${showScrollButton && !hasPromptContent ? 'visible' : 'invisible'}`}
-                title="Scroll to bottom"
-              >
-                <ArrowDown className="w-6 h-6" />
-              </button>
-            )}
 {showStopButton && (
             <button
               onClick={handleStop}
@@ -1396,18 +1384,7 @@ return (
             <Upload className="w-5 h-5" />
           </button>
           {showVoiceMic && renderVoiceMic()}
-          {showMobileScrollButton ? (
-            <button
-              type="button"
-              aria-label="Scroll to bottom"
-              title="Scroll to bottom"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={onScrollToBottom}
-              className={cn(getIconToggleButtonClassName(false), 'flex items-center justify-center size-11 p-0')}
-            >
-              <ArrowDown className="w-5 h-5" />
-            </button>
-          ) : isMobile && directory && (
+          {isMobile && directory && (
             <ComposerToolsMenu
               sessionID={sessionID}
               directory={directory}
