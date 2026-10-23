@@ -335,7 +335,7 @@ export const compactionSequence: V2Event[] = [
     created: 5000,
     type: 'session.compaction.started',
     durable: durable(50),
-    data: { sessionID: SESSION_ID, reason: 'auto', recent: 'previous turn' },
+    data: { sessionID: SESSION_ID, reason: 'auto' },
   },
   {
     id: eventID(51),
@@ -352,7 +352,6 @@ export const compactionSequence: V2Event[] = [
       sessionID: SESSION_ID,
       reason: 'auto',
       text: 'Summarizing the previous turn.',
-      recent: 'previous turn',
       cost: 0.02,
       tokens: { input: 900, output: 60, reasoning: 0, cache: { read: 0, write: 0 } },
     },
@@ -365,7 +364,7 @@ export const failedCompactionSequence: V2Event[] = [
     created: 5030,
     type: 'session.compaction.started',
     durable: durable(53),
-    data: { sessionID: SESSION_ID, reason: 'manual', recent: 'previous turn' },
+    data: { sessionID: SESSION_ID, reason: 'manual' },
   },
   {
     id: eventID(54),

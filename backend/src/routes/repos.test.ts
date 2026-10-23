@@ -424,7 +424,11 @@ describe('DELETE /api/repos/:id/workspaces', () => {
     const client = createStubOpenCodeClient()
     client.api.worktree.list = mock(async () => ([{ directory: worktreeDir, strategy: 'git' }])) as any
     client.api.worktree.remove = mock(async () => {
-      throw Object.assign(new Error('cannot remove'), { name: 'WorktreeError', data: { message: 'cannot remove' } })
+      throw Object.assign(new Error('cannot remove'), {
+        _tag: 'WorktreeError',
+        name: 'WorktreeError',
+        data: { message: 'cannot remove' },
+      })
     }) as any
     const app = createTestApp(db, client)
 
@@ -519,7 +523,11 @@ describe('POST /api/repos/:id/workspaces', () => {
     createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
     const client = createStubOpenCodeClient()
     client.api.worktree.create = mock(async () => {
-      throw Object.assign(new Error('cannot create'), { name: 'WorktreeError', data: { message: 'cannot create' } })
+      throw Object.assign(new Error('cannot create'), {
+        _tag: 'WorktreeError',
+        name: 'WorktreeError',
+        data: { message: 'cannot create' },
+      })
     }) as any
     const app = createTestApp(db, client)
 

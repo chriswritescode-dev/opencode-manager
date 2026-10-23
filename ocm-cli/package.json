@@ -54,7 +54,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",
-    "@opencode/plugin": "2.0.15",
+    "@opencode/plugin": "2.1.2",
     "@opencode-manager/shared": "workspace:*",
     "@opentui/core": "^0.5.12",
     "@opentui/solid": "^0.5.12",

@@ -504,7 +504,7 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
           error: undefined,
           finish: undefined,
           rawFinish: undefined,
-          providerState: undefined,
+          native: undefined,
           time: { created: started, streamed: undefined, completed: undefined },
           ...(snapshot ? { snapshot: { ...current.snapshot, start: snapshot } } : {}),
         }
@@ -539,7 +539,7 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
         time: { ...assistant.time, completed: event.created },
         finish: event.data.finish,
         rawFinish: event.data.rawFinish,
-        providerState: event.data.providerState,
+        native: event.data.native,
         cost: event.data.cost,
         tokens: event.data.tokens,
         ...(event.data.snapshot || event.data.files
@@ -559,7 +559,7 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
         time: { ...assistant.time, completed: event.created },
         finish: event.data.finish ?? 'error',
         rawFinish: event.data.rawFinish,
-        providerState: event.data.providerState,
+        native: event.data.native,
         error: event.data.error,
         retry: undefined,
         ...(event.data.cost !== undefined && event.data.tokens !== undefined
@@ -592,7 +592,7 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
         editText(assistant, (text) => ({
           ...text,
           text: event.data.text,
-          ...(event.data.state === undefined ? {} : { state: event.data.state }),
+          ...(event.data.native === undefined ? {} : { native: event.data.native }),
         })),
       )
       return
@@ -604,7 +604,7 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
           {
             type: 'reasoning',
             text: '',
-            ...(event.data.state === undefined ? {} : { state: event.data.state }),
+            ...(event.data.native === undefined ? {} : { native: event.data.native }),
             time: { created: event.created },
           },
         ],
@@ -623,7 +623,7 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
         editReasoning(assistant, (reasoning) => ({
           ...reasoning,
           text: event.data.text,
-          ...(event.data.state === undefined ? {} : { state: event.data.state }),
+          ...(event.data.native === undefined ? {} : { native: event.data.native }),
           time: { created: reasoning.time?.created ?? event.created, completed: event.created },
         })),
       )
@@ -666,7 +666,7 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
         editTool(assistant, event.data.id, (tool) => ({
           ...tool,
           executed: event.data.executed,
-          providerState: event.data.state,
+          native: event.data.native,
           time: { ...tool.time, ran: event.created },
           state: { status: 'running', input: event.data.input, metadata: {} },
         })),
@@ -688,7 +688,9 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
           return {
             ...tool,
             executed: event.data.executed || tool.executed === true,
-            providerResultState: event.data.resultState,
+            ...(tool.native || event.data.native
+              ? { native: { ...tool.native, ...event.data.native } }
+              : {}),
             time: { ...tool.time, completed: event.created },
             state: {
               status: 'completed',
@@ -707,7 +709,9 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
           return {
             ...tool,
             executed: event.data.executed || tool.executed === true,
-            providerResultState: event.data.resultState,
+            ...(tool.native || event.data.native
+              ? { native: { ...tool.native, ...event.data.native } }
+              : {}),
             time: { ...tool.time, completed: event.created },
             state: {
               status: 'error',
@@ -827,7 +831,6 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
         status: 'running',
         reason: event.data.reason,
         summary: '',
-        recent: event.data.recent ?? '',
         time: { created: event.created },
       })
       return
@@ -847,8 +850,7 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
         if (
           latest?.type === 'compaction' &&
           latest.status === 'completed' &&
-          latest.summary === event.data.text &&
-          latest.recent === event.data.recent
+          latest.summary === event.data.text
         ) {
           return
         }
@@ -858,9 +860,8 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
           status: 'completed',
           reason: event.data.reason,
           model: event.data.model,
-          providerState: event.data.providerState,
+          native: event.data.native,
           summary: event.data.text,
-          recent: event.data.recent,
           cost: event.data.cost,
           tokens: event.data.tokens,
           time: { created: event.created },
@@ -872,9 +873,8 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
         status: 'completed',
         reason: event.data.reason,
         model: event.data.model,
-        providerState: event.data.providerState,
+        native: event.data.native,
         summary: event.data.text,
-        recent: event.data.recent,
         cost: event.data.cost,
         tokens: event.data.tokens,
         metadata: event.metadata ? { ...current.metadata, ...event.metadata } : current.metadata,

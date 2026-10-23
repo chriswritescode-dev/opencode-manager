@@ -26,6 +26,10 @@ interface CapturedRequest {
   headers: Record<string, string>
 }
 
+interface PackageManifest {
+  dependencies: Record<string, string>
+}
+
 function createFetchSpy() {
   const calls: CapturedRequest[] = []
   const fetchSpy = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
@@ -143,6 +147,13 @@ describe('OpenCode v2 contract', () => {
       const dockerfile = readFileSync(join(REPO_ROOT, 'Dockerfile'), 'utf8')
       expect(dockerfile).toMatch(new RegExp(`^ARG OPENCODE_VERSION=${OPENCODE_PINNED_VERSION.replace(/\./g, '\\.')}$`, 'm'))
       expect(dockerfile).toMatch(/^ENV OPENCODE_BUNDLED_VERSION=\$\{OPENCODE_VERSION\}$/m)
+    })
+
+    it('keeps the shared SDK dependency in sync with the pin', () => {
+      const manifest = JSON.parse(
+        readFileSync(join(REPO_ROOT, 'shared', 'package.json'), 'utf8'),
+      ) as PackageManifest
+      expect(manifest.dependencies['@opencode/client']).toBe(OPENCODE_PINNED_VERSION)
     })
 
     it('makes the shell scripts derive the pin from the Dockerfile or the bundled version instead of hardcoding it', () => {
