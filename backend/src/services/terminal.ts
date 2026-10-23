@@ -38,9 +38,12 @@ export class TerminalNotFoundError extends Error {
 }
 
 const DEFERRED_START_SHELL = '/bin/sh'
-const DEFERRED_START_SCRIPT = 'sleep 0.3; exec "$@"'
+const DEFERRED_START_SCRIPT = 'stty -echo 2>/dev/null; IFS= read -r _; stty echo 2>/dev/null; exec "$@"'
 const DEFERRED_START_HANDLE = 'ocm-terminal'
+const DEFERRED_START_RELEASE = '\n'
 const DEFERRED_START_KINDS: ReadonlySet<TerminalKind> = new Set(['action', 'setup'])
+
+type DeferredRelease = 'pending' | 'released'
 
 function deferCommandStart(command: string, args: readonly string[]): { command: string; args: string[] } {
   return {
@@ -55,10 +58,11 @@ export class TerminalService {
     private readonly credentialProvider: CredentialProvider,
     private readonly openSocket: (url: string) => WebSocket = (url) => new WebSocket(url),
     private readonly hubs: TerminalHubRegistry = new TerminalHubRegistry(),
+    private readonly deferredReleases: Map<string, DeferredRelease> = new Map(),
   ) {}
 
   forTarget(target: TerminalTarget): TerminalService {
-    return new TerminalService(target, this.credentialProvider, this.openSocket, this.hubs)
+    return new TerminalService(target, this.credentialProvider, this.openSocket, this.hubs, this.deferredReleases)
   }
 
   async list(directory: string): Promise<TerminalInfo[]> {
@@ -86,14 +90,19 @@ export class TerminalService {
       },
     })
     const terminal = this.toTerminalInfo(result.data)
-    this.recordTerminal(directory, terminal.id)
+    this.recordTerminal(directory, terminal.id, deferred !== undefined)
     return terminal
   }
 
-  private recordTerminal(directory: string, ptyID: string): void {
+  private recordTerminal(directory: string, ptyID: string, deferred: boolean): void {
+    if (!deferred) return
     const key = this.hubKey(directory, ptyID)
     if (this.hubs.get(key)) return
-    const hub = new TerminalHub({ openUpstream: () => this.openUpstreamSocket(directory, ptyID, 0) })
+    this.deferredReleases.set(key, 'pending')
+    const hub = new TerminalHub({
+      openUpstream: () => this.openUpstreamSocket(directory, ptyID, 0),
+      releaseOnOpen: DEFERRED_START_RELEASE,
+    })
     this.hubs.register(key, hub)
     void hub.start()
   }
@@ -119,7 +128,9 @@ export class TerminalService {
     try {
       await this.target.client.api.pty.remove({ ptyID, location: { directory } })
     } finally {
-      this.hubs.dispose(this.hubKey(directory, ptyID))
+      const key = this.hubKey(directory, ptyID)
+      this.hubs.dispose(key)
+      this.deferredReleases.delete(key)
     }
   }
 
@@ -147,9 +158,34 @@ export class TerminalService {
     const key = this.hubKey(directory, ptyID)
     const hub = this.hubs.get(key)
     if (hub?.isAvailable()) return hub.attach(peer, cursor)
-    if (hub) this.hubs.dispose(key)
+    if (hub) {
+      if (hub.hasReleased()) this.deferredReleases.set(key, 'released')
+      this.hubs.dispose(key)
+    }
 
-    return bridgeWebSocket(await this.openUpstreamSocket(directory, ptyID, cursor), peer)
+    const releasePending = this.deferredReleases.get(key) === 'pending'
+    const upstream = await this.openUpstreamSocket(directory, ptyID, cursor)
+    if (releasePending) this.releaseOnOpen(key, upstream)
+    return bridgeWebSocket(upstream, peer)
+  }
+
+  private releaseOnOpen(key: string, upstream: WebSocket): void {
+    const release = (): void => this.sendRelease(key, upstream)
+    if (upstream.readyState === WebSocket.OPEN) {
+      release()
+      return
+    }
+    upstream.addEventListener('open', release)
+  }
+
+  private sendRelease(key: string, upstream: WebSocket): void {
+    if (this.deferredReleases.get(key) !== 'pending') return
+    try {
+      upstream.send(DEFERRED_START_RELEASE)
+    } catch {
+      return
+    }
+    this.deferredReleases.set(key, 'released')
   }
 
   private async openUpstreamSocket(

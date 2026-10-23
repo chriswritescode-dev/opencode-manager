@@ -1,6 +1,7 @@
 import {
   MAX_PEER_BUFFERED_BYTES,
   MAX_UPSTREAM_BUFFERED_BYTES,
+  UPSTREAM_CONNECT_TIMEOUT_MS,
   type WebSocketBridge,
   type WebSocketPeer,
 } from '../utils/websocket-bridge'
@@ -14,11 +15,16 @@ const MAX_REGISTERED_HUBS = 64
 const WEBSOCKET_OPEN = 1
 const WEBSOCKET_CLOSING = 2
 const WEBSOCKET_CLOSED = 3
+const DEFAULT_EXIT_CODE = 1000
+const ABNORMAL_CLOSE_CODE = 1011
+const TOO_SLOW_CLOSE_CODE = 1013
+const GRACEFUL_CLOSE_CODES: ReadonlySet<number> = new Set([DEFAULT_EXIT_CODE, 4404])
 
 type HubState = 'connecting' | 'open' | 'closed' | 'failed'
 
 const META_DECODER = new TextDecoder()
 const META_ENCODER = new TextEncoder()
+const DETACHED_BRIDGE: WebSocketBridge = { send: () => {}, close: () => {} }
 
 export function encodeTerminalMetaFrame(cursor: number): Uint8Array<ArrayBuffer> {
   const payload = META_ENCODER.encode(JSON.stringify({ cursor }))
@@ -30,6 +36,7 @@ export function encodeTerminalMetaFrame(cursor: number): Uint8Array<ArrayBuffer>
 
 export interface TerminalHubOptions {
   openUpstream: () => Promise<WebSocket>
+  releaseOnOpen?: string
 }
 
 export class TerminalHub {
@@ -40,10 +47,14 @@ export class TerminalHub {
   private state: HubState = 'connecting'
   private attempts = 0
   private retryTimer: ReturnType<typeof setTimeout> | undefined
+  private attemptTimer: ReturnType<typeof setTimeout> | undefined
+  private attemptToken = 0
   private pendingInputBytes = 0
   private buffer = ''
   private bufferStart = 0
   private cursor = 0
+  private exitCode = DEFAULT_EXIT_CODE
+  private released = false
 
   constructor(private readonly options: TerminalHubOptions) {}
 
@@ -59,11 +70,19 @@ export class TerminalHub {
     return this.state === 'closed' || this.state === 'failed'
   }
 
+  hasReleased(): boolean {
+    return this.released
+  }
+
   attach(peer: WebSocketPeer, cursor: number | undefined): WebSocketBridge {
     this.replay(peer, cursor)
     if (this.state === 'closed') {
-      this.closePeer(peer, 1000)
-      return { send: () => {}, close: () => {} }
+      this.closePeer(peer, this.exitCode)
+      return DETACHED_BRIDGE
+    }
+    if (this.state === 'failed') {
+      this.closePeer(peer, ABNORMAL_CLOSE_CODE)
+      return DETACHED_BRIDGE
     }
     this.subscribers.add(peer)
     return {
@@ -76,26 +95,33 @@ export class TerminalHub {
 
   dispose(): void {
     this.clearRetry()
+    this.clearAttemptTimer()
+    const closeCode = this.state === 'failed' ? ABNORMAL_CLOSE_CODE : this.exitCode
     if (this.state !== 'failed') this.state = 'closed'
     const socket = this.socket
     this.socket = null
     closeSocketQuietly(socket)
     const peers = [...this.subscribers]
     this.subscribers.clear()
-    for (const peer of peers) this.closePeer(peer, 1000)
+    for (const peer of peers) this.closePeer(peer, closeCode)
   }
 
   private async connect(): Promise<void> {
     if (this.state !== 'connecting') return
     this.attempts += 1
+    const token = ++this.attemptToken
+    this.clearAttemptTimer()
+    this.attemptTimer = setTimeout(() => this.handleConnectTimeout(token), UPSTREAM_CONNECT_TIMEOUT_MS)
     let socket: WebSocket
     try {
       socket = await this.options.openUpstream()
     } catch {
+      if (token !== this.attemptToken) return
+      this.clearAttemptTimer()
       this.retryOrFail()
       return
     }
-    if (this.state !== 'connecting') {
+    if (token !== this.attemptToken || this.state !== 'connecting') {
       closeSocketQuietly(socket)
       return
     }
@@ -103,7 +129,7 @@ export class TerminalHub {
     socket.binaryType = 'arraybuffer'
     socket.addEventListener('open', () => this.handleOpen(socket))
     socket.addEventListener('message', (event) => this.handleMessage(event as MessageEvent))
-    socket.addEventListener('close', () => this.handleUpstreamClosed(socket))
+    socket.addEventListener('close', (event) => this.handleUpstreamClosed(socket, closeCodeOf(event)))
     socket.addEventListener('error', () => this.handleUpstreamError(socket))
     const readyState = (socket as { readyState?: number }).readyState
     if (readyState === WEBSOCKET_OPEN) {
@@ -112,23 +138,50 @@ export class TerminalHub {
     }
     if (readyState === WEBSOCKET_CLOSING || readyState === WEBSOCKET_CLOSED) {
       this.socket = null
+      this.clearAttemptTimer()
       this.retryOrFail()
     }
+  }
+
+  private handleConnectTimeout(token: number): void {
+    if (token !== this.attemptToken) return
+    this.attemptTimer = undefined
+    this.attemptToken += 1
+    const socket = this.socket
+    this.socket = null
+    closeSocketQuietly(socket)
+    if (this.state !== 'connecting') return
+    this.retryOrFail()
   }
 
   private handleOpen(socket: WebSocket): void {
     if (this.socket !== socket || this.state !== 'connecting') return
     this.state = 'open'
+    this.clearAttemptTimer()
+    if (!this.sendRelease(socket)) return
     while (this.pendingInput.length > 0) {
       const item = this.pendingInput.shift()!
       this.pendingInputBytes -= byteLengthOf(item)
       try {
         socket.send(item)
       } catch {
-        this.endStream()
+        this.endStream(DEFAULT_EXIT_CODE)
         return
       }
     }
+  }
+
+  private sendRelease(socket: WebSocket): boolean {
+    const payload = this.options.releaseOnOpen
+    if (payload === undefined || this.released) return true
+    try {
+      socket.send(payload)
+    } catch {
+      this.failStream(ABNORMAL_CLOSE_CODE)
+      return false
+    }
+    this.released = true
+    return true
   }
 
   private handleMessage(event: MessageEvent): void {
@@ -155,15 +208,21 @@ export class TerminalHub {
   private handleUpstreamError(socket: WebSocket): void {
     if (this.socket !== socket || this.state !== 'connecting') return
     this.socket = null
+    this.clearAttemptTimer()
     closeSocketQuietly(socket)
     this.retryOrFail()
   }
 
-  private handleUpstreamClosed(socket: WebSocket): void {
+  private handleUpstreamClosed(socket: WebSocket, code: number): void {
     if (this.socket !== socket) return
     this.socket = null
+    this.clearAttemptTimer()
     if (this.state === 'open') {
-      this.endStream()
+      if (GRACEFUL_CLOSE_CODES.has(code)) {
+        this.endStream(code)
+        return
+      }
+      this.failStream(ABNORMAL_CLOSE_CODE)
       return
     }
     if (this.state === 'connecting') this.retryOrFail()
@@ -172,7 +231,7 @@ export class TerminalHub {
   private retryOrFail(): void {
     if (this.state !== 'connecting') return
     if (this.attempts >= MAX_CONNECT_ATTEMPTS) {
-      this.state = 'failed'
+      this.failStream(ABNORMAL_CLOSE_CODE)
       return
     }
     this.clearRetry()
@@ -188,12 +247,36 @@ export class TerminalHub {
     this.retryTimer = undefined
   }
 
-  private endStream(): void {
-    if (this.state === 'closed') return
+  private clearAttemptTimer(): void {
+    if (this.attemptTimer === undefined) return
+    clearTimeout(this.attemptTimer)
+    this.attemptTimer = undefined
+  }
+
+  private endStream(code: number): void {
+    if (this.state === 'closed' || this.state === 'failed') return
     this.state = 'closed'
+    this.exitCode = code
+    this.closeSubscribers(code)
+  }
+
+  private failStream(code: number, reason?: string): void {
+    if (this.state === 'failed') return
+    this.state = 'failed'
+    this.clearRetry()
+    this.clearAttemptTimer()
+    this.pendingInput.length = 0
+    this.pendingInputBytes = 0
+    const socket = this.socket
+    this.socket = null
+    closeSocketQuietly(socket)
+    this.closeSubscribers(code, reason)
+  }
+
+  private closeSubscribers(code: number, reason?: string): void {
     const peers = [...this.subscribers]
     this.subscribers.clear()
-    for (const peer of peers) this.closePeer(peer, 1000)
+    for (const peer of peers) this.closePeer(peer, code, reason)
   }
 
   private alignToCursor(payload: Uint8Array): void {
@@ -244,15 +327,14 @@ export class TerminalHub {
       try {
         this.socket.send(payload)
       } catch {
-        this.endStream()
+        this.endStream(DEFAULT_EXIT_CODE)
       }
       return
     }
     this.pendingInput.push(payload)
     this.pendingInputBytes += byteLengthOf(payload)
-    while (this.pendingInputBytes > MAX_UPSTREAM_BUFFERED_BYTES && this.pendingInput.length > 0) {
-      const dropped = this.pendingInput.shift()!
-      this.pendingInputBytes -= byteLengthOf(dropped)
+    if (this.pendingInputBytes > MAX_UPSTREAM_BUFFERED_BYTES) {
+      this.failStream(TOO_SLOW_CLOSE_CODE, 'Upstream too slow')
     }
   }
 
@@ -265,7 +347,7 @@ export class TerminalHub {
     }
     if (peer.bufferedAmount() > MAX_PEER_BUFFERED_BYTES) {
       this.subscribers.delete(peer)
-      this.closePeer(peer, 1013, 'Client too slow')
+      this.closePeer(peer, TOO_SLOW_CLOSE_CODE, 'Client too slow')
     }
   }
 
@@ -276,6 +358,11 @@ export class TerminalHub {
       return
     }
   }
+}
+
+function closeCodeOf(event: unknown): number {
+  const code = (event as Partial<CloseEvent> | undefined)?.code
+  return typeof code === 'number' ? code : DEFAULT_EXIT_CODE
 }
 
 function closeSocketQuietly(socket: { close: () => void } | null | undefined): void {

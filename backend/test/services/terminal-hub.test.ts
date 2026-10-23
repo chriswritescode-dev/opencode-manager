@@ -1,6 +1,8 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TerminalHub } from '../../src/services/terminal-hub'
-import type { WebSocketPeer } from '../../src/utils/websocket-bridge'
+import { MAX_UPSTREAM_BUFFERED_BYTES, UPSTREAM_CONNECT_TIMEOUT_MS, type WebSocketPeer } from '../../src/utils/websocket-bridge'
+
+const RETRY_DELAY_MS = 100
 
 class FakeSocket {
   binaryType: 'blob' | 'arraybuffer' = 'blob'
@@ -64,6 +66,10 @@ async function createOpenHub(): Promise<{ hub: TerminalHub; socket: FakeSocket }
 }
 
 describe('TerminalHub', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('sends retained output, then the cursor, then live output to a late client', async () => {
     const { hub, socket } = await createOpenHub()
     socket.emit('message', { data: 'hi\r\n' })
@@ -163,5 +169,111 @@ describe('TerminalHub', () => {
     socket.emit('message', { data: 'after close' })
 
     expect(peer.sent.some((chunk) => chunk === 'after close')).toBe(false)
+  })
+
+  it.each([1000, 4404])('closes attached clients with the upstream exit code %i', async (code) => {
+    const { hub, socket } = await createOpenHub()
+    const peer = createPeer()
+    hub.attach(peer, undefined)
+
+    socket.emit('close', { code })
+
+    expect(peer.closeCalls).toEqual([{ code, reason: undefined }])
+    expect(hub.isAvailable()).toBe(true)
+    expect(hub.isEnded()).toBe(true)
+  })
+
+  it('replays and closes a late client with a 4404 exit code', async () => {
+    const { hub, socket } = await createOpenHub()
+    socket.emit('message', { data: 'gone' })
+    socket.emit('close', { code: 4404 })
+
+    const peer = createPeer()
+    hub.attach(peer, undefined)
+
+    expect(peer.sent[0]).toBe('gone')
+    expect(peer.closeCalls).toEqual([{ code: 4404, reason: undefined }])
+  })
+
+  it('fails the hub on an abnormal upstream close so the client can fall back', async () => {
+    const { hub, socket } = await createOpenHub()
+    const peer = createPeer()
+    hub.attach(peer, undefined)
+
+    socket.emit('close', { code: 1006 })
+
+    expect(peer.closeCalls).toEqual([{ code: 1011, reason: undefined }])
+    expect(hub.isAvailable()).toBe(false)
+    expect(hub.isEnded()).toBe(true)
+
+    const late = createPeer()
+    hub.attach(late, undefined)
+    expect(late.closeCalls).toEqual([{ code: 1011, reason: undefined }])
+  })
+
+  it('retries each connect attempt after the upstream timeout and then fails', async () => {
+    vi.useFakeTimers()
+    const sockets: FakeSocket[] = []
+    const hub = new TerminalHub({
+      openUpstream: async () => {
+        const socket = new FakeSocket()
+        sockets.push(socket)
+        return socket as unknown as WebSocket
+      },
+    })
+    await hub.start()
+    expect(sockets).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(UPSTREAM_CONNECT_TIMEOUT_MS)
+    expect(sockets[0]!.close).toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(RETRY_DELAY_MS)
+    expect(sockets).toHaveLength(2)
+
+    await vi.advanceTimersByTimeAsync(UPSTREAM_CONNECT_TIMEOUT_MS)
+    await vi.advanceTimersByTimeAsync(RETRY_DELAY_MS)
+    expect(sockets).toHaveLength(3)
+
+    const peer = createPeer()
+    hub.attach(peer, undefined)
+    await vi.advanceTimersByTimeAsync(UPSTREAM_CONNECT_TIMEOUT_MS)
+
+    expect(hub.isAvailable()).toBe(false)
+    expect(peer.closeCalls).toEqual([{ code: 1011, reason: undefined }])
+    expect(sockets).toHaveLength(3)
+  })
+
+  it('fails the hub and closes clients 1013 when queued input exceeds the upstream limit', async () => {
+    const socket = new FakeSocket()
+    const hub = new TerminalHub({ openUpstream: async () => socket as unknown as WebSocket })
+    await hub.start()
+
+    const peer = createPeer()
+    const bridge = hub.attach(peer, undefined)
+    bridge.send('x'.repeat(MAX_UPSTREAM_BUFFERED_BYTES + 1))
+
+    expect(hub.isAvailable()).toBe(false)
+    expect(peer.closeCalls).toEqual([{ code: 1013, reason: 'Upstream too slow' }])
+    expect(socket.sent).toEqual([])
+  })
+
+  it('releases a deferred command once before queued client input', async () => {
+    const socket = new FakeSocket()
+    const hub = new TerminalHub({
+      openUpstream: async () => socket as unknown as WebSocket,
+      releaseOnOpen: '\n',
+    })
+    await hub.start()
+
+    const peer = createPeer()
+    const bridge = hub.attach(peer, undefined)
+    bridge.send('typed')
+    expect(socket.sent).toEqual([])
+
+    socket.readyState = 1
+    socket.emit('open')
+    socket.emit('open')
+
+    expect(socket.sent).toEqual(['\n', 'typed'])
+    expect(hub.hasReleased()).toBe(true)
   })
 })
