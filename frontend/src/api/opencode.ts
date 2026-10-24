@@ -38,24 +38,66 @@ export type OpenCodeLocationInfo = Awaited<ReturnType<OpenCodeApi['location']['g
 
 export type OpenCodeProject = Awaited<ReturnType<OpenCodeApi['project']['list']>>[number]
 
-/**
- * Returns the timestamp that represents a project's most recent activity.
- *
- * @param project Project whose activity time is read.
- * @returns The activity time, falling back to the last update when the project was never active.
- */
-export function projectActivityTimestamp(project: OpenCodeProject): number {
-  return project.time.active || project.time.updated
+/** A project paired with the timestamp that represents its most recent activity. */
+export interface RemoteProjectActivity {
+  project: OpenCodeProject
+  activityAt: number
 }
 
 /**
- * Orders projects from the most to the least recently active.
+ * Orders projects from the most to the least recently updated.
+ *
+ * A project's own update time covers metadata edits and registration, not work, so this is the
+ * ordering used when no session evidence is available.
  *
  * @param projects Projects to order.
- * @returns A new array with the projects sorted by activity; the input is left untouched.
+ * @returns A new array with the projects sorted by update time; the input is left untouched.
  */
-export function sortProjectsByActivity(projects: OpenCodeProject[]): OpenCodeProject[] {
-  return [...projects].sort((a, b) => projectActivityTimestamp(b) - projectActivityTimestamp(a))
+export function sortProjectsByUpdatedAt(projects: OpenCodeProject[]): OpenCodeProject[] {
+  return [...projects].sort((a, b) => b.time.updated - a.time.updated)
+}
+
+/**
+ * Derives each project's activity time from the newest session of the server that belongs to it and
+ * orders projects by that time.
+ *
+ * Session update times record work; a project's own update time only records metadata edits and
+ * registration, so projects without a session in the given page fall back to it and sort after the
+ * session-backed ones. `time.active` is deliberately unused: OpenCode stamps it on every location
+ * boot, including boots caused by other clients and idle evictions.
+ *
+ * @param projects Projects of one server.
+ * @param sessions Sessions of that server, as returned by a first session page.
+ * @returns The projects with their activity time, most recently active first.
+ */
+export function rankProjectsBySessionActivity(
+  projects: OpenCodeProject[],
+  sessions: SessionInfo[],
+): RemoteProjectActivity[] {
+  const sessionActivityByProjectId = new Map<string, number>()
+  for (const session of sessions) {
+    const project = findRemoteProjectForDirectory(projects, session.location.directory)
+    if (!project) continue
+    const updated = session.time.updated
+    const current = sessionActivityByProjectId.get(project.id)
+    if (current === undefined || updated > current) {
+      sessionActivityByProjectId.set(project.id, updated)
+    }
+  }
+
+  const sessionActivity = (project: OpenCodeProject) => sessionActivityByProjectId.get(project.id)
+
+  return projects
+    .map((project) => ({
+      project,
+      activityAt: sessionActivity(project) ?? project.time.updated,
+    }))
+    .sort((a, b) => {
+      const aHasSession = sessionActivity(a.project) !== undefined
+      const bHasSession = sessionActivity(b.project) !== undefined
+      if (aHasSession !== bHasSession) return aHasSession ? -1 : 1
+      return b.activityAt - a.activityAt
+    })
 }
 
 /**

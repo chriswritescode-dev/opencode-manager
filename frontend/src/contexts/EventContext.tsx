@@ -24,7 +24,7 @@ import type { PermissionResponse, SSHHostKeyRequest, Repo } from '@/api/types'
 import { showToast } from '@/lib/toast'
 import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode-event-stream'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
-import { getServerSessionPath, getSessionPath, parseRepoRoute, parseServerSessionRoute } from '@/lib/navigation'
+import { getServerSessionPath, getSessionPath, parseRepoRoute, parseServerProjectRoute, parseServerSessionRoute } from '@/lib/navigation'
 import { serverScopedKey } from '@/lib/serverScope'
 import { repoMatchesDirectory } from '@/components/navigation/sidebar-session-tree'
 import { changeWalkthroughQueryKey } from '@/hooks/useChangeWalkthrough'
@@ -374,6 +374,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const reposRef = useRef<typeof repos>(null)
   const ancestryInFlightRef = useRef<Set<string>>(new Set())
   const forgottenSessionIDsRef = useRef(new Set<string>())
+  const reconciledActiveDirectoriesRef = useRef(new Set<string>())
+  const viewedRouteRef = useRef({ pathname: location.pathname, search: location.search })
 
   const { isAuthenticated } = useAuth()
   const { data: repos } = useQuery({
@@ -433,6 +435,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     formsBySessionRef.current = formsBySession
   }, [formsBySession])
+
+  useEffect(() => {
+    viewedRouteRef.current = { pathname: location.pathname, search: location.search }
+  }, [location.pathname, location.search])
 
   const viewedSessionId = useMemo(
     () => parseServerSessionRoute(location.pathname)?.sessionId ?? parseRepoRoute(location.pathname).sessionId,
@@ -699,8 +705,52 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     navigateToSession(currentPermission.sessionID, currentPermission.serverId)
   }, [currentPermission, navigateToSession])
 
-  const reconcilePendingActionsForDirectories = useCallback(async (directories: string[]) => {
-    await Promise.all(directories.map(async (key) => {
+  const resolveViewedRemoteDirectoryKey = useCallback((): string | null => {
+    const { pathname, search } = viewedRouteRef.current
+    const projectRoute = parseServerProjectRoute(pathname, search)
+    if (projectRoute) return buildServerDirectoryKey(projectRoute.serverId, projectRoute.directory)
+    const sessionRoute = parseServerSessionRoute(pathname)
+    if (!sessionRoute) return null
+    const remembered = useSessionStatus.getState().directories.get(sessionRoute.sessionId)
+    if (remembered) return remembered
+    const cached = findCachedSessionDirectory(sessionRoute.sessionId)
+    return cached ? buildServerDirectoryKey(sessionRoute.serverId, cached) : null
+  }, [findCachedSessionDirectory])
+
+  const collectActiveRemoteDirectoryKeys = useCallback((): Set<string> => {
+    const state = useSessionStatus.getState()
+    const keys = new Set<string>()
+    const addKey = (key: string | null | undefined) => {
+      if (!key) return
+      if (isLocalOpenCodeServer(parseServerDirectoryKey(key).serverId)) return
+      keys.add(key)
+    }
+    for (const key of selectActiveSessionDirectoriesKey(state).split('\n')) addKey(key)
+    for (const bySession of [permissionsBySessionRef.current, formsBySessionRef.current]) {
+      for (const [sessionID, items] of Object.entries(bySession)) {
+        if (items.length === 0) continue
+        addKey(state.directories.get(sessionID))
+      }
+    }
+    addKey(resolveViewedRemoteDirectoryKey())
+    return keys
+  }, [resolveViewedRemoteDirectoryKey])
+
+  /**
+   * Limits directory-scoped work on a linked server to the directories that can hold pending work,
+   * because every directory-scoped request boots that server's location and stamps project activity.
+   * Local directories are always kept.
+   */
+  const filterTrackedDirectories = useCallback((directories: string[]): string[] => {
+    const activeRemoteDirectories = collectActiveRemoteDirectoryKeys()
+    return directories.filter((key) => {
+      if (isLocalOpenCodeServer(parseServerDirectoryKey(key).serverId)) return true
+      return activeRemoteDirectories.has(key)
+    })
+  }, [collectActiveRemoteDirectoryKeys])
+
+  const reconcilePendingActionsForDirectories = useCallback(async (trackedDirectories: string[]) => {
+    await Promise.all(filterTrackedDirectories(trackedDirectories).map(async (key) => {
       const { serverId, directory } = parseServerDirectoryKey(key)
       try {
         const [pendingPermissions, pendingForms] = await Promise.all([
@@ -718,7 +768,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         }
       }
     }))
-  }, [reconcilePermissionsForDirectory, reconcileFormsForDirectory, prunePendingActions])
+  }, [reconcilePermissionsForDirectory, reconcileFormsForDirectory, prunePendingActions, filterTrackedDirectories])
 
   const collectTrackedDirectories = useCallback((): string[] => {
     const directories = new Set<string>()
@@ -815,8 +865,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     await Promise.allSettled(sessionIDs.map((sessionID) => resolveUp(sessionID)))
   }, [])
 
-  const syncRunningShells = useCallback(async (directories: string[]) => {
-    await Promise.all(directories.map(async (key) => {
+  const syncRunningShells = useCallback(async (trackedDirectories: string[]) => {
+    await Promise.all(filterTrackedDirectories(trackedDirectories).map(async (key) => {
       const { serverId, directory } = parseServerDirectoryKey(key)
       const token = useSessionStatus.getState().beginShellSnapshot()
       try {
@@ -835,7 +885,20 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         }
       }
     }))
-  }, [resolveSessionAncestry])
+  }, [resolveSessionAncestry, filterTrackedDirectories])
+
+  useEffect(() => {
+    const activeDirectories = activeSessionDirectoriesKey ? activeSessionDirectoriesKey.split('\n') : []
+    const alreadyReconciled = reconciledActiveDirectoriesRef.current
+    const newlyActive = activeDirectories.filter((key) => !alreadyReconciled.has(key))
+    reconciledActiveDirectoriesRef.current = new Set(activeDirectories)
+    const remoteDirectories = newlyActive.filter(
+      (key) => !isLocalOpenCodeServer(parseServerDirectoryKey(key).serverId),
+    )
+    if (remoteDirectories.length === 0) return
+    void reconcilePendingActionsForDirectories(remoteDirectories)
+    void syncRunningShells(remoteDirectories)
+  }, [activeSessionDirectoriesKey, reconcilePendingActionsForDirectories, syncRunningShells])
 
   const fetchInitialPendingData = useCallback(async () => {
     const reposToUse = reposRef.current
@@ -913,15 +976,29 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     }
   }, [resolveSessionAncestry])
 
-  const reconcileRemoteServersOnce = useCallback((serversToReconcile: Array<{ id: string }>) => {
+  const reconcileRemoteDirectoryActivity = useCallback(async (
+    serverId: string,
+    extraDirectories: string[] = [],
+  ) => {
+    await reconcileRemoteSessionStatuses(serverId)
+    const directories = [...new Set([...collectTrackedDirectories(), ...extraDirectories])].filter(
+      (key) => parseServerDirectoryKey(key).serverId === serverId,
+    )
+    await Promise.all([
+      reconcilePendingActionsForServer(serverId, directories),
+      syncRunningShells(directories),
+    ])
+  }, [reconcileRemoteSessionStatuses, reconcilePendingActionsForServer, collectTrackedDirectories, syncRunningShells])
+
+  const reconcileRemoteServersOnce = useCallback(async (serversToReconcile: Array<{ id: string }>) => {
     const reconciled = reconciledRemoteServerIdsRef.current
-    for (const server of serversToReconcile) {
-      if (reconciled.has(server.id)) continue
+    const newServers = serversToReconcile.filter((server) => {
+      if (reconciled.has(server.id)) return false
       reconciled.add(server.id)
-      void reconcileRemoteSessionStatuses(server.id)
-      void reconcilePendingActionsForServer(server.id)
-    }
-  }, [reconcileRemoteSessionStatuses, reconcilePendingActionsForServer])
+      return true
+    })
+    await Promise.all(newServers.map((server) => reconcileRemoteDirectoryActivity(server.id)))
+  }, [reconcileRemoteDirectoryActivity])
 
   useEffect(() => {
     const enabledIds = new Set(enabledRemoteServers.map((server) => server.id))
@@ -929,7 +1006,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       if (!enabledIds.has(serverId)) reconciledRemoteServerIdsRef.current.delete(serverId)
     }
     if (!streamConnectedRef.current) return
-    reconcileRemoteServersOnce(enabledRemoteServers)
+    void reconcileRemoteServersOnce(enabledRemoteServers)
   }, [enabledRemoteServers, reconcileRemoteServersOnce])
 
   const stopStatusPoll = useCallback(() => {
@@ -1152,7 +1229,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         initialFetchDoneRef.current = false
         void reconcilePendingActionsForServer(LOCAL_OPENCODE_SERVER_ID)
         fetchInitialSessionStatuses()
-        reconcileRemoteServersOnce(enabledRemoteServersRef.current)
+        void reconcileRemoteServersOnce(enabledRemoteServersRef.current)
         void syncRunningShells(collectTrackedDirectories())
         invalidateChildSessionCaches(queryClient)
         invalidateQueryKeysDebounced(queryClient, LOCATION_CATALOG_QUERY_KEYS)
@@ -1168,12 +1245,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
     const handleResync = (subscribedDirectories: string[], serverId?: string) => {
       if (serverId && !isLocalOpenCodeServer(serverId)) {
-        const directories = subscribedDirectories.filter(
-          (key) => parseServerDirectoryKey(key).serverId === serverId,
-        )
-        void reconcilePendingActionsForServer(serverId, subscribedDirectories)
-        void reconcileRemoteSessionStatuses(serverId)
-        void syncRunningShells(directories)
+        void reconcileRemoteDirectoryActivity(serverId, subscribedDirectories)
         invalidateSessionListCachesDebounced(queryClient, undefined, serverId)
         invalidateQueryKeysDebounced(
           queryClient,
@@ -1212,7 +1284,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       subscription.dispose()
       subscriptionRef.current = null
     }
-  }, [isAuthenticated, addPermission, removePermission, addForm, removeForm, forgetPendingActionsForSession, rememberSessionDirectory, fetchInitialSessionStatuses, startStatusPoll, stopStatusPoll, queryClient, handleHealthChange, reconcilePendingActionsForDirectories, reconcilePendingActionsForServer, collectTrackedDirectories, syncRunningShells, resolveSessionAncestry, reconcileRemoteSessionStatuses, reconcileRemoteServersOnce, invalidateRemoteStatusSyncs])
+  }, [isAuthenticated, addPermission, removePermission, addForm, removeForm, forgetPendingActionsForSession, rememberSessionDirectory, fetchInitialSessionStatuses, startStatusPoll, stopStatusPoll, queryClient, handleHealthChange, reconcilePendingActionsForDirectories, reconcilePendingActionsForServer, collectTrackedDirectories, syncRunningShells, resolveSessionAncestry, reconcileRemoteServersOnce, reconcileRemoteDirectoryActivity, invalidateRemoteStatusSyncs])
 
   useEffect(() => {
     reposRef.current = repos

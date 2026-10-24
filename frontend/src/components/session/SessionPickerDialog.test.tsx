@@ -112,6 +112,12 @@ vi.mock('@/hooks/useSessionPins', () => ({
   useToggleSessionPin: () => ({ mutate: mocks.togglePinMock }),
 }))
 
+vi.mock('@/components/navigation/RemoteProjectNav', () => ({
+  RemoteProjectNavList: ({ serverId }: { serverId: string }) => (
+    <div data-testid="remote-project-nav" data-server={serverId} />
+  ),
+}))
+
 vi.mock('@/hooks/useSidebarRepoGroups', () => ({
   useNavigableRepos: () => ({ repos: mocks.repos, isLoading: false, refetch: vi.fn() }),
 }))
@@ -1029,6 +1035,17 @@ describe('SessionPickerDialog', () => {
         expect.objectContaining({ id: 'ses_remote' }),
         'srv_kitchen',
       )
+    })
+
+    it('renders the linked server projects tab through the shared activity-ordered project list', async () => {
+      renderPicker({
+        remote: { serverId: 'srv_kitchen', serverName: 'Kitchen', projectDirectory: '/home/me/app' },
+      })
+
+      openProjectsTab()
+
+      const nav = await screen.findByTestId('remote-project-nav')
+      expect(nav).toHaveAttribute('data-server', 'srv_kitchen')
     })
 
     it('queries the linked server sessions without a host-supplied server provider', async () => {

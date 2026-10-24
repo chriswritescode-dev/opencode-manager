@@ -21,7 +21,10 @@ const mocks = vi.hoisted(() => ({
   useOpenCodeServerStatuses: vi.fn(),
   useSessionsAcrossDirectories: vi.fn(),
   useCreateSession: vi.fn(),
-  sessionsCalls: [] as Array<{ directories: string[]; options?: { serverId?: string } }>,
+  sessionsCalls: [] as Array<{
+    directories: string[]
+    options?: { serverId?: string; allDirectories?: boolean; limit?: number }
+  }>,
   createCalls: [] as Array<{ directory?: string; serverId?: string }>,
   sessions: [] as SessionFixture[],
   hasNextPage: { current: false },
@@ -43,11 +46,13 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
     ...actual,
     useSessionsAcrossDirectories: (
       directories: string[],
-      options?: { serverId?: string },
+      options?: { serverId?: string; allDirectories?: boolean; limit?: number },
     ) => {
       mocks.sessionsCalls.push({ directories, options })
       return {
-        data: mocks.sessions.filter((session) => directories.includes(session.location.directory)),
+        data: options?.allDirectories
+          ? mocks.sessions
+          : mocks.sessions.filter((session) => directories.includes(session.location.directory)),
         isLoading: false,
         isError: false,
         hasNextPage: mocks.hasNextPage.current,
@@ -192,6 +197,28 @@ describe('RemoteProjectNavList', () => {
     expect(screen.getByText('beta')).toBeInTheDocument()
     expect(screen.getByText('/projects/alpha')).toBeInTheDocument()
     expect(mocks.listProjects).toHaveBeenCalledWith('srv_kitchen')
+  })
+
+  it('orders projects by their newest session and ignores the project activity time', async () => {
+    mocks.listProjects.mockResolvedValue([
+      createProject('p1', 'Alpha', '/projects/alpha', { created: 1, updated: 900, active: 999 }),
+      createProject('p2', 'Beta', '/projects/beta', { created: 1, updated: 100, active: 1 }),
+    ])
+    mocks.sessions = [createSession('b1', '/projects/beta', 500)]
+
+    render(<RemoteListHarness serverId="srv_kitchen" />, { wrapper: createWrapper('/') })
+
+    await screen.findByText('Beta')
+    const toggles = screen
+      .getAllByRole('button', { name: /^Show sessions in / })
+      .map((button) => button.getAttribute('aria-label'))
+    expect(toggles).toEqual(['Show sessions in Beta', 'Show sessions in Alpha'])
+    expect(
+      mocks.sessionsCalls.filter((call) => call.options?.allDirectories === true),
+    ).toHaveLength(1)
+    expect(
+      mocks.sessionsCalls.find((call) => call.options?.allDirectories === true)?.options,
+    ).toMatchObject({ serverId: 'srv_kitchen', limit: 100 })
   })
 
   it('expands the project of the current project route and loads its sessions', async () => {

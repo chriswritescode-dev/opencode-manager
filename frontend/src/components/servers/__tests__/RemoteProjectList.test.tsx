@@ -7,6 +7,7 @@ import { RemoteProjectList } from '../RemoteProjectList'
 
 const mocks = vi.hoisted(() => ({
   listProjects: vi.fn(),
+  listSessionPage: vi.fn(),
   useCreateSession: vi.fn(),
   useOpenCodeServers: vi.fn(),
   useSettingsDialog: vi.fn(),
@@ -17,12 +18,13 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/api/opencode', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/opencode')>()
-  return { ...actual, listProjects: mocks.listProjects }
+  return { ...actual, listProjects: mocks.listProjects, listSessionPage: mocks.listSessionPage }
 })
 
-vi.mock('@/hooks/useOpenCode', () => ({
-  useCreateSession: mocks.useCreateSession,
-}))
+vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/useOpenCode')>()
+  return { ...actual, useCreateSession: mocks.useCreateSession }
+})
 
 vi.mock('@/hooks/useOpenCodeServers', () => ({
   useOpenCodeServers: mocks.useOpenCodeServers,
@@ -110,6 +112,17 @@ const otherProject = {
   sandboxes: [],
 }
 
+function createSession(directory: string, updated: number) {
+  return {
+    id: `ses_${directory}`,
+    projectID: 'prj_1',
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    time: { created: updated - 1000, updated },
+    location: { directory },
+  }
+}
+
 function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } })
 }
@@ -133,6 +146,7 @@ describe('RemoteProjectList', () => {
     vi.clearAllMocks()
     mocks.isMobile = true
     mocks.listProjects.mockResolvedValue([project])
+    mocks.listSessionPage.mockResolvedValue({ items: [] })
     mocks.useCreateSession.mockReturnValue({ mutateAsync: mocks.createSession, isPending: false })
     mocks.useOpenCodeServers.mockReturnValue({ servers: [server], isLoading: false })
     mocks.useSettingsDialog.mockReturnValue({ openTab: mocks.openTab })
@@ -148,34 +162,70 @@ describe('RemoteProjectList', () => {
     expect(mocks.listProjects).toHaveBeenCalledWith('srv_kitchen')
   })
 
-  it('labels a row with its project activity time', async () => {
+  it('labels a row with its newest session time instead of the project activity time', async () => {
     const now = Date.now()
     mocks.listProjects.mockResolvedValue([
       {
         ...project,
-        time: { created: now - 10_800_000, updated: now - 10_800_000, active: now - 300_000 },
+        time: { created: now - 10_800_000, updated: now - 10_800_000, active: now },
       },
     ])
+    mocks.listSessionPage.mockResolvedValue({
+      items: [createSession('/home/me/app', now - 300_000)],
+    })
 
     renderProjectList()
 
     await screen.findByText('App')
-    expect(screen.getByText('5m ago')).toBeInTheDocument()
+    expect(await screen.findByText('5m ago')).toBeInTheDocument()
   })
 
-  it('labels a row with the update time when the project has no activity time', async () => {
+  it('labels a row with the update time when the project has no session in the fetched page', async () => {
     const now = Date.now()
     mocks.listProjects.mockResolvedValue([
       {
         ...project,
-        time: { created: now - 10_800_000, updated: now - 300_000 },
+        time: { created: now - 10_800_000, updated: now - 300_000, active: now },
       },
     ])
 
     renderProjectList()
 
     await screen.findByText('App')
-    expect(screen.getByText('5m ago')).toBeInTheDocument()
+    expect(await screen.findByText('5m ago')).toBeInTheDocument()
+  })
+
+  it('orders projects by their newest session, not by the project activity time', async () => {
+    const now = Date.now()
+    mocks.listProjects.mockResolvedValue([
+      {
+        ...project,
+        time: { created: now - 10_800_000, updated: now - 10_800_000, active: now },
+      },
+      {
+        ...otherProject,
+        time: { created: now - 10_800_000, updated: now - 10_800_000, active: now - 3_600_000 },
+      },
+    ])
+    mocks.listSessionPage.mockResolvedValue({
+      items: [createSession('/srv/other', now - 120_000)],
+    })
+
+    renderProjectList()
+
+    await screen.findByText('App')
+    await waitFor(() => {
+      expect(screen.getByText('Other')).toBeInTheDocument()
+    })
+    const names = screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)
+    expect(names).toEqual(['Other', 'App'])
+  })
+
+  it('shows no status dot on remote project cards', async () => {
+    const { container } = renderProjectList()
+
+    await screen.findByText('App')
+    expect(container.querySelector('.bg-success')).toBeNull()
   })
 
   it('opens the remote project page when a project card is clicked', async () => {

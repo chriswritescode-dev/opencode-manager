@@ -21,7 +21,7 @@ import {
   listPendingPermissions,
   listSessionMessages,
   listSessionPage,
-  projectActivityTimestamp,
+  rankProjectsBySessionActivity,
   readSessionSnapshot,
   remoteProjectName,
   renameSession,
@@ -30,7 +30,7 @@ import {
   runCommand,
   runShell,
   sendPrompt,
-  sortProjectsByActivity,
+  sortProjectsByUpdatedAt,
   stageRevert,
   switchSessionAgent,
   switchSessionModel,
@@ -765,31 +765,71 @@ const project = (
   time: { created: number; updated: number; active?: number },
 ) => ({ id, name, canonical, time, sandboxes: [] })
 
+const session = (id: string, directory: string, updated: number) => ({
+  id,
+  projectID: 'prj',
+  cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  time: { created: updated - 1000, updated },
+  location: { directory },
+})
+
 describe('project helpers', () => {
-  it('prefers the activity time over the update time', () => {
-    const withActivity = project('p1', 'Active', '/work/active', { created: 1, updated: 10, active: 900 })
-
-    expect(projectActivityTimestamp(withActivity)).toBe(900)
-  })
-
-  it('falls back to the update time when the project was never active', () => {
-    const neverActive = project('p1', 'Idle', '/work/idle', { created: 1, updated: 10, active: 0 })
-
-    expect(projectActivityTimestamp(neverActive)).toBe(10)
-  })
-
-  it('orders projects by activity, most recent first, without mutating the input', () => {
-    const stale = project('p_stale', 'Stale', '/work/stale', { created: 1, updated: 500, active: 100 })
-    const recent = project('p_recent', 'Recent', '/work/recent', { created: 1, updated: 100, active: 900 })
+  it('orders projects by their update time, most recent first, without mutating the input', () => {
+    const stale = project('p_stale', 'Stale', '/work/stale', { created: 1, updated: 100 })
+    const recent = project('p_recent', 'Recent', '/work/recent', { created: 1, updated: 900 })
     const middle = project('p_middle', 'Middle', '/work/middle', { created: 1, updated: 700 })
     const projects = [stale, recent, middle]
 
-    expect(sortProjectsByActivity(projects).map((entry) => entry.id)).toEqual([
+    expect(sortProjectsByUpdatedAt(projects).map((entry) => entry.id)).toEqual([
       'p_recent',
       'p_middle',
       'p_stale',
     ])
     expect(projects.map((entry) => entry.id)).toEqual(['p_stale', 'p_recent', 'p_middle'])
+  })
+
+  it('labels a project with its newest session time and ignores the project activity time', () => {
+    const projects = [project('p1', 'Alpha', '/work/alpha', { created: 1, updated: 10, active: 900 })]
+
+    const [entry] = rankProjectsBySessionActivity(projects, [
+      session('ses_old', '/work/alpha', 300),
+      session('ses_new', '/work/alpha', 500),
+    ])
+
+    expect(entry.project.id).toBe('p1')
+    expect(entry.activityAt).toBe(500)
+  })
+
+  it('credits a session in a nested directory to the project that owns it', () => {
+    const projects = [project('p1', 'Alpha', '/work/alpha', { created: 1, updated: 10 })]
+
+    const [entry] = rankProjectsBySessionActivity(projects, [
+      session('ses_nested', '/work/alpha/packages/web', 400),
+    ])
+
+    expect(entry.activityAt).toBe(400)
+  })
+
+  it('orders session-backed projects first, then the rest by update time', () => {
+    const projects = [
+      project('p_idle', 'Idle', '/work/idle', { created: 1, updated: 950, active: 999 }),
+      project('p_worked', 'Worked', '/work/worked', { created: 1, updated: 20, active: 999 }),
+      project('p_quiet', 'Quiet', '/work/quiet', { created: 1, updated: 600 }),
+    ]
+
+    const ranked = rankProjectsBySessionActivity(projects, [session('ses_1', '/work/worked', 300)])
+
+    expect(ranked.map((entry) => entry.project.id)).toEqual(['p_worked', 'p_idle', 'p_quiet'])
+    expect(ranked.map((entry) => entry.activityAt)).toEqual([300, 950, 600])
+  })
+
+  it('ignores sessions that belong to no listed project', () => {
+    const projects = [project('p1', 'Alpha', '/work/alpha', { created: 1, updated: 10 })]
+
+    const [entry] = rankProjectsBySessionActivity(projects, [session('ses_1', '/srv/other', 900)])
+
+    expect(entry.activityAt).toBe(10)
   })
 
   it('names a project from its trimmed title', () => {

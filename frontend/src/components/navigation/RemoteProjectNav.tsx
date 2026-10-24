@@ -5,7 +5,7 @@ import type { Session } from '@/api/types'
 import { ActivityStateIndicator } from '@/components/activity/ActivityStateIndicator'
 import { useSessionsAcrossDirectories } from '@/hooks/useOpenCode'
 import { useActiveRemoteDirectory } from '@/hooks/useActiveRemoteDirectory'
-import { useRemoteProjects } from '@/hooks/useRemoteProjects'
+import { useRemoteProjectsByActivity } from '@/hooks/useRemoteProjects'
 import { useOpenCodeServers, useOpenCodeServerStatuses } from '@/hooks/useOpenCodeServers'
 import { useProjectActivityState } from '@/hooks/useActiveWork'
 import { useSessionSearch } from '@/hooks/useSessionSearch'
@@ -366,7 +366,7 @@ export function RemoteProjectNavList({
   const { directory: activeDirectory } = useActiveRemoteDirectory(serverId)
 
   const { projects, isLoading: projectsLoading, isError: projectsError, hasData: hasProjects } =
-    useRemoteProjects(serverId)
+    useRemoteProjectsByActivity(serverId)
   const trimmedSearch = search.trim()
 
   if (isServersLoading) return <SessionNavStatus>Loading projects...</SessionNavStatus>

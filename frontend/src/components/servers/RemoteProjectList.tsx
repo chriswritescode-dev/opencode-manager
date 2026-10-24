@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Folder, FolderGit2, FolderPlus, GitBranch, Search, Server } from 'lucide-react'
-import { projectActivityTimestamp, remoteProjectName, type OpenCodeProject } from '@/api/opencode'
+import { remoteProjectName, type OpenCodeProject } from '@/api/opencode'
 import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
-import { useRemoteProjects } from '@/hooks/useRemoteProjects'
+import { useRemoteProjectsByActivity } from '@/hooks/useRemoteProjects'
 import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 import { useProjectActivityState } from '@/hooks/useActiveWork'
 import { getServerProjectPath } from '@/lib/navigation'
@@ -19,15 +19,19 @@ import { RepoCardShell } from '@/components/repo/RepoCardShell'
 import { RepoCardSkeleton } from '@/components/repo/RepoCardSkeleton'
 import { RepoSearchInput } from '@/components/repo/RepoSearchInput'
 
-function RemoteProjectCard({ project, serverId }: { project: OpenCodeProject; serverId: string }) {
+interface RemoteProjectCardProps {
+  project: OpenCodeProject
+  serverId: string
+  activityAt: number
+}
+
+function RemoteProjectCard({ project, serverId, activityAt }: RemoteProjectCardProps) {
   const navigate = useNavigate()
   const activityState = useProjectActivityState(serverId, project.canonical)
-  const activeAt = projectActivityTimestamp(project)
 
   return (
     <RepoCardShell
       title={remoteProjectName(project)}
-      statusDotClassName="bg-success"
       activity={<ActivityStateIndicator state={activityState} />}
       actions={<RemoteProjectRowActions serverId={serverId} directory={project.canonical} />}
       meta={
@@ -40,7 +44,7 @@ function RemoteProjectCard({ project, serverId }: { project: OpenCodeProject; se
           <span className="truncate">{project.canonical}</span>
         </span>
       }
-      activityLabel={activeAt > 0 ? formatShortRelativeTime(new Date(activeAt)) : undefined}
+      activityLabel={activityAt > 0 ? formatShortRelativeTime(new Date(activityAt)) : undefined}
       isInteractive
       onClick={() => navigate(getServerProjectPath(serverId, project.canonical))}
     />
@@ -90,7 +94,7 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
   const server = servers.find((candidate) => candidate.id === serverId)
   const isDisabled = server !== undefined && !server.enabled
 
-  const { projects, isLoading, isError, hasData, error, refetch } = useRemoteProjects(serverId)
+  const { projects, activityById, isLoading, isError, hasData, error, refetch } = useRemoteProjectsByActivity(serverId)
   const showsProjectError = isError && !hasData
 
   const filteredProjects = useMemo(() => {
@@ -185,6 +189,7 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
                         key={project.id}
                         project={project}
                         serverId={serverId}
+                        activityAt={activityById.get(project.id) ?? 0}
                       />
                     ))}
                   </div>
