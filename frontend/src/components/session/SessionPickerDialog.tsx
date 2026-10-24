@@ -1362,7 +1362,7 @@ function SessionPickerPanelBody({
       >
         <div className="shrink-0 px-4 pt-4 sm:px-0 sm:pt-6">
           {renderTitle?.(SESSION_PICKER_TAB_LABELS[activeTab])}
-          <TabsList>
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="active">{SESSION_PICKER_TAB_LABELS.active}</TabsTrigger>
             <TabsTrigger
               value="sessions"
