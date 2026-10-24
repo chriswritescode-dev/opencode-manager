@@ -9,6 +9,7 @@ import { getServerProjectPath } from '@/lib/navigation'
 import { LocationCatcher } from '@/test/test-utils'
 import { MessageThread } from '@/components/message/MessageThread'
 import { ContextUsageIndicator } from '@/components/session/ContextUsageIndicator'
+import { SessionCostIndicator } from '@/components/session/SessionCostIndicator'
 import { SessionSendErrorBanner } from '@/components/session/SessionSendErrorBanner'
 import { PendingActionsGroup } from '@/components/notifications/PendingActionsGroup'
 import { SessionDetail } from '../SessionDetail'
@@ -134,6 +135,7 @@ vi.mock('@/components/message/PromptInput', () => ({ PromptInput: vi.fn(() => nu
 vi.mock('@/components/message/FloatingTTSButton', () => ({ FloatingTTSButton: vi.fn(() => null) }))
 vi.mock('@/components/message/MessageSkeleton', () => ({ MessageSkeleton: vi.fn(() => null) }))
 vi.mock('@/components/session/ContextUsageIndicator', () => ({ ContextUsageIndicator: vi.fn(() => null) }))
+vi.mock('@/components/session/SessionCostIndicator', () => ({ SessionCostIndicator: vi.fn(() => null) }))
 vi.mock('@/components/session/SessionSendErrorBanner', () => ({ SessionSendErrorBanner: vi.fn(() => null) }))
 vi.mock('@/components/session/BackgroundWorkBar', () => ({ BackgroundWorkBar: vi.fn(() => null) }))
 vi.mock('@/components/session/SessionGoalBar', () => ({ SessionGoalBar: mocks.SessionGoalBar }))
@@ -457,6 +459,18 @@ describe('SessionDetail remote server mode', () => {
     )
     expect(vi.mocked(SessionSendErrorBanner).mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({ isConnected: false, isReconnecting: true }),
+    )
+  })
+
+  it('passes the remote session to the cost indicator', async () => {
+    renderRemoteSession()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-thread')).toBeInTheDocument()
+    })
+
+    expect(vi.mocked(SessionCostIndicator).mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ sessionID: 'ses_remote' }),
     )
   })
 

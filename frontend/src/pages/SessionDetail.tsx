@@ -17,6 +17,7 @@ import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Button } from "@/components/ui/button";
 import { NotFoundState } from "@/components/ui/not-found-state";
 import { ContextUsageIndicator } from "@/components/session/ContextUsageIndicator";
+import { SessionCostIndicator } from "@/components/session/SessionCostIndicator";
 import { useSession, useInterruptSession, useUpdateSession, useCreateSession } from "@/hooks/useOpenCode";
 import { useSessionTranscript } from "@/hooks/useSessionTranscript";
 import { useAutoOpenWalkthrough } from "@/hooks/useAutoOpenWalkthrough";
@@ -861,6 +862,7 @@ export function SessionDetail() {
               isReconnecting={streamReconnecting}
               revertMessageID={revertMessageID}
             />
+            <SessionCostIndicator sessionID={sessionId} revertMessageID={revertMessageID} />
             <SessionMoreButton />
           </Header.Actions>
         </Header>
