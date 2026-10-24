@@ -22,10 +22,10 @@ const mocks = vi.hoisted(() => ({
   openTab: vi.fn(),
 }))
 
-vi.mock('@/api/opencode', () => ({
-  listProjects: mocks.listProjects,
-  getVcsInfo: mocks.getVcsInfo,
-}))
+vi.mock('@/api/opencode', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/opencode')>()
+  return { ...actual, listProjects: mocks.listProjects, getVcsInfo: mocks.getVcsInfo }
+})
 
 vi.mock('@/hooks/useOpenCode', () => ({
   useCreateSession: mocks.useCreateSession,

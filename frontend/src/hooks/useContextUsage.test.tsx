@@ -87,7 +87,7 @@ describe('useContextUsage', () => {
       wrapper: createWrapper(queryClient),
     })
 
-    expect(result.current.usage?.totalTokens).toBe(1515)
+    expect(result.current?.totalTokens).toBe(1515)
   })
 
   it('rounds the usage percentage against the model context limit', () => {
@@ -108,7 +108,7 @@ describe('useContextUsage', () => {
       wrapper: createWrapper(queryClient),
     })
 
-    expect(result.current.usage?.usagePercentage).toBe(152)
+    expect(result.current?.usagePercentage).toBe(152)
   })
 
   it('reports the context limit measured against', () => {
@@ -129,7 +129,7 @@ describe('useContextUsage', () => {
       wrapper: createWrapper(queryClient),
     })
 
-    expect(result.current.usage?.contextLimit).toBe(1000)
+    expect(result.current?.contextLimit).toBe(1000)
   })
 
   it('hides usage when the latest assistant has all-zero tokens even if an earlier one had usage', () => {
@@ -153,7 +153,7 @@ describe('useContextUsage', () => {
       wrapper: createWrapper(queryClient),
     })
 
-    expect(result.current.usage).toBeNull()
+    expect(result.current).toBeNull()
   })
 
   it('skips the latest assistant when tokens are undefined and uses the earlier assistant', () => {
@@ -172,7 +172,7 @@ describe('useContextUsage', () => {
       wrapper: createWrapper(queryClient),
     })
 
-    expect(result.current.usage?.totalTokens).toBe(1515)
+    expect(result.current?.totalTokens).toBe(1515)
   })
 
   it('ignores assistants before the latest completed compaction', () => {
@@ -191,7 +191,7 @@ describe('useContextUsage', () => {
       wrapper: createWrapper(queryClient),
     })
 
-    expect(result.current.usage).toBeNull()
+    expect(result.current).toBeNull()
   })
 
   it('uses an assistant that appears after the latest completed compaction', () => {
@@ -216,7 +216,7 @@ describe('useContextUsage', () => {
       wrapper: createWrapper(queryClient),
     })
 
-    expect(result.current.usage?.totalTokens).toBe(180)
+    expect(result.current?.totalTokens).toBe(180)
   })
 
   it('does not treat a running compaction as a boundary', () => {
@@ -235,7 +235,7 @@ describe('useContextUsage', () => {
       wrapper: createWrapper(queryClient),
     })
 
-    expect(result.current.usage?.totalTokens).toBe(1515)
+    expect(result.current?.totalTokens).toBe(1515)
   })
 
   it('ignores assistants at or after the revert boundary', () => {
@@ -259,7 +259,7 @@ describe('useContextUsage', () => {
       wrapper: createWrapper(queryClient),
     })
 
-    expect(result.current.usage?.totalTokens).toBe(1515)
+    expect(result.current?.totalTokens).toBe(1515)
   })
 
   it('hides usage when the revert boundary excludes every assistant', () => {
@@ -283,7 +283,7 @@ describe('useContextUsage', () => {
       wrapper: createWrapper(queryClient),
     })
 
-    expect(result.current.usage).toBeNull()
+    expect(result.current).toBeNull()
   })
 
   it('hides usage when the revert boundary is unknown', () => {
@@ -301,6 +301,6 @@ describe('useContextUsage', () => {
       wrapper: createWrapper(queryClient),
     })
 
-    expect(result.current.usage).toBeNull()
+    expect(result.current).toBeNull()
   })
 })

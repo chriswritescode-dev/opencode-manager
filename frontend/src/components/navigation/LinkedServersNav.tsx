@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils'
 
 const LOCAL_SERVER_LABEL = 'OC Manager'
 
-export type LinkedServersVariant = 'sidebar' | 'rail' | 'header'
+type LinkedServersVariant = 'sidebar' | 'rail' | 'header'
 
 interface LinkedServersNavProps {
   /** `sidebar` renders the full-width trigger row, `rail` the collapsed icon button, `header` a compact page-header trigger. */

@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, fireEvent, act } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useLocation, useNavigationType } from 'react-router-dom'
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import type { Repo, Session } from '@/api/types'
 import type { ActiveWorkGroups, ActiveWorkItem } from '@/lib/activeWork'
 import { DEFAULT_ACTIVITY_WINDOW_MINUTES } from '@/api/types/settings'
 import { KeyboardShortcutsProvider } from '@/contexts/KeyboardShortcutsContext'
 import { useSidebarServerStore } from '@/stores/sidebarServerStore'
-import { stubMatchMedia } from '@/test/test-utils'
+import { LocationCatcher, stubMatchMedia } from '@/test/test-utils'
+import { makeRepo, makeSession } from '@/test/fixtures/session-picker'
 import { SessionPickerSheet } from './SessionPickerSheet'
 
 const mocks = vi.hoisted(() => ({
@@ -22,6 +23,7 @@ const mocks = vi.hoisted(() => ({
     | undefined,
   getOpenCodeLocation: vi.fn(),
   listProjects: vi.fn(),
+  getSession: vi.fn(),
   repos: [] as Repo[],
   activeWorkGroups: { needsInput: [], running: [], recent: [] } as ActiveWorkGroups,
 }))
@@ -32,7 +34,12 @@ vi.mock('@/hooks/useSettings', () => ({
 
 vi.mock('@/api/opencode', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/opencode')>()
-  return { ...actual, getOpenCodeLocation: mocks.getOpenCodeLocation, listProjects: mocks.listProjects }
+  return {
+    ...actual,
+    getOpenCodeLocation: mocks.getOpenCodeLocation,
+    listProjects: mocks.listProjects,
+    getSession: mocks.getSession,
+  }
 })
 
 vi.mock('@/api/repos', () => ({
@@ -112,30 +119,6 @@ vi.mock('@/stores/sessionStatusStore', async (importOriginal) => {
   return { ...actual, useSessionStatusForSession: () => ({ type: 'idle' }) }
 })
 
-function session(id: string, title: string, directory: string, updated = Date.now()): Session {
-  return {
-    id,
-    projectID: 'proj',
-    title,
-    time: { created: updated, updated },
-    location: { directory },
-    cost: 0,
-    tokens: {},
-  } as unknown as Session
-}
-
-function repo(id: number, name: string, fullPath: string): Repo {
-  return {
-    id,
-    name,
-    localPath: fullPath,
-    fullPath,
-    defaultBranch: 'main',
-    cloneStatus: 'ready',
-    clonedAt: 0,
-  }
-}
-
 function activeWorkItem(
   id: string,
   directory: string,
@@ -145,8 +128,8 @@ function activeWorkItem(
   return {
     key: `${server?.id ?? LOCAL_OPENCODE_SERVER_ID}:${id}`,
     state: 'recent',
-    session: session(id, `Active ${id}`, directory, now),
-    repo: server ? null : repo(1, 'alpha', directory),
+    session: makeSession(id, `Active ${id}`, directory, now),
+    repo: server ? null : makeRepo(1, 'alpha', directory),
     serverId: server?.id ?? null,
     serverName: server?.name ?? null,
     updatedAt: now,
@@ -154,17 +137,16 @@ function activeWorkItem(
   }
 }
 
-function LocationProbe() {
-  const location = useLocation()
-  const navigationType = useNavigationType()
-  return (
-    <div data-testid="location">{`${location.pathname}${location.search} ${navigationType}`}</div>
-  )
-}
-
-function renderSheet(initialEntries: string[] = ['/repos/1?mobileTab=sessions']) {
+function renderSheet(
+  initialEntries: string[] = ['/repos/1?mobileTab=sessions'],
+  options: { isOpen?: boolean; cachedRepos?: Repo[] } = {},
+) {
   const onClose = vi.fn()
+  const capturedPathname: { current: string } = { current: '' }
+  const capturedSearch: { current: string } = { current: '' }
+  const capturedNavigationType: { current: string } = { current: '' }
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  if (options.cachedRepos) queryClient.setQueryData(['repos'], options.cachedRepos)
   render(
     <QueryClientProvider client={queryClient}>
       <KeyboardShortcutsProvider>
@@ -174,8 +156,12 @@ function renderSheet(initialEntries: string[] = ['/repos/1?mobileTab=sessions'])
               path="*"
               element={
                 <>
-                  <SessionPickerSheet isOpen onClose={onClose} />
-                  <LocationProbe />
+                  <SessionPickerSheet isOpen={options.isOpen ?? true} onClose={onClose} />
+                  <LocationCatcher
+                    capturedPathname={capturedPathname}
+                    capturedSearch={capturedSearch}
+                    capturedNavigationType={capturedNavigationType}
+                  />
                 </>
               }
             />
@@ -184,7 +170,11 @@ function renderSheet(initialEntries: string[] = ['/repos/1?mobileTab=sessions'])
       </KeyboardShortcutsProvider>
     </QueryClientProvider>,
   )
-  return { onClose }
+  return {
+    onClose,
+    location: () =>
+      `${capturedPathname.current}${capturedSearch.current} ${capturedNavigationType.current}`,
+  }
 }
 
 describe('SessionPickerSheet', () => {
@@ -193,7 +183,7 @@ describe('SessionPickerSheet', () => {
     localStorage.clear()
     stubMatchMedia(true)
     useSidebarServerStore.setState({ serverId: LOCAL_OPENCODE_SERVER_ID })
-    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    mocks.repos = [makeRepo(1, 'alpha', '/w/a'), makeRepo(2, 'beta', '/w/b')]
     mocks.sessionsData = []
     mocks.lastDirectories = []
     mocks.lastAllDirectories = false
@@ -205,6 +195,7 @@ describe('SessionPickerSheet', () => {
       project: { id: 'global', directory: '/w/a', canonical: '/w/a' },
     }
     mocks.getOpenCodeLocation.mockResolvedValue(mocks.locationData)
+    mocks.getSession.mockResolvedValue(null)
   })
 
   afterEach(() => {
@@ -222,37 +213,35 @@ describe('SessionPickerSheet', () => {
   })
 
   it('navigates to the chosen session, replacing the sheet history entry', async () => {
-    mocks.sessionsData = [session('ses_one', 'Solo session', '/w/a')]
+    mocks.sessionsData = [makeSession('ses_one', 'Solo session', '/w/a')]
 
-    renderSheet()
+    const { location } = renderSheet()
 
     const row = await screen.findByRole('option', { name: /Solo session/ })
     fireEvent.click(row)
 
-    expect(screen.getByTestId('location')).toHaveTextContent('/repos/1/sessions/ses_one REPLACE')
+    expect(location()).toBe('/repos/1/sessions/ses_one REPLACE')
   })
 
   it('closes instead of navigating when the chosen session is already open', async () => {
-    mocks.sessionsData = [session('ses_one', 'Solo session', '/w/a')]
+    mocks.sessionsData = [makeSession('ses_one', 'Solo session', '/w/a')]
 
-    const { onClose } = renderSheet(['/repos/1/sessions/ses_one?mobileTab=sessions'])
+    const { onClose, location } = renderSheet(['/repos/1/sessions/ses_one?mobileTab=sessions'])
 
     const row = await screen.findByRole('option', { name: /Solo session/ })
     fireEvent.click(row)
 
     expect(onClose).toHaveBeenCalled()
-    expect(screen.getByTestId('location')).toHaveTextContent(
-      '/repos/1/sessions/ses_one?mobileTab=sessions POP',
-    )
+    expect(location()).toBe('/repos/1/sessions/ses_one?mobileTab=sessions POP')
   })
 
   it('creates a session in the current repo from the header action and opens it', async () => {
-    renderSheet()
+    const { location } = renderSheet()
 
     fireEvent.click(await screen.findByRole('button', { name: 'New session in alpha' }))
 
     expect(mocks.createSessionDirectories).toEqual(['/w/a'])
-    expect(screen.getByTestId('location')).toHaveTextContent('/repos/1/sessions/ses_new REPLACE')
+    expect(location()).toBe('/repos/1/sessions/ses_new REPLACE')
   })
 
   it('opens the add repository dialog from the projects tab header action', async () => {
@@ -267,9 +256,9 @@ describe('SessionPickerSheet', () => {
 
   it('lists and opens the linked server sessions when a linked server is selected', async () => {
     useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
-    mocks.sessionsData = [session('ses_remote', 'Remote session', '/home/me/app')]
+    mocks.sessionsData = [makeSession('ses_remote', 'Remote session', '/home/me/app')]
 
-    renderSheet()
+    const { location } = renderSheet()
 
     const row = await screen.findByRole('option', { name: /Remote session/ })
     expect(row).toHaveTextContent('Kitchen')
@@ -280,9 +269,7 @@ describe('SessionPickerSheet', () => {
 
     fireEvent.click(row)
 
-    expect(screen.getByTestId('location')).toHaveTextContent(
-      '/servers/srv_kitchen/sessions/ses_remote REPLACE',
-    )
+    expect(location()).toBe('/servers/srv_kitchen/sessions/ses_remote REPLACE')
   })
 
   it('lists the linked server projects on the projects tab and opens one', async () => {
@@ -297,18 +284,16 @@ describe('SessionPickerSheet', () => {
       },
     ])
 
-    renderSheet()
+    const { location } = renderSheet()
 
     fireEvent.mouseDown(screen.getByRole('tab', { name: 'Projects' }))
     fireEvent.click(await screen.findByText('Alpha'))
 
-    expect(screen.getByTestId('location')).toHaveTextContent(
-      '/servers/srv_kitchen/projects?directory=%2Fprojects%2Falpha REPLACE',
-    )
+    expect(location()).toBe('/servers/srv_kitchen/projects?directory=%2Fprojects%2Falpha REPLACE')
   })
 
   it('follows the sidebar server selection to list that server', async () => {
-    mocks.sessionsData = [session('ses_remote', 'Remote session', '/home/me/app')]
+    mocks.sessionsData = [makeSession('ses_remote', 'Remote session', '/home/me/app')]
 
     renderSheet()
 
@@ -328,12 +313,12 @@ describe('SessionPickerSheet', () => {
       recent: [activeWorkItem('ses_active', '/w/a')],
     }
 
-    renderSheet()
+    const { location } = renderSheet()
 
     fireEvent.mouseDown(screen.getByRole('tab', { name: 'Activity' }))
     fireEvent.click(await screen.findByRole('option', { name: /Active ses_active/ }))
 
-    expect(screen.getByTestId('location')).toHaveTextContent('/repos/1/sessions/ses_active REPLACE')
+    expect(location()).toBe('/repos/1/sessions/ses_active REPLACE')
   })
 
   it('opens a remote activity row on its own server while the local server is selected', async () => {
@@ -343,14 +328,12 @@ describe('SessionPickerSheet', () => {
       recent: [activeWorkItem('ses_kitchen', '/home/me/app', { id: 'srv_kitchen', name: 'Kitchen' })],
     }
 
-    renderSheet()
+    const { location } = renderSheet()
 
     fireEvent.mouseDown(screen.getByRole('tab', { name: 'Activity' }))
     fireEvent.click(await screen.findByRole('option', { name: /Active ses_kitchen/ }))
 
-    expect(screen.getByTestId('location')).toHaveTextContent(
-      '/servers/srv_kitchen/sessions/ses_kitchen REPLACE',
-    )
+    expect(location()).toBe('/servers/srv_kitchen/sessions/ses_kitchen REPLACE')
   })
 
   it('opens a remote activity row of the same session id that is open on another server', async () => {
@@ -361,26 +344,28 @@ describe('SessionPickerSheet', () => {
       recent: [activeWorkItem('ses_shared', '/home/me/hall', { id: 'srv_hall', name: 'Hall' })],
     }
 
-    const { onClose } = renderSheet(['/servers/srv_kitchen/sessions/ses_shared?mobileTab=sessions'])
+    const { onClose, location } = renderSheet([
+      '/servers/srv_kitchen/sessions/ses_shared?mobileTab=sessions',
+    ])
 
     fireEvent.mouseDown(screen.getByRole('tab', { name: 'Activity' }))
     fireEvent.click(await screen.findByRole('option', { name: /Active ses_shared/ }))
 
     expect(onClose).not.toHaveBeenCalled()
-    expect(screen.getByTestId('location')).toHaveTextContent(
-      '/servers/srv_hall/sessions/ses_shared REPLACE',
-    )
+    expect(location()).toBe('/servers/srv_hall/sessions/ses_shared REPLACE')
   })
 
   it('opens a local session row that shares the id of the open remote session', async () => {
-    mocks.sessionsData = [session('ses_shared', 'Shared session', '/w/a')]
+    mocks.sessionsData = [makeSession('ses_shared', 'Shared session', '/w/a')]
 
-    const { onClose } = renderSheet(['/servers/srv_kitchen/sessions/ses_shared?mobileTab=sessions'])
+    const { onClose, location } = renderSheet([
+      '/servers/srv_kitchen/sessions/ses_shared?mobileTab=sessions',
+    ])
 
     fireEvent.click(await screen.findByRole('option', { name: /Shared session/ }))
 
     expect(onClose).not.toHaveBeenCalled()
-    expect(screen.getByTestId('location')).toHaveTextContent('/repos/1/sessions/ses_shared REPLACE')
+    expect(location()).toBe('/repos/1/sessions/ses_shared REPLACE')
   })
 
   it('opens a session row of another linked server than the selected one', async () => {
@@ -391,13 +376,67 @@ describe('SessionPickerSheet', () => {
       recent: [activeWorkItem('ses_hall', '/home/me/hall', { id: 'srv_hall', name: 'Hall' })],
     }
 
-    renderSheet()
+    const { location } = renderSheet()
 
     fireEvent.mouseDown(screen.getByRole('tab', { name: 'Activity' }))
     fireEvent.click(await screen.findByRole('option', { name: /Active ses_hall/ }))
 
-    expect(screen.getByTestId('location')).toHaveTextContent(
-      '/servers/srv_hall/sessions/ses_hall REPLACE',
+    expect(location()).toBe('/servers/srv_hall/sessions/ses_hall REPLACE')
+  })
+
+  it('keeps the assistant session flag when choosing another session of the same repo', async () => {
+    mocks.sessionsData = [makeSession('ses_b', 'Second assistant session', '/w/a')]
+
+    const { location } = renderSheet(['/repos/1/sessions/ses_a?assistant=1&mobileTab=sessions'])
+
+    fireEvent.click(await screen.findByRole('option', { name: /Second assistant session/ }))
+
+    expect(location()).toBe('/repos/1/sessions/ses_b?assistant=1 REPLACE')
+  })
+
+  it('drops the assistant session flag when choosing a session of another repo', async () => {
+    localStorage.setItem('oc:session-picker:all-projects', 'true')
+    mocks.sessionsData = [
+      makeSession('ses_a', 'Assistant session', '/w/a'),
+      makeSession('ses_b', 'Beta session', '/w/b'),
+    ]
+
+    const { location } = renderSheet(['/repos/1/sessions/ses_a?assistant=1&mobileTab=sessions'])
+
+    fireEvent.click(await screen.findByRole('option', { name: /Beta session/ }))
+
+    expect(location()).toBe('/repos/2/sessions/ses_b REPLACE')
+  })
+
+  it('scopes the sheet to the open remote session directory on a linked server session route', async () => {
+    useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
+    mocks.getSession.mockResolvedValue(makeSession('ses_remote', 'Remote session', '/home/me/app'))
+
+    renderSheet(['/servers/srv_kitchen/sessions/ses_remote?mobileTab=sessions'])
+
+    await waitFor(() => expect(mocks.lastDirectories).toEqual(['/home/me/app']))
+    expect(mocks.lastAllDirectories).toBe(false)
+  })
+
+  it('does not resolve the remote session directory while the sheet is closed', async () => {
+    useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
+
+    renderSheet(['/servers/srv_kitchen/sessions/ses_remote'], { isOpen: false })
+
+    await waitFor(() => expect(mocks.getSession).not.toHaveBeenCalled())
+  })
+
+  it('prefetches the project location on a repo route while the sheet is closed', async () => {
+    renderSheet(['/repos/1'], { isOpen: false, cachedRepos: mocks.repos })
+
+    await waitFor(() =>
+      expect(mocks.getOpenCodeLocation).toHaveBeenCalledWith('/w/a', LOCAL_OPENCODE_SERVER_ID),
     )
+  })
+
+  it('does not prefetch the project location outside a repo route', async () => {
+    renderSheet(['/'], { isOpen: false, cachedRepos: mocks.repos })
+
+    await waitFor(() => expect(mocks.getOpenCodeLocation).not.toHaveBeenCalled())
   })
 })

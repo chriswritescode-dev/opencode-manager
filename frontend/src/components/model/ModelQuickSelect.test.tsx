@@ -633,3 +633,70 @@ describe('ModelQuickSelect context strip', () => {
     expect(screen.queryByTestId('context-usage-strip')).not.toBeInTheDocument()
   })
 })
+
+describe('ModelQuickSelect model descriptions', () => {
+  const limitedProviders: Provider[] = [
+    {
+      id: 'anthropic',
+      name: 'Anthropic',
+      models: [
+        {
+          id: 'claude-sonnet-4',
+          key: 'claude-sonnet-4',
+          name: 'Claude Sonnet 4',
+          released: 0,
+          free: false,
+          limit: { context: 200000, output: 8192 },
+        },
+        {
+          id: 'claude-opus-5-5',
+          key: 'claude-opus-5-5',
+          name: 'Claude Opus 5.5',
+          released: 0,
+          free: false,
+          limit: { context: 1000000, output: 8192 },
+        },
+      ],
+    },
+  ]
+
+  function selectModel(modelID: string) {
+    const modelState = { favorite: [], recent: [], variant: {} }
+    mocks.useModelSelection.mockReturnValue({
+      model: { providerID: 'anthropic', modelID },
+      modelString: `anthropic/${modelID}`,
+      info: undefined,
+      activeAgent: null,
+      recentModels: [],
+      favoriteModels: [],
+      configured: null,
+      modelState,
+      setModel: vi.fn(),
+      setActiveAgent: vi.fn(),
+      toggleFavorite: vi.fn(),
+      removeRecentModel: vi.fn(),
+      isModelReady: true,
+    })
+    mocks.useModelSections.mockReturnValue({
+      providers: limitedProviders,
+      sections: buildModelSections(limitedProviders, modelState, null),
+      defaultModel: null,
+      modelState,
+      isLoading: false,
+    })
+  }
+
+  it('formats the context limit like the context strip', () => {
+    selectModel('claude-sonnet-4')
+    render(<ModelQuickSelect open />)
+
+    expect(screen.getByText('Anthropic · 200k context', { selector: 'p' })).toBeInTheDocument()
+  })
+
+  it('formats million-token limits without a trailing decimal', () => {
+    selectModel('claude-opus-5-5')
+    render(<ModelQuickSelect open />)
+
+    expect(screen.getByText('Anthropic · 1M context', { selector: 'p' })).toBeInTheDocument()
+  })
+})

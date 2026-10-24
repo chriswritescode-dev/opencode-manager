@@ -7,6 +7,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { useOpenNavItem } from '@/hooks/useOpenNavItem'
 import { useSessionPickerRouteScope } from '@/hooks/useSessionPickerRouteScope'
+import { useSessionPickerNavigation } from '@/hooks/useSessionPickerNavigation'
 import { buildNavModel, type MoreDrawerItem, type NavPrimaryCta } from '@/components/navigation/moreDrawerItems'
 import { SessionPickerDialog } from '@/components/session/SessionPickerDialog'
 import { DesktopSessionTree } from '@/components/navigation/DesktopSessionTree'
@@ -16,14 +17,13 @@ import {
   SidebarSection,
   SidebarItem,
 } from '@/components/ui/sidebar'
-import { getRepoPath, getServerSessionPath, getSessionPath } from '@/lib/navigation'
 import { List } from 'lucide-react'
 
 const FOOTER_ITEM_KEYS = new Set(['home', 'settings', 'logout'])
 
 function DesktopSessionsPicker({ onDismiss }: { onDismiss: () => void }) {
-  const navigate = useNavigate()
   const { currentRepo, activeSessionID, remote } = useSessionPickerRouteScope(true)
+  const pickerNavigation = useSessionPickerNavigation({ mode: 'push', onClose: onDismiss })
 
   return (
     <SessionPickerDialog
@@ -33,27 +33,8 @@ function DesktopSessionsPicker({ onDismiss }: { onDismiss: () => void }) {
       }}
       currentRepo={currentRepo}
       activeSessionID={activeSessionID}
+      {...pickerNavigation}
       remote={remote}
-      onSelectSession={(session, sessionRepo) => {
-        navigate(getSessionPath(sessionRepo.id, session.id))
-        onDismiss()
-      }}
-      onSelectRemoteSession={(session, serverId) => {
-        navigate(getServerSessionPath(serverId, session.id))
-        onDismiss()
-      }}
-      onDeleteActiveSession={() => {
-        onDismiss()
-        if (currentRepo) navigate(getRepoPath(currentRepo.id))
-      }}
-      onSelectRepo={(selectedRepo) => {
-        navigate(getRepoPath(selectedRepo.id))
-        onDismiss()
-      }}
-      onNavigate={(path) => {
-        navigate(path)
-        onDismiss()
-      }}
     />
   )
 }

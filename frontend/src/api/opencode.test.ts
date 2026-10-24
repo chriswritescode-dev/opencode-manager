@@ -20,13 +20,16 @@ import {
   listPendingPermissions,
   listSessionMessages,
   listSessionPage,
+  projectActivityTimestamp,
   readSessionSnapshot,
+  remoteProjectName,
   renameSession,
   replyForm,
   replyPermission,
   runCommand,
   runShell,
   sendPrompt,
+  sortProjectsByActivity,
   stageRevert,
   switchSessionAgent,
   switchSessionModel,
@@ -751,5 +754,49 @@ describe('OpenCode facade', () => {
 
     expect(lastRequest().url).toBe('http://localhost/api/opencode/api/session/ses_1/form/form_1')
     expect(lastRequest().init.method).toBe('DELETE')
+  })
+})
+
+const project = (
+  id: string,
+  name: string | undefined,
+  canonical: string,
+  time: { created: number; updated: number; active?: number },
+) => ({ id, name, canonical, time, sandboxes: [] })
+
+describe('project helpers', () => {
+  it('prefers the activity time over the update time', () => {
+    const withActivity = project('p1', 'Active', '/work/active', { created: 1, updated: 10, active: 900 })
+
+    expect(projectActivityTimestamp(withActivity)).toBe(900)
+  })
+
+  it('falls back to the update time when the project was never active', () => {
+    const neverActive = project('p1', 'Idle', '/work/idle', { created: 1, updated: 10, active: 0 })
+
+    expect(projectActivityTimestamp(neverActive)).toBe(10)
+  })
+
+  it('orders projects by activity, most recent first, without mutating the input', () => {
+    const stale = project('p_stale', 'Stale', '/work/stale', { created: 1, updated: 500, active: 100 })
+    const recent = project('p_recent', 'Recent', '/work/recent', { created: 1, updated: 100, active: 900 })
+    const middle = project('p_middle', 'Middle', '/work/middle', { created: 1, updated: 700 })
+    const projects = [stale, recent, middle]
+
+    expect(sortProjectsByActivity(projects).map((entry) => entry.id)).toEqual([
+      'p_recent',
+      'p_middle',
+      'p_stale',
+    ])
+    expect(projects.map((entry) => entry.id)).toEqual(['p_stale', 'p_recent', 'p_middle'])
+  })
+
+  it('names a project from its trimmed title', () => {
+    expect(remoteProjectName(project('p1', '  Alpha  ', '/work/alpha', { created: 1, updated: 2 }))).toBe('Alpha')
+  })
+
+  it('names a project from its directory when it has no title', () => {
+    expect(remoteProjectName(project('p1', undefined, '/work/beta', { created: 1, updated: 2 }))).toBe('beta')
+    expect(remoteProjectName(project('p1', '   ', '/work/gamma', { created: 1, updated: 2 }))).toBe('gamma')
   })
 })

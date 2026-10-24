@@ -9,11 +9,6 @@ import { serverScopedKey } from '@/lib/serverScope'
 import type { TranscriptCache } from '@/lib/session-projection'
 import type { ContextUsage } from '@/lib/contextUsage'
 
-interface ContextUsageResult {
-  usage: ContextUsage | null
-  isLoading: boolean
-}
-
 function lastCompletedCompactionIndex(messages: SessionMessageInfo[], end: number): number {
   for (let index = end - 1; index >= 0; index -= 1) {
     const message = messages[index]
@@ -34,14 +29,13 @@ export const useContextUsage = (
   sessionID: string | undefined,
   directory?: string,
   revertMessageID?: string,
-): ContextUsageResult => {
+): ContextUsage | null => {
   const serverId = useOpenCodeServerId()
   const transcriptQuery = useQuery<TranscriptCache>({
     queryKey: serverScopedKey(sessionTranscriptQueryKey(sessionID ?? ''), serverId),
     queryFn: skipToken,
   })
   const transcriptData = transcriptQuery.data
-  const messagesLoading = transcriptQuery.isPending
 
   const { data: providersData } = useProviders(directory)
   const models = providersData?.models
@@ -53,7 +47,7 @@ export const useContextUsage = (
       ? messages.findIndex((message) => message.id === revertMessageID)
       : -1
     if (revertMessageID && boundaryIndex === -1) {
-      return { usage: null, isLoading: messagesLoading }
+      return null
     }
 
     const end = boundaryIndex === -1 ? messages.length : boundaryIndex
@@ -61,13 +55,13 @@ export const useContextUsage = (
     const assistantIndex = lastAssistantWithUsageIndex(messages, compactionIndex, end)
     const assistant = assistantIndex === -1 ? undefined : messages[assistantIndex]
     if (assistant?.type !== 'assistant' || assistant.tokens === undefined) {
-      return { usage: null, isLoading: messagesLoading }
+      return null
     }
 
     const { input, output, reasoning, cache } = assistant.tokens
     const totalTokens = input + output + reasoning + cache.read + cache.write
     if (totalTokens <= 0) {
-      return { usage: null, isLoading: messagesLoading }
+      return null
     }
 
     const model = models
@@ -76,6 +70,6 @@ export const useContextUsage = (
     const contextLimit = model?.limit.context ?? null
     const usagePercentage = contextLimit ? Math.round((totalTokens / contextLimit) * 100) : null
 
-    return { usage: { totalTokens, usagePercentage, contextLimit }, isLoading: messagesLoading }
-  }, [transcriptData, messagesLoading, models, revertMessageID])
+    return { totalTokens, usagePercentage, contextLimit }
+  }, [transcriptData, models, revertMessageID])
 }

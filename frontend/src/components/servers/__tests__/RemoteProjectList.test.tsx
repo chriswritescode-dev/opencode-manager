@@ -148,64 +148,34 @@ describe('RemoteProjectList', () => {
     expect(mocks.listProjects).toHaveBeenCalledWith('srv_kitchen')
   })
 
-  it('orders projects by recent activity and labels rows with that activity time', async () => {
+  it('labels a row with its project activity time', async () => {
     const now = Date.now()
     mocks.listProjects.mockResolvedValue([
       {
         ...project,
-        id: 'prj_stale',
-        name: 'Stale',
-        canonical: '/work/stale',
-        time: { created: now - 10_800_000, updated: now - 300_000, active: now - 10_800_000 },
-      },
-      {
-        ...project,
-        id: 'prj_recent',
-        name: 'Recent',
-        canonical: '/work/recent',
         time: { created: now - 10_800_000, updated: now - 10_800_000, active: now - 300_000 },
       },
     ])
 
-    const { container } = renderProjectList()
+    renderProjectList()
 
-    await screen.findByText('Recent')
-
-    const text = container.textContent ?? ''
-    expect(text.indexOf('Recent')).toBeGreaterThan(-1)
-    expect(text.indexOf('Recent')).toBeLessThan(text.indexOf('5m ago'))
-    expect(text.indexOf('5m ago')).toBeLessThan(text.indexOf('Stale'))
-    expect(text.indexOf('Stale')).toBeLessThan(text.indexOf('3h ago'))
+    await screen.findByText('App')
+    expect(screen.getByText('5m ago')).toBeInTheDocument()
   })
 
-  it('falls back to the update time when a project has no activity time', async () => {
+  it('labels a row with the update time when the project has no activity time', async () => {
     const now = Date.now()
     mocks.listProjects.mockResolvedValue([
       {
         ...project,
-        id: 'prj_older',
-        name: 'Older',
-        canonical: '/work/older',
-        time: { created: now - 10_800_000, updated: now - 10_800_000 },
-      },
-      {
-        ...project,
-        id: 'prj_newer',
-        name: 'Newer',
-        canonical: '/work/newer',
         time: { created: now - 10_800_000, updated: now - 300_000 },
       },
     ])
 
-    const { container } = renderProjectList()
+    renderProjectList()
 
-    await screen.findByText('Newer')
-
-    const text = container.textContent ?? ''
-    expect(text.indexOf('Newer')).toBeGreaterThan(-1)
-    expect(text.indexOf('Newer')).toBeLessThan(text.indexOf('5m ago'))
-    expect(text.indexOf('5m ago')).toBeLessThan(text.indexOf('Older'))
-    expect(text.indexOf('Older')).toBeLessThan(text.indexOf('3h ago'))
+    await screen.findByText('App')
+    expect(screen.getByText('5m ago')).toBeInTheDocument()
   })
 
   it('opens the remote project page when a project card is clicked', async () => {

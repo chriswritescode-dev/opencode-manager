@@ -194,32 +194,6 @@ describe('RemoteProjectNavList', () => {
     expect(mocks.listProjects).toHaveBeenCalledWith('srv_kitchen')
   })
 
-  it('orders projects by recent activity', async () => {
-    const now = Date.now()
-    mocks.listProjects.mockResolvedValue([
-      createProject('p_stale', 'Stale', '/projects/stale', {
-        created: now - 10_800_000,
-        updated: now - 300_000,
-        active: now - 10_800_000,
-      }),
-      createProject('p_recent', 'Recent', '/projects/recent', {
-        created: now - 10_800_000,
-        updated: now - 10_800_000,
-        active: now - 300_000,
-      }),
-    ])
-
-    const { container } = render(<RemoteListHarness serverId="srv_kitchen" />, {
-      wrapper: createWrapper('/'),
-    })
-
-    await screen.findByText('Recent')
-
-    const text = container.textContent ?? ''
-    expect(text.indexOf('Recent')).toBeGreaterThan(-1)
-    expect(text.indexOf('Recent')).toBeLessThan(text.indexOf('Stale'))
-  })
-
   it('expands the project of the current project route and loads its sessions', async () => {
     render(<RemoteListHarness serverId="srv_kitchen" />, {
       wrapper: createWrapper('/servers/srv_kitchen/projects?directory=%2Fprojects%2Falpha'),

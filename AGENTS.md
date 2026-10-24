@@ -17,7 +17,7 @@
 
 ## Code Style
 
-- Doc comments only: JSDoc/TSDoc attached to the declaration they document, in the language's native doc convention. No inline, explanatory, or section comments; code must be self-documenting
+- Doc comments only in new and changed code: JSDoc/TSDoc attached to the declaration they document, in the language's native doc convention. No inline, explanatory, or section comments; code must be self-documenting
 - No console logs (use Bun's logger or proper error handling)
 - Strict TypeScript everywhere, proper typing required
 - Named imports only: `import { Hono } from 'hono'`, `import { useState } from 'react'`

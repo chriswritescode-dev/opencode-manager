@@ -6,7 +6,6 @@ import { SessionDetailsSheet, type SessionDetailsSheetProps } from './SessionDet
 
 const mocks = vi.hoisted(() => ({
   useMobile: vi.fn(),
-  useUpdateSession: vi.fn(),
 }))
 
 vi.mock('@/hooks/useMobile', () => ({
@@ -15,34 +14,27 @@ vi.mock('@/hooks/useMobile', () => ({
   useSwipeDismiss: vi.fn(() => ({ bind: vi.fn(), swipeProgress: 0, swipeStyles: {} })),
 }))
 
-vi.mock('@/hooks/useOpenCode', () => ({ useUpdateSession: mocks.useUpdateSession }))
-
-type RenameMutation = {
-  mutate: ReturnType<typeof vi.fn>
-  reset: ReturnType<typeof vi.fn>
-  error: Error | null
-  isPending: boolean
-}
-
 const baseProps: SessionDetailsSheetProps = {
   open: true,
   onOpenChange: vi.fn(),
-  sessionId: 'ses_1',
   title: 'Fix the header',
   remote: false,
   project: 'oc-manager',
+  onRename: vi.fn(() => Promise.resolve()),
 }
 
-function mockRename(overrides: Partial<RenameMutation> = {}): RenameMutation {
-  const mutation: RenameMutation = {
-    mutate: vi.fn(),
-    reset: vi.fn(),
-    error: null,
-    isPending: false,
-    ...overrides,
-  }
-  mocks.useUpdateSession.mockReturnValue(mutation)
-  return mutation
+function createDeferred() {
+  let resolve!: () => void
+  let reject!: (error: Error) => void
+  const promise = new Promise<void>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
+function failingRename(error = new Error('nope')) {
+  return vi.fn(() => Promise.reject(error))
 }
 
 function renderSheet(overrides: Partial<SessionDetailsSheetProps> = {}) {
@@ -53,7 +45,6 @@ describe('SessionDetailsSheet', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.useMobile.mockReturnValue(false)
-    mockRename()
   })
 
   it('lists the local session details', () => {
@@ -118,101 +109,108 @@ describe('SessionDetailsSheet', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
   })
 
-  it('saves the trimmed title and leaves edit mode on success', () => {
-    const mutation = mockRename()
-    renderSheet()
+  it('saves the trimmed title and leaves edit mode on success', async () => {
+    const user = userEvent.setup()
+    const onRename = vi.fn(() => Promise.resolve())
+    renderSheet({ onRename })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
-    fireEvent.change(screen.getByLabelText('Session title'), {
-      target: { value: '  New name  ' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await user.click(screen.getByRole('button', { name: 'Rename' }))
+    await user.clear(screen.getByLabelText('Session title'))
+    await user.type(screen.getByLabelText('Session title'), '  New name  ')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
 
-    expect(mutation.mutate).toHaveBeenCalledWith(
-      { sessionID: 'ses_1', title: 'New name' },
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
-    )
-
-    const options = mutation.mutate.mock.calls[0]![1] as { onSuccess: () => void }
-    act(() => options.onSuccess())
-
+    expect(onRename).toHaveBeenCalledWith('New name')
     expect(screen.queryByLabelText('Session title')).not.toBeInTheDocument()
     expect(screen.getByText('Fix the header')).toBeInTheDocument()
   })
 
-  it('saves on Enter', () => {
-    const mutation = mockRename()
-    renderSheet()
+  it('saves on Enter', async () => {
+    const onRename = vi.fn(() => Promise.resolve())
+    renderSheet({ onRename })
 
     fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
     fireEvent.change(screen.getByLabelText('Session title'), { target: { value: 'Entered' } })
-    fireEvent.keyDown(screen.getByLabelText('Session title'), { key: 'Enter' })
+    await act(async () => {
+      fireEvent.keyDown(screen.getByLabelText('Session title'), { key: 'Enter' })
+    })
 
-    expect(mutation.mutate).toHaveBeenCalledWith(
-      { sessionID: 'ses_1', title: 'Entered' },
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
-    )
+    expect(onRename).toHaveBeenCalledWith('Entered')
   })
 
   it('ignores Enter while an IME composition is active', () => {
-    const mutation = mockRename()
-    renderSheet()
+    const onRename = vi.fn(() => Promise.resolve())
+    renderSheet({ onRename })
 
     fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
     const input = screen.getByLabelText('Session title')
     fireEvent.change(input, { target: { value: 'にほんご' } })
     fireEvent.keyDown(input, { key: 'Enter', isComposing: true })
 
-    expect(mutation.mutate).not.toHaveBeenCalled()
+    expect(onRename).not.toHaveBeenCalled()
   })
 
-  it('cancels editing and resets the rename error', () => {
-    const mutation = mockRename({ error: new Error('nope') })
-    renderSheet()
+  it('shows the rename failure inline', async () => {
+    const user = userEvent.setup()
+    renderSheet({ onRename: failingRename() })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
-    expect(screen.getByText('Rename failed')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Rename' }))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(await screen.findByText('Rename failed')).toBeInTheDocument()
+    expect(screen.getByLabelText('Session title')).toBeInTheDocument()
+  })
 
+  it('cancels editing and clears the rename error', async () => {
+    const user = userEvent.setup()
+    renderSheet({ onRename: failingRename() })
+
+    await user.click(screen.getByRole('button', { name: 'Rename' }))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('Rename failed')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(screen.queryByText('Rename failed')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Session title')).not.toBeInTheDocument()
-    expect(mutation.reset).toHaveBeenCalled()
   })
 
-  it('shows the rename failure inline', () => {
-    mockRename({ error: new Error('nope') })
-    renderSheet()
+  it('disables the title field while a rename is pending', async () => {
+    const user = userEvent.setup()
+    const deferred = createDeferred()
+    renderSheet({ onRename: () => deferred.promise })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
-
-    expect(screen.getByText('Rename failed')).toBeInTheDocument()
-  })
-
-  it('disables the title field while a rename is pending', () => {
-    mockRename({ isPending: true })
-    renderSheet()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
+    await user.click(screen.getByRole('button', { name: 'Rename' }))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(screen.getByLabelText('Session title')).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+
+    await act(async () => {
+      deferred.resolve()
+    })
   })
 
   it('does not dismiss while a rename is pending', async () => {
     const user = userEvent.setup()
+    const deferred = createDeferred()
     const onOpenChange = vi.fn()
-    mockRename({ isPending: true })
-    renderSheet({ onOpenChange })
+    renderSheet({ onOpenChange, onRename: () => deferred.promise })
 
     await user.click(screen.getByRole('button', { name: 'Rename' }))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
     await user.keyboard('{Escape}')
+    await user.click(screen.getByRole('button', { name: 'Close' }))
 
     expect(onOpenChange).not.toHaveBeenCalled()
     expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    await act(async () => {
+      deferred.resolve()
+    })
   })
 
-  it('resets to view mode and clears the error when reopened', () => {
-    const mutation = mockRename({ error: new Error('nope') })
+  it('resets to view mode and clears the error when reopened', async () => {
+    const user = userEvent.setup()
 
     function Host() {
       const [open, setOpen] = useState(true)
@@ -221,22 +219,28 @@ describe('SessionDetailsSheet', () => {
           <button type="button" onClick={() => setOpen((current) => !current)}>
             toggle
           </button>
-          <SessionDetailsSheet {...baseProps} open={open} onOpenChange={setOpen} />
+          <SessionDetailsSheet
+            {...baseProps}
+            open={open}
+            onOpenChange={setOpen}
+            onRename={failingRename()}
+          />
         </>
       )
     }
 
     render(<Host />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
-    expect(screen.getByLabelText('Session title')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Rename' }))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('Rename failed')).toBeInTheDocument()
 
     fireEvent.click(screen.getByText('toggle'))
     fireEvent.click(screen.getByText('toggle'))
 
     expect(screen.queryByLabelText('Session title')).not.toBeInTheDocument()
+    expect(screen.queryByText('Rename failed')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Rename' })).toBeInTheDocument()
-    expect(mutation.reset).toHaveBeenCalled()
   })
 
   it('renders as a bottom sheet on mobile', () => {

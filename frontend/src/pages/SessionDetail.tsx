@@ -10,7 +10,7 @@ import { SquareFill } from "@/components/ui/square-fill";
 import { Header } from "@/components/ui/header";
 import { Badge } from "@/components/ui/badge";
 import { SessionPickerDialog } from "@/components/session/SessionPickerDialog";
-import { getRepoPath, getServerProjectPath, getServerSessionPath, getSessionListPath, getSessionPath } from '@/lib/navigation'
+import { getServerProjectPath, getSessionListPath, getSessionPath } from '@/lib/navigation'
 import { FetchError } from '@/api/fetchWrapper'
 
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
@@ -49,8 +49,9 @@ import { ProjectActionsMenu } from "@/components/repo/ProjectActionsMenu";
 import { RepoActionsDialog } from "@/components/repo/RepoActionsDialog";
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
 import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
-import { compactSession, forkSession, listProjects, listSessionMessages } from "@/api/opencode";
+import { compactSession, forkSession, listSessionMessages, remoteProjectName } from "@/api/opencode";
 import { useOpenCodeServerId, isLocalOpenCodeServer } from "@/contexts/OpenCodeServerContext";
+import { useRemoteProjects } from "@/hooks/useRemoteProjects";
 import { useSwipeNavigation } from "@/contexts/SwipeNavigationContext";
 import { useOpenCodeServers, useOpenCodeServerStatuses } from "@/hooks/useOpenCodeServers";
 import { serverScopedKey } from "@/lib/serverScope";
@@ -83,6 +84,7 @@ import { ChangesWalkthroughSheet, type WalkthroughSourceRequest } from "@/compon
 import { ToolSidePanel } from "@/components/navigation/ToolSidePanel";
 import type { WalkthroughSource } from "@opencode-manager/shared/schemas";
 import { useToolPanel } from "@/hooks/useToolPanel";
+import { useSessionPickerNavigation } from "@/hooks/useSessionPickerNavigation";
 
 const OLDER_HISTORY_SCROLL_THRESHOLD_PX = 200
 
@@ -191,8 +193,6 @@ export function SessionDetail() {
 
   useRepoActivity(repoId, Boolean(repo) && !isRemoteServer);
 
-  const sessionRouteSuffix = isAssistantSession && !isRemoteServer ? '?assistant=1' : '';
-
   const repoDirectory = repo?.fullPath;
   const [resolvedSessionDirectory, setResolvedSessionDirectory] = useState<{ sessionId: string; directory: string } | null>(null);
   const resolvedDirectory = (
@@ -217,25 +217,20 @@ export function SessionDetail() {
 
   const { servers: linkedServers } = useOpenCodeServers({ enabled: isRemoteServer });
 
-  const { data: remoteProjects } = useQuery({
-    queryKey: serverScopedKey(['opencode', 'projects'], serverId),
-    queryFn: () => listProjects(serverId),
-    enabled: isRemoteServer,
-    retry: false,
-  });
+  const { projects: remoteProjects } = useRemoteProjects(serverId, { enabled: isRemoteServer });
 
-  const remoteProjectDirectory = useMemo(() => {
+  const remoteProject = useMemo(() => {
     if (!isRemoteServer || !sessionDirectory) return undefined;
-    const project = remoteProjects?.find(
+    return remoteProjects.find(
       (entry) => sessionDirectory === entry.canonical || sessionDirectory.startsWith(`${entry.canonical}/`),
     );
-    return project?.canonical ?? sessionDirectory;
   }, [isRemoteServer, remoteProjects, sessionDirectory]);
 
-  const remoteProjectName = useMemo(() => {
-    if (!isRemoteServer) return undefined;
-    return remoteProjects?.find((entry) => entry.canonical === remoteProjectDirectory)?.name?.trim() || undefined;
-  }, [isRemoteServer, remoteProjects, remoteProjectDirectory]);
+  const remoteProjectDirectory = isRemoteServer && sessionDirectory
+    ? remoteProject?.canonical ?? sessionDirectory
+    : undefined;
+
+  const remoteProjectDisplayName = remoteProject ? remoteProjectName(remoteProject) : undefined;
 
   const sessionBranch = useMemo(
     () => (repo && !isAssistantSession ? resolveSessionBranch(repo, sessionDirectory, repoSiblings) : null),
@@ -557,6 +552,12 @@ export function SessionDetail() {
     navigate(getSessionListPath(repoId, isAssistantSession, tab))
   }, [navigate, repoId, isAssistantSession, isRemoteServer, remoteProjectBackPath, location.search])
 
+  const pickerNavigation = useSessionPickerNavigation({
+    mode: 'push',
+    onClose: () => setSessionsDialogOpen(false),
+    onDeleteActiveSession: handleCloseSession,
+  })
+
   const handleOpenModelDialog = useCallback(() => {
     promptInputRef.current?.openModelPicker();
   }, [])
@@ -576,18 +577,22 @@ export function SessionDetail() {
     setFileBrowserOpen(true)
   }, [repo?.fullPath, repo?.localPath, sessionDirectory, setFileBrowserOpen]);
 
+  const renameSession = useCallback(async (title: string) => {
+    if (!sessionId) throw new Error('No active session');
+    await updateSessionAsync({ sessionID: sessionId, title: title.trim() });
+  }, [sessionId, updateSessionAsync]);
+
   const handleRenameSession = useCallback(async (title: string) => {
-    if (!sessionId) return;
     const trimmedTitle = title.trim();
     try {
-      await updateSessionAsync({ sessionID: sessionId, title: trimmedTitle });
+      await renameSession(title);
       if (!trimmedTitle) {
         showToast.success('Session title regenerated');
       }
     } catch (error) {
       showToast.error(`Rename failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }, [sessionId, updateSessionAsync]);
+  }, [renameSession]);
 
   const handleFileBrowserClose = useCallback(() => setFileBrowserOpen(false), [setFileBrowserOpen]);
 
@@ -796,7 +801,7 @@ export function SessionDetail() {
 
   const linkedServer = linkedServers.find((candidate) => candidate.id === serverId);
   const projectDisplayName = isRemoteServer
-    ? remoteProjectName ?? (sessionDirectory ? getDirectoryName(sessionDirectory) : 'Project')
+    ? remoteProjectDisplayName ?? (sessionDirectory ? getDirectoryName(sessionDirectory) : 'Project')
     : isAssistantSession || !repo
       ? 'Assistant'
       : getRepoDisplayName(repo);
@@ -1049,42 +1054,19 @@ export function SessionDetail() {
             ? { serverId, serverName: linkedServer?.name, projectDirectory: remoteProjectDirectory }
             : undefined
         }
-        onSelectSession={(session, sessionRepo) => {
-          if (!isRemoteServer && sessionRepo.id === repoId) {
-            navigate(`/repos/${repoId}/sessions/${session.id}${sessionRouteSuffix}`)
-          } else {
-            navigate(getSessionPath(sessionRepo.id, session.id))
-          }
-          setSessionsDialogOpen(false)
-        }}
-        onSelectRemoteSession={(session, targetServerId) => {
-          navigate(getServerSessionPath(targetServerId, session.id))
-          setSessionsDialogOpen(false)
-        }}
-        onDeleteActiveSession={() => {
-          setSessionsDialogOpen(false)
-          handleCloseSession()
-        }}
-        onSelectRepo={(selectedRepo) => {
-          navigate(getRepoPath(selectedRepo.id))
-          setSessionsDialogOpen(false)
-        }}
-        onNavigate={(path) => {
-          navigate(path)
-          setSessionsDialogOpen(false)
-        }}
+        {...pickerNavigation}
       />
 
       <SessionDetailsSheet
         open={sessionDetailsOpen}
         onOpenChange={setSessionDetailsOpen}
-        sessionId={sessionId}
         title={session?.title}
         serverName={linkedServer?.name}
         remote={isRemoteServer}
         project={projectDisplayName}
         branch={headerBranch}
         directory={sessionDirectory}
+        onRename={renameSession}
       />
 
       {sideQuestion && sessionId && (

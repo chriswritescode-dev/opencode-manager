@@ -3,9 +3,8 @@ import { useQuery } from '@tanstack/react-query'
 import { format, startOfDay } from 'date-fns'
 import { ChevronsUpDown, MoreHorizontal, Pin, PinOff, Plus } from 'lucide-react'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
-import { getOpenCodeLocation } from '@/api/opencode'
 import { OpenCodeServerProvider, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
-import { serverScopedKey } from '@/lib/serverScope'
+import { openCodeLocationQueryOptions } from '@/lib/openCodeLocation'
 import type { Repo, Session } from '@/api/types'
 import { ACTIVE_WORK_GROUPS, MS_PER_MINUTE, formatActivityEmptyMessage } from '@/lib/activeWork'
 import { Button } from '@/components/ui/button'
@@ -53,7 +52,6 @@ const NEAR_BOTTOM_PX = 240
 type SessionPickerTab = 'active' | 'sessions' | 'projects'
 
 const SESSION_PICKER_TABS: SessionPickerTab[] = ['active', 'sessions', 'projects']
-const REMOTE_SESSION_PICKER_TABS: SessionPickerTab[] = ['active', 'sessions']
 
 const SESSION_PICKER_TAB_LABELS: Record<SessionPickerTab, string> = {
   active: 'Activity',
@@ -71,7 +69,7 @@ function sessionsTabLabel(scopeEnabled: boolean, allProjects: boolean): string {
   return allProjects ? 'All sessions' : 'This project'
 }
 
-interface RemotePickerScope {
+export interface RemotePickerScope {
   serverId: string
   serverName?: string
   projectDirectory?: string
@@ -601,10 +599,8 @@ function SessionPickerContent({
 
   const serverId = useOpenCodeServerId()
   const locationQuery = useQuery({
-    queryKey: serverScopedKey(['opencode', 'location', currentRepo?.fullPath], serverId),
-    queryFn: () => getOpenCodeLocation(currentRepo!.fullPath, serverId),
+    ...openCodeLocationQueryOptions(currentRepo?.fullPath ?? '', serverId),
     enabled: !allProjects && Boolean(currentRepo?.fullPath),
-    staleTime: 5 * 60 * 1000,
   })
 
   const location = locationQuery.data
@@ -1212,13 +1208,25 @@ export interface SessionPickerPanelProps {
   onSelectRepo: (repo: Repo) => void
   onNavigate: (path: string) => void
   remote?: RemotePickerScope
-  remoteProjects?: boolean
   searchTrailing?: React.ReactNode
   onAddRepo?: () => void
   renderTitle?: (label: string) => React.ReactNode
 }
 
-export function SessionPickerPanel({
+/**
+ * Picker content shared by the desktop dialog and the mobile sheet. A remote scope supplies its own
+ * server, so every host reads the linked server's sessions without wrapping the panel itself.
+ */
+export function SessionPickerPanel(props: SessionPickerPanelProps) {
+  if (!props.remote) return <SessionPickerPanelBody {...props} />
+  return (
+    <OpenCodeServerProvider serverId={props.remote.serverId}>
+      <SessionPickerPanelBody {...props} />
+    </OpenCodeServerProvider>
+  )
+}
+
+function SessionPickerPanelBody({
   open,
   currentRepo,
   activeSessionID,
@@ -1228,7 +1236,6 @@ export function SessionPickerPanel({
   onSelectRepo,
   onNavigate,
   remote,
-  remoteProjects = false,
   searchTrailing,
   onAddRepo,
   renderTitle,
@@ -1254,24 +1261,22 @@ export function SessionPickerPanel({
     [preferences],
   )
   const isRemote = remote !== undefined
-  const pickerTabs = isRemote && !remoteProjects ? REMOTE_SESSION_PICKER_TABS : SESSION_PICKER_TABS
-  const [tab, setTab] = useState<SessionPickerTab>('sessions')
+  const [activeTab, setActiveTab] = useState<SessionPickerTab>('sessions')
   const [prevOpen, setPrevOpen] = useState(open)
 
   if (prevOpen !== open) {
     setPrevOpen(open)
-    if (open) setTab('sessions')
+    if (open) setActiveTab('sessions')
   }
 
-  const activeTab: SessionPickerTab = pickerTabs.includes(tab) ? tab : 'sessions'
   const scopeEnabled = !isRemote && Boolean(currentRepo)
   const allProjects = scopeEnabled ? allProjectsPreference : true
   const readyRepo = scopeEnabled && currentRepo && isRepoReady(currentRepo) ? currentRepo : undefined
 
   const toggleTab = useCallback(() => {
     focusSearchAfterSwitchRef.current = true
-    setTab((current) => nextSessionPickerTab(current, pickerTabs))
-  }, [pickerTabs])
+    setActiveTab((current) => nextSessionPickerTab(current, SESSION_PICKER_TABS))
+  }, [])
 
   useShortcutActions({ switchPickerTab: open ? toggleTab : undefined })
 
@@ -1330,18 +1335,26 @@ export function SessionPickerPanel({
   const sessionsTrailing = withTrailing(newSessionButton)
   const projectsTrailing = withTrailing(addRepoButton)
 
+  const canToggleScope = scopeEnabled && activeTab === 'sessions'
+
+  /**
+   * The sessions tab re-activates itself to toggle the scope. Pointer activation records whether the
+   * tab was already selected before Radix activates it, so the click that follows only toggles a
+   * tab that was already current. Keyboard activation toggles on Enter/Space directly and suppresses
+   * the click Radix would otherwise synthesize for the same key press.
+   */
   const handleSessionsPointerDown = () => {
-    scopePressRef.current = scopeEnabled && activeTab === 'sessions'
+    scopePressRef.current = canToggleScope
   }
 
   const handleSessionsClick = () => {
-    if (!scopePressRef.current) return
+    if (!canToggleScope || !scopePressRef.current) return
     scopePressRef.current = false
     toggleAllProjects()
   }
 
   const handleSessionsKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
-    if (!scopeEnabled || activeTab !== 'sessions') return
+    if (!canToggleScope) return
     if (event.key !== 'Enter' && event.key !== ' ') return
     event.preventDefault()
     toggleAllProjects()
@@ -1351,7 +1364,7 @@ export function SessionPickerPanel({
     <>
       <Tabs
         value={activeTab}
-        onValueChange={(value) => setTab(value as SessionPickerTab)}
+        onValueChange={(value) => setActiveTab(value as SessionPickerTab)}
         className="flex min-h-0 w-full min-w-0 flex-1 flex-col gap-0"
       >
         <div className="shrink-0 px-4 pt-4 sm:px-0 sm:pt-6">
@@ -1369,9 +1382,7 @@ export function SessionPickerPanel({
                 <ChevronsUpDown aria-hidden="true" className="ml-1 h-3 w-3 shrink-0 opacity-60" />
               )}
             </TabsTrigger>
-            {pickerTabs.includes('projects') && (
-              <TabsTrigger value="projects">{SESSION_PICKER_TAB_LABELS.projects}</TabsTrigger>
-            )}
+            <TabsTrigger value="projects">{SESSION_PICKER_TAB_LABELS.projects}</TabsTrigger>
           </TabsList>
         </div>
         <TabsContent
@@ -1423,33 +1434,31 @@ export function SessionPickerPanel({
             />
           )}
         </TabsContent>
-        {pickerTabs.includes('projects') && (
-          <TabsContent
-            value="projects"
-            className="mt-0 flex min-h-0 w-full min-w-0 flex-1 flex-col px-0"
-          >
-            {remote ? (
-              <RemoteProjectPickerContent
-                serverId={remote.serverId}
-                open={open}
-                searchInputRef={projectSearchInputRef}
-                searchTrailing={projectsTrailing}
-                onOpenProject={onNavigate}
-                onSelectSession={onNavigate}
-              />
-            ) : (
-              <ProjectPickerContent
-                open={open}
-                currentRepo={currentRepo}
-                onSelectRepo={onSelectRepo}
-                onNavigate={onNavigate}
-                switchHint={switchHint}
-                searchInputRef={projectSearchInputRef}
-                searchTrailing={projectsTrailing}
-              />
-            )}
-          </TabsContent>
-        )}
+        <TabsContent
+          value="projects"
+          className="mt-0 flex min-h-0 w-full min-w-0 flex-1 flex-col px-0"
+        >
+          {remote ? (
+            <RemoteProjectPickerContent
+              serverId={remote.serverId}
+              open={open}
+              searchInputRef={projectSearchInputRef}
+              searchTrailing={projectsTrailing}
+              onOpenProject={onNavigate}
+              onSelectSession={onNavigate}
+            />
+          ) : (
+            <ProjectPickerContent
+              open={open}
+              currentRepo={currentRepo}
+              onSelectRepo={onSelectRepo}
+              onNavigate={onNavigate}
+              switchHint={switchHint}
+              searchInputRef={projectSearchInputRef}
+              searchTrailing={projectsTrailing}
+            />
+          )}
+        </TabsContent>
       </Tabs>
       {addRepoOpen && !onAddRepo && <AddRepoDialog open onOpenChange={setAddRepoOpen} />}
     </>

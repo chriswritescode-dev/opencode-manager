@@ -1,14 +1,13 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
 import { Folder, FolderGit2, FolderPlus, GitBranch, Search, Server } from 'lucide-react'
-import { listProjects, projectActivityTimestamp, type OpenCodeProject } from '@/api/opencode'
+import { projectActivityTimestamp, remoteProjectName, type OpenCodeProject } from '@/api/opencode'
 import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
+import { useRemoteProjects } from '@/hooks/useRemoteProjects'
 import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 import { useProjectActivityState } from '@/hooks/useActiveWork'
-import { serverScopedKey } from '@/lib/serverScope'
 import { getServerProjectPath } from '@/lib/navigation'
-import { formatShortRelativeTime, getDirectoryName } from '@/lib/utils'
+import { formatShortRelativeTime } from '@/lib/utils'
 import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
 import { ActivityStateIndicator } from '@/components/activity/ActivityStateIndicator'
 import { Button } from '@/components/ui/button'
@@ -20,10 +19,6 @@ import { RepoCardShell } from '@/components/repo/RepoCardShell'
 import { RepoCardSkeleton } from '@/components/repo/RepoCardSkeleton'
 import { RepoSearchInput } from '@/components/repo/RepoSearchInput'
 
-function projectName(project: OpenCodeProject): string {
-  return project.name?.trim() || getDirectoryName(project.canonical)
-}
-
 function RemoteProjectCard({ project, serverId }: { project: OpenCodeProject; serverId: string }) {
   const navigate = useNavigate()
   const activityState = useProjectActivityState(serverId, project.canonical)
@@ -31,7 +26,7 @@ function RemoteProjectCard({ project, serverId }: { project: OpenCodeProject; se
 
   return (
     <RepoCardShell
-      title={projectName(project)}
+      title={remoteProjectName(project)}
       statusDotClassName="bg-success"
       activity={<ActivityStateIndicator state={activityState} />}
       actions={<RemoteProjectRowActions serverId={serverId} directory={project.canonical} />}
@@ -95,28 +90,15 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
   const server = servers.find((candidate) => candidate.id === serverId)
   const isDisabled = server !== undefined && !server.enabled
 
-  const projectsQuery = useQuery({
-    queryKey: serverScopedKey(['opencode', 'projects'], serverId),
-    queryFn: () => listProjects(serverId),
-    enabled: server?.enabled === true,
-    retry: false,
-  })
-
-  const projects = useMemo(
-    () =>
-      [...(projectsQuery.data ?? [])].sort(
-        (a, b) => projectActivityTimestamp(b) - projectActivityTimestamp(a),
-      ),
-    [projectsQuery.data],
-  )
-  const showsProjectError = projectsQuery.isError && projectsQuery.data === undefined
+  const { projects, isLoading, isError, hasData, error, refetch } = useRemoteProjects(serverId)
+  const showsProjectError = isError && !hasData
 
   const filteredProjects = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
     if (!query) return projects
 
     return projects.filter((project) =>
-      projectName(project).toLowerCase().includes(query) ||
+      remoteProjectName(project).toLowerCase().includes(query) ||
       project.canonical.toLowerCase().includes(query),
     )
   }, [projects, searchQuery])
@@ -151,19 +133,19 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
           <div>
             <p className="font-medium">Could not load projects</p>
             <p className="text-sm text-muted-foreground">
-              {projectsQuery.error instanceof Error
-                ? projectsQuery.error.message
+              {error instanceof Error
+                ? error.message
                 : 'The server did not respond.'}
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => void projectsQuery.refetch()}>
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
             Retry
           </Button>
         </Card>
       ) : null}
 
       {server && !isDisabled && !showsProjectError ? (
-        projectsQuery.isLoading ? (
+        isLoading ? (
           <RemoteProjectListLoading />
         ) : projects.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center p-12 text-center">

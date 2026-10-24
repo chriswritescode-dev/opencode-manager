@@ -4,19 +4,18 @@ import { BottomSheet, BottomSheetContent, BottomSheetHeader } from '@/components
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useMobile } from '@/hooks/useMobile'
-import { useUpdateSession } from '@/hooks/useOpenCode'
 import { cn } from '@/lib/utils'
 
 export interface SessionDetailsSheetProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  sessionId: string
   title?: string
   serverName?: string
   remote: boolean
   project: string
   branch?: string | null
   directory?: string
+  onRename: (title: string) => Promise<void>
 }
 
 interface InfoRowProps {
@@ -43,31 +42,32 @@ function InfoRow({ label, value, mono, leading }: InfoRowProps) {
 export function SessionDetailsSheet({
   open,
   onOpenChange,
-  sessionId,
   title,
   serverName,
   remote,
   project,
   branch,
   directory,
+  onRename,
 }: SessionDetailsSheetProps) {
   const isMobile = useMobile()
-  const renameSession = useUpdateSession(directory)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [renameFailed, setRenameFailed] = useState(false)
   const [lastOpen, setLastOpen] = useState(open)
 
   if (open !== lastOpen) {
     setLastOpen(open)
     if (open) {
       setEditing(false)
-      if (renameSession.error) renameSession.reset()
+      setRenameFailed(false)
     }
   }
 
   const displayTitle = title?.trim() ? title : 'Untitled Session'
   const trimmedDraft = draft.trim()
-  const canSave = trimmedDraft.length > 0 && !renameSession.isPending
+  const canSave = trimmedDraft.length > 0 && !saving
 
   const startEditing = () => {
     setDraft(title ?? '')
@@ -76,19 +76,25 @@ export function SessionDetailsSheet({
 
   const cancelEditing = () => {
     setEditing(false)
-    if (renameSession.error) renameSession.reset()
+    setRenameFailed(false)
   }
 
-  const save = () => {
+  const save = async () => {
     if (!canSave) return
-    renameSession.mutate(
-      { sessionID: sessionId, title: trimmedDraft },
-      { onSuccess: () => setEditing(false) },
-    )
+    setSaving(true)
+    setRenameFailed(false)
+    try {
+      await onRename(trimmedDraft)
+      setEditing(false)
+    } catch {
+      setRenameFailed(true)
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleClose = () => {
-    if (renameSession.isPending) return
+    if (saving) return
     onOpenChange(false)
   }
 
@@ -116,13 +122,13 @@ export function SessionDetailsSheet({
                 event.preventDefault()
                 save()
               }}
-              disabled={renameSession.isPending}
+              disabled={saving}
               aria-label="Session title"
               placeholder="Session title"
               autoFocus
               className="w-full min-w-0 rounded border border-border bg-background px-3 py-2 text-sm font-semibold outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
             />
-            {renameSession.error && (
+            {renameFailed && (
               <span className="text-xs text-destructive">Rename failed</span>
             )}
             <div className="flex items-center gap-2 pt-1">
@@ -178,7 +184,7 @@ export function SessionDetailsSheet({
         isOpen={open}
         onClose={handleClose}
         ariaLabel="Session details"
-        dismissible={!renameSession.isPending}
+        dismissible={!saving}
       >
         <BottomSheetHeader title="Session details" />
         <BottomSheetContent>{body}</BottomSheetContent>

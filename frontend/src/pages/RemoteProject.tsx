@@ -1,8 +1,8 @@
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
 import { FolderGit2, GitBranch, Loader2, Plus, Server } from 'lucide-react'
-import { listProjects } from '@/api/opencode'
+import { remoteProjectName } from '@/api/opencode'
 import { useCreateSession } from '@/hooks/useOpenCode'
+import { useRemoteProjects } from '@/hooks/useRemoteProjects'
 import { useVcsInfo } from '@/hooks/useVcsInfo'
 import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
 import { useSettingsDialog } from '@/hooks/useSettingsDialog'
@@ -11,7 +11,6 @@ import { useToolPanelLayout } from '@/hooks/useToolPanelLayout'
 import { useToolPanel } from '@/hooks/useToolPanel'
 import { useDialogParam } from '@/hooks/useDialogParam'
 import { useTerminalDialogParam, useTerminalDirectoryParam } from '@/hooks/useOpenTerminal'
-import { serverScopedKey } from '@/lib/serverScope'
 import { getServerSessionPath } from '@/lib/navigation'
 import { getDirectoryName } from '@/lib/utils'
 import { Header } from '@/components/ui/header'
@@ -44,20 +43,19 @@ function RemoteProjectContent({ serverId, directory }: { serverId: string; direc
   const isReady = server?.enabled === true && Boolean(directory)
   const createSession = useCreateSession(directory)
 
-  const projectsQuery = useQuery({
-    queryKey: serverScopedKey(['opencode', 'projects'], serverId),
-    queryFn: () => listProjects(serverId),
-    enabled: server?.enabled === true,
-    retry: false,
-  })
+  const { projects } = useRemoteProjects(serverId)
 
   const vcsQuery = useVcsInfo(directory, serverId, { enabled: isReady })
 
   useSSE(directory)
 
-  const project = (projectsQuery.data ?? []).find((entry) => entry.canonical === directory)
+  const project = projects.find((entry) => entry.canonical === directory)
   const branch = vcsQuery.data?.branch.current ?? vcsQuery.data?.branch.default
-  const title = project?.name?.trim() || (directory ? getDirectoryName(directory) : 'Project')
+  const title = project
+    ? remoteProjectName(project)
+    : directory
+      ? getDirectoryName(directory)
+      : 'Project'
 
   const openSettings = () => openTab('servers')
 

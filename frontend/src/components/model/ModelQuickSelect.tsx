@@ -472,8 +472,7 @@ export function ModelQuickSelect({
   const getDescription = (item: ModelListItem) => {
     const context = item.model?.limit?.context
     if (context) {
-      const formattedContext = context >= 1000000 ? `${(context / 1000000).toFixed(1)}M` : context.toLocaleString()
-      return `${item.providerName} · ${formattedContext} context`
+      return `${item.providerName} · ${formatCompactTokens(context)} context`
     }
 
     return item.providerName

@@ -1,6 +1,7 @@
 import { openCodeLocation, parseOpenCodeModelRef } from '@opencode-manager/shared/opencode'
 import { MANAGER_PROMPT_CLIENT_METADATA_KEY } from '@opencode-manager/shared/schemas'
 import { isMobileViewport } from '@/hooks/useMobile'
+import { getDirectoryName } from '@/lib/utils'
 import { callOpenCode } from './opencodeApi'
 import type {
   AgentInfo,
@@ -37,8 +38,34 @@ export type OpenCodeLocationInfo = Awaited<ReturnType<OpenCodeApi['location']['g
 
 export type OpenCodeProject = Awaited<ReturnType<OpenCodeApi['project']['list']>>[number]
 
+/**
+ * Returns the timestamp that represents a project's most recent activity.
+ *
+ * @param project Project whose activity time is read.
+ * @returns The activity time, falling back to the last update when the project was never active.
+ */
 export function projectActivityTimestamp(project: OpenCodeProject): number {
   return project.time.active || project.time.updated
+}
+
+/**
+ * Orders projects from the most to the least recently active.
+ *
+ * @param projects Projects to order.
+ * @returns A new array with the projects sorted by activity; the input is left untouched.
+ */
+export function sortProjectsByActivity(projects: OpenCodeProject[]): OpenCodeProject[] {
+  return [...projects].sort((a, b) => projectActivityTimestamp(b) - projectActivityTimestamp(a))
+}
+
+/**
+ * Returns the display name of a project, falling back to the name of its directory.
+ *
+ * @param project Project whose name is resolved.
+ * @returns The trimmed project name, or the last segment of its canonical directory.
+ */
+export function remoteProjectName(project: OpenCodeProject): string {
+  return project.name?.trim() || getDirectoryName(project.canonical)
 }
 
 export type VcsInfo = Awaited<ReturnType<OpenCodeApi['vcs']['get']>>['data']

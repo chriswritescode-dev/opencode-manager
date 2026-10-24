@@ -1,3 +1,4 @@
+import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
 import { CONTEXT_USAGE_BG_CLASS, contextUsageTone } from '@/lib/contextUsage'
 
@@ -6,20 +7,19 @@ interface ContextUsageMeterProps {
   className?: string
 }
 
+/**
+ * Thin context-window fill bar. Its accessible label lives on the model pill, so the bar itself is hidden
+ * from assistive technology.
+ */
 export function ContextUsageMeter({ percentage, className }: ContextUsageMeterProps) {
-  const width = percentage === null ? 0 : Math.min(percentage, 100)
-
   return (
-    <div
+    <Progress
       data-testid="context-usage-meter"
       aria-hidden="true"
-      className={cn('h-0.5 w-full overflow-hidden bg-border/50', className)}
-    >
-      <div
-        data-testid="context-usage-meter-fill"
-        className={cn('h-full', CONTEXT_USAGE_BG_CLASS[contextUsageTone(percentage)])}
-        style={{ width: `${width}%` }}
-      />
-    </div>
+      value={percentage ?? 0}
+      className={cn('h-0.5 rounded-none bg-border/50', className)}
+      indicatorClassName={cn('transition-none', CONTEXT_USAGE_BG_CLASS[contextUsageTone(percentage)])}
+      indicatorTestId="context-usage-meter-fill"
+    />
   )
 }

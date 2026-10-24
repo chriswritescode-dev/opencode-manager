@@ -17,6 +17,7 @@ export function useVcsInfo(
     queryKey: [...serverScopedKey(['opencode', 'vcs', directory ?? ''], serverId), 'info'],
     queryFn: () => getVcsInfo(directory ?? '', serverId),
     enabled: enabled && Boolean(directory),
+    staleTime: 30_000,
     retry: false,
   })
 }

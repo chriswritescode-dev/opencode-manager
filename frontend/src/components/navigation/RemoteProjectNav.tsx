@@ -1,21 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { listProjects, projectActivityTimestamp, type OpenCodeProject } from '@/api/opencode'
+import { remoteProjectName, type OpenCodeProject } from '@/api/opencode'
 import type { Session } from '@/api/types'
 import { ActivityStateIndicator } from '@/components/activity/ActivityStateIndicator'
-import { useSessionsAcrossDirectories, sessionQueryOptions } from '@/hooks/useOpenCode'
+import { useSessionsAcrossDirectories } from '@/hooks/useOpenCode'
+import { useActiveRemoteDirectory } from '@/hooks/useActiveRemoteDirectory'
+import { useRemoteProjects } from '@/hooks/useRemoteProjects'
 import { useOpenCodeServers, useOpenCodeServerStatuses } from '@/hooks/useOpenCodeServers'
 import { useProjectActivityState } from '@/hooks/useActiveWork'
 import { useSessionSearch } from '@/hooks/useSessionSearch'
-import { serverScopedKey } from '@/lib/serverScope'
 import {
   getServerProjectPath,
   getServerSessionPath,
-  parseServerProjectRoute,
-  parseServerSessionRoute,
 } from '@/lib/navigation'
-import { getDirectoryName } from '@/lib/utils'
 import { getSessionKey } from '@/lib/sessionKey'
 import {
   NewSessionButton,
@@ -30,10 +27,6 @@ import {
   normalizeDirectory,
   type SidebarSessionItem,
 } from '@/components/navigation/sidebar-session-tree'
-
-function projectName(project: OpenCodeProject): string {
-  return project.name?.trim() || getDirectoryName(project.canonical)
-}
 
 function buildRemoteItem(session: Session, serverId: string, projectLabel: string): SidebarSessionItem {
   return {
@@ -53,20 +46,6 @@ function RemoteProjectActivityIndicator({ serverId, directory }: { serverId: str
   const state = useProjectActivityState(serverId, directory)
 
   return <ActivityStateIndicator state={state} />
-}
-
-function useActiveRemoteDirectory(serverId: string): string | null {
-  const { pathname, search } = useLocation()
-  const projectRoute = parseServerProjectRoute(pathname, search)
-  const sessionRoute = parseServerSessionRoute(pathname)
-  const sessionID = sessionRoute?.serverId === serverId ? sessionRoute.sessionId : undefined
-  const { data: session } = useQuery({
-    ...sessionQueryOptions(sessionID, undefined, serverId),
-    enabled: Boolean(sessionID),
-  })
-
-  if (projectRoute?.serverId === serverId) return projectRoute.directory
-  return session?.location.directory ?? null
 }
 
 interface RemoteSessionRowsProps {
@@ -135,7 +114,7 @@ function RemoteProjectSessions({ serverId, project, onSelectSession }: RemotePro
   return (
     <RemoteSessionRows
       serverId={serverId}
-      projectLabel={projectName(project)}
+      projectLabel={remoteProjectName(project)}
       sessions={data}
       isLoading={isLoading}
       isError={isError}
@@ -167,7 +146,7 @@ function RemoteProjectGroup({
   onSelectSession,
   children,
 }: RemoteProjectGroupProps) {
-  const name = projectName(project)
+  const name = remoteProjectName(project)
 
   return (
     <RepoNavGroup
@@ -290,7 +269,7 @@ function RemoteProjectSearchResults({
     () =>
       projects.filter(
         (project) =>
-          projectName(project).toLowerCase().includes(needle) ||
+          remoteProjectName(project).toLowerCase().includes(needle) ||
           project.canonical.toLowerCase().includes(needle),
       ),
     [projects, needle],
@@ -342,7 +321,7 @@ function RemoteProjectSearchResults({
             {matchedSessions ? (
               <RemoteSessionRows
                 serverId={serverId}
-                projectLabel={projectName(project)}
+                projectLabel={remoteProjectName(project)}
                 sessions={matchedSessions}
                 isLoading={false}
                 isError={false}
@@ -386,27 +365,15 @@ export function RemoteProjectNavList({
   const server = servers.find((candidate) => candidate.id === serverId)
   const activeDirectory = useActiveRemoteDirectory(serverId)
 
-  const projectsQuery = useQuery({
-    queryKey: serverScopedKey(['opencode', 'projects'], serverId),
-    queryFn: () => listProjects(serverId),
-    enabled: server?.enabled === true,
-    retry: false,
-  })
-
-  const projects = useMemo(
-    () =>
-      [...(projectsQuery.data ?? [])].sort(
-        (a, b) => projectActivityTimestamp(b) - projectActivityTimestamp(a),
-      ),
-    [projectsQuery.data],
-  )
+  const { projects, isLoading: projectsLoading, isError: projectsError, hasData: hasProjects } =
+    useRemoteProjects(serverId)
   const trimmedSearch = search.trim()
 
   if (isServersLoading) return <SessionNavStatus>Loading projects...</SessionNavStatus>
   if (!server) return <SessionNavStatus>Server not found</SessionNavStatus>
   if (!server.enabled) return <SessionNavStatus>Server is disabled</SessionNavStatus>
-  if (projectsQuery.isLoading) return <SessionNavStatus>Loading projects...</SessionNavStatus>
-  if (projectsQuery.isError && projectsQuery.data === undefined) {
+  if (projectsLoading) return <SessionNavStatus>Loading projects...</SessionNavStatus>
+  if (projectsError && !hasProjects) {
     return (
       <SessionNavStatus>
         {statusById[serverId]?.connected === false ? 'Server unreachable' : 'Could not load projects'}
