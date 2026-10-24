@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { listProjects, type OpenCodeProject } from '@/api/opencode'
+import { listProjects, projectActivityTimestamp, type OpenCodeProject } from '@/api/opencode'
 import type { Session } from '@/api/types'
 import { ActivityStateIndicator } from '@/components/activity/ActivityStateIndicator'
 import { useSessionsAcrossDirectories, sessionQueryOptions } from '@/hooks/useOpenCode'
@@ -393,14 +393,20 @@ export function RemoteProjectNavList({
     retry: false,
   })
 
-  const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
+  const projects = useMemo(
+    () =>
+      [...(projectsQuery.data ?? [])].sort(
+        (a, b) => projectActivityTimestamp(b) - projectActivityTimestamp(a),
+      ),
+    [projectsQuery.data],
+  )
   const trimmedSearch = search.trim()
 
   if (isServersLoading) return <SessionNavStatus>Loading projects...</SessionNavStatus>
   if (!server) return <SessionNavStatus>Server not found</SessionNavStatus>
   if (!server.enabled) return <SessionNavStatus>Server is disabled</SessionNavStatus>
   if (projectsQuery.isLoading) return <SessionNavStatus>Loading projects...</SessionNavStatus>
-  if (projectsQuery.isError) {
+  if (projectsQuery.isError && projectsQuery.data === undefined) {
     return (
       <SessionNavStatus>
         {statusById[serverId]?.connected === false ? 'Server unreachable' : 'Could not load projects'}

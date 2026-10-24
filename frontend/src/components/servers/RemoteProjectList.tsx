@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Folder, FolderGit2, FolderPlus, GitBranch, Search, Server } from 'lucide-react'
-import { listProjects, type OpenCodeProject } from '@/api/opencode'
+import { listProjects, projectActivityTimestamp, type OpenCodeProject } from '@/api/opencode'
 import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
 import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 import { useProjectActivityState } from '@/hooks/useActiveWork'
@@ -27,7 +27,7 @@ function projectName(project: OpenCodeProject): string {
 function RemoteProjectCard({ project, serverId }: { project: OpenCodeProject; serverId: string }) {
   const navigate = useNavigate()
   const activityState = useProjectActivityState(serverId, project.canonical)
-  const updatedAt = project.time.updated
+  const activeAt = projectActivityTimestamp(project)
 
   return (
     <RepoCardShell
@@ -45,7 +45,7 @@ function RemoteProjectCard({ project, serverId }: { project: OpenCodeProject; se
           <span className="truncate">{project.canonical}</span>
         </span>
       }
-      activityLabel={updatedAt > 0 ? formatShortRelativeTime(new Date(updatedAt)) : undefined}
+      activityLabel={activeAt > 0 ? formatShortRelativeTime(new Date(activeAt)) : undefined}
       isInteractive
       onClick={() => navigate(getServerProjectPath(serverId, project.canonical))}
     />
@@ -102,7 +102,14 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
     retry: false,
   })
 
-  const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
+  const projects = useMemo(
+    () =>
+      [...(projectsQuery.data ?? [])].sort(
+        (a, b) => projectActivityTimestamp(b) - projectActivityTimestamp(a),
+      ),
+    [projectsQuery.data],
+  )
+  const showsProjectError = projectsQuery.isError && projectsQuery.data === undefined
 
   const filteredProjects = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
@@ -138,7 +145,7 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
         />
       ) : null}
 
-      {server && !isDisabled && projectsQuery.isError ? (
+      {server && !isDisabled && showsProjectError ? (
         <Card className="flex flex-col items-center gap-3 p-6 text-center">
           <Server className="h-8 w-8 text-muted-foreground" />
           <div>
@@ -155,7 +162,7 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
         </Card>
       ) : null}
 
-      {server && !isDisabled && !projectsQuery.isError ? (
+      {server && !isDisabled && !showsProjectError ? (
         projectsQuery.isLoading ? (
           <RemoteProjectListLoading />
         ) : projects.length === 0 ? (

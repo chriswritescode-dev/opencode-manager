@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { OpenCodeProject } from '@/api/opencode'
@@ -87,14 +87,19 @@ const kitchen = {
   updatedAt: 2,
 }
 
-function createProject(id: string, name: string | undefined, canonical: string): OpenCodeProject {
+function createProject(
+  id: string,
+  name: string | undefined,
+  canonical: string,
+  time: OpenCodeProject['time'] = { created: 1, updated: 2, active: 0 },
+): OpenCodeProject {
   return {
     id,
     canonical,
     name,
-    time: { created: 1, updated: 2 },
+    time,
     sandboxes: [],
-  } as OpenCodeProject
+  }
 }
 
 function createSession(id: string, directory: string, updated = Date.now()): SessionFixture {
@@ -117,10 +122,12 @@ function LocationSpy() {
   return <div data-testid="location">{`${pathname}${search}`}</div>
 }
 
-function createWrapper(initialEntry: string) {
-  const queryClient = new QueryClient({
+function createWrapper(
+  initialEntry: string,
+  queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  })
+  }),
+) {
   return ({ children }: { children: React.ReactNode }) => (
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialEntry]}>
@@ -185,6 +192,32 @@ describe('RemoteProjectNavList', () => {
     expect(screen.getByText('beta')).toBeInTheDocument()
     expect(screen.getByText('/projects/alpha')).toBeInTheDocument()
     expect(mocks.listProjects).toHaveBeenCalledWith('srv_kitchen')
+  })
+
+  it('orders projects by recent activity', async () => {
+    const now = Date.now()
+    mocks.listProjects.mockResolvedValue([
+      createProject('p_stale', 'Stale', '/projects/stale', {
+        created: now - 10_800_000,
+        updated: now - 300_000,
+        active: now - 10_800_000,
+      }),
+      createProject('p_recent', 'Recent', '/projects/recent', {
+        created: now - 10_800_000,
+        updated: now - 10_800_000,
+        active: now - 300_000,
+      }),
+    ])
+
+    const { container } = render(<RemoteListHarness serverId="srv_kitchen" />, {
+      wrapper: createWrapper('/'),
+    })
+
+    await screen.findByText('Recent')
+
+    const text = container.textContent ?? ''
+    expect(text.indexOf('Recent')).toBeGreaterThan(-1)
+    expect(text.indexOf('Recent')).toBeLessThan(text.indexOf('Stale'))
   })
 
   it('expands the project of the current project route and loads its sessions', async () => {
@@ -285,6 +318,28 @@ describe('RemoteProjectNavList', () => {
     )
 
     expect(await screen.findByText('Could not load projects')).toBeInTheDocument()
+  })
+
+  it('keeps the cached project list when a refetch fails', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    mocks.listProjects.mockResolvedValueOnce([alpha, beta]).mockRejectedValueOnce(new Error('offline'))
+
+    render(<RemoteListHarness serverId="srv_kitchen" />, {
+      wrapper: createWrapper('/', queryClient),
+    })
+
+    await screen.findByText('Alpha')
+    await act(async () => {
+      await queryClient.refetchQueries()
+    })
+
+    await waitFor(() => {
+      expect(mocks.listProjects).toHaveBeenCalledTimes(2)
+    })
+    expect(screen.getByText('Alpha')).toBeInTheDocument()
+    expect(screen.queryByText('Could not load projects')).not.toBeInTheDocument()
   })
 
   it('reports an unreachable server on a failed project load', async () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
@@ -15,9 +15,10 @@ const mocks = vi.hoisted(() => ({
   isMobile: true,
 }))
 
-vi.mock('@/api/opencode', () => ({
-  listProjects: mocks.listProjects,
-}))
+vi.mock('@/api/opencode', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/opencode')>()
+  return { ...actual, listProjects: mocks.listProjects }
+})
 
 vi.mock('@/hooks/useOpenCode', () => ({
   useCreateSession: mocks.useCreateSession,
@@ -113,9 +114,9 @@ function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } })
 }
 
-function renderProjectList(serverId = 'srv_kitchen') {
+function renderProjectList(serverId = 'srv_kitchen', queryClient = createQueryClient()) {
   return render(
-    <QueryClientProvider client={createQueryClient()}>
+    <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/']}>
         <Routes>
           <Route path="/" element={<RemoteProjectList serverId={serverId} />} />
@@ -145,6 +146,66 @@ describe('RemoteProjectList', () => {
     })
     expect(screen.getByText('/home/me/app')).toBeInTheDocument()
     expect(mocks.listProjects).toHaveBeenCalledWith('srv_kitchen')
+  })
+
+  it('orders projects by recent activity and labels rows with that activity time', async () => {
+    const now = Date.now()
+    mocks.listProjects.mockResolvedValue([
+      {
+        ...project,
+        id: 'prj_stale',
+        name: 'Stale',
+        canonical: '/work/stale',
+        time: { created: now - 10_800_000, updated: now - 300_000, active: now - 10_800_000 },
+      },
+      {
+        ...project,
+        id: 'prj_recent',
+        name: 'Recent',
+        canonical: '/work/recent',
+        time: { created: now - 10_800_000, updated: now - 10_800_000, active: now - 300_000 },
+      },
+    ])
+
+    const { container } = renderProjectList()
+
+    await screen.findByText('Recent')
+
+    const text = container.textContent ?? ''
+    expect(text.indexOf('Recent')).toBeGreaterThan(-1)
+    expect(text.indexOf('Recent')).toBeLessThan(text.indexOf('5m ago'))
+    expect(text.indexOf('5m ago')).toBeLessThan(text.indexOf('Stale'))
+    expect(text.indexOf('Stale')).toBeLessThan(text.indexOf('3h ago'))
+  })
+
+  it('falls back to the update time when a project has no activity time', async () => {
+    const now = Date.now()
+    mocks.listProjects.mockResolvedValue([
+      {
+        ...project,
+        id: 'prj_older',
+        name: 'Older',
+        canonical: '/work/older',
+        time: { created: now - 10_800_000, updated: now - 10_800_000 },
+      },
+      {
+        ...project,
+        id: 'prj_newer',
+        name: 'Newer',
+        canonical: '/work/newer',
+        time: { created: now - 10_800_000, updated: now - 300_000 },
+      },
+    ])
+
+    const { container } = renderProjectList()
+
+    await screen.findByText('Newer')
+
+    const text = container.textContent ?? ''
+    expect(text.indexOf('Newer')).toBeGreaterThan(-1)
+    expect(text.indexOf('Newer')).toBeLessThan(text.indexOf('5m ago'))
+    expect(text.indexOf('5m ago')).toBeLessThan(text.indexOf('Older'))
+    expect(text.indexOf('Older')).toBeLessThan(text.indexOf('3h ago'))
   })
 
   it('opens the remote project page when a project card is clicked', async () => {
@@ -340,6 +401,32 @@ describe('RemoteProjectList', () => {
     await waitFor(() => {
       expect(screen.getByText('No projects on this server yet')).toBeInTheDocument()
     })
+  })
+
+  it('shows the load error when no project data is cached', async () => {
+    mocks.listProjects.mockRejectedValue(new Error('offline'))
+
+    renderProjectList()
+
+    expect(await screen.findByText('Could not load projects')).toBeInTheDocument()
+  })
+
+  it('keeps the cached project list when a refetch fails', async () => {
+    const queryClient = createQueryClient()
+    mocks.listProjects.mockResolvedValueOnce([project]).mockRejectedValueOnce(new Error('offline'))
+
+    renderProjectList('srv_kitchen', queryClient)
+
+    await screen.findByText('App')
+    await act(async () => {
+      await queryClient.refetchQueries()
+    })
+
+    await waitFor(() => {
+      expect(mocks.listProjects).toHaveBeenCalledTimes(2)
+    })
+    expect(screen.getByText('App')).toBeInTheDocument()
+    expect(screen.queryByText('Could not load projects')).not.toBeInTheDocument()
   })
 
   it('scopes the list to the given server rather than the route', async () => {

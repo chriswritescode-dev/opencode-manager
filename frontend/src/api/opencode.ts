@@ -37,6 +37,14 @@ export type OpenCodeLocationInfo = Awaited<ReturnType<OpenCodeApi['location']['g
 
 export type OpenCodeProject = Awaited<ReturnType<OpenCodeApi['project']['list']>>[number]
 
+/**
+ * The timestamp a project list sorts and labels on: the server's last-activity time, falling back
+ * to the record's update time for a project that has never recorded activity.
+ */
+export function projectActivityTimestamp(project: OpenCodeProject): number {
+  return project.time.active || project.time.updated
+}
+
 export type VcsInfo = Awaited<ReturnType<OpenCodeApi['vcs']['get']>>['data']
 
 export type VcsFileStatus = Awaited<ReturnType<OpenCodeApi['vcs']['status']>>['data'][number]
