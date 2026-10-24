@@ -2,7 +2,7 @@
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { createBrowserRouter, RouterProvider, Outlet, useNavigate, useLocation, useParams, Navigate } from 'react-router-dom'
 import { useEffect, useRef, useCallback, type ReactNode } from 'react'
-import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
+import { DEVICE_PAIRING_PATH, LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { Toaster } from 'sonner'
 import { Repos } from './pages/Repos'
 import { RepoDetail } from './pages/RepoDetail'
@@ -12,6 +12,7 @@ import { SessionDetail } from './pages/SessionDetail'
 import { Schedules } from './pages/Schedules'
 import { GlobalSchedules } from './pages/GlobalSchedules'
 import { Login } from './pages/Login'
+import { Pair } from './pages/Pair'
 import { Register } from './pages/Register'
 import { Setup } from './pages/Setup'
 import { AssistantRedirect } from './pages/AssistantRedirect'
@@ -43,6 +44,7 @@ import { useOpenCodeFailureToast } from '@/hooks/useOpenCodeFailureToast'
 import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 import { useGlobalShortcutActions } from '@/hooks/useGlobalShortcutActions'
 import { useSidebarServerRouteSync } from '@/hooks/useSidebarServerSelection'
+import { usePushSubscriptionSessionSync } from '@/hooks/usePushSubscriptionSessionSync'
 import { sessionQueryOptions } from '@/hooks/useOpenCode'
 import { RestartServerDialog } from '@/components/settings/RestartServerDialog'
 
@@ -155,6 +157,11 @@ function SidebarServerRouteSync() {
   return null
 }
 
+function PushSubscriptionSessionSync() {
+  usePushSubscriptionSessionSync()
+  return null
+}
+
 function ServerScope({ children }: { children: ReactNode }) {
   const { serverId } = useParams<{ serverId: string }>()
 
@@ -178,7 +185,7 @@ function RootLayout() {
   )
 }
 
-function AppShell() {
+export function AppShell() {
   const navigate = useNavigate()
   const location = useLocation()
   const rootRef = useRef<HTMLDivElement>(null)
@@ -252,6 +259,7 @@ function AppShell() {
         <KeyboardShortcutsProvider>
           <GlobalShortcuts />
           <SidebarServerRouteSync />
+          <PushSubscriptionSessionSync />
           <div className="flex h-dvh w-full min-w-0 flex-col">
             <PwaUpdatePrompt />
             <div ref={rootRef} className="flex flex-1 min-h-0 w-full min-w-0">
@@ -283,6 +291,10 @@ const router = createBrowserRouter([
         path: '/login',
         element: <Login />,
         loader: loginLoader,
+      },
+      {
+        path: DEVICE_PAIRING_PATH,
+        element: <Pair />,
       },
       {
         path: '/register',

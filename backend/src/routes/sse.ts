@@ -5,11 +5,17 @@ import { LOCAL_OPENCODE_SERVER_ID, SSESubscribeSchema, SSEVisibilitySchema } fro
 import { logger } from '../utils/logger'
 import { DEFAULTS } from '@opencode-manager/shared/config'
 import { createQueuedSSEWriter } from './sse-writer'
+import { registerSessionConnection } from '../services/session-connections'
+import type { Session } from '../auth'
 
 const { HEARTBEAT_INTERVAL_MS } = DEFAULTS.SSE
 
+interface SSERouteVariables {
+  session?: Session['session']
+}
+
 export function createSSERoutes() {
-  const app = new Hono()
+  const app = new Hono<{ Variables: SSERouteVariables }>()
 
   app.get('/stream', async (c) => {
     const directoriesParam = c.req.query('directories')
@@ -48,15 +54,27 @@ export function createSSERoutes() {
         directories
       )
 
+      let endStream: () => void = () => {}
+      const streamEnded = new Promise<void>((resolve) => {
+        endStream = resolve
+      })
+
+      const sessionId = c.get('session')?.id
+      const unregisterSession = sessionId === undefined
+        ? () => {}
+        : registerSessionConnection(sessionId, () => writer.abort())
+
       writer.onAbort(() => {
+        unregisterSession()
         queuedWriter.close()
         clearInterval(heartbeatInterval)
         cleanup()
+        endStream()
       })
 
       queuedWriter.writeSSE('connected', JSON.stringify({ clientId, directories, ...sseAggregator.getConnectionStatus() }))
 
-      await new Promise(() => {})
+      await streamEnded
     })
   })
 

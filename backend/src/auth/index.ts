@@ -5,6 +5,9 @@ import { Database } from 'bun:sqlite'
 import { ENV, getTrustedOrigins } from '@opencode-manager/shared/config/env'
 import { AUTH_COOKIE_PREFIX } from './cookies'
 import { AUTH_SOCKET_IP_HEADER } from './client-ip'
+import { devicePairing } from './device-pairing'
+import { closeSessionConnections } from '../services/session-connections'
+import { deletePushSubscriptionsForSession } from '../db/push-subscriptions'
 
 export type AuthInstance = ReturnType<typeof createAuth>
 
@@ -53,6 +56,13 @@ export function createAuth(db: Database) {
     },
     socialProviders: Object.keys(socialProviders).length > 0 ? socialProviders : undefined,
     databaseHooks: {
+      session: {
+        delete: {
+          after: async (session) => {
+            closeSessionConnections(session.id)
+          },
+        },
+      },
       user: {
         create: {
           before: async (user, context) => {
@@ -72,6 +82,9 @@ export function createAuth(db: Database) {
           residentKey: 'required',
           userVerification: 'required',
         },
+      }),
+      devicePairing({
+        onDeviceRevoked: (sessionId) => deletePushSubscriptionsForSession(db, sessionId),
       }),
     ],
     session: {
@@ -110,6 +123,7 @@ export type Session = {
     updatedAt: Date
     ipAddress?: string | null
     userAgent?: string | null
+    deviceName?: string | null
   }
   user: {
     id: string

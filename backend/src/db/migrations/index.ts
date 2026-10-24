@@ -37,6 +37,8 @@ import migration202610181200 from './202610181200-opencode-servers'
 import migration202610181300 from './202610181300-session-server-scope'
 import migration202610181310 from './202610181310-multi-run-targets'
 import migration202610181320 from './202610181320-remote-schedule-targets'
+import migration202610221800 from './202610221800-session-device-name'
+import migration202610231200 from './202610231200-push-subscription-session-id'
 
 export const allMigrations: Migration[] = [
   migration001,
@@ -77,4 +79,6 @@ export const allMigrations: Migration[] = [
   migration202610181300,
   migration202610181310,
   migration202610181320,
+  migration202610221800,
+  migration202610231200,
 ]

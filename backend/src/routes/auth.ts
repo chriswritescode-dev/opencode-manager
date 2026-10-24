@@ -1,10 +1,10 @@
 import { Hono } from 'hono'
+import type { Database } from 'bun:sqlite'
 import { isAdminConfigured, type AuthInstance } from '../auth'
 import { applyClientIpHeaders, resolveSocketIp } from '../auth/client-ip'
-import { Database } from 'bun:sqlite'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { logger } from '../utils/logger'
-import { hashPassword } from 'better-auth/crypto'
+import { deletePushSubscriptionsForSessions } from '../db/push-subscriptions'
 
 export function createAuthRoutes(auth: AuthInstance): Hono {
   const app = new Hono()
@@ -23,20 +23,28 @@ export async function syncAdminFromEnv(auth: AuthInstance, db: Database): Promis
   const adminEmail = ENV.AUTH.ADMIN_EMAIL!
   const adminPassword = ENV.AUTH.ADMIN_PASSWORD!
 
-  const existingUser = db.prepare('SELECT id, email FROM "user" WHERE lower(email) = lower(?)').get(adminEmail) as { id: string; email: string } | undefined
+  const ctx = await auth.$context
+  const existingAdmin = await ctx.adapter.findOne<{ id: string }>({
+    model: 'user',
+    where: [{ field: 'email', value: adminEmail, mode: 'insensitive' }],
+  })
 
-  if (existingUser) {
+  if (existingAdmin) {
     if (ENV.AUTH.ADMIN_PASSWORD_RESET) {
-      const hashedPassword = await hashPassword(adminPassword)
-      const resetAdminCredentials = db.transaction(() => {
-        db.prepare('UPDATE "account" SET password = ? WHERE "userId" = ? AND "providerId" = ?').run(
-          hashedPassword,
-          existingUser.id,
-          'credential'
-        )
-        db.prepare('DELETE FROM "session" WHERE "userId" = ?').run(existingUser.id)
-      })
-      resetAdminCredentials()
+      const credentialAccount = (await ctx.internalAdapter.findAccounts(existingAdmin.id))
+        .find((account) => account.providerId === 'credential')
+
+      if (credentialAccount) {
+        await ctx.internalAdapter.updateAccount(credentialAccount.id, {
+          password: await ctx.password.hash(adminPassword),
+        })
+      } else {
+        logger.warn(`No credential account found for ${adminEmail}; skipped the password reset`)
+      }
+
+      const sessions = await ctx.internalAdapter.listSessions(existingAdmin.id)
+      await ctx.internalAdapter.deleteUserSessions(existingAdmin.id)
+      deletePushSubscriptionsForSessions(db, sessions.map((session) => session.id))
       logger.info(`Admin password reset from environment for ${adminEmail}`)
       logger.warn('Remove ADMIN_PASSWORD_RESET=true from environment after password reset')
     }
@@ -57,7 +65,7 @@ export async function syncAdminFromEnv(auth: AuthInstance, db: Database): Promis
   }
 }
 
-export function createAuthInfoRoutes(auth: AuthInstance, db: Database) {
+export function createAuthInfoRoutes(auth: AuthInstance) {
   const app = new Hono()
 
   app.get('/config', async (c) => {
@@ -75,13 +83,13 @@ export function createAuthInfoRoutes(auth: AuthInstance, db: Database) {
 
     enabledProviders.push('passkey')
 
-    const hasUsers = db.prepare('SELECT COUNT(*) as count FROM "user"').get() as { count: number }
+    const userCount = await (await auth.$context).adapter.count({ model: 'user' })
     const adminConfigured = isAdminConfigured()
     
     return c.json({
       enabledProviders,
       registrationEnabled: !adminConfigured,
-      isFirstUser: hasUsers.count === 0,
+      isFirstUser: userCount === 0,
       adminConfigured,
     })
   })

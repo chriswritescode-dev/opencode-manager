@@ -7,7 +7,9 @@ import { SettingsService } from '../services/settings'
 import { writeFileContent, readFileContent, fileExists } from '../services/file-operations'
 import { archiveBrokenOpenCodeConfigFile, deleteOpenCodeConfigFile } from '../services/opencode-config-file'
 import { reloadOpenCodeOrMarkRestartPending, restoreLastKnownGoodOpenCodeConfig } from '../services/opencode-config-apply'
+import { RemoteAccessHeadersService } from '../services/remote-access-headers'
 import { createOpenCodeConfigRoutes } from './opencode-config'
+import { createRemoteAccessHeaderRoutes } from './remote-access-headers'
 import type { OpenCodeClient } from '../services/opencode/client'
 import { getAgentsMdPath } from '@opencode-manager/shared/config/env'
 import {
@@ -476,6 +478,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
   // OpenCode Config routes
   app.route('/opencode-config', createOpenCodeConfigRoutes(settingsService, openCodeClient))
+  app.route('/remote-access-headers', createRemoteAccessHeaderRoutes(new RemoteAccessHeadersService(db)))
 
   app.post('/opencode-restart', async (c) => {
     try {

@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { Hono } from 'hono'
+import { Database } from 'bun:sqlite'
 import { createNotificationRoutes } from '../../src/routes/notifications'
-import type { NotificationService } from '../../src/services/notification'
+import { NotificationService } from '../../src/services/notification'
+import type { Session } from '../../src/auth'
 
 interface NotificationServiceStub {
   getVapidPublicKey: ReturnType<typeof vi.fn>
@@ -82,6 +85,7 @@ describe('Notification Routes', () => {
         'p256dh-key',
         'auth-key',
         'Phone',
+        undefined,
       )
     })
 
@@ -106,7 +110,80 @@ describe('Notification Routes', () => {
         'p256dh-key',
         'auth-key',
         undefined,
+        undefined,
       )
+    })
+
+    it('saves the session of the device that subscribed', async () => {
+      service.saveSubscription.mockReturnValue({ id: 3 })
+
+      const sessionApp = new Hono<{ Variables: { session?: Session['session'] } }>()
+      sessionApp.use('*', async (c, next) => {
+        c.set('session', { id: 'ses_phone' } as Session['session'])
+        await next()
+      })
+      sessionApp.route('/', createNotificationRoutes(service as unknown as NotificationService))
+
+      const res = await sessionApp.fetch(new Request('http://localhost/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          endpoint: 'https://push.example.com/abc',
+          keys: { p256dh: 'p256dh-key', auth: 'auth-key' },
+          deviceName: 'Phone',
+        }),
+      }))
+
+      expect(res.status).toBe(200)
+      expect(service.saveSubscription).toHaveBeenCalledWith(
+        'default',
+        'https://push.example.com/abc',
+        'p256dh-key',
+        'auth-key',
+        'Phone',
+        'ses_phone',
+      )
+    })
+
+    it('updates the stored session id and keeps the device name when the same endpoint subscribes again without one', async () => {
+      const db = new Database(':memory:')
+      const service = new NotificationService(db)
+      const endpoint = 'https://push.example.com/phone'
+      const subscriptionBody = (deviceName?: string) => JSON.stringify({
+        endpoint,
+        keys: { p256dh: 'p256dh-key', auth: 'auth-key' },
+        ...(deviceName ? { deviceName } : {}),
+      })
+
+      try {
+        const subscribes: Array<[sessionId: string, deviceName: string | undefined]> = [
+          ['ses_old', 'Phone'],
+          ['ses_new', undefined],
+        ]
+
+        for (const [sessionId, deviceName] of subscribes) {
+          const sessionApp = new Hono<{ Variables: { session?: Session['session'] } }>()
+          sessionApp.use('*', async (c, next) => {
+            c.set('session', { id: sessionId } as Session['session'])
+            await next()
+          })
+          sessionApp.route('/', createNotificationRoutes(service))
+
+          const res = await sessionApp.fetch(new Request('http://localhost/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: subscriptionBody(deviceName),
+          }))
+          expect(res.status).toBe(200)
+        }
+
+        const rows = db
+          .prepare('SELECT session_id, device_name FROM push_subscriptions WHERE endpoint = ?')
+          .all(endpoint)
+        expect(rows).toEqual([{ session_id: 'ses_new', device_name: 'Phone' }])
+      } finally {
+        db.close()
+      }
     })
 
     it('returns 400 for invalid subscription data', async () => {

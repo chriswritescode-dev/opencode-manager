@@ -10,6 +10,7 @@ import { createRepoTerminalSocketRoutes } from './routes/repo-terminal-socket'
 import { createIPCServer, type IPCServer } from './ipc/ipcServer'
 import { GitAuthService } from './services/git-auth'
 import { createSettingsRoutes } from './routes/settings'
+import { createDevicePairingRoutes } from './routes/device-pairing'
 import { createHealthRoutes } from './routes/health'
 import { createTTSRoutes, cleanupExpiredCache } from './routes/tts';
 import { createSTTRoutes } from './routes/stt'
@@ -61,6 +62,7 @@ import { sseAggregator } from './services/sse-aggregator'
 import { RemoteServerEventHub } from './services/remote-server-events'
 import { ensureDirectoryExists, writeFileContent, fileExists } from './services/file-operations'
 import { SettingsService } from './services/settings'
+import { RemoteAccessHeadersService } from './services/remote-access-headers'
 import { SessionPermissionModeService } from './services/session-permission-modes'
 import { SessionSandboxService } from './services/session-sandbox'
 import { SessionAncestry } from './services/session-ancestry'
@@ -381,7 +383,7 @@ const previewSessionStore = new PreviewSessionStore()
 const previewAvailability = createPreviewAvailability(false)
 
 app.route('/api/auth', createAuthRoutes(auth))
-app.route('/api/auth-info', createAuthInfoRoutes(auth, db))
+app.route('/api/auth-info', createAuthInfoRoutes(auth))
 app.route('/api/health', createHealthRoutes(db, openCodeSupervisor))
 
 app.route('/api/mcp-oauth-proxy', createMcpOauthProxyRoutes(openCodeClient, requireAuth))
@@ -394,6 +396,12 @@ protectedApi.use('/*', requireAuth)
 protectedApi.route('/repos', createRepoTerminalSocketRoutes(db, gitAuthService, openCodeClient, terminalService, upgradeWebSocket))
 protectedApi.route('/repos', createRepoRoutes(db, gitAuthService, scheduleService, openCodeClient, terminalService, projectConfigService, repoWorkspaces))
 protectedApi.route('/settings', createSettingsRoutes(db, gitAuthService, openCodeClient, openCodeSupervisor))
+protectedApi.route('/device-pairing', createDevicePairingRoutes({
+  mintPairingCode: (headers) => auth.api.createDevicePairingCode({ headers }),
+  remoteAccessHeaders: new RemoteAccessHeadersService(db),
+  readAllowPrivateNetworkHttp: () =>
+    settingsService.getSettings('default').preferences.devicePairing?.allowPrivateNetworkHttp === true,
+}))
   protectedApi.route('/files', createFileRoutes())
   protectedApi.route('/filesystem', createFilesystemRoutes())
 protectedApi.route('/providers', createProvidersRoutes(openCodeClient))

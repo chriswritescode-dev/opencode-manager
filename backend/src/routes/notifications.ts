@@ -2,11 +2,16 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { PushSubscriptionRequestSchema } from "@opencode-manager/shared/schemas";
 import type { NotificationService } from "../services/notification";
+import type { Session } from "../auth";
+
+interface NotificationRouteVariables {
+  session?: Session['session'];
+}
 
 export function createNotificationRoutes(
   notificationService: NotificationService
 ) {
-  const app = new Hono();
+  const app = new Hono<{ Variables: NotificationRouteVariables }>();
 
   app.get("/vapid-public-key", (c) => {
     const publicKey = notificationService.getVapidPublicKey();
@@ -21,6 +26,7 @@ export function createNotificationRoutes(
 
   app.post("/subscribe", async (c) => {
     const userId = c.req.query('userId') || 'default'
+    const sessionId = c.get('session')?.id
     const body = await c.req.json();
     const parsed = PushSubscriptionRequestSchema.safeParse(body);
 
@@ -35,7 +41,8 @@ export function createNotificationRoutes(
       endpoint,
       keys.p256dh,
       keys.auth,
-      deviceName
+      deviceName,
+      sessionId
     );
 
     return c.json({ subscription });

@@ -3,6 +3,7 @@ import { Hono } from 'hono'
 import type { Context, MiddlewareHandler } from 'hono'
 import { createNodeWebSocket, type NodeWebSocket } from '@hono/node-ws'
 import type { PreviewPort } from '@opencode-manager/shared/schemas'
+import { isLoopbackHost } from '@opencode-manager/shared/utils'
 import { AUTH_COOKIE_PREFIX } from '../../auth/cookies'
 import { buildProxyResponseHeaders, filterProxyHeaders } from '../../utils/proxy-headers'
 import { bridgeWebSocket, createBridgedSocketEvents } from '../../utils/websocket-bridge'
@@ -135,9 +136,7 @@ function rewriteLocalLocation(location: string, port: number): string | null {
   } catch {
     return null
   }
-  const isLocalHost =
-    parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '[::1]' || parsed.hostname === '::1'
-  if (!isLocalHost) return null
+  if (!isLoopbackHost(parsed.hostname)) return null
   const locationPort = parsed.port
     ? Number.parseInt(parsed.port, 10)
     : parsed.protocol === 'https:'

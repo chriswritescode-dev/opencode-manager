@@ -205,6 +205,12 @@ export const DEFAULT_SESSION_DEFAULTS = {
   goalMaxContinuations: 20,
 } satisfies SessionDefaults;
 
+export const DevicePairingPreferencesSchema = z.object({
+  allowPrivateNetworkHttp: z.boolean().optional(),
+});
+
+export type DevicePairingPreferences = z.infer<typeof DevicePairingPreferencesSchema>;
+
 export const UserPreferencesSchema = z.object({
   theme: z.enum(["dark", "light", "system"]),
   colorTheme: ColorThemeIdSchema.optional(),
@@ -236,6 +242,7 @@ export const UserPreferencesSchema = z.object({
   serverEnvVars: z.array(ServerEnvVarSchema).optional(),
   sandbox: SandboxPreferencesSchema.optional(),
   sessionDefaults: SessionDefaultsSchema.optional(),
+  devicePairing: DevicePairingPreferencesSchema.optional(),
   disabledDefaultServerEnvVars: z.array(z.string()).optional(),
 });
 
