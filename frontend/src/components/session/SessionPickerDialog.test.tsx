@@ -357,12 +357,18 @@ describe('SessionPickerDialog', () => {
     const user = userEvent.setup()
     renderPicker()
 
+    await waitFor(() => expect(combobox()).toHaveFocus())
+
+    const sessionsTab = screen.getByRole('tab', { name: 'This project' })
     act(() => {
-      screen.getByRole('tab', { name: 'This project' }).focus()
+      sessionsTab.focus()
     })
+    expect(sessionsTab).toHaveFocus()
+
     await user.keyboard('{Enter}')
 
-    expect(screen.getByRole('tab', { name: 'All sessions', selected: true })).toBeInTheDocument()
+    expect(await screen.findByRole('tab', { name: 'All sessions', selected: true })).toBeInTheDocument()
+    expect(localStorage.getItem('oc:session-picker:all-projects')).toBe('true')
   })
 
   it('labels the sessions tab Sessions and lists every project without a current repo', () => {
