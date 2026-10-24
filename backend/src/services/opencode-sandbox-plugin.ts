@@ -1,15 +1,19 @@
+import { ENV_NAME_PATTERN, SANDBOX_CONTROL_ENV_PREFIXES } from '@opencode-manager/shared/schemas'
 import { sandboxPlanTimeoutMs, SANDBOX_UNAVAILABLE_PREFIX } from './sandbox/command'
 import {
-  SANDBOX_FORWARDED_ENV_NAMES,
+  SANDBOX_SHELL_ENV_FORWARD,
   SANDBOX_SHELL_ENV_NAME,
   SANDBOX_SHELL_ENV_WORKDIR,
 } from './sandbox/shell-shim'
+import {
+  SANDBOX_SHELL_MARKER_PREFIX,
+  SANDBOX_SHELL_STATE_KEY,
+  SECRET_MASK_STORE_SOURCE,
+} from './opencode-plugin-state'
 
 export const SANDBOX_PLAN_TIMEOUT_MS = sandboxPlanTimeoutMs()
 
 export const SANDBOX_CLAIM_TIMEOUT_MS = 15000
-
-export const SANDBOX_SHELL_STATE_KEY = 'ocm-sandbox.shell-state.v2'
 
 const SANDBOX_DOCKER_HINT = '\n\nCommands run inside an isolated sandbox microVM that includes Docker (docker, docker compose, docker buildx). The Docker daemon is not started automatically: run `ocm-dockerd-start` once before your first docker command; it is safe to run again and exits immediately if the daemon is already running.'
 
@@ -24,27 +28,50 @@ var CLAIM_TIMEOUT_MS = ${SANDBOX_CLAIM_TIMEOUT_MS}
 var SHELL_SHIM_PATH = ${JSON.stringify(shellShimPath)}
 var ENV_WORKDIR = ${JSON.stringify(SANDBOX_SHELL_ENV_WORKDIR)}
 var ENV_SANDBOX_NAME = ${JSON.stringify(SANDBOX_SHELL_ENV_NAME)}
-var FORWARDED_ENV_NAMES = ${JSON.stringify(SANDBOX_FORWARDED_ENV_NAMES)}
+var ENV_FORWARD = ${JSON.stringify(SANDBOX_SHELL_ENV_FORWARD)}
+var ENV_NAME_PATTERN = new RegExp(${JSON.stringify(ENV_NAME_PATTERN.source)})
+var CONTROL_ENV_PREFIXES = ${JSON.stringify(SANDBOX_CONTROL_ENV_PREFIXES)}
 var SERVICE_SETTINGS_PATH = path.resolve(${JSON.stringify(serviceSettingsPath)})
 var SERVICE_SETTINGS_DIRECTORY = path.dirname(SERVICE_SETTINGS_PATH)
 var SERVICE_SETTINGS_DENIED = 'OpenCode Manager denies access to its service settings file (service.json), which holds the OpenCode server password.'
 var DOCKER_HINT = ${JSON.stringify(SANDBOX_DOCKER_HINT)}
 var SHELL_TOOL_NAME = 'shell'
-var SHELL_MARKER_PREFIX = 'ocm-sandbox-required-'
-var SHELL_MARKER_PATTERN = /^(ocm-sandbox-required-[0-9a-f-]{36}) && /
+var SHELL_MARKER_PREFIX = ${JSON.stringify(SANDBOX_SHELL_MARKER_PREFIX)}
+var SHELL_MARKER_PATTERN = /^(${SANDBOX_SHELL_MARKER_PREFIX}[0-9a-f-]{36}) && /
 var PLAN_NAME_PATTERN = /^ocm-session-[0-9a-f]{12}$/
 var ARBITER_KEY = Symbol.for('opencode.sandbox-arbiter.v1')
 var SHELL_STATE_KEY = Symbol.for(${JSON.stringify(SANDBOX_SHELL_STATE_KEY)})
 var OCM_PROVIDER_ID = 'ocm'
 var TIER_RANK = { workload: 3, explicit: 2, default: 1 }
 
+${SECRET_MASK_STORE_SOURCE}
+
+function isControlEnvName(name) {
+  return CONTROL_ENV_PREFIXES.some(function (prefix) { return name.indexOf(prefix) === 0 })
+}
+
 function shellSandboxState() {
   var state = globalThis[SHELL_STATE_KEY]
   if (state === undefined) {
-    state = { pendingMarkers: new Map(), sandboxedCallIDs: new Set(), foreignOwners: new Map() }
+    state = { pendingMarkers: new Map(), sandboxedCallIDs: new Set(), foreignOwners: new Map(), inFlightSandboxedCommands: new Map() }
     globalThis[SHELL_STATE_KEY] = state
   }
   return state
+}
+
+function pinInFlightSandboxCommand(command, markedCommand) {
+  var inFlight = shellState.inFlightSandboxedCommands
+  inFlight.set(command, (inFlight.get(command) || 0) + 1)
+  inFlight.set(markedCommand, (inFlight.get(markedCommand) || 0) + 1)
+}
+
+function releaseInFlightSandboxCommand(command, markedCommand) {
+  var inFlight = shellState.inFlightSandboxedCommands
+  for (var key of [command, markedCommand]) {
+    var count = inFlight.get(key) || 0
+    if (count <= 1) inFlight.delete(key)
+    else inFlight.set(key, count - 1)
+  }
 }
 
 var shellState = shellSandboxState()
@@ -312,13 +339,18 @@ async function pinSandboxShell(event, sessionID, locationDirectory) {
     throw unavailable('the sandbox shell shim is missing at ' + SHELL_SHIM_PATH)
   }
   var plan = await planSandboxShell(event.cwd, sessionID, locationDirectory)
+  var forwardNames = []
   if (plan.env !== null && typeof plan.env === 'object') {
-    for (var name of FORWARDED_ENV_NAMES) {
-      if (typeof plan.env[name] === 'string') {
-        event.env[name] = plan.env[name]
-      }
+    for (var name of Object.keys(plan.env)) {
+      var value = plan.env[name]
+      if (typeof value !== 'string') continue
+      if (!ENV_NAME_PATTERN.test(name)) continue
+      if (isControlEnvName(name)) continue
+      event.env[name] = value
+      forwardNames.push(name)
     }
   }
+  replaceMaskValues(event.cwd, plan.mask)
   if (!lockAccessor(event, 'shell', SHELL_SHIM_PATH)) {
     throw unavailable('sandbox enforcement could not pin the sandbox shell; aborting before the command runs on the host')
   }
@@ -327,6 +359,9 @@ async function pinSandboxShell(event, sessionID, locationDirectory) {
   }
   if (!lockAccessor(event.env, ENV_SANDBOX_NAME, plan.name)) {
     throw unavailable('sandbox enforcement could not pin the sandbox session name; aborting before the command runs on the host')
+  }
+  if (!lockAccessor(event.env, ENV_FORWARD, forwardNames.join(' '))) {
+    throw unavailable('sandbox enforcement could not pin the forwarded environment list; aborting before the command runs on the host')
   }
 }
 
@@ -348,11 +383,14 @@ async function wrapSandboxedShellTool(ctx) {
             throw unavailable('refusing to run a sandboxed shell call without a command')
           }
           var marker = SHELL_MARKER_PREFIX + randomUUID()
+          var markedCommand = marker + ' && ' + input.command
           shellState.pendingMarkers.set(marker, { callID: context.id, sessionID: context.sessionID })
           shellState.sandboxedCallIDs.add(context.id)
+          pinInFlightSandboxCommand(input.command, markedCommand)
           try {
-            return await execute({ ...input, command: marker + ' && ' + input.command }, context)
+            return await execute({ ...input, command: markedCommand }, context)
           } finally {
+            releaseInFlightSandboxCommand(input.command, markedCommand)
             shellState.pendingMarkers.delete(marker)
           }
         } finally {

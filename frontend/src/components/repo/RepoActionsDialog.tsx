@@ -24,11 +24,11 @@ import { randomId } from '@/lib/utils'
 import type {
   ProjectAction,
   ProjectActionIcon,
-  ProjectConfigResponse,
   ProjectItemSource,
 } from '@opencode-manager/shared/types'
 import { ACTION_ICON_OPTIONS, actionIcon } from './projectActionIcons'
 import { TrustExecutableList } from './TrustExecutableList'
+import { hasExecutableContent, type RepoFileExecutable } from './trustExecutable'
 
 interface ActionDraft {
   id: string
@@ -162,8 +162,6 @@ function ActionForm({ draft, isSaving, onChange, onSave, onCancel }: ActionFormP
   )
 }
 
-type RepoFileExecutable = NonNullable<ProjectConfigResponse['repoFile']['executable']>
-
 interface TrustReview {
   hash: string
   directory: string | undefined
@@ -281,7 +279,9 @@ export function RepoActionsContent({ repoId, directory, open }: RepoActionsConte
     setSetupCommands((current) => [...current, ''])
   }
 
-  const needsTrust = Boolean(repoFile?.exists && !repoFile.trusted && repoFile.hash && repoFile.executable)
+  const needsTrust = Boolean(
+    repoFile?.exists && !repoFile.trusted && repoFile.hash && hasExecutableContent(repoFile.executable),
+  )
 
   const openTrustReview = () => {
     if (!repoFile?.hash || !repoFile.executable) return

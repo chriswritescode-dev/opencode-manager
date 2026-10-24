@@ -6,7 +6,8 @@ import path from 'node:path'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 import { sessionSandboxName } from '../../../src/services/sandbox/command'
 import {
-  SANDBOX_FORWARDED_ENV_NAMES,
+  SANDBOX_MAX_FORWARDED_GIT_CONFIGS,
+  SANDBOX_SHELL_ENV_FORWARD,
   SANDBOX_SHELL_ENV_NAME,
   SANDBOX_SHELL_ENV_WORKDIR,
 } from '../../../src/services/sandbox/shell-shim'
@@ -37,7 +38,22 @@ function writeArgvCapturingFakeMsb(msbPath: string, captureFile: string): void {
 
 function sandboxShellEnv(overrides: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env = { ...process.env }
-  for (const name of SANDBOX_FORWARDED_ENV_NAMES) delete env[name]
+  const inherited = [
+    'GIT_TERMINAL_PROMPT',
+    'GIT_CONFIG_COUNT',
+    ...Array.from({ length: SANDBOX_MAX_FORWARDED_GIT_CONFIGS }, (_, index) => [
+      `GIT_CONFIG_KEY_${index}`,
+      `GIT_CONFIG_VALUE_${index}`,
+    ]).flat(),
+    'GIT_AUTHOR_NAME',
+    'GIT_AUTHOR_EMAIL',
+    'GIT_COMMITTER_NAME',
+    'GIT_COMMITTER_EMAIL',
+    'GH_TOKEN',
+    'GITHUB_TOKEN',
+    SANDBOX_SHELL_ENV_FORWARD,
+  ]
+  for (const name of inherited) delete env[name]
   return { ...env, ...overrides }
 }
 
@@ -96,7 +112,7 @@ describe('sandbox shell shim', () => {
     }
   })
 
-  it('forwards only the allow-listed credential env into the guest as -e pairs, ahead of the command', async () => {
+  it('forwards exactly the plan-approved names as -e pairs, ahead of the command', async () => {
     const fakeBin = mkdtempSync(path.join(tmpdir(), 'ocm-shim-msb-'))
     const configHome = mkdtempSync(path.join(tmpdir(), 'ocm-shim-config-'))
     const msbPath = path.join(fakeBin, 'msb')
@@ -118,9 +134,12 @@ describe('sandbox shell shim', () => {
         env: sandboxShellEnv({
           [SANDBOX_SHELL_ENV_WORKDIR]: directory,
           [SANDBOX_SHELL_ENV_NAME]: SANDBOX_NAME,
+          [SANDBOX_SHELL_ENV_FORWARD]: 'GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0',
           GIT_CONFIG_COUNT: '1',
           GIT_CONFIG_KEY_0: 'http.https://github.com/.extraheader',
           GIT_CONFIG_VALUE_0: extraheaderValue,
+          GH_TOKEN: 'inherited-must-not-be-forwarded',
+          GIT_AUTHOR_NAME: 'Inherited Author',
           OCM_INTERNAL_TOKEN: 'must-not-be-forwarded',
         }),
       })
@@ -130,19 +149,171 @@ describe('sandbox shell shim', () => {
 
       expect(argv).toContain('-e')
       expect(argv).toContain('GIT_CONFIG_COUNT=1')
+      expect(argv).toContain('GIT_CONFIG_KEY_0=http.https://github.com/.extraheader')
       expect(argv).toContain(`GIT_CONFIG_VALUE_0=${extraheaderValue}`)
 
       const separatorIndex = argv.indexOf('--')
       expect(argv.slice(separatorIndex)).toEqual(['--', 'sh', '-c', 'echo -e sentinel'])
       expect(argv.slice(0, separatorIndex).filter((element) => element === '-e')).toHaveLength(3)
 
+      expect(argv.some((element) => element.startsWith('GH_TOKEN='))).toBe(false)
+      expect(argv.some((element) => element.startsWith('GIT_AUTHOR_NAME='))).toBe(false)
       expect(argv.some((element) => element.startsWith('OCM_INTERNAL_TOKEN='))).toBe(false)
-      for (const element of argv) {
-        if (!element.includes('=') || element === '--') continue
-        const name = element.slice(0, element.indexOf('='))
-        if (!SANDBOX_FORWARDED_ENV_NAMES.includes(name as never)) continue
-        expect(SANDBOX_FORWARDED_ENV_NAMES).toContain(name)
+    } finally {
+      if (originalMsbPath === undefined) {
+        delete process.env.MSB_PATH
+      } else {
+        process.env.MSB_PATH = originalMsbPath
       }
+      rmSync(fakeBin, { recursive: true, force: true })
+      rmSync(configHome, { recursive: true, force: true })
+    }
+  })
+
+  it('forwards nothing but the plan-approved names when the spawn env carries git and GitHub credentials', async () => {
+    const fakeBin = mkdtempSync(path.join(tmpdir(), 'ocm-shim-msb-'))
+    const configHome = mkdtempSync(path.join(tmpdir(), 'ocm-shim-config-'))
+    const msbPath = path.join(fakeBin, 'msb')
+    const captureFile = path.join(fakeBin, 'argv.txt')
+    writeArgvCapturingFakeMsb(msbPath, captureFile)
+    const originalMsbPath = process.env.MSB_PATH
+    process.env.MSB_PATH = msbPath
+    try {
+      vi.resetModules()
+      const shimMod = await import('../../../src/services/sandbox/shell-shim')
+      const commandMod = await import('../../../src/services/sandbox/command')
+      commandMod.overrideSandboxExecutableTrustValidator(() => true)
+      const shimPath = await shimMod.ensureSandboxShellShim(configHome)
+
+      const directory = path.join(getReposPath(), 'foo')
+      const result = spawnSync(shimPath, ['-c', 'echo sentinel'], {
+        encoding: 'utf8',
+        env: sandboxShellEnv({
+          [SANDBOX_SHELL_ENV_WORKDIR]: directory,
+          [SANDBOX_SHELL_ENV_NAME]: SANDBOX_NAME,
+          GH_TOKEN: 'inherited-gh-token',
+          GITHUB_TOKEN: 'inherited-github-token',
+          GIT_CONFIG_COUNT: '1',
+          GIT_CONFIG_KEY_0: 'http.https://github.com/.extraheader',
+          GIT_CONFIG_VALUE_0: 'AUTHORIZATION: basic inherited',
+          GIT_AUTHOR_NAME: 'Inherited Author',
+          GIT_COMMITTER_EMAIL: 'inherited@example.com',
+        }),
+      })
+      expect(result.status).toBe(0)
+
+      const argv = readFileSync(captureFile, 'utf8').split('\0').filter((element) => element !== '')
+
+      expect(argv.filter((element) => element === '-e')).toHaveLength(0)
+      expect(argv).not.toContain('GH_TOKEN=inherited-gh-token')
+      expect(argv).not.toContain('GITHUB_TOKEN=inherited-github-token')
+      expect(argv).not.toContain('GIT_CONFIG_COUNT=1')
+    } finally {
+      if (originalMsbPath === undefined) {
+        delete process.env.MSB_PATH
+      } else {
+        process.env.MSB_PATH = originalMsbPath
+      }
+      rmSync(fakeBin, { recursive: true, force: true })
+      rmSync(configHome, { recursive: true, force: true })
+    }
+  })
+
+  it('skips reserved and invalid forward names without executing anything', async () => {
+    const fakeBin = mkdtempSync(path.join(tmpdir(), 'ocm-shim-names-'))
+    const configHome = mkdtempSync(path.join(tmpdir(), 'ocm-shim-config-'))
+    const msbPath = path.join(fakeBin, 'msb')
+    const captureFile = path.join(fakeBin, 'argv.txt')
+    writeArgvCapturingFakeMsb(msbPath, captureFile)
+    const originalMsbPath = process.env.MSB_PATH
+    process.env.MSB_PATH = msbPath
+    try {
+      vi.resetModules()
+      const shimMod = await import('../../../src/services/sandbox/shell-shim')
+      const commandMod = await import('../../../src/services/sandbox/command')
+      commandMod.overrideSandboxExecutableTrustValidator(() => true)
+      const shimPath = await shimMod.ensureSandboxShellShim(configHome)
+
+      const directory = path.join(getReposPath(), 'foo')
+      const marker = path.join(fakeBin, 'injected.marker')
+      const substitutionName = `$(touch ${marker})`
+      const result = spawnSync(shimPath, ['-c', 'echo invalid-sentinel'], {
+        encoding: 'utf8',
+        env: sandboxShellEnv({
+          [SANDBOX_SHELL_ENV_WORKDIR]: directory,
+          [SANDBOX_SHELL_ENV_NAME]: SANDBOX_NAME,
+          [SANDBOX_SHELL_ENV_FORWARD]: `1BAD A-B ${substitutionName} OCM_INTERNAL_TOKEN MSB_SECRET GOOD_ONE`,
+          '1BAD': 'leading-digit',
+          'A-B': 'dash',
+          [substitutionName]: 'substitution',
+          OCM_INTERNAL_TOKEN: 'reserved-ocm',
+          MSB_SECRET: 'reserved-msb',
+          GOOD_ONE: 'forwarded',
+        }),
+      })
+      expect(result.status).toBe(0)
+      expect(result.stdout).toBe('invalid-sentinel\n')
+      expect(existsSync(marker)).toBe(false)
+
+      const argv = readFileSync(captureFile, 'utf8').split('\0').filter((element) => element !== '')
+      expect(argv.filter((element) => element === '-e')).toHaveLength(1)
+      expect(argv).toContain('GOOD_ONE=forwarded')
+      expect(argv.some((element) => element.startsWith('OCM_INTERNAL_TOKEN='))).toBe(false)
+      expect(argv.some((element) => element.startsWith('MSB_SECRET='))).toBe(false)
+      expect(argv.some((element) => element.startsWith('1BAD='))).toBe(false)
+      expect(argv.some((element) => element.startsWith('A-B='))).toBe(false)
+    } finally {
+      if (originalMsbPath === undefined) {
+        delete process.env.MSB_PATH
+      } else {
+        process.env.MSB_PATH = originalMsbPath
+      }
+      rmSync(fakeBin, { recursive: true, force: true })
+      rmSync(configHome, { recursive: true, force: true })
+    }
+  })
+
+  it('passes forwarded values with spaces, quotes, dollars, and newlines verbatim as single arguments', async () => {
+    const fakeBin = mkdtempSync(path.join(tmpdir(), 'ocm-shim-values-'))
+    const configHome = mkdtempSync(path.join(tmpdir(), 'ocm-shim-config-'))
+    const msbPath = path.join(fakeBin, 'msb')
+    const captureFile = path.join(fakeBin, 'argv.txt')
+    writeArgvCapturingFakeMsb(msbPath, captureFile)
+    const originalMsbPath = process.env.MSB_PATH
+    process.env.MSB_PATH = msbPath
+    try {
+      vi.resetModules()
+      const shimMod = await import('../../../src/services/sandbox/shell-shim')
+      const commandMod = await import('../../../src/services/sandbox/command')
+      commandMod.overrideSandboxExecutableTrustValidator(() => true)
+      const shimPath = await shimMod.ensureSandboxShellShim(configHome)
+
+      const directory = path.join(getReposPath(), 'foo')
+      const plain = 'a b c'
+      const quoted = 'it\'s "quoted"'
+      const dollar = '$HOME ${not_expanded} `backtick`'
+      const multiline = 'line1\nline2'
+      const result = spawnSync(shimPath, ['-c', 'echo verbatim-sentinel'], {
+        encoding: 'utf8',
+        env: sandboxShellEnv({
+          [SANDBOX_SHELL_ENV_WORKDIR]: directory,
+          [SANDBOX_SHELL_ENV_NAME]: SANDBOX_NAME,
+          [SANDBOX_SHELL_ENV_FORWARD]: 'PLAIN QUOTED DOLLAR MULTILINE',
+          PLAIN: plain,
+          QUOTED: quoted,
+          DOLLAR: dollar,
+          MULTILINE: multiline,
+        }),
+      })
+      expect(result.status).toBe(0)
+      expect(result.stdout).toBe('verbatim-sentinel\n')
+
+      const argv = readFileSync(captureFile, 'utf8').split('\0').filter((element) => element !== '')
+      expect(argv.filter((element) => element === '-e')).toHaveLength(4)
+      expect(argv).toContain(`PLAIN=${plain}`)
+      expect(argv).toContain(`QUOTED=${quoted}`)
+      expect(argv).toContain(`DOLLAR=${dollar}`)
+      expect(argv).toContain(`MULTILINE=${multiline}`)
     } finally {
       if (originalMsbPath === undefined) {
         delete process.env.MSB_PATH

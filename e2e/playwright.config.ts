@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
 import { BASE_URL, E2E_ROOT, REPORT_DIR, REPO_ROOT, STORAGE_STATE, TEST_RESULTS_DIR, createServerEnv } from './env'
 
+const serverEnv = createServerEnv()
+
 export default defineConfig({
   testDir: E2E_ROOT,
   outputDir: TEST_RESULTS_DIR,
@@ -43,6 +45,6 @@ export default defineConfig({
     timeout: 180_000,
     reuseExistingServer: false,
     gracefulShutdown: { signal: 'SIGTERM', timeout: 15_000 },
-    env: createServerEnv(),
+    env: { ...serverEnv, E2E_SERVER_ENV_KEYS: Object.keys(serverEnv).join(' ') },
   },
 })

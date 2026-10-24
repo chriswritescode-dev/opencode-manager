@@ -1,5 +1,6 @@
 import { createInternalRoutes } from '../../src/routes/internal'
 import { createStubOpenCodeClient } from './stub-opencode-client'
+import { createStubRepoEnvService } from './stub-repo-env-service'
 
 type CreateInternalRoutesParams = Parameters<typeof createInternalRoutes>
 
@@ -15,6 +16,7 @@ type InternalTestAppOverrides = Partial<{
   multiRuns: CreateInternalRoutesParams[9]
   changeWalkthroughService: CreateInternalRoutesParams[10]
   sessionSandbox: CreateInternalRoutesParams[11]
+  repoEnvService: CreateInternalRoutesParams[12]
 }>
 
 export function createInternalTestApp(
@@ -34,5 +36,6 @@ export function createInternalTestApp(
     overrides.multiRuns ?? ({} as CreateInternalRoutesParams[9]),
     overrides.changeWalkthroughService ?? ({} as CreateInternalRoutesParams[10]),
     overrides.sessionSandbox ?? ({} as CreateInternalRoutesParams[11]),
+    overrides.repoEnvService ?? createStubRepoEnvService(),
   )
 }

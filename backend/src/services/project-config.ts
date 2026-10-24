@@ -31,6 +31,14 @@ const REPO_CONFIG_TRUST_KEY = 'repoConfigTrustHash'
 const REPO_FILE_RELATIVE_PATH = path.join('.ocm', 'project.json')
 const REPO_CONFIG_SYMLINK_MESSAGE = '.ocm/project.json must not be a symbolic link'
 
+function describeZodIssue(issue: { path?: PropertyKey[]; message: string } | undefined): string {
+  if (!issue) {
+    return 'Invalid value'
+  }
+  const issuePath = (issue.path ?? []).map(String).join('.')
+  return issuePath ? `${issuePath}: ${issue.message}` : issue.message
+}
+
 export interface RepoFileState {
   exists: boolean
   file: RepoProjectFile | null
@@ -280,7 +288,7 @@ export class ProjectConfigService {
     }
   }
 
-  private isRepoFileTrusted(projectRepo: Repo, repoFile: RepoFileState): boolean {
+  isRepoFileTrusted(projectRepo: Repo, repoFile: RepoFileState): boolean {
     return (
       repoFile.hash !== null &&
       repoFile.hash === getRepoSetting(this.database, projectRepo.id, REPO_CONFIG_TRUST_KEY)
@@ -306,7 +314,7 @@ export class ProjectConfigService {
 
       const parsed = RepoProjectFileSchema.safeParse(parsedJson)
       if (!parsed.success) {
-        return { exists: true, file: null, hash: null, error: 'Does not match the project file schema' }
+        return { exists: true, file: null, hash: null, error: `Does not match the project file schema: ${describeZodIssue(parsed.error.issues[0])}` }
       }
       return { exists: true, file: parsed.data, hash: this.hashRepoFile(parsed.data) }
     } catch {
@@ -315,7 +323,7 @@ export class ProjectConfigService {
   }
 
   buildRepoFileExecutable(file: RepoProjectFile): NonNullable<ProjectConfigResponse['repoFile']['executable']> {
-    return {
+    const executable: NonNullable<ProjectConfigResponse['repoFile']['executable']> = {
       actions: (file.projectActions ?? []).map((action) => ({
         id: action.id,
         name: action.name,
@@ -325,6 +333,13 @@ export class ProjectConfigService {
       })),
       setup: file.setupWorktree ?? [],
     }
+    if (file.environment !== undefined) {
+      executable.environment = file.environment
+    }
+    if (file.env && Object.keys(file.env).length > 0) {
+      executable.env = file.env
+    }
+    return executable
   }
 
   hashRepoFile(file: RepoProjectFile): string {
@@ -459,7 +474,10 @@ export class ProjectConfigService {
       return false
     }
     const hasExecutable =
-      (state.file.projectActions?.length ?? 0) > 0 || (state.file.setupWorktree?.length ?? 0) > 0
+      (state.file.projectActions?.length ?? 0) > 0 ||
+      (state.file.setupWorktree?.length ?? 0) > 0 ||
+      (state.file.env !== undefined && Object.keys(state.file.env).length > 0) ||
+      state.file.environment !== undefined
     return hasExecutable && !this.isRepoFileTrusted(projectRepo, state)
   }
 

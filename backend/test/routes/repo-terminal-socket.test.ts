@@ -11,6 +11,7 @@ import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { CredentialProvider } from '../../src/services/credential-provider'
 import { startWebSocketServer, type WebSocketTestServer } from '../helpers/websocket-server'
 import { rawWebSocketHandshake } from '../helpers/raw-websocket-handshake'
+import { createStubRepoEnvService } from '../helpers/stub-repo-env-service'
 
 vi.mock('../../src/services/repo', () => ({
   resolveRepoOrAssistant: vi.fn(),
@@ -79,8 +80,9 @@ upstreamApp.get(
 )
 
 const terminalService = new TerminalService(
-  { client: openCodeClient, baseUrl: () => upstreamBase, includeLocalCredentials: true },
+  { client: openCodeClient, baseUrl: () => upstreamBase, includeLocalEnv: true },
   credentialProvider,
+  createStubRepoEnvService(),
 )
 
 const managerApp = new Hono()

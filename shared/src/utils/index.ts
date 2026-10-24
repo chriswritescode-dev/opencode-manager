@@ -1,3 +1,4 @@
+export * from './env-expressions'
 export * from './jsonc'
 export * from './record'
 export * from './repo'

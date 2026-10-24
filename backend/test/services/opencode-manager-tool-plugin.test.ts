@@ -655,7 +655,7 @@ describe('ocm-manager plugin', () => {
   it('rejects non-allow-listed routes without calling the API', async () => {
     const tool = await loadTool(configHome)
     const deniedRoutes = [
-      ['GET', '/git-credentials/gh-env'],
+      ['GET', '/shell-env'],
       ['POST', '/sandbox/shell'],
       ['GET', '/repos/0/mirror/head'],
       ['POST', '/notifications/send'],
@@ -707,7 +707,7 @@ describe('ocm-manager plugin', () => {
     const tool = await loadTool(configHome)
 
     await expect(
-      runTool(tool, { action: 'request', params: { method: 'GET', path: '/repos/x/../../git-credentials/gh-env' } }),
+      runTool(tool, { action: 'request', params: { method: 'GET', path: '/repos/x/../../shell-env' } }),
     ).rejects.toThrow(/is not an allowed OpenCode Manager route/)
     expect(fetchMock).not.toHaveBeenCalled()
   })

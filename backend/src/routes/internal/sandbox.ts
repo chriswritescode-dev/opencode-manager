@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { Database } from 'bun:sqlite'
 import { SandboxRuntimeService } from '../../services/sandbox/runtime'
 import type { SessionSandboxService } from '../../services/session-sandbox'
+import type { RepoEnvService } from '../../services/repo-env'
 import { logger } from '../../utils/logger'
 
 const SandboxShellRequestSchema = z.object({
@@ -12,7 +13,11 @@ const SandboxShellRequestSchema = z.object({
   enforced: z.boolean().optional(),
 })
 
-export function createInternalSandboxRoutes(db: Database, sessionSandbox: SessionSandboxService) {
+export function createInternalSandboxRoutes(
+  db: Database,
+  sessionSandbox: SessionSandboxService,
+  repoEnvService: RepoEnvService,
+) {
   const app = new Hono()
 
   app.get('/sessions/:sessionId', async (c) => {
@@ -40,7 +45,7 @@ export function createInternalSandboxRoutes(db: Database, sessionSandbox: Sessio
     try {
       const target = await sessionSandbox.resolveShellTarget(parsed.data.sessionId)
       return c.json(
-        await new SandboxRuntimeService(db).planShell(
+        await new SandboxRuntimeService(db, repoEnvService).planShell(
           parsed.data.directory,
           { ...target, locationDirectory: parsed.data.locationDirectory },
           parsed.data.enforced === true,
