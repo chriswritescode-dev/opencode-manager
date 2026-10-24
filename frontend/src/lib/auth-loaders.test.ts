@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LoaderFunctionArgs } from 'react-router-dom'
 import { getLoginRedirectTarget, loginLoader, loginRedirectPath, protectedLoader, resolveRedirectTarget } from './auth-loaders'
+import { STORED_AUTH_USER_KEY } from './authSession'
+
+const STORED_USER_KEY_VALUE = { id: 'user-1', email: 'user@example.com', name: 'Ada' }
 
 const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
@@ -52,10 +55,11 @@ describe('auth redirect targets', () => {
 describe('protectedLoader', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
   })
 
   it('redirects an anonymous visitor to login carrying the requested location', async () => {
-    mocks.getSession.mockResolvedValue({ data: null })
+    mocks.getSession.mockResolvedValue({ data: null, error: null })
 
     const result = await protectedLoader(loaderArgs('http://localhost/repos/2?tab=workspaces#session'))
 
@@ -63,9 +67,63 @@ describe('protectedLoader', () => {
   })
 
   it('lets an authenticated visitor through', async () => {
-    mocks.getSession.mockResolvedValue({ data: { user: { id: 'user-1' } } })
+    mocks.getSession.mockResolvedValue({ data: { user: { id: 'user-1' } }, error: null })
 
     await expect(protectedLoader(loaderArgs('http://localhost/repos/2'))).resolves.toBeNull()
+  })
+
+  it('remembers the validated user for an offline cold start', async () => {
+    mocks.getSession.mockResolvedValue({
+      data: { user: { id: 'user-1', email: 'user@example.com', name: 'Ada' } },
+      error: null,
+    })
+
+    await protectedLoader(loaderArgs('http://localhost/repos/2'))
+
+    expect(JSON.parse(localStorage.getItem(STORED_AUTH_USER_KEY) ?? '')).toEqual({
+      id: 'user-1',
+      email: 'user@example.com',
+      name: 'Ada',
+    })
+  })
+
+  it('lets a stored user through when the session read fails transiently', async () => {
+    localStorage.setItem(STORED_AUTH_USER_KEY, JSON.stringify(STORED_USER_KEY_VALUE))
+    mocks.getSession.mockRejectedValue(new TypeError('Failed to fetch'))
+
+    await expect(protectedLoader(loaderArgs('http://localhost/repos/2'))).resolves.toBeNull()
+    expect(localStorage.getItem(STORED_AUTH_USER_KEY)).not.toBeNull()
+  })
+
+  it('lets a stored user through on a 5xx response', async () => {
+    localStorage.setItem(STORED_AUTH_USER_KEY, JSON.stringify(STORED_USER_KEY_VALUE))
+    mocks.getSession.mockResolvedValue({
+      data: null,
+      error: { status: 503, statusText: 'Service Unavailable' },
+    })
+
+    await expect(protectedLoader(loaderArgs('http://localhost/repos/2'))).resolves.toBeNull()
+  })
+
+  it('redirects when a transient failure has no stored user', async () => {
+    mocks.getSession.mockRejectedValue(new TypeError('Failed to fetch'))
+
+    const result = await protectedLoader(loaderArgs('http://localhost/repos/2'))
+
+    expect(redirectLocation(result)).toBe('/login?redirect=%2Frepos%2F2')
+  })
+
+  it.each([
+    ['a 401 response', { status: 401, statusText: 'Unauthorized' }],
+    ['a successful response without a user', null],
+  ])('forgets the stored user and redirects on %s', async (_label, error) => {
+    localStorage.setItem(STORED_AUTH_USER_KEY, JSON.stringify(STORED_USER_KEY_VALUE))
+    mocks.getSession.mockResolvedValue({ data: null, error })
+
+    const result = await protectedLoader(loaderArgs('http://localhost/repos/2'))
+
+    expect(redirectLocation(result)).toBe('/login?redirect=%2Frepos%2F2')
+    expect(localStorage.getItem(STORED_AUTH_USER_KEY)).toBeNull()
   })
 })
 

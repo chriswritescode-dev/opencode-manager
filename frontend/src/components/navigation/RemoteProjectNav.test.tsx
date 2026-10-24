@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { IsRestoringProvider, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { OpenCodeProject } from '@/api/opencode'
 import { RemoteProjectNavList } from './RemoteProjectNav'
 
@@ -132,22 +132,25 @@ function createWrapper(
   queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   }),
+  isRestoring = false,
 ) {
   return ({ children }: { children: React.ReactNode }) => (
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[initialEntry]}>
-        <Routes>
-          <Route
-            path="*"
-            element={
-              <>
-                {children}
-                <LocationSpy />
-              </>
-            }
-          />
-        </Routes>
-      </MemoryRouter>
+      <IsRestoringProvider value={isRestoring}>
+        <MemoryRouter initialEntries={[initialEntry]}>
+          <Routes>
+            <Route
+              path="*"
+              element={
+                <>
+                  {children}
+                  <LocationSpy />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </IsRestoringProvider>
     </QueryClientProvider>
   )
 }
@@ -174,7 +177,11 @@ describe('RemoteProjectNavList', () => {
     mocks.sessions = [createSession('a1', '/projects/alpha', Date.now())]
     mocks.hasNextPage.current = false
     mocks.listProjects.mockResolvedValue([alpha, beta])
-    mocks.useOpenCodeServers.mockReturnValue({ servers: [kitchen], isLoading: false })
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [kitchen],
+      isLoading: false,
+      showsInitialLoading: false,
+    })
     mocks.useOpenCodeServerStatuses.mockReturnValue({
       statuses: [],
       statusById: { srv_kitchen: { serverId: 'srv_kitchen', connected: true, version: null, error: null } },
@@ -289,6 +296,7 @@ describe('RemoteProjectNavList', () => {
     mocks.useOpenCodeServers.mockReturnValue({
       servers: [{ ...kitchen, enabled: false }],
       isLoading: false,
+      showsInitialLoading: false,
     })
 
     render(
@@ -341,6 +349,62 @@ describe('RemoteProjectNavList', () => {
     })
     expect(screen.getByText('Alpha')).toBeInTheDocument()
     expect(screen.queryByText('Could not load projects')).not.toBeInTheDocument()
+  })
+
+  it('keeps the project list loading while the cache restore holds the query', () => {
+    mocks.listProjects.mockReturnValue(new Promise(() => {}))
+
+    render(<RemoteListHarness serverId="srv_kitchen" />, {
+      wrapper: createWrapper('/', undefined, true),
+    })
+
+    expect(screen.getByText('Loading projects...')).toBeInTheDocument()
+    expect(screen.queryByText('No projects')).not.toBeInTheDocument()
+    expect(mocks.listProjects).not.toHaveBeenCalled()
+  })
+
+  it('keeps the sidebar loading while the server list is restoring', () => {
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [],
+      isLoading: false,
+      showsInitialLoading: true,
+    })
+
+    render(
+      <RemoteProjectNavList
+        serverId="srv_kitchen"
+        isVisible
+        onOpenProject={vi.fn()}
+        onSelectSession={vi.fn()}
+      />,
+      { wrapper: createWrapper('/') },
+    )
+
+    expect(screen.getByText('Loading projects...')).toBeInTheDocument()
+    expect(screen.queryByText('Server not found')).not.toBeInTheDocument()
+  })
+
+  it('reports an unreachable server list instead of a missing server while paused offline', () => {
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [],
+      isLoading: false,
+      showsInitialLoading: false,
+      isPaused: true,
+    })
+
+    render(
+      <RemoteProjectNavList
+        serverId="srv_kitchen"
+        isVisible
+        onOpenProject={vi.fn()}
+        onSelectSession={vi.fn()}
+      />,
+      { wrapper: createWrapper('/') },
+    )
+
+    expect(screen.getByText('Servers unavailable')).toBeInTheDocument()
+    expect(screen.queryByText('Server not found')).not.toBeInTheDocument()
+    expect(mocks.listProjects).not.toHaveBeenCalled()
   })
 
   it('reports an unreachable server on a failed project load', async () => {

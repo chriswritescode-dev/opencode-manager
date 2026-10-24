@@ -13,6 +13,7 @@ import { ActivityStateIndicator } from '@/components/activity/ActivityStateIndic
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { LinkedServerStateCard } from '@/components/servers/LinkedServerStateCard'
+import { ServersUnavailableCard } from '@/components/servers/ServersUnavailableCard'
 import { OpenDirectoryDialog } from '@/components/servers/OpenDirectoryDialog'
 import { RemoteProjectRowActions } from '@/components/servers/RemoteProjectRowActions'
 import { RepoCardShell } from '@/components/repo/RepoCardShell'
@@ -86,16 +87,22 @@ function RemoteProjectListLoading() {
 }
 
 function RemoteProjectListContent({ serverId }: { serverId: string }) {
-  const { servers, isLoading: serversLoading } = useOpenCodeServers()
+  const {
+    servers,
+    showsInitialLoading: serversLoading,
+    isPaused: serversPaused,
+    refetch: refetchServers,
+  } = useOpenCodeServers()
   const { openTab } = useSettingsDialog()
   const [openDirectoryOpen, setOpenDirectoryOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
 
   const server = servers.find((candidate) => candidate.id === serverId)
+  const serversUnavailable = serversPaused && servers.length === 0
   const isDisabled = server !== undefined && !server.enabled
 
-  const { projects, activityById, isLoading, isError, hasData, error, refetch } = useRemoteProjectsByActivity(serverId)
-  const showsProjectError = isError && !hasData
+  const { projects, activityById, showsInitialLoading, showsError, error, refetch } =
+    useRemoteProjectsByActivity(serverId)
 
   const filteredProjects = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
@@ -111,7 +118,9 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
 
   return (
     <div className="flex h-full flex-col px-0 md:px-4 md:pt-4">
-      {!serversLoading && !server ? (
+      {serversUnavailable ? <ServersUnavailableCard onRetry={refetchServers} /> : null}
+
+      {!serversLoading && !serversUnavailable && !server ? (
         <LinkedServerStateCard
           icon={Server}
           title="Server not found"
@@ -120,6 +129,8 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
           onAction={openSettings}
         />
       ) : null}
+
+      {serversLoading ? <RemoteProjectListLoading /> : null}
 
       {isDisabled ? (
         <LinkedServerStateCard
@@ -131,15 +142,13 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
         />
       ) : null}
 
-      {server && !isDisabled && showsProjectError ? (
+      {server && !isDisabled && showsError ? (
         <Card className="flex flex-col items-center gap-3 p-6 text-center">
           <Server className="h-8 w-8 text-muted-foreground" />
           <div>
             <p className="font-medium">Could not load projects</p>
             <p className="text-sm text-muted-foreground">
-              {error instanceof Error
-                ? error.message
-                : 'The server did not respond.'}
+              {error instanceof Error ? error.message : 'The server did not respond.'}
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => refetch()}>
@@ -148,8 +157,8 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
         </Card>
       ) : null}
 
-      {server && !isDisabled && !showsProjectError ? (
-        isLoading ? (
+      {server && !isDisabled && !showsError ? (
+        showsInitialLoading ? (
           <RemoteProjectListLoading />
         ) : projects.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center p-12 text-center">

@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { SessionList } from '@/components/session/SessionList'
 import { LinkedServerStateCard } from '@/components/servers/LinkedServerStateCard'
+import { ServersUnavailableCard } from '@/components/servers/ServersUnavailableCard'
 import { RemoteSchedulesButton } from '@/components/schedules/RemoteSchedulesButton'
 import { RemoteMultiRunButton } from '@/components/repo/RemoteMultiRunButton'
 import { RepoMcpDialog } from '@/components/repo/RepoMcpDialog'
@@ -28,7 +29,12 @@ import { ToolSidePanel } from '@/components/navigation/ToolSidePanel'
 
 function RemoteProjectContent({ serverId, directory }: { serverId: string; directory?: string }) {
   const navigate = useNavigate()
-  const { servers, isLoading: serversLoading } = useOpenCodeServers()
+  const {
+    servers,
+    showsInitialLoading: serversLoading,
+    isPaused: serversPaused,
+    refetch: refetchServers,
+  } = useOpenCodeServers()
   const { openTab } = useSettingsDialog()
   const [mcpDialogOpen, setMcpDialogOpen] = useDialogParam('mcp')
   const [skillsDialogOpen, setSkillsDialogOpen] = useDialogParam('skills')
@@ -39,6 +45,7 @@ function RemoteProjectContent({ serverId, directory }: { serverId: string; direc
   const toolPanel = useToolPanel(showRail)
 
   const server = servers.find((candidate) => candidate.id === serverId)
+  const serversUnavailable = serversPaused && servers.length === 0
   const isDisabled = server !== undefined && !server.enabled
   const isReady = server?.enabled === true && Boolean(directory)
   const createSession = useCreateSession(directory)
@@ -120,7 +127,19 @@ function RemoteProjectContent({ serverId, directory }: { serverId: string; direc
         </Header>
 
         <div className="flex min-h-0 flex-1 flex-col">
-          {!serversLoading && !server ? (
+          {serversLoading && directory ? (
+            <div
+              role="status"
+              aria-label="Loading project"
+              className="flex flex-1 items-center justify-center"
+            >
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : serversUnavailable ? (
+            <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-3 sm:p-4">
+              <ServersUnavailableCard onRetry={refetchServers} />
+            </div>
+          ) : !serversLoading && !server ? (
             <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-3 sm:p-4">
               <LinkedServerStateCard
                 icon={Server}

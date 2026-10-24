@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { SessionList } from './SessionList'
 
-const { createSessionMock, deleteSessionMock, sessionsData, createSessionState, fetchNextPageMock, hasNextPageRef, isFetchingNextPageRef, isFetchNextPageErrorRef, isLoadingRef, isPlaceholderDataRef, useRealSessionsHookRef, lastSessionsHookArgs, sessionPinsData, togglePinMock } = vi.hoisted(() => ({
+const { createSessionMock, deleteSessionMock, sessionsData, createSessionState, fetchNextPageMock, hasNextPageRef, isFetchingNextPageRef, isFetchNextPageErrorRef, isLoadingRef, isPendingRef, isPlaceholderDataRef, useRealSessionsHookRef, lastSessionsHookArgs, sessionPinsData, togglePinMock } = vi.hoisted(() => ({
   createSessionMock: vi.fn(),
   deleteSessionMock: vi.fn(),
   sessionsData: [] as Array<{ id: string; title: string; location: { directory: string }; parentID?: string; time: { updated: number } }>,
@@ -15,6 +15,7 @@ const { createSessionMock, deleteSessionMock, sessionsData, createSessionState, 
   isFetchingNextPageRef: { current: false },
   isFetchNextPageErrorRef: { current: false },
   isLoadingRef: { current: false },
+  isPendingRef: { current: false },
   isPlaceholderDataRef: { current: false },
   useRealSessionsHookRef: { current: false },
   lastSessionsHookArgs: { current: undefined as { directories: string[]; options?: { search?: string; limit?: number; keepPreviousResults?: boolean } } | undefined },
@@ -38,6 +39,7 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
       return {
         data,
         isLoading: isLoadingRef.current,
+        isPending: isPendingRef.current || isLoadingRef.current,
         isPlaceholderData: isPlaceholderDataRef.current,
         fetchNextPage: fetchNextPageMock,
         hasNextPage: hasNextPageRef.current,
@@ -54,6 +56,7 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
 })
 
 vi.mock('@/hooks/useSessionPins', () => ({
+  SESSION_PINS_QUERY_KEY: ['session-pins'],
   useSessionPins: () => ({ data: sessionPinsData }),
   useToggleSessionPin: () => ({ mutate: togglePinMock }),
 }))
@@ -78,6 +81,7 @@ describe('SessionList', () => {
     isFetchingNextPageRef.current = false
     isFetchNextPageErrorRef.current = false
     isLoadingRef.current = false
+    isPendingRef.current = false
     isPlaceholderDataRef.current = false
     useRealSessionsHookRef.current = false
     lastSessionsHookArgs.current = undefined
@@ -589,6 +593,21 @@ describe('SessionList', () => {
 
   it('keeps the search input rendered while the first page is loading', () => {
     isLoadingRef.current = true
+    isPendingRef.current = true
+
+    render(
+      <SessionList
+        directories={['/w/a']}
+        onSelectSession={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByPlaceholderText('Search sessions...')).toBeTruthy()
+    expect(screen.getByText('Loading sessions...')).toBeTruthy()
+  })
+
+  it('keeps the search input rendered while the cache is restoring', () => {
+    isPendingRef.current = true
 
     render(
       <SessionList

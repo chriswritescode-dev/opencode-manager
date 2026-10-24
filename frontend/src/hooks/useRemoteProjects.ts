@@ -4,6 +4,7 @@ import { listProjects, rankProjectsBySessionActivity, sortProjectsByUpdatedAt, t
 import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
 import { useSessionsAcrossDirectories } from '@/hooks/useOpenCode'
 import { serverScopedKey } from '@/lib/serverScope'
+import { cachedListStates } from '@/lib/queryState'
 
 const REMOTE_PROJECT_ACTIVITY_SESSION_LIMIT = 100
 
@@ -14,9 +15,10 @@ export interface UseRemoteProjectsOptions {
 
 export interface UseRemoteProjectsResult {
   projects: OpenCodeProject[]
-  isLoading: boolean
-  isError: boolean
-  hasData: boolean
+  /** True only while no project list is cached and no error settled, so a restore does not flash a skeleton. */
+  showsInitialLoading: boolean
+  /** True only when the query failed and no cached list remains to render. */
+  showsError: boolean
   error: Error | null
   refetch: () => void
 }
@@ -67,12 +69,16 @@ export function useRemoteProjects(
     () => sortProjectsByUpdatedAt(projectsQuery.data ?? []),
     [projectsQuery.data],
   )
+  const { showsInitialLoading, showsError } = cachedListStates(
+    projectsQuery.data,
+    projectsQuery.isError,
+    projectsQuery.isEnabled,
+  )
 
   return {
     projects,
-    isLoading: projectsQuery.isLoading,
-    isError: projectsQuery.isError,
-    hasData: projectsQuery.data !== undefined,
+    showsInitialLoading,
+    showsError,
     error: projectsQuery.error,
     refetch: projectsQuery.refetch,
   }
@@ -96,7 +102,7 @@ export function useRemoteProjectsByActivity(
   const projectsResult = useRemoteProjects(serverId, options)
   const { data: sessions } = useSessionsAcrossDirectories([], {
     serverId,
-    allDirectories: projectsResult.hasData,
+    allDirectories: projectsResult.projects.length > 0,
     limit: REMOTE_PROJECT_ACTIVITY_SESSION_LIMIT,
   })
 

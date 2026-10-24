@@ -360,20 +360,24 @@ export function RemoteProjectNavList({
   onOpenProject,
   onSelectSession,
 }: RemoteProjectNavListProps) {
-  const { servers, isLoading: isServersLoading } = useOpenCodeServers()
+  const {
+    servers,
+    showsInitialLoading: isServersLoading,
+    isPaused: serversPaused,
+  } = useOpenCodeServers()
   const { statusById } = useOpenCodeServerStatuses()
   const server = servers.find((candidate) => candidate.id === serverId)
   const { directory: activeDirectory } = useActiveRemoteDirectory(serverId)
 
-  const { projects, isLoading: projectsLoading, isError: projectsError, hasData: hasProjects } =
-    useRemoteProjectsByActivity(serverId)
+  const { projects, showsInitialLoading, showsError } = useRemoteProjectsByActivity(serverId)
   const trimmedSearch = search.trim()
 
   if (isServersLoading) return <SessionNavStatus>Loading projects...</SessionNavStatus>
+  if (serversPaused && servers.length === 0) return <SessionNavStatus>Servers unavailable</SessionNavStatus>
   if (!server) return <SessionNavStatus>Server not found</SessionNavStatus>
   if (!server.enabled) return <SessionNavStatus>Server is disabled</SessionNavStatus>
-  if (projectsLoading) return <SessionNavStatus>Loading projects...</SessionNavStatus>
-  if (projectsError && !hasProjects) {
+  if (showsInitialLoading) return <SessionNavStatus>Loading projects...</SessionNavStatus>
+  if (showsError) {
     return (
       <SessionNavStatus>
         {statusById[serverId]?.connected === false ? 'Server unreachable' : 'Could not load projects'}
