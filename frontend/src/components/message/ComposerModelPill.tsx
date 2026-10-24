@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, useMemo } from 'react'
 import { ModelQuickSelect } from '@/components/model/ModelQuickSelect'
 import { ContextUsageMeter } from '@/components/session/ContextUsageMeter'
 import { useSession } from '@/hooks/useOpenCode'
@@ -51,16 +51,8 @@ export const ComposerModelPill = memo(function ComposerModelPill({
     contextUsage ? contextUsageAccessibleLabel(contextUsage) : null,
   ].filter((part): part is string => part !== null).join(', ')
 
-  return (
-    <ModelQuickSelect
-      directory={directory}
-      open={open}
-      onOpenChange={onOpenChange}
-      session={modelSelectionSession}
-      contextUsage={contextUsage}
-      isCompacting={isCompacting}
-      onCompact={onCompact}
-    >
+  const trigger = useMemo(
+    () => (
       <button
         aria-label={pillLabel}
         className="relative px-2.5 py-0.5 md:px-3 min-h-11 md:min-h-9 min-w-0 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer flex-1 md:flex-initial md:w-auto md:max-w-[220px] dark:border-border/30 flex flex-col items-start justify-center overflow-hidden"
@@ -91,6 +83,21 @@ export const ComposerModelPill = memo(function ComposerModelPill({
           />
         )}
       </button>
+    ),
+    [contextUsage, modelName, pillLabel, pillUsage, pillUsageTone, variant],
+  )
+
+  return (
+    <ModelQuickSelect
+      directory={directory}
+      open={open}
+      onOpenChange={onOpenChange}
+      session={modelSelectionSession}
+      contextUsage={contextUsage}
+      isCompacting={isCompacting}
+      onCompact={onCompact}
+    >
+      {trigger}
     </ModelQuickSelect>
   )
 })

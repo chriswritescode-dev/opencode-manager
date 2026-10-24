@@ -5,25 +5,19 @@ import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useSwipeBack } from '@/hooks/useMobile'
 import { useVisualViewport } from '@/hooks/useVisualViewport'
-import { getFocusedElement, restoreOverlayFocus } from '@/lib/overlayFocus'
+import { useOverlayReturnFocus } from '@/hooks/useOverlayReturnFocus'
 
 const DialogOpenContext = React.createContext<boolean>(true)
-const DialogReturnFocusContext = React.createContext<HTMLElement | null>(null)
+const DialogCloseAutoFocusContext = React.createContext<((event: Event) => void) | null>(null)
 
 function Dialog({ open, ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
-  const [openState, setOpenState] = React.useState(() => ({
-    open,
-    returnFocus: open ? getFocusedElement() : null,
-  }))
-  if (openState.open !== open) {
-    setOpenState({ open, returnFocus: open ? getFocusedElement() : openState.returnFocus })
-  }
+  const { handleCloseAutoFocus } = useOverlayReturnFocus(open)
 
   return (
     <DialogOpenContext.Provider value={open ?? true}>
-      <DialogReturnFocusContext.Provider value={openState.returnFocus}>
+      <DialogCloseAutoFocusContext.Provider value={handleCloseAutoFocus}>
         <DialogPrimitive.Root open={open} {...props} />
-      </DialogReturnFocusContext.Provider>
+      </DialogCloseAutoFocusContext.Provider>
     </DialogOpenContext.Provider>
   )
 }
@@ -68,13 +62,11 @@ const DialogContent = React.forwardRef<
 >(({ className, children, hideCloseButton, fullscreen, mobileFullscreen, mobileSwipeToClose, keyboardAware, canSwipeBack, onSwipeBack, overlayClassName, style, onCloseAutoFocus, onEscapeKeyDown, ...props }, ref) => {
   const isMobileFullscreenMode = fullscreen || mobileFullscreen
   const isDialogOpen = React.useContext(DialogOpenContext)
-  const returnFocus = React.useContext(DialogReturnFocusContext)
+  const restoreFocusOnClose = React.useContext(DialogCloseAutoFocusContext)
   const handleCloseAutoFocus = (event: Event) => {
     onCloseAutoFocus?.(event)
     if (event.defaultPrevented) return
-    if (restoreOverlayFocus(returnFocus, event.currentTarget as Element | null)) {
-      event.preventDefault()
-    }
+    restoreFocusOnClose?.(event)
   }
   const handleEscapeKeyDown = (event: KeyboardEvent) => {
     onEscapeKeyDown?.(event)

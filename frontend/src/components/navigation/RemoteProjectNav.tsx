@@ -363,7 +363,7 @@ export function RemoteProjectNavList({
   const { servers, isLoading: isServersLoading } = useOpenCodeServers()
   const { statusById } = useOpenCodeServerStatuses()
   const server = servers.find((candidate) => candidate.id === serverId)
-  const activeDirectory = useActiveRemoteDirectory(serverId)
+  const { directory: activeDirectory } = useActiveRemoteDirectory(serverId)
 
   const { projects, isLoading: projectsLoading, isError: projectsError, hasData: hasProjects } =
     useRemoteProjects(serverId)

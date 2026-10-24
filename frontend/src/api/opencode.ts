@@ -68,6 +68,23 @@ export function remoteProjectName(project: OpenCodeProject): string {
   return project.name?.trim() || getDirectoryName(project.canonical)
 }
 
+/**
+ * Finds the project that owns a directory, matching its canonical directory and anything nested
+ * inside it.
+ *
+ * @param projects Projects of the server that owns the directory.
+ * @param directory Directory whose owning project is resolved.
+ * @returns The owning project, or undefined when the directory belongs to none of them.
+ */
+export function findRemoteProjectForDirectory(
+  projects: OpenCodeProject[],
+  directory: string,
+): OpenCodeProject | undefined {
+  return projects.find(
+    (project) => directory === project.canonical || directory.startsWith(`${project.canonical}/`),
+  )
+}
+
 export type VcsInfo = Awaited<ReturnType<OpenCodeApi['vcs']['get']>>['data']
 
 export type VcsFileStatus = Awaited<ReturnType<OpenCodeApi['vcs']['status']>>['data'][number]

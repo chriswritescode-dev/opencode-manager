@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Search, Star, Trash2, X, type LucideIcon } from 'lucide-react'
 import { useModelSelection, type ModelSelectionSession } from '@/hooks/useModelSelection'
 import { useMobile } from '@/hooks/useMobile'
@@ -220,7 +220,7 @@ function VirtualizedList<T>({
   )
 }
 
-export function ModelQuickSelect({
+export const ModelQuickSelect = memo(function ModelQuickSelect({
   directory,
   disabled,
   children,
@@ -801,4 +801,4 @@ export function ModelQuickSelect({
       </BottomSheet>
     </>
   )
-}
+})

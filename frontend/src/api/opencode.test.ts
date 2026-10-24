@@ -12,6 +12,7 @@ import {
   createSessionWithPrompt,
   deleteSession,
   findFiles,
+  findRemoteProjectForDirectory,
   forkSession,
   getSession,
   interruptSession,
@@ -798,5 +799,21 @@ describe('project helpers', () => {
   it('names a project from its directory when it has no title', () => {
     expect(remoteProjectName(project('p1', undefined, '/work/beta', { created: 1, updated: 2 }))).toBe('beta')
     expect(remoteProjectName(project('p1', '   ', '/work/gamma', { created: 1, updated: 2 }))).toBe('gamma')
+  })
+
+  it('finds the project that owns a directory or one nested inside it', () => {
+    const projects = [
+      project('p1', 'Alpha', '/work/alpha', { created: 1, updated: 2 }),
+      project('p2', 'Beta', '/work/beta', { created: 1, updated: 2 }),
+    ]
+
+    expect(findRemoteProjectForDirectory(projects, '/work/beta')?.id).toBe('p2')
+    expect(findRemoteProjectForDirectory(projects, '/work/beta/packages/web')?.id).toBe('p2')
+  })
+
+  it('does not match a directory that only shares a prefix with a canonical directory', () => {
+    const projects = [project('p1', 'Alpha', '/work/alpha', { created: 1, updated: 2 })]
+
+    expect(findRemoteProjectForDirectory(projects, '/work/alphabet')).toBeUndefined()
   })
 })

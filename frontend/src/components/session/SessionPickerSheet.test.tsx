@@ -418,6 +418,52 @@ describe('SessionPickerSheet', () => {
     expect(mocks.lastAllDirectories).toBe(false)
   })
 
+  it('scopes the sheet to the canonical project directory of a remote session subdirectory', async () => {
+    useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
+    mocks.getSession.mockResolvedValue(makeSession('ses_remote', 'Remote session', '/home/me/app/packages/web'))
+    mocks.listProjects.mockResolvedValue([
+      {
+        id: 'p1',
+        name: 'App',
+        canonical: '/home/me/app',
+        time: { created: 1, updated: 2 },
+        sandboxes: [],
+      },
+    ])
+
+    renderSheet(['/servers/srv_kitchen/sessions/ses_remote?mobileTab=sessions'])
+
+    await waitFor(() => expect(mocks.lastDirectories).toEqual(['/home/me/app']))
+    expect(mocks.lastAllDirectories).toBe(false)
+  })
+
+  it('holds the all-directories search while the remote session directory resolves', async () => {
+    useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
+    mocks.getSession.mockReturnValue(new Promise(() => undefined))
+
+    renderSheet(['/servers/srv_kitchen/sessions/ses_remote?mobileTab=sessions'])
+
+    await waitFor(() => expect(mocks.getSession).toHaveBeenCalled())
+    expect(mocks.lastDirectories).toEqual([])
+    expect(mocks.lastAllDirectories).toBe(false)
+  })
+
+  it('returns to the repo session list keeping its tab when the open session is deleted', async () => {
+    mocks.sessionsData = [makeSession('ses_active', 'Active session', '/w/a')]
+    mocks.deleteSessionMock.mockResolvedValue(undefined)
+
+    const { location } = renderSheet(['/repos/1/sessions/ses_active?mobileTab=sessions&repoTab=changes'])
+
+    const combobox = await screen.findByRole('combobox')
+    await screen.findByRole('option', { name: /Active session/ })
+    fireEvent.keyDown(combobox, { key: 'd', ctrlKey: true })
+    expect(screen.getByText('Press Ctrl+D again to confirm')).toBeInTheDocument()
+    fireEvent.keyDown(combobox, { key: 'd', ctrlKey: true })
+
+    await waitFor(() => expect(mocks.deleteSessionMock).toHaveBeenCalled())
+    expect(location()).toBe('/repos/1?repoTab=changes REPLACE')
+  })
+
   it('does not resolve the remote session directory while the sheet is closed', async () => {
     useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
 

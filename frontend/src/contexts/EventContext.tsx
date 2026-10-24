@@ -8,7 +8,6 @@ import {
   listActiveSessions,
   listPendingForms,
   listPendingPermissions,
-  listProjects,
   listShells,
   replyForm,
   replyPermission,
@@ -19,6 +18,7 @@ import { buildServerDirectoryKey, LOCAL_OPENCODE_SERVER_ID, parseServerDirectory
 import { isLocalOpenCodeServer } from '@/contexts/OpenCodeServerContext'
 import { useAuth } from '@/hooks/useAuth'
 import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
+import { remoteProjectsQueryOptions } from '@/hooks/useRemoteProjects'
 import type { FormAnswer, FormInfo, PermissionRequest, V2Event } from '@opencode-manager/shared/opencode'
 import type { PermissionResponse, SSHHostKeyRequest, Repo } from '@/api/types'
 import { showToast } from '@/lib/toast'
@@ -399,10 +399,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [])
   const remoteProjectQueries = useQueries({
     queries: enabledRemoteServers.map((server) => ({
-      queryKey: serverScopedKey(['opencode', 'projects'], server.id),
-      queryFn: () => listProjects(server.id),
+      ...remoteProjectsQueryOptions(server.id),
       enabled: isAuthenticated,
-      retry: false,
     })),
   })
   const remoteProjectDirectoriesKey = useMemo(() => {

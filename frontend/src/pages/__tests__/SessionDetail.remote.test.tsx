@@ -540,6 +540,7 @@ describe('SessionDetail remote server mode', () => {
           serverId: 'srv_kitchen',
           serverName: 'Kitchen',
           projectDirectory: '/home/me/app',
+          isPending: false,
         },
       }),
     )

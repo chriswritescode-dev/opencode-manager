@@ -9,7 +9,7 @@ import {
 import { cn } from '@/lib/utils'
 import { MODAL_TRANSITION_MS } from '@/lib/utils'
 import { useSwipeDismiss } from '@/hooks/useMobile'
-import { getFocusedElement, restoreOverlayFocus } from '@/lib/overlayFocus'
+import { useOverlayReturnFocus } from '@/hooks/useOverlayReturnFocus'
 
 export interface BottomSheetProps {
   isOpen: boolean
@@ -31,23 +31,13 @@ export function BottomSheet({
   dismissible = true,
 }: BottomSheetProps) {
   const [shouldRender, setShouldRender] = useState(false)
-  const [openState, setOpenState] = useState(() => ({
-    open: isOpen,
-    returnFocus: isOpen ? getFocusedElement() : null,
-  }))
+  const { handleCloseAutoFocus } = useOverlayReturnFocus(isOpen)
   const panelRef = useRef<HTMLDivElement>(null)
   const [panelElement, setPanelElement] = useState<HTMLDivElement | null>(null)
   const setPanelRef = useCallback((node: HTMLDivElement | null) => {
     panelRef.current = node
     setPanelElement(node)
   }, [])
-
-  if (openState.open !== isOpen) {
-    setOpenState({
-      open: isOpen,
-      returnFocus: isOpen ? getFocusedElement() : openState.returnFocus,
-    })
-  }
 
   const { bind, swipeStyles } = useSwipeDismiss(onClose, {
     enabled: isOpen && dismissible,
@@ -74,12 +64,6 @@ export function BottomSheet({
   const handleOpenAutoFocus = (event: Event) => {
     event.preventDefault()
     panelRef.current?.focus({ preventScroll: true })
-  }
-
-  const handleCloseAutoFocus = (event: Event) => {
-    if (restoreOverlayFocus(openState.returnFocus, event.currentTarget as Element | null)) {
-      event.preventDefault()
-    }
   }
 
   if (!isOpen && !shouldRender) return null

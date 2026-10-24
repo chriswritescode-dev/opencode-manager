@@ -1,9 +1,8 @@
 import { useEffect, useId, useMemo, useState } from 'react'
 import type { Repo } from '@/api/types'
 import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
-import { NewSessionButton } from '@/components/navigation/RepoSessionNav'
+import { LocalRepoNewSessionButton } from '@/components/navigation/RepoSessionNav'
 import { isRepoReady } from '@/components/navigation/sidebar-session-tree'
-import { getSessionPath } from '@/lib/navigation'
 import { cn, getRepoBranchLabel, getRepoDisplayName } from '@/lib/utils'
 import {
   PickerSearchBar,
@@ -158,12 +157,7 @@ export function ProjectPickerContent({
                   )}
                 </div>
                 {isRepoReady(repo) ? (
-                  <NewSessionButton
-                    directory={repo.fullPath}
-                    label={getRepoDisplayName(repo)}
-                    sessionPath={(sessionId) => getSessionPath(repo.id, sessionId)}
-                    onOpenSession={onNavigate}
-                  />
+                  <LocalRepoNewSessionButton repo={repo} onOpenSession={onNavigate} />
                 ) : (
                   <span className="shrink-0 pr-2 text-xs text-muted-foreground">Not ready</span>
                 )}

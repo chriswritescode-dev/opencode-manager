@@ -49,7 +49,7 @@ import { ProjectActionsMenu } from "@/components/repo/ProjectActionsMenu";
 import { RepoActionsDialog } from "@/components/repo/RepoActionsDialog";
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
 import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
-import { compactSession, forkSession, listSessionMessages, remoteProjectName } from "@/api/opencode";
+import { compactSession, findRemoteProjectForDirectory, forkSession, listSessionMessages, remoteProjectName } from "@/api/opencode";
 import { useOpenCodeServerId, isLocalOpenCodeServer } from "@/contexts/OpenCodeServerContext";
 import { useRemoteProjects } from "@/hooks/useRemoteProjects";
 import { useSwipeNavigation } from "@/contexts/SwipeNavigationContext";
@@ -221,9 +221,7 @@ export function SessionDetail() {
 
   const remoteProject = useMemo(() => {
     if (!isRemoteServer || !sessionDirectory) return undefined;
-    return remoteProjects.find(
-      (entry) => sessionDirectory === entry.canonical || sessionDirectory.startsWith(`${entry.canonical}/`),
-    );
+    return findRemoteProjectForDirectory(remoteProjects, sessionDirectory);
   }, [isRemoteServer, remoteProjects, sessionDirectory]);
 
   const remoteProjectDirectory = isRemoteServer && sessionDirectory
@@ -555,7 +553,7 @@ export function SessionDetail() {
   const pickerNavigation = useSessionPickerNavigation({
     mode: 'push',
     onClose: () => setSessionsDialogOpen(false),
-    onDeleteActiveSession: handleCloseSession,
+    onDeleteActiveSession: isRemoteServer ? handleCloseSession : undefined,
   })
 
   const handleOpenModelDialog = useCallback(() => {
@@ -1051,7 +1049,12 @@ export function SessionDetail() {
         activeSessionID={sessionId || undefined}
         remote={
           isRemoteServer
-            ? { serverId, serverName: linkedServer?.name, projectDirectory: remoteProjectDirectory }
+            ? {
+                serverId,
+                serverName: linkedServer?.name,
+                projectDirectory: remoteProjectDirectory,
+                isPending: sessionLoading,
+              }
             : undefined
         }
         {...pickerNavigation}

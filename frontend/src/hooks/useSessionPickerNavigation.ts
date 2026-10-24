@@ -5,9 +5,10 @@ import type { Repo, Session } from '@/api/types'
 import {
   getRepoPath,
   getServerSessionPath,
+  getSessionListPath,
   getSessionPath,
+  parseActivePickerSession,
   parseRepoRoute,
-  parseServerSessionRoute,
   withQueryParam,
 } from '@/lib/navigation'
 
@@ -18,7 +19,7 @@ export interface SessionPickerNavigationOptions {
    */
   mode: 'push' | 'replace'
   onClose: () => void
-  /** Replaces the default delete behaviour of opening the current repo page. */
+  /** Replaces the default delete behaviour of returning to the current repo's session list. */
   onDeleteActiveSession?: () => void
 }
 
@@ -46,12 +47,11 @@ export function useSessionPickerNavigation({
 }: SessionPickerNavigationOptions): SessionPickerNavigation {
   const navigate = useNavigate()
   const { pathname, search } = useLocation()
-  const repoRoute = parseRepoRoute(pathname)
-  const serverSessionRoute = parseServerSessionRoute(pathname)
-  const currentRepoId = repoRoute.repoId
-  const activeSessionID = repoRoute.sessionId ?? serverSessionRoute?.sessionId ?? undefined
-  const activeServerId = repoRoute.sessionId ? LOCAL_OPENCODE_SERVER_ID : serverSessionRoute?.serverId
-  const isAssistantSession = new URLSearchParams(search).get('assistant') === '1'
+  const currentRepoId = parseRepoRoute(pathname).repoId
+  const { sessionId: activeSessionID, serverId: activeServerId } = parseActivePickerSession(pathname)
+  const searchParams = new URLSearchParams(search)
+  const isAssistantSession = searchParams.get('assistant') === '1'
+  const repoTab = searchParams.get('repoTab') ?? undefined
 
   const open = useCallback(
     (path: string) => {
@@ -98,8 +98,8 @@ export function useSessionPickerNavigation({
       onClose()
       return
     }
-    open(getRepoPath(currentRepoId))
-  }, [currentRepoId, deleteActiveSessionOverride, onClose, open])
+    open(getSessionListPath(currentRepoId, isAssistantSession, repoTab))
+  }, [currentRepoId, deleteActiveSessionOverride, isAssistantSession, onClose, open, repoTab])
 
   const onSelectRepo = useCallback(
     (repo: Repo) => {

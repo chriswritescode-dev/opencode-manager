@@ -20,7 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DeleteSessionDialog } from '@/components/session/DeleteSessionDialog'
 import { ProjectPickerContent } from '@/components/session/ProjectPickerContent'
 import { AddRepoDialog } from '@/components/repo/AddRepoDialog'
-import { NewSessionButton } from '@/components/navigation/RepoSessionNav'
+import { LocalRepoNewSessionButton } from '@/components/navigation/RepoSessionNav'
 import { RemoteProjectNavList } from '@/components/navigation/RemoteProjectNav'
 import {
   PickerSearchBar,
@@ -40,7 +40,6 @@ import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
 import { useShortcutActions } from '@/contexts/KeyboardShortcutsContext'
 import { useSettings } from '@/hooks/useSettings'
 import { buildPinnedSessionKeys, getSessionKey } from '@/lib/sessionKey'
-import { getSessionPath } from '@/lib/navigation'
 import { formatShortcutLabel, resolveShortcutBindings } from '@/lib/keyboardShortcuts'
 import { cn, formatShortRelativeTime, getRepoDisplayName } from '@/lib/utils'
 import { FINE_POINTER_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
@@ -72,21 +71,17 @@ function sessionsTabLabel(scopeEnabled: boolean, allProjects: boolean): string {
 export interface RemotePickerScope {
   serverId: string
   serverName?: string
+  /** Canonical project directory in view; omitted when the route scopes to the whole server. */
   projectDirectory?: string
+  /** Whether the route's project directory is still resolving, which holds the all-sessions search. */
+  isPending?: boolean
 }
 
-interface SessionPickerDialogProps {
-  open: boolean
+type SessionPickerDialogProps = Omit<
+  SessionPickerPanelProps,
+  'searchTrailing' | 'onAddRepo' | 'renderTitle'
+> & {
   onOpenChange: (open: boolean) => void
-  currentRepo: Repo | undefined
-  activeSessionID?: string
-  onSelectSession: (session: Session, repo: Repo) => void
-  onSelectRemoteSession?: (session: Session, serverId: string) => void
-  onDeleteActiveSession: () => void
-  onSelectRepo: (repo: Repo) => void
-  onNavigate: (path: string) => void
-  /** Set on a linked-server route to list that server's sessions instead of Manager repos. */
-  remote?: RemotePickerScope
 }
 
 interface SessionPickerRow {
@@ -988,6 +983,7 @@ interface RemoteSessionPickerContentProps {
   open: boolean
   serverName?: string
   projectDirectory?: string
+  isPending?: boolean
   activeSessionID?: string
   onSelectSession: (session: Session) => void
   switchHint: string
@@ -999,6 +995,7 @@ function RemoteSessionPickerContent({
   open,
   serverName,
   projectDirectory,
+  isPending = false,
   activeSessionID,
   onSelectSession,
   switchHint,
@@ -1021,7 +1018,7 @@ function RemoteSessionPickerContent({
     isFetchNextPageError,
     canFetchNextPage,
   } = useSessionSearch(projectDirectory ? [projectDirectory] : [], {
-    allDirectories: projectDirectory === undefined,
+    allDirectories: projectDirectory === undefined && !isPending,
   })
 
   const sections = useMemo(
@@ -1207,6 +1204,7 @@ export interface SessionPickerPanelProps {
   onDeleteActiveSession: () => void
   onSelectRepo: (repo: Repo) => void
   onNavigate: (path: string) => void
+  /** Set on a linked-server route to list that server's sessions instead of Manager repos. */
   remote?: RemotePickerScope
   searchTrailing?: React.ReactNode
   onAddRepo?: () => void
@@ -1312,12 +1310,7 @@ function SessionPickerPanelBody({
   )
 
   const newSessionButton = readyRepo ? (
-    <NewSessionButton
-      directory={readyRepo.fullPath}
-      label={getRepoDisplayName(readyRepo)}
-      sessionPath={(sessionId) => getSessionPath(readyRepo.id, sessionId)}
-      onOpenSession={onNavigate}
-    />
+    <LocalRepoNewSessionButton repo={readyRepo} onOpenSession={onNavigate} />
   ) : (
     addRepoButton
   )
@@ -1411,6 +1404,7 @@ function SessionPickerPanelBody({
               open={open}
               serverName={remote.serverName}
               projectDirectory={remote.projectDirectory}
+              isPending={remote.isPending}
               activeSessionID={activeSessionID}
               onSelectSession={(session) => onSelectRemoteSession?.(session, remote.serverId)}
               switchHint={switchHint}
@@ -1477,7 +1471,6 @@ export function SessionPickerDialog({
   onNavigate,
   remote,
 }: SessionPickerDialogProps) {
-  const searchInputRef = useRef<HTMLInputElement>(null)
   const hasFinePointer = useMediaQuery(FINE_POINTER_MEDIA_QUERY)
 
   return (
@@ -1488,9 +1481,7 @@ export function SessionPickerDialog({
         onEscapeKeyDown={() => onOpenChange(false)}
         onOpenAutoFocus={(event) => {
           event.preventDefault()
-          if (hasFinePointer) {
-            searchInputRef.current?.focus()
-          } else {
+          if (!hasFinePointer) {
             ;(event.currentTarget as HTMLElement).focus()
           }
         }}

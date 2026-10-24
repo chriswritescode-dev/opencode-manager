@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { renderHook } from '@testing-library/react'
+import { act, renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
@@ -302,5 +302,102 @@ describe('useContextUsage', () => {
     })
 
     expect(result.current).toBeNull()
+  })
+
+  it('keeps the usage object identity across transcript updates that do not change the totals', () => {
+    const queryClient = createQueryClient()
+    seedTranscript(queryClient, [
+      assistantMessage('assistant-1', {
+        input: 10,
+        output: 5,
+        reasoning: 0,
+        cache: { read: 1000, write: 500 },
+      }),
+    ])
+
+    const { result, rerender } = renderHook(() => useContextUsage(SESSION_ID, DIRECTORY), {
+      wrapper: createWrapper(queryClient),
+    })
+    const firstUsage = result.current
+
+    act(() => {
+      seedTranscript(queryClient, [
+        assistantMessage('assistant-1', {
+          input: 10,
+          output: 5,
+          reasoning: 0,
+          cache: { read: 1000, write: 500 },
+        }),
+        assistantMessage('assistant-2', undefined),
+      ])
+    })
+    rerender()
+
+    expect(result.current).toBe(firstUsage)
+    expect(result.current?.totalTokens).toBe(1515)
+  })
+
+  it('returns a new usage object when the token totals change', () => {
+    const queryClient = createQueryClient()
+    seedTranscript(queryClient, [
+      assistantMessage('assistant-1', {
+        input: 10,
+        output: 5,
+        reasoning: 0,
+        cache: { read: 1000, write: 500 },
+      }),
+    ])
+
+    const { result, rerender } = renderHook(() => useContextUsage(SESSION_ID, DIRECTORY), {
+      wrapper: createWrapper(queryClient),
+    })
+    const firstUsage = result.current
+
+    act(() => {
+      seedTranscript(queryClient, [
+        assistantMessage('assistant-1', {
+          input: 10,
+          output: 5,
+          reasoning: 0,
+          cache: { read: 1000, write: 500 },
+        }),
+        assistantMessage('assistant-2', {
+          input: 20,
+          output: 10,
+          reasoning: 0,
+          cache: { read: 100, write: 50 },
+        }),
+      ])
+    })
+    rerender()
+
+    expect(result.current).not.toBe(firstUsage)
+    expect(result.current?.totalTokens).toBe(180)
+  })
+
+  it('returns a new usage object when only the measurable context limit changes', () => {
+    const queryClient = createQueryClient()
+    seedTranscript(queryClient, [
+      assistantMessage('assistant-1', {
+        input: 10,
+        output: 5,
+        reasoning: 0,
+        cache: { read: 1000, write: 500 },
+      }),
+    ])
+
+    const { result, rerender } = renderHook(() => useContextUsage(SESSION_ID, DIRECTORY), {
+      wrapper: createWrapper(queryClient),
+    })
+    const firstUsage = result.current
+
+    mocks.useProviders.mockReturnValue({
+      data: { models: [{ providerID: 'anthropic', id: 'claude-sonnet', limit: { context: 1000 } }] },
+    })
+    rerender()
+
+    expect(result.current).not.toBe(firstUsage)
+    expect(result.current?.contextLimit).toBe(1000)
+    expect(result.current?.usagePercentage).toBe(152)
   })
 })

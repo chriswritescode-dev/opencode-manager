@@ -19,6 +19,21 @@ export interface UseRemoteProjectsResult {
 }
 
 /**
+ * Builds the query options for one linked server's project list so every reader shares the same
+ * cache entry and retry policy.
+ *
+ * @param serverId Linked server whose projects are listed.
+ * @returns The query options, without the caller's own enabled gate.
+ */
+export function remoteProjectsQueryOptions(serverId: string) {
+  return {
+    queryKey: serverScopedKey(['opencode', 'projects'], serverId),
+    queryFn: () => listProjects(serverId),
+    retry: false,
+  }
+}
+
+/**
  * Loads the projects of one linked server, most recently active first, while that server is enabled.
  *
  * @param serverId Linked server whose projects are listed.
@@ -33,10 +48,8 @@ export function useRemoteProjects(
   const { servers } = useOpenCodeServers({ enabled })
   const isServerEnabled = servers.find((server) => server.id === serverId)?.enabled === true
   const projectsQuery = useQuery({
-    queryKey: serverScopedKey(['opencode', 'projects'], serverId),
-    queryFn: () => listProjects(serverId),
+    ...remoteProjectsQueryOptions(serverId),
     enabled: enabled && isServerEnabled,
-    retry: false,
   })
 
   const projects = useMemo(
