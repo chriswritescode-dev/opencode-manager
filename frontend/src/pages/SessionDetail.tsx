@@ -5,7 +5,7 @@ import { repoQueryOptions } from "@/lib/repoQuery";
 import { MessageThread } from "@/components/message/MessageThread";
 import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
 import { FloatingTTSButton } from '@/components/message/FloatingTTSButton'
-import { X, CornerUpLeft, GitBranch, ArrowDown } from "lucide-react";
+import { X, CornerUpLeft, GitBranch, ArrowDown, Server } from "lucide-react";
 import { SquareFill } from "@/components/ui/square-fill";
 import { Header } from "@/components/ui/header";
 import { Badge } from "@/components/ui/badge";
@@ -14,15 +14,14 @@ import { getRepoPath, getServerProjectPath, getServerSessionPath, getSessionList
 import { FetchError } from '@/api/fetchWrapper'
 
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
-import { Button } from "@/components/ui/button";
 import { NotFoundState } from "@/components/ui/not-found-state";
-import { ContextUsageIndicator } from "@/components/session/ContextUsageIndicator";
 import { useSession, useInterruptSession, useUpdateSession, useCreateSession } from "@/hooks/useOpenCode";
 import { useSessionTranscript } from "@/hooks/useSessionTranscript";
 import { useAutoOpenWalkthrough } from "@/hooks/useAutoOpenWalkthrough";
 import { useRepoActivity } from "@/hooks/useRepoActivity";
 import { useRepoSiblings } from "@/hooks/useRepoSiblings";
 import { useSSE } from "@/hooks/useSSE";
+import { useVcsInfo } from "@/hooks/useVcsInfo";
 import { useUIState } from "@/stores/uiStateStore";
 import { useSettings } from "@/hooks/useSettings";
 import { useModelSelection } from "@/hooks/useModelSelection";
@@ -71,6 +70,8 @@ import { SourceControlPanel, RemoteSourceControlPanel } from "@/components/sourc
 import { TerminalPanel } from "@/components/terminal/TerminalPanel";
 import { PreviewPanel } from "@/components/preview/PreviewPanel";
 import { SessionSendErrorBanner } from "@/components/session/SessionSendErrorBanner";
+import { ReconnectingBanner } from "@/components/session/ReconnectingBanner";
+import { SessionDetailsSheet } from "@/components/session/SessionDetailsSheet";
 import { BackgroundWorkBar } from "@/components/session/BackgroundWorkBar";
 import { SessionGoalBar } from "@/components/session/SessionGoalBar";
 import { useDialogParam } from "@/hooks/useDialogParam";
@@ -135,6 +136,7 @@ export function SessionDetail() {
   const [messageContainer, setMessageContainer] = useState<HTMLDivElement | null>(null);
   const promptInputRef = useRef<PromptInputHandle>(null);
   const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false);
+  const [sessionDetailsOpen, setSessionDetailsOpen] = useState(false);
   const [fileBrowserOpen, setFileBrowserOpen] = useDialogParam('files');
   const [mcpDialogOpen, setMcpDialogOpen] = useDialogParam('mcp');
   const [skillsDialogOpen, setSkillsDialogOpen] = useDialogParam('skills');
@@ -230,10 +232,18 @@ export function SessionDetail() {
     return project?.canonical ?? sessionDirectory;
   }, [isRemoteServer, remoteProjects, sessionDirectory]);
 
+  const remoteProjectName = useMemo(() => {
+    if (!isRemoteServer) return undefined;
+    return remoteProjects?.find((entry) => entry.canonical === remoteProjectDirectory)?.name?.trim() || undefined;
+  }, [isRemoteServer, remoteProjects, remoteProjectDirectory]);
+
   const sessionBranch = useMemo(
     () => (repo && !isAssistantSession ? resolveSessionBranch(repo, sessionDirectory, repoSiblings) : null),
     [repo, isAssistantSession, sessionDirectory, repoSiblings],
   );
+
+  const { data: remoteVcsInfo } = useVcsInfo(sessionDirectory, serverId, { enabled: isRemoteServer });
+  const headerBranch = isRemoteServer ? remoteVcsInfo?.branch.current ?? null : sessionBranch;
 
   const { data: session, isLoading: sessionLoading, error: sessionQueryError } = useSession(
     sessionId,
@@ -785,10 +795,8 @@ export function SessionDetail() {
   }
 
   const linkedServer = linkedServers.find((candidate) => candidate.id === serverId);
-  const workspaceDisplayName = isRemoteServer
-    ? [linkedServer?.name ?? 'Linked server', sessionDirectory ? getDirectoryName(sessionDirectory) : undefined]
-        .filter(Boolean)
-        .join(' · ')
+  const projectDisplayName = isRemoteServer
+    ? remoteProjectName ?? (sessionDirectory ? getDirectoryName(sessionDirectory) : 'Project')
     : isAssistantSession || !repo
       ? 'Assistant'
       : getRepoDisplayName(repo);
@@ -807,51 +815,52 @@ export function SessionDetail() {
       >
         <Header className="bg-background [&_button]:bg-background [&_button]:text-foreground [&_button]:border-border [&_button:hover]:bg-accent">
           <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
-            {session?.parentID ? (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleParentSessionClick}
-                  className="text-primary hover:text-primary-hover hover:bg-primary/10 h-7 px-2 gap-1"
-                  title="Back to parent session"
+            <Header.BackButton to={sessionBackPath} className="text-xs sm:text-sm" />
+            <div className="min-w-0 flex-1">
+              <button
+                type="button"
+                onClick={() => setSessionDetailsOpen(true)}
+                aria-label="Session details"
+                className="block min-w-0 max-w-full cursor-pointer text-left"
+              >
+                <h1 className="text-xs sm:text-base font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent truncate hover:opacity-80 transition-opacity">
+                  {session?.title || "Untitled Session"}
+                </h1>
+              </button>
+              {session?.parentID ? (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleParentSessionClick();
+                  }}
+                  aria-label="Parent session"
+                  className="mt-0.5 inline-flex max-w-full items-center gap-1 rounded-full border border-info/40 px-2 py-0.5 text-[10px] sm:text-xs text-info transition-colors hover:bg-info/10"
                 >
-                  <CornerUpLeft className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline text-xs">Parent</span>
-                </Button>
-                <div className="hidden sm:block">
-                  <Header.BackButton to={sessionBackPath} className="text-xs sm:text-sm" />
-                </div>
-              </>
-            ) : (
-              <Header.BackButton to={sessionBackPath} className="text-xs sm:text-sm" />
-            )}
-            <Header.EditableTitle
-              value={session?.title || "Untitled Session"}
-              onChange={handleRenameSession}
-              subtitle={
-                <span className="text-highlight">
-                  {isRemoteServer ? (
-                    <>
-                      <span className="text-info">{linkedServer?.name ?? 'Linked server'}</span>
-                      {sessionDirectory && ` · ${getDirectoryName(sessionDirectory)}`}
-                    </>
-                  ) : (
-                    workspaceDisplayName
+                  <CornerUpLeft className="h-3 w-3 shrink-0" />
+                  <span className="truncate">Parent session</span>
+                </button>
+              ) : (
+                <p className="flex min-w-0 items-center gap-1 text-[10px] sm:text-xs text-muted-foreground">
+                  {isRemoteServer && (
+                    <Server aria-label="Remote server" className="h-3 w-3 shrink-0 text-highlight" />
                   )}
-                  {sessionBranch && <span className="font-mono sm:hidden"> · {sessionBranch}</span>}
-                </span>
-              }
-            />
-            {sessionBranch && (
+                  <span className="truncate text-highlight">{projectDisplayName}</span>
+                  {headerBranch && (
+                    <span className="truncate font-mono sm:hidden"> · {headerBranch}</span>
+                  )}
+                </p>
+              )}
+            </div>
+            {headerBranch && (
               <Badge
                 variant="outline"
                 data-testid="session-branch"
-                title={`Branch: ${sessionBranch}`}
+                title={`Branch: ${headerBranch}`}
                 className="hidden sm:inline-flex max-w-44 shrink-0 items-center gap-1 border-border bg-card px-2 font-mono text-[11px] font-normal text-muted-foreground"
               >
                 <GitBranch className="h-3 w-3 shrink-0" />
-                <span className="truncate">{sessionBranch}</span>
+                <span className="truncate">{headerBranch}</span>
               </Badge>
             )}
           </div>
@@ -862,17 +871,10 @@ export function SessionDetail() {
               )}
               <PendingActionsGroup showScheduleReports={!isRemoteServer} />
             </div>
-            <ContextUsageIndicator
-              directory={sessionDirectory}
-              sessionID={sessionId}
-              isConnected={streamConnected}
-              isReconnecting={streamReconnecting}
-              revertMessageID={revertMessageID}
-            />
             <SessionMoreButton />
           </Header.Actions>
         </Header>
-
+        <ReconnectingBanner key={sessionId} connected={streamConnected} />
       </div>
 
       <div className="flex flex-1 min-h-0">
@@ -1071,6 +1073,18 @@ export function SessionDetail() {
         }}
       />
 
+      <SessionDetailsSheet
+        open={sessionDetailsOpen}
+        onOpenChange={setSessionDetailsOpen}
+        sessionId={sessionId}
+        title={session?.title}
+        serverName={linkedServer?.name}
+        remote={isRemoteServer}
+        project={projectDisplayName}
+        branch={headerBranch}
+        directory={sessionDirectory}
+      />
+
       {sideQuestion && sessionId && (
         <SideQuestionDialog
           key={sideQuestion.id}
@@ -1102,7 +1116,7 @@ export function SessionDetail() {
           isOpen={!docked && fileBrowserOpen}
           onClose={handleFileBrowserClose}
           basePath={workspaceBasePath}
-          repoName={workspaceDisplayName}
+          repoName={projectDisplayName}
           repoId={repoId}
           initialSelectedFile={selectedFilePath}
         />
@@ -1160,7 +1174,7 @@ export function SessionDetail() {
             isOpen={!docked && sourceControlOpen}
             onClose={() => setSourceControlOpen(false)}
             currentBranch={repo?.currentBranch || repo?.branch || "main"}
-            repoName={workspaceDisplayName}
+            repoName={projectDisplayName}
           />
         )}
 

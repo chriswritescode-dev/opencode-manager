@@ -124,6 +124,7 @@ vi.mock('@/hooks/useSettingsDialog', () => ({
 vi.mock('@/hooks/useMobile', () => ({
   useMobile: mocks.useMobile,
   useSwipeBack: vi.fn(() => ({ ref: vi.fn() })),
+  useSwipeDismiss: vi.fn(() => ({ bind: vi.fn(), swipeProgress: 0, swipeStyles: {} })),
 }))
 
 vi.mock('@/hooks/useVisualViewport', () => ({

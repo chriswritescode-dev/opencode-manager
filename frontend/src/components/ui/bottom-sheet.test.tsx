@@ -142,6 +142,19 @@ describe('BottomSheet', () => {
     })
   })
 
+  it('disables the swipe gesture when the sheet is not dismissible', () => {
+    render(
+      <BottomSheet isOpen dismissible={false} onClose={() => {}} ariaLabel="Test sheet">
+        <div>Test content</div>
+      </BottomSheet>,
+    )
+
+    expect(useSwipeDismiss).toHaveBeenCalledWith(expect.any(Function), {
+      enabled: false,
+      threshold: 60,
+    })
+  })
+
   it('binds gesture to the panel element with aria-modal', () => {
     const mockBind = vi.fn()
     vi.mocked(useSwipeDismiss).mockReturnValue({

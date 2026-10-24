@@ -12,6 +12,7 @@ export interface BottomSheetProps {
   className?: string
   children: React.ReactNode
   ariaLabel?: string
+  dismissible?: boolean
 }
 
 export function BottomSheet({
@@ -21,6 +22,7 @@ export function BottomSheet({
   className,
   children,
   ariaLabel,
+  dismissible = true,
 }: BottomSheetProps) {
   const [shouldRender, setShouldRender] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -28,7 +30,7 @@ export function BottomSheet({
   useRestoreFocusOnClose(isOpen, panelRef)
 
   const { bind, swipeStyles } = useSwipeDismiss(onClose, {
-    enabled: isOpen,
+    enabled: isOpen && dismissible,
     threshold: 60,
   })
 

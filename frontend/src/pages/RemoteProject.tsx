@@ -1,8 +1,9 @@
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { FolderGit2, GitBranch, Loader2, Plus, Server } from 'lucide-react'
-import { getVcsInfo, listProjects } from '@/api/opencode'
+import { listProjects } from '@/api/opencode'
 import { useCreateSession } from '@/hooks/useOpenCode'
+import { useVcsInfo } from '@/hooks/useVcsInfo'
 import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
 import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 import { useSSE } from '@/hooks/useSSE'
@@ -50,12 +51,7 @@ function RemoteProjectContent({ serverId, directory }: { serverId: string; direc
     retry: false,
   })
 
-  const vcsQuery = useQuery({
-    queryKey: [...serverScopedKey(['opencode', 'vcs', directory ?? ''], serverId), 'info'],
-    queryFn: () => getVcsInfo(directory ?? '', serverId),
-    enabled: isReady,
-    retry: false,
-  })
+  const vcsQuery = useVcsInfo(directory, serverId, { enabled: isReady })
 
   useSSE(directory)
 
