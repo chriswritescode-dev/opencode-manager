@@ -154,6 +154,18 @@ describe('SessionDetailsSheet', () => {
     )
   })
 
+  it('ignores Enter while an IME composition is active', () => {
+    const mutation = mockRename()
+    renderSheet()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
+    const input = screen.getByLabelText('Session title')
+    fireEvent.change(input, { target: { value: 'にほんご' } })
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true })
+
+    expect(mutation.mutate).not.toHaveBeenCalled()
+  })
+
   it('cancels editing and resets the rename error', () => {
     const mutation = mockRename({ error: new Error('nope') })
     renderSheet()

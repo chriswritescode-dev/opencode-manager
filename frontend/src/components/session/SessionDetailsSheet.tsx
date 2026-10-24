@@ -40,15 +40,6 @@ function InfoRow({ label, value, mono, leading }: InfoRowProps) {
   )
 }
 
-/**
- * Session details shown from the session header title. It lists the title,
- * server, project, branch and directory untruncated, and renames the session
- * inline so the sheet stays open while the new title lands through the session
- * query. It renders as a bottom sheet on mobile and a dialog on desktop.
- *
- * Dismissal is blocked while a rename is pending, and the mutation error resets
- * when the sheet reopens so a failed rename cannot leak into the next open.
- */
 export function SessionDetailsSheet({
   open,
   onOpenChange,
@@ -120,6 +111,7 @@ export function SessionDetailsSheet({
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return
                 if (event.key !== 'Enter') return
                 event.preventDefault()
                 save()

@@ -6,10 +6,6 @@ interface ContextUsageMeterProps {
   className?: string
 }
 
-/**
- * Two-pixel context-window meter: a muted track with a tone-coloured fill sized to `min(percentage, 100)`.
- * Purely decorative, so the surrounding readout carries the accessible label.
- */
 export function ContextUsageMeter({ percentage, className }: ContextUsageMeterProps) {
   const width = percentage === null ? 0 : Math.min(percentage, 100)
 

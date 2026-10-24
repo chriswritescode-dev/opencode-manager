@@ -499,7 +499,7 @@ describe('SessionDetail remote server mode', () => {
   it('opens the session details sheet from the header title', async () => {
     renderRemoteSession()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Session details' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Session details: Remote chat' }))
 
     expect(await screen.findByRole('dialog')).toHaveAccessibleName('Session details')
     expect(screen.getByText('/home/me/app')).toBeInTheDocument()

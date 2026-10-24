@@ -14,12 +14,10 @@ interface SessionPickerSheetProps {
   onClose: () => void
 }
 
-/** The session picker in a bottom sheet; every navigation replaces the sheet's history entry. */
 export function SessionPickerSheet({ isOpen, onClose }: SessionPickerSheetProps) {
   const navigate = useNavigate()
   const [addRepoOpen, setAddRepoOpen] = useState(false)
   const { currentRepo, activeSessionID, remote } = useSessionPickerRouteScope(isOpen)
-  const remoteServerId = remote?.serverId
 
   const navigateReplacing = useCallback(
     (path: string) => {
@@ -40,15 +38,14 @@ export function SessionPickerSheet({ isOpen, onClose }: SessionPickerSheetProps)
   )
 
   const handleSelectRemoteSession = useCallback(
-    (session: Session) => {
-      if (!remoteServerId) return
+    (session: Session, serverId: string) => {
       if (session.id === activeSessionID) {
         onClose()
         return
       }
-      navigateReplacing(getServerSessionPath(remoteServerId, session.id))
+      navigateReplacing(getServerSessionPath(serverId, session.id))
     },
-    [activeSessionID, navigateReplacing, onClose, remoteServerId],
+    [activeSessionID, navigateReplacing, onClose],
   )
 
   const handleDeleteActiveSession = useCallback(() => {

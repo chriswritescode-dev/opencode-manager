@@ -817,16 +817,18 @@ export function SessionDetail() {
           <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
             <Header.BackButton to={sessionBackPath} className="text-xs sm:text-sm" />
             <div className="min-w-0 flex-1">
-              <button
-                type="button"
-                onClick={() => setSessionDetailsOpen(true)}
-                aria-label="Session details"
-                className="block min-w-0 max-w-full cursor-pointer text-left"
-              >
-                <h1 className="text-xs sm:text-base font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent truncate hover:opacity-80 transition-opacity">
-                  {session?.title || "Untitled Session"}
-                </h1>
-              </button>
+              <h1 className="min-w-0 max-w-full text-xs sm:text-base font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setSessionDetailsOpen(true)}
+                  aria-label={`Session details: ${session?.title || "Untitled Session"}`}
+                  className="block min-w-0 max-w-full cursor-pointer text-left"
+                >
+                  <span className="block truncate bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent transition-opacity hover:opacity-80">
+                    {session?.title || "Untitled Session"}
+                  </span>
+                </button>
+              </h1>
               {session?.parentID ? (
                 <button
                   type="button"

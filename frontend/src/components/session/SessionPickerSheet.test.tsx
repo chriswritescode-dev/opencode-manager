@@ -136,13 +136,19 @@ function repo(id: number, name: string, fullPath: string): Repo {
   }
 }
 
-function activeWorkItem(id: string, directory: string): ActiveWorkItem {
+function activeWorkItem(
+  id: string,
+  directory: string,
+  server?: { id: string; name: string },
+): ActiveWorkItem {
   const now = Date.now()
   return {
-    key: `1:${id}`,
+    key: `${server?.id ?? LOCAL_OPENCODE_SERVER_ID}:${id}`,
     state: 'recent',
     session: session(id, `Active ${id}`, directory, now),
-    repo: repo(1, 'alpha', directory),
+    repo: server ? null : repo(1, 'alpha', directory),
+    serverId: server?.id ?? null,
+    serverName: server?.name ?? null,
     updatedAt: now,
     path: `/repos/1/sessions/${id}`,
   }
@@ -328,5 +334,40 @@ describe('SessionPickerSheet', () => {
     fireEvent.click(await screen.findByRole('option', { name: /Active ses_active/ }))
 
     expect(screen.getByTestId('location')).toHaveTextContent('/repos/1/sessions/ses_active REPLACE')
+  })
+
+  it('opens a remote activity row on its own server while the local server is selected', async () => {
+    mocks.activeWorkGroups = {
+      needsInput: [],
+      running: [],
+      recent: [activeWorkItem('ses_kitchen', '/home/me/app', { id: 'srv_kitchen', name: 'Kitchen' })],
+    }
+
+    renderSheet()
+
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Activity' }))
+    fireEvent.click(await screen.findByRole('option', { name: /Active ses_kitchen/ }))
+
+    expect(screen.getByTestId('location')).toHaveTextContent(
+      '/servers/srv_kitchen/sessions/ses_kitchen REPLACE',
+    )
+  })
+
+  it('opens an activity row of another linked server than the selected one', async () => {
+    useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
+    mocks.activeWorkGroups = {
+      needsInput: [],
+      running: [],
+      recent: [activeWorkItem('ses_hall', '/home/me/hall', { id: 'srv_hall', name: 'Hall' })],
+    }
+
+    renderSheet()
+
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Activity' }))
+    fireEvent.click(await screen.findByRole('option', { name: /Active ses_hall/ }))
+
+    expect(screen.getByTestId('location')).toHaveTextContent(
+      '/servers/srv_hall/sessions/ses_hall REPLACE',
+    )
   })
 })

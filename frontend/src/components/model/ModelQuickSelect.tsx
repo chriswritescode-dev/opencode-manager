@@ -87,10 +87,6 @@ interface ContextUsageStripProps {
   compactDisabled: boolean
 }
 
-/**
- * Compact context-window strip pinned above the picker header: the tone meter, then one line with the
- * used and limit token counts, the percentage, and the session compaction action.
- */
 function ContextUsageStrip({ usage, onCompact, compactDisabled }: ContextUsageStripProps) {
   const percentage = usage.usagePercentage
   const toneClass = CONTEXT_USAGE_TEXT_CLASS[contextUsageTone(percentage)]

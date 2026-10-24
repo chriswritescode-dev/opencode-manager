@@ -4,14 +4,6 @@ export interface ReconnectingBannerProps {
   connected: boolean
 }
 
-/**
- * Full-width strip under the session header that reports a paused event
- * stream. It stays hidden until the stream has connected at least once, so a
- * first paint before the subscription settles does not read as a dropped
- * connection.
- *
- * @param connected Whether the session's event stream is currently connected.
- */
 export function ReconnectingBanner({ connected }: ReconnectingBannerProps) {
   const [hasConnected, setHasConnected] = useState(false)
 

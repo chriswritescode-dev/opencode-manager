@@ -13,10 +13,6 @@ export interface SessionPickerRouteScope {
   remote: { serverId: string; serverName?: string; projectDirectory?: string } | undefined
 }
 
-/**
- * Resolves what a session picker opened on the current route should list: the Manager repo of a
- * repo route, or the selected linked server and its project directory.
- */
 export function useSessionPickerRouteScope(enabled: boolean): SessionPickerRouteScope {
   const { pathname, search } = useLocation()
   const [selectedServerId] = useSidebarServerSelection()

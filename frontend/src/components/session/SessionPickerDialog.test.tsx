@@ -394,6 +394,18 @@ describe('SessionPickerDialog', () => {
     expect(localStorage.getItem('oc:session-picker:all-projects')).toBeNull()
   })
 
+  it('leaves the persisted scope preference unchanged on Ctrl+A without a current repo', () => {
+    localStorage.setItem('oc:session-picker:all-projects', 'false')
+
+    renderPicker({ currentRepo: undefined })
+
+    fireEvent.keyDown(combobox(), { key: 'a', ctrlKey: true })
+
+    expect(localStorage.getItem('oc:session-picker:all-projects')).toBe('false')
+    expect(mocks.lastAllDirectories).toBe(true)
+    expect(screen.getByRole('tab', { name: 'Sessions', selected: true })).toBeInTheDocument()
+  })
+
   it('starts a new session in the current repo from the sessions tab header action', () => {
     const onNavigate = vi.fn()
     renderPicker({ onNavigate })

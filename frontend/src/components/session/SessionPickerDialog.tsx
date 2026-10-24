@@ -86,7 +86,6 @@ interface SessionPickerDialogProps {
   onSelectRemoteSession?: (session: Session, serverId: string) => void
   onDeleteActiveSession: () => void
   onSelectRepo: (repo: Repo) => void
-  /** Navigates to a path the panel produced, such as a new session created from the header action. */
   onNavigate: (path: string) => void
   /** Set on a linked-server route to list that server's sessions instead of Manager repos. */
   remote?: RemotePickerScope
@@ -569,7 +568,7 @@ interface SessionPickerContentProps {
   onDeleteActiveSession: () => void
   allProjects: boolean
   scopeEnabled: boolean
-  onToggleAllProjects: () => void
+  onToggleAllProjects?: () => void
   switchHint: string
   searchInputRef: React.RefObject<HTMLInputElement | null>
   searchTrailing?: React.ReactNode
@@ -1212,19 +1211,13 @@ export interface SessionPickerPanelProps {
   onDeleteActiveSession: () => void
   onSelectRepo: (repo: Repo) => void
   onNavigate: (path: string) => void
-  /** Set on a linked-server route to list that server's sessions instead of Manager repos. */
   remote?: RemotePickerScope
-  /** Lists the linked server's projects on a Projects tab; the desktop dialog leaves it off. */
   remoteProjects?: boolean
-  /** Extra controls rendered at the trailing end of every tab's search bar. */
   searchTrailing?: React.ReactNode
-  /** Hands the add-repository action to the host, which renders the dialog above its own surface. */
   onAddRepo?: () => void
-  /** Renders the dialog title element, which only a Radix Dialog can host. */
   renderTitle?: (label: string) => React.ReactNode
 }
 
-/** The tab strip, search bars, lists and header actions shared by the picker dialog and sheet. */
 export function SessionPickerPanel({
   open,
   currentRepo,
@@ -1423,7 +1416,7 @@ export function SessionPickerPanel({
               onDeleteActiveSession={onDeleteActiveSession}
               allProjects={allProjects}
               scopeEnabled={scopeEnabled}
-              onToggleAllProjects={toggleAllProjects}
+              onToggleAllProjects={scopeEnabled ? toggleAllProjects : undefined}
               switchHint={switchHint}
               searchInputRef={searchInputRef}
               searchTrailing={sessionsTrailing}
