@@ -9,7 +9,7 @@
 
 ## Checklist
 
-- [ ] Code follows project style (no comments, named imports)
+- [ ] Code follows project style (doc comments only, named imports)
 - [ ] TypeScript types are properly defined
 - [ ] Tests added/updated (80% coverage target)
 - [ ] `pnpm lint` passes locally
