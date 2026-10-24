@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { Database } from 'bun:sqlite'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
-import scopeIndexMigration from '../../src/db/migrations/202610181410-secrets-global-scope-index'
+import { secretsGlobalScopeIndexMigration } from '../../src/db/migrations/202610181410-secrets-global-scope-index'
 import { SecretsService } from '../../src/services/secrets'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 
@@ -68,8 +68,24 @@ describe('secrets global scope index migration', () => {
   it('restores the legacy index expression on rollback', () => {
     migrate(db, allMigrations)
 
-    scopeIndexMigration.down(db)
+    secretsGlobalScopeIndexMigration.down(db)
 
     expect(scopeIndexSql(db)).toContain('COALESCE(repo_id, 0)')
+  })
+
+  it('collapses merged global and Assistant scopes to the newest row on rollback', () => {
+    migrate(db, allMigrations)
+    service.set('secret', null, null, 'TOKEN', 'global-token')
+    service.set('secret', ASSISTANT_REPO_ID, null, 'TOKEN', 'assistant-token')
+    db.prepare('UPDATE secrets SET updated_at = ? WHERE repo_id IS NULL').run(1_000)
+    db.prepare('UPDATE secrets SET updated_at = ? WHERE repo_id = ?').run(2_000, ASSISTANT_REPO_ID)
+
+    expect(() => secretsGlobalScopeIndexMigration.down(db)).not.toThrow()
+
+    expect(scopeIndexSql(db)).toContain('COALESCE(repo_id, 0)')
+    expect(
+      db.prepare('SELECT repo_id, name, updated_at FROM secrets').all(),
+    ).toEqual([{ repo_id: ASSISTANT_REPO_ID, name: 'TOKEN', updated_at: 2_000 }])
+    expect(service.resolveValues(ASSISTANT_REPO_ID, null).secrets.TOKEN).toBe('assistant-token')
   })
 })

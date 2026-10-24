@@ -38,7 +38,7 @@ import migration202610181300 from './202610181300-session-server-scope'
 import migration202610181310 from './202610181310-multi-run-targets'
 import migration202610181320 from './202610181320-remote-schedule-targets'
 import migration202610181400 from './202610181400-secrets'
-import migration202610181410 from './202610181410-secrets-global-scope-index'
+import { secretsGlobalScopeIndexMigration } from './202610181410-secrets-global-scope-index'
 
 export const allMigrations: Migration[] = [
   migration001,
@@ -80,5 +80,5 @@ export const allMigrations: Migration[] = [
   migration202610181310,
   migration202610181320,
   migration202610181400,
-  migration202610181410,
+  secretsGlobalScopeIndexMigration,
 ]

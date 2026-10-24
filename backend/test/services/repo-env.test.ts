@@ -181,6 +181,27 @@ describe('RepoEnvService', () => {
     expect(result.env).toEqual({ PLAIN: 'literal' })
   })
 
+  it('does not resolve a separate clone of the same origin to the registered repo', async () => {
+    const root = createTempDir('ocm-repo-env-')
+    initGitRepo(root)
+    execSync(`git -C "${root}" remote add origin https://github.com/test/shared.git`)
+    writeProjectFile(root, { version: 1, env: { TOKEN: '${{ secrets.TOKEN }}' } })
+    const repo = registerRepo(root)
+    secretsService.set('secret', repo.id, null, 'TOKEN', 'registered-token')
+    await trust(root, repo)
+
+    const clone = createTempDir('ocm-repo-env-clone-')
+    initGitRepo(clone)
+    execSync(`git -C "${clone}" remote add origin https://github.com/test/shared.git`)
+    writeProjectFile(clone, { version: 1, env: { TOKEN: '${{ secrets.TOKEN }}' } })
+
+    expect(await repoEnvService.resolveForDirectory(clone)).toEqual(EMPTY)
+    expect(await repoEnvService.resolveForDirectory(root)).toEqual({
+      env: { TOKEN: 'registered-token' },
+      maskValues: ['registered-token'],
+    })
+  })
+
   it('returns an empty result for a non-git directory', async () => {
     const plain = createTempDir('ocm-repo-env-plain-')
 

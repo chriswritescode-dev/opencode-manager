@@ -666,10 +666,32 @@ describe('resolveRepoForDirectory', () => {
     resolveProjectId.mockImplementation(async (directory: string) =>
       directory === workspaceDirectory || directory === repo.fullPath ? 'commit-A' : null,
     )
+    executeCommand.mockImplementation(async (args: string[]) =>
+      args.includes('--git-common-dir') ? path.join(repo.fullPath, '.git') : '',
+    )
 
     const result = await resolveRepoForDirectory({} as never, workspaceDirectory)
 
     expect(result).toBe(repo)
+  })
+
+  it('returns null for a matching project id that is not the registered checkout', async () => {
+    const { resolveRepoForDirectory } = await import('../../src/services/repo')
+    const repo = createReadyRepo(1, 'repo-a')
+    const cloneDirectory = '/clones/repo-a'
+    getRepoBySourcePath.mockReturnValue(null)
+    getRepoByLocalPath.mockReturnValue(null)
+    listRepos.mockReturnValue([repo])
+    resolveProjectId.mockImplementation(async (directory: string) =>
+      directory === cloneDirectory || directory === repo.fullPath ? 'commit-A' : null,
+    )
+    executeCommand.mockImplementation(async (args: string[]) =>
+      args.includes('--git-common-dir') ? path.join(cloneDirectory, '.git') : '',
+    )
+
+    const result = await resolveRepoForDirectory({} as never, cloneDirectory)
+
+    expect(result).toBeNull()
   })
 
   it('returns null for a directory that matches no repo', async () => {

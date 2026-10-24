@@ -1210,6 +1210,11 @@ export async function resolveRepoProjectId(openCodeClient: OpenCodeClient, direc
   return project.id
 }
 
+/**
+ * Resolves the registered repository a directory belongs to. Beyond the repository's own
+ * location, a directory is only attributed to a repository that shares its Git metadata, so a
+ * separate clone of the same origin, whose project id matches, is not mistaken for it.
+ */
 export async function resolveRepoForDirectory(
   database: Database,
   directory: string,
@@ -1225,13 +1230,22 @@ export async function resolveRepoForDirectory(
   const readyRepos = listRepos(database).filter(
     (candidate) => candidate.cloneStatus === 'ready',
   )
+  const candidates: Repo[] = []
   for (const candidate of readyRepos) {
     const candidateProjectId = await resolveProjectId(candidate.fullPath).catch(
       () => null,
     )
-    if (candidateProjectId === projectId) return candidate
+    if (candidateProjectId === projectId) candidates.push(candidate)
   }
-  return null
+  if (candidates.length === 0) return null
+
+  const mainCheckout = await resolveMainCheckoutPath(directory)
+  if (!mainCheckout) return null
+  const canonicalMainCheckout = canonicalPathSync(path.resolve(mainCheckout))
+
+  return candidates.find(
+    (candidate) => canonicalPathSync(path.resolve(candidate.fullPath)) === canonicalMainCheckout,
+  ) ?? null
 }
 
 export function resolveRepoOrAssistant(database: Database, id: number): Repo | null {
