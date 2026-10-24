@@ -5,6 +5,7 @@ import { allMigrations } from '../../src/db/migrations'
 import { SecretsService, SecretsServiceError } from '../../src/services/secrets'
 import { decryptSecret } from '../../src/utils/crypto'
 import { logger } from '../../src/utils/logger'
+import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 
 function createTestDb(): Database {
   const db = new Database(':memory:')
@@ -104,6 +105,24 @@ describe('SecretsService', () => {
         expect.objectContaining({ name: 'SCOPED', environment: 'prod' }),
       ]),
     )
+  })
+
+  it('keeps global and Assistant repository entries with the same name independent', () => {
+    service.set('variable', null, null, 'LOG_LEVEL', 'global')
+    service.set('variable', ASSISTANT_REPO_ID, null, 'LOG_LEVEL', 'assistant')
+
+    expect(service.list('variable', null)).toEqual([
+      expect.objectContaining({ name: 'LOG_LEVEL', value: 'global' }),
+    ])
+    expect(service.list('variable', ASSISTANT_REPO_ID)).toEqual([
+      expect.objectContaining({ name: 'LOG_LEVEL', value: 'assistant' }),
+    ])
+
+    service.set('variable', null, null, 'LOG_LEVEL', 'global-updated')
+    service.set('variable', ASSISTANT_REPO_ID, null, 'LOG_LEVEL', 'assistant-updated')
+
+    expect(service.list('variable', null)[0]?.value).toBe('global-updated')
+    expect(service.list('variable', ASSISTANT_REPO_ID)[0]?.value).toBe('assistant-updated')
   })
 
   it('resolves values with global < repository < repository+environment precedence', () => {

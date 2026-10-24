@@ -94,6 +94,12 @@ export function setRepoSandboxGitCredentials(db: Database, repoId: number, allow
   setRepoSetting(db, repoId, REPO_SANDBOX_GIT_CREDENTIALS_SETTING_KEY, allowed === null ? null : String(allowed))
 }
 
+export function getRepoByExactDirectory(db: Database, directory: string): Repo | null {
+  const resolvedDirectory = canonicalPathSync(path.resolve(directory))
+
+  return listRepos(db).find((repo) => canonicalPathSync(path.resolve(repo.fullPath)) === resolvedDirectory) ?? null
+}
+
 export function getRepoByDirectory(db: Database, directory: string): Repo | null {
   const resolvedDirectory = canonicalPathSync(path.resolve(directory))
   const repos = listRepos(db)

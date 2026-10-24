@@ -44,11 +44,11 @@ describe('RepoEnvService', () => {
     return dir
   }
 
-  function initGitRepo(dir: string): void {
+  function initGitRepo(dir: string, message = 'Initial commit'): void {
     execSync(`git init "${dir}"`)
     execSync(`git -C "${dir}" config user.email test@test.com`)
     execSync(`git -C "${dir}" config user.name Test`)
-    execSync(`git -C "${dir}" commit --allow-empty -m "Initial commit"`)
+    execSync(`git -C "${dir}" commit --allow-empty -m "${message}"`)
   }
 
   function writeProjectFile(dir: string, content: unknown): void {
@@ -148,6 +148,20 @@ describe('RepoEnvService', () => {
     const result = await repoEnvService.resolveForDirectory(nested)
 
     expect(result.env).toEqual({ PLAIN: 'literal' })
+  })
+
+  it('ignores an unregistered nested git root inside a registered repository', async () => {
+    const root = createTempDir('ocm-repo-env-')
+    initGitRepo(root)
+    const repo = registerRepo(root)
+    secretsService.set('secret', repo.id, null, 'TOKEN', 'root-token')
+    const nested = path.join(root, 'packages', 'nested')
+    fs.mkdirSync(nested, { recursive: true })
+    initGitRepo(nested, 'Nested initial commit')
+    writeProjectFile(nested, { version: 1, env: { TOKEN: '${{ secrets.TOKEN }}' } })
+    await trust(nested, repo)
+
+    expect(await repoEnvService.resolveForDirectory(nested)).toEqual(EMPTY)
   })
 
   it('resolves a git worktree outside the repository folder to the main repo', async () => {

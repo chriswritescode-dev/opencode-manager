@@ -3,7 +3,7 @@ import path from 'node:path'
 import type { Database } from 'bun:sqlite'
 import type { Repo } from '@opencode-manager/shared/types'
 import { interpolateEnvExpressions, type EnvExpressionReference } from '@opencode-manager/shared/utils'
-import { getRepoByDirectory } from '../db/queries'
+import { getRepoByExactDirectory } from '../db/queries'
 import { canonicalPathSync } from '../utils/fs-safe'
 import { logger } from '../utils/logger'
 import { repoEnvCacheEpoch } from '../utils/repo-env-cache'
@@ -133,7 +133,7 @@ export class RepoEnvService {
 
     const topLevel = await findGitRepoRoot(cwd)
     const repo = topLevel
-      ? getRepoByDirectory(this.db, topLevel) ?? (await resolveRepoForDirectory(this.db, topLevel))
+      ? getRepoByExactDirectory(this.db, topLevel) ?? (await resolveRepoForDirectory(this.db, topLevel))
       : null
     const projectRepo = repo ? await this.projectConfigService.resolveProjectRepo(repo) : null
 

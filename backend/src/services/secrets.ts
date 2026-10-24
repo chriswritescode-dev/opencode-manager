@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import type { SecretEntry, SecretKind } from '@opencode-manager/shared/schemas'
+import { GLOBAL_SECRETS_SCOPE_ID } from '../db/secrets-scope'
 import { decryptSecret, encryptSecret } from '../utils/crypto'
 import { logger } from '../utils/logger'
 
@@ -46,7 +47,7 @@ export class SecretsService {
       .prepare(
         `INSERT INTO secrets (kind, repo_id, environment, name, value, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(kind, COALESCE(repo_id, 0), environment, name) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+         ON CONFLICT(kind, COALESCE(repo_id, ${GLOBAL_SECRETS_SCOPE_ID}), environment, name) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
       )
       .run(kind, repoId, normalizedEnvironment, name, storedValue, now, now)
   }
