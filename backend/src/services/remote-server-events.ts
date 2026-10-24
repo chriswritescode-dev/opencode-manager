@@ -14,6 +14,7 @@ import type {
   OpenCodeServerRegistry,
 } from './opencode-server-registry'
 import {
+  applySessionActivity,
   collectPendingReplayEvents,
   createAuthorizedEventSourceInit,
   createReplayEventBuilder,
@@ -63,6 +64,7 @@ interface RemoteServerStream {
   versionRequested: boolean
   versionProbeToken: number
   sessionDirectories: Map<string, string>
+  busySessions: Set<string>
   subagentSessions: Set<string>
 }
 
@@ -152,6 +154,9 @@ export class RemoteServerEventHub {
     const key = buildServerDirectoryKey(serverId, directory)
     if (!this.aggregator.hasClientDirectory(clientId, key)) return
 
+    const stream = this.streams.get(serverId)
+    if (!stream || !this.hasActiveSession(stream, directory)) return
+
     let api: OpenCodeApi
     try {
       api = this.registry.getClient(serverId).api
@@ -170,6 +175,13 @@ export class RemoteServerEventHub {
 
     this.emitReplayEventsToClient(clientId, serverId, directory, events.permissions)
     this.emitReplayEventsToClient(clientId, serverId, directory, events.forms)
+  }
+
+  private hasActiveSession(stream: RemoteServerStream, directory: string): boolean {
+    for (const sessionID of stream.busySessions) {
+      if (stream.sessionDirectories.get(sessionID) === directory) return true
+    }
+    return false
   }
 
   private emitReplayEventsToClient(
@@ -281,6 +293,7 @@ export class RemoteServerEventHub {
     try {
       const { event, resolvedDirectory, payloadJson } = routed
       const sessionID = sessionIDFromEvent(event)
+      if (sessionID) applySessionActivity(stream.busySessions, event)
       if (sessionID && event.type === 'session.deleted') {
         stream.subagentSessions.delete(sessionID)
       } else if (event.type === 'session.created' && event.data.parentID) {
@@ -352,12 +365,16 @@ export class RemoteServerEventHub {
 
     if (!this.isStreamCurrent(serverId, stream, source)) return
 
+    await this.resolveActiveSessionDirectories(api, serverId, stream, Object.keys(active ?? {}))
+    if (!this.isStreamCurrent(serverId, stream, source)) return
+
     const plan = planSessionStatusReplay(active, stream.sessionDirectories)
     let replayed = 0
 
     for (const { sessionID, directory } of plan.idle) {
       const event = this.buildReplayEvent('session.status', directory, { sessionID, status: { type: 'idle' } })
       this.aggregator.deliverRemoteEnvelope(serverId, directory, JSON.stringify(event))
+      stream.busySessions.delete(sessionID)
       replayed++
     }
 
@@ -365,12 +382,33 @@ export class RemoteServerEventHub {
       const directory = stream.sessionDirectories.get(sessionID) ?? null
       const event = this.buildReplayEvent('session.status', directory ?? '', { sessionID, status: { type: 'busy' } })
       this.aggregator.deliverRemoteEnvelope(serverId, directory, JSON.stringify(event))
+      stream.busySessions.add(sessionID)
       replayed++
     }
 
     if (replayed > 0) {
       logger.info(`remote status replay: re-emitted ${replayed} session status(es) for ${serverId}`)
     }
+  }
+
+  private async resolveActiveSessionDirectories(
+    api: OpenCodeApi,
+    serverId: string,
+    stream: RemoteServerStream,
+    sessionIDs: string[],
+  ): Promise<void> {
+    const unresolved = sessionIDs.filter((sessionID) => !stream.sessionDirectories.has(sessionID))
+    if (unresolved.length === 0) return
+
+    await Promise.allSettled(unresolved.map(async (sessionID) => {
+      try {
+        const session = await api.session.get({ sessionID })
+        const directory = session.location.directory
+        if (directory) stream.sessionDirectories.set(sessionID, directory)
+      } catch (error) {
+        logger.warn(`remote status replay: failed to resolve the directory of ${sessionID} on ${serverId}: ${String(error)}`)
+      }
+    }))
   }
 
   private async refreshVersion(serverId: string): Promise<void> {
@@ -413,6 +451,7 @@ export class RemoteServerEventHub {
       versionRequested: false,
       versionProbeToken: 0,
       sessionDirectories: new Map(),
+      busySessions: new Set(),
       subagentSessions: new Set(),
     }
     this.streams.set(serverId, stream)

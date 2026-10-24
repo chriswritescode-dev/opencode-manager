@@ -49,7 +49,7 @@ Each item is tagged with a theme to help you find work in your area of interest:
 
 ### Code Style
 
-- Self-documenting code (no comments needed)
+- New and changed code uses doc comments only (JSDoc/TSDoc on the declaration they document); no inline or explanatory comments
 - Strict TypeScript with proper typing
 - Named imports only
 - DRY principles - check for existing patterns before adding new ones

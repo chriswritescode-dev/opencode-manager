@@ -70,11 +70,11 @@ describe('MobileTabBar', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     )
-    expect(screen.getByText('Repos')).toBeInTheDocument()
+    expect(screen.getByText('Sessions')).toBeInTheDocument()
     expect(screen.getByText('Git')).toBeInTheDocument()
     expect(screen.queryByText('Schedules')).not.toBeInTheDocument()
     const labels = screen.getAllByRole('button').map((button) => button.textContent)
-    expect(labels).toEqual(['Repos', 'Files', 'Git', 'Assistant', 'More'])
+    expect(labels).toEqual(['Sessions', 'Files', 'Git', 'Assistant', 'More'])
   })
 
   it('opens the source control dialog when Git is clicked on repo detail path', async () => {
@@ -109,7 +109,7 @@ describe('MobileTabBar', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     )
-    expect(screen.getByText('Repos')).toBeInTheDocument()
+    expect(screen.getByText('Sessions')).toBeInTheDocument()
     expect(screen.getByText('Assistant')).toBeInTheDocument()
     expect(screen.getByText('Schedules')).toBeInTheDocument()
   })
@@ -226,7 +226,7 @@ describe('MobileTabBar', () => {
       </QueryClientProvider>,
     )
     const labels = screen.getAllByRole('button').map((button) => button.textContent)
-    expect(labels).toEqual(['Repos', 'Git', 'Assistant', 'More'])
+    expect(labels).toEqual(['Sessions', 'Git', 'Assistant', 'More'])
     expect(screen.queryByText('Files')).not.toBeInTheDocument()
     expect(screen.queryByText('Schedules')).not.toBeInTheDocument()
   })
@@ -255,7 +255,7 @@ describe('MobileTabBar', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('dialog=sourceControl')
   })
 
-  it('opens the repos sheet from the Repos tab on a linked server project page', async () => {
+  it('opens the sessions sheet from the Sessions tab on a linked server project page', async () => {
     vi.mocked(useMobile).mockReturnValue(true)
     const queryClient = new QueryClient()
     const user = userEvent.setup()
@@ -273,8 +273,8 @@ describe('MobileTabBar', () => {
       </QueryClientProvider>,
     )
 
-    await user.click(screen.getByRole('button', { name: 'Repos' }))
-    expect(screen.getByTestId('location')).toHaveTextContent('mobileTab=repos')
+    await user.click(screen.getByRole('button', { name: 'Sessions' }))
+    expect(screen.getByTestId('location')).toHaveTextContent('mobileTab=sessions')
   })
 
   it('does not render tab bar on a linked server session path', () => {
@@ -316,7 +316,7 @@ describe('MobileTabBar', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     )
-    expect(screen.getByText('Repos')).toBeInTheDocument()
+    expect(screen.getByText('Sessions')).toBeInTheDocument()
     expect(screen.getByText('Files')).toBeInTheDocument()
     expect(screen.getByText('Assistant')).toBeInTheDocument()
     expect(screen.getByText('Schedules')).toBeInTheDocument()
@@ -336,7 +336,7 @@ describe('MobileTabBar', () => {
       </QueryClientProvider>,
     )
     const labels = screen.getAllByRole('button').map((button) => button.textContent)
-    expect(labels).toEqual(['Repos', 'Assistant', 'Schedules', 'More'])
+    expect(labels).toEqual(['Sessions', 'Assistant', 'Schedules', 'More'])
     expect(screen.queryByText('Files')).not.toBeInTheDocument()
   })
 
@@ -350,11 +350,11 @@ describe('MobileTabBar', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     )
-    expect(screen.getByText('Repos')).toBeInTheDocument()
+    expect(screen.getByText('Sessions')).toBeInTheDocument()
     expect(screen.getByText('Schedules')).toBeInTheDocument()
   })
 
-  it('Repos tab is active when pathname is / and no sheet is open', () => {
+  it('Sessions tab is active when pathname is / and no sheet is open', () => {
     vi.mocked(useMobile).mockReturnValue(true)
     const queryClient = new QueryClient()
     render(
@@ -364,24 +364,24 @@ describe('MobileTabBar', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     )
-    const reposButton = screen.getByText('Repos').closest('button')
-    expect(reposButton).toHaveClass('text-primary')
-    expect(reposButton).toHaveClass('border-primary')
+    const sessionsButton = screen.getByText('Sessions').closest('button')
+    expect(sessionsButton).toHaveClass('text-primary')
+    expect(sessionsButton).toHaveClass('border-primary')
   })
 
-  it('Repos tab is active when openSheet is repos regardless of pathname', () => {
+  it('Sessions tab is active when openSheet is sessions regardless of pathname', () => {
     vi.mocked(useMobile).mockReturnValue(true)
     const queryClient = new QueryClient()
     render(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/repos/123?mobileTab=repos']}>
+        <MemoryRouter initialEntries={['/repos/123?mobileTab=sessions']}>
           <MobileTabBar />
         </MemoryRouter>
       </QueryClientProvider>,
     )
-    const reposButton = screen.getByText('Repos').closest('button')
-    expect(reposButton).toHaveClass('text-primary')
-    expect(reposButton).toHaveClass('border-primary')
+    const sessionsButton = screen.getByText('Sessions').closest('button')
+    expect(sessionsButton).toHaveClass('text-primary')
+    expect(sessionsButton).toHaveClass('border-primary')
   })
 
   it('maintains stable callbacks when search changes but mobileTab does not', () => {
@@ -396,8 +396,8 @@ describe('MobileTabBar', () => {
       </QueryClientProvider>,
     )
 
-    const firstReposButton = screen.getByText('Repos').closest('button')
-    expect(firstReposButton).toBeInTheDocument()
+    const firstSessionsButton = screen.getByText('Sessions').closest('button')
+    expect(firstSessionsButton).toBeInTheDocument()
 
     rerender(
       <QueryClientProvider client={queryClient}>
@@ -407,8 +407,8 @@ describe('MobileTabBar', () => {
       </QueryClientProvider>,
     )
 
-    const secondReposButton = screen.getByText('Repos').closest('button')
-    expect(secondReposButton).toBeInTheDocument()
+    const secondSessionsButton = screen.getByText('Sessions').closest('button')
+    expect(secondSessionsButton).toBeInTheDocument()
   })
 
   it('does not render tab bar on SessionDetail path /repos/:id/sessions/:sid', () => {

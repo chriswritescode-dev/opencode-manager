@@ -1,6 +1,7 @@
 import { openCodeLocation, parseOpenCodeModelRef } from '@opencode-manager/shared/opencode'
 import { MANAGER_PROMPT_CLIENT_METADATA_KEY } from '@opencode-manager/shared/schemas'
 import { isMobileViewport } from '@/hooks/useMobile'
+import { getDirectoryName } from '@/lib/utils'
 import { callOpenCode } from './opencodeApi'
 import type {
   AgentInfo,
@@ -36,6 +37,95 @@ export type ShellOutputChunk = Awaited<ReturnType<OpenCodeApi['shell']['output']
 export type OpenCodeLocationInfo = Awaited<ReturnType<OpenCodeApi['location']['get']>>
 
 export type OpenCodeProject = Awaited<ReturnType<OpenCodeApi['project']['list']>>[number]
+
+/** A project paired with the timestamp that represents its most recent activity. */
+export interface RemoteProjectActivity {
+  project: OpenCodeProject
+  activityAt: number
+}
+
+/**
+ * Orders projects from the most to the least recently updated.
+ *
+ * A project's own update time covers metadata edits and registration, not work, so this is the
+ * ordering used when no session evidence is available.
+ *
+ * @param projects Projects to order.
+ * @returns A new array with the projects sorted by update time; the input is left untouched.
+ */
+export function sortProjectsByUpdatedAt(projects: OpenCodeProject[]): OpenCodeProject[] {
+  return [...projects].sort((a, b) => b.time.updated - a.time.updated)
+}
+
+/**
+ * Derives each project's activity time from the newest session of the server that belongs to it and
+ * orders projects by that time.
+ *
+ * Session update times record work; a project's own update time only records metadata edits and
+ * registration, so projects without a session in the given page fall back to it and sort after the
+ * session-backed ones. `time.active` is deliberately unused: OpenCode stamps it on every location
+ * boot, including boots caused by other clients and idle evictions.
+ *
+ * @param projects Projects of one server.
+ * @param sessions Sessions of that server, as returned by a first session page.
+ * @returns The projects with their activity time, most recently active first.
+ */
+export function rankProjectsBySessionActivity(
+  projects: OpenCodeProject[],
+  sessions: SessionInfo[],
+): RemoteProjectActivity[] {
+  const sessionActivityByProjectId = new Map<string, number>()
+  for (const session of sessions) {
+    const project = findRemoteProjectForDirectory(projects, session.location.directory)
+    if (!project) continue
+    const updated = session.time.updated
+    const current = sessionActivityByProjectId.get(project.id)
+    if (current === undefined || updated > current) {
+      sessionActivityByProjectId.set(project.id, updated)
+    }
+  }
+
+  const sessionActivity = (project: OpenCodeProject) => sessionActivityByProjectId.get(project.id)
+
+  return projects
+    .map((project) => ({
+      project,
+      activityAt: sessionActivity(project) ?? project.time.updated,
+    }))
+    .sort((a, b) => {
+      const aHasSession = sessionActivity(a.project) !== undefined
+      const bHasSession = sessionActivity(b.project) !== undefined
+      if (aHasSession !== bHasSession) return aHasSession ? -1 : 1
+      return b.activityAt - a.activityAt
+    })
+}
+
+/**
+ * Returns the display name of a project, falling back to the name of its directory.
+ *
+ * @param project Project whose name is resolved.
+ * @returns The trimmed project name, or the last segment of its canonical directory.
+ */
+export function remoteProjectName(project: OpenCodeProject): string {
+  return project.name?.trim() || getDirectoryName(project.canonical)
+}
+
+/**
+ * Finds the project that owns a directory, matching its canonical directory and anything nested
+ * inside it.
+ *
+ * @param projects Projects of the server that owns the directory.
+ * @param directory Directory whose owning project is resolved.
+ * @returns The owning project, or undefined when the directory belongs to none of them.
+ */
+export function findRemoteProjectForDirectory(
+  projects: OpenCodeProject[],
+  directory: string,
+): OpenCodeProject | undefined {
+  return projects.find(
+    (project) => directory === project.canonical || directory.startsWith(`${project.canonical}/`),
+  )
+}
 
 export type VcsInfo = Awaited<ReturnType<OpenCodeApi['vcs']['get']>>['data']
 

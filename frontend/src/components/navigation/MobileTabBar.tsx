@@ -1,6 +1,6 @@
 import { memo, useMemo } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { FolderGit2, FolderOpen, CalendarClock, Menu, Info, History, Bot, GitCommitHorizontal } from 'lucide-react'
+import { List, FolderOpen, CalendarClock, Menu, Info, History, Bot, GitCommitHorizontal } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMobile } from '@/hooks/useMobile'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
@@ -112,11 +112,11 @@ function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideR
 
   return [
     {
-      key: 'repos',
-      label: 'Repos',
-      icon: FolderGit2,
-      onClick: () => open('repos'),
-      active: openSheet === 'repos' || (pathname === '/' && !openSheet),
+      key: 'sessions',
+      label: 'Sessions',
+      icon: List,
+      onClick: () => open('sessions'),
+      active: openSheet === 'sessions' || (pathname === '/' && !openSheet),
     },
     ...(showsFiles
       ? [{

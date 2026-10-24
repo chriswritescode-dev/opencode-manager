@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Search, Star, Trash2, X, type LucideIcon } from 'lucide-react'
 import { useModelSelection, type ModelSelectionSession } from '@/hooks/useModelSelection'
 import { useMobile } from '@/hooks/useMobile'
@@ -14,8 +14,16 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
+import { ContextUsageMeter } from '@/components/session/ContextUsageMeter'
 import { buildModelSections, filterModelSections, type ModelOption } from '@/lib/modelSections'
 import { isTextEntryElement } from '@/lib/domTargets'
+import {
+  CONTEXT_USAGE_TEXT_CLASS,
+  contextUsageAccessibleLabel,
+  contextUsageTone,
+  formatCompactTokens,
+  type ContextUsage,
+} from '@/lib/contextUsage'
 
 interface ModelQuickSelectProps {
   directory?: string
@@ -24,6 +32,9 @@ interface ModelQuickSelectProps {
   open?: boolean
   onOpenChange?: (open: boolean) => void
   session?: ModelSelectionSession
+  contextUsage?: ContextUsage | null
+  isCompacting?: boolean
+  onCompact?: () => void
 }
 
 interface ModelListItem {
@@ -68,6 +79,46 @@ const ICON_BUTTON_CLASS =
 
 function formatModelCount(count: number) {
   return `${count} ${count === 1 ? 'model' : 'models'}`
+}
+
+interface ContextUsageStripProps {
+  usage: ContextUsage
+  onCompact?: () => void
+  compactDisabled: boolean
+}
+
+function ContextUsageStrip({ usage, onCompact, compactDisabled }: ContextUsageStripProps) {
+  const percentage = usage.usagePercentage
+  const toneClass = CONTEXT_USAGE_TEXT_CLASS[contextUsageTone(percentage)]
+  const summary = usage.contextLimit === null || percentage === null
+    ? `${formatCompactTokens(usage.totalTokens)} tokens`
+    : `${formatCompactTokens(usage.totalTokens)} / ${formatCompactTokens(usage.contextLimit)} · ${percentage}%`
+
+  return (
+    <div data-testid="context-usage-strip" className="shrink-0 border-b border-border px-4 pb-2">
+      <ContextUsageMeter percentage={percentage} />
+      <div className="mt-1.5 flex items-center gap-3">
+        <span
+          data-testid="context-usage-summary"
+          aria-label={contextUsageAccessibleLabel(usage)}
+          className={`min-w-0 truncate text-xs font-medium ${toneClass}`}
+        >
+          {summary}
+        </span>
+        {onCompact && (
+          <button
+            type="button"
+            onClick={onCompact}
+            disabled={compactDisabled}
+            aria-label="Compact session"
+            className="ml-auto shrink-0 rounded text-xs font-medium text-info hover:underline disabled:cursor-not-allowed disabled:opacity-40 disabled:no-underline"
+          >
+            Compact
+          </button>
+        )}
+      </div>
+    </div>
+  )
 }
 
 function VirtualizedList<T>({
@@ -169,13 +220,16 @@ function VirtualizedList<T>({
   )
 }
 
-export function ModelQuickSelect({
+export const ModelQuickSelect = memo(function ModelQuickSelect({
   directory,
   disabled,
   children,
   open,
   onOpenChange,
   session,
+  contextUsage,
+  isCompacting = false,
+  onCompact,
 }: ModelQuickSelectProps) {
   const [internalIsOpen, setInternalIsOpen] = useState(false)
   const isOpen = open ?? internalIsOpen
@@ -410,11 +464,15 @@ export function ModelQuickSelect({
     setSearchQuery('')
   }
 
+  const handleCompact = () => {
+    onCompact?.()
+    handleOpenChange(false)
+  }
+
   const getDescription = (item: ModelListItem) => {
     const context = item.model?.limit?.context
     if (context) {
-      const formattedContext = context >= 1000000 ? `${(context / 1000000).toFixed(1)}M` : context.toLocaleString()
-      return `${item.providerName} · ${formattedContext} context`
+      return `${item.providerName} · ${formatCompactTokens(context)} context`
     }
 
     return item.providerName
@@ -576,6 +634,13 @@ export function ModelQuickSelect({
         className="z-[300] border-border bg-popover text-foreground shadow-2xl md:mx-auto md:max-w-lg"
         ariaLabel="Select model"
       >
+        {contextUsage && (
+          <ContextUsageStrip
+            usage={contextUsage}
+            onCompact={onCompact ? handleCompact : undefined}
+            compactDisabled={!session?.id || isCompacting}
+          />
+        )}
         <div className={`flex items-center justify-between gap-2 px-4 ${showAllModels ? 'pb-2 pt-2' : 'pb-3 pt-0'}`}>
           {showAllModels ? (
             <>
@@ -736,4 +801,4 @@ export function ModelQuickSelect({
       </BottomSheet>
     </>
   )
-}
+})

@@ -52,6 +52,33 @@ export function planSessionStatusReplay(
   return { idle, busy }
 }
 
+/**
+ * Records the activity state an event implies for its session, so that directory-scoped work can be
+ * limited to the sessions that are actually running.
+ *
+ * @param busySessions Sessions currently running on the server, updated in place.
+ * @param event Event observed on the server stream.
+ */
+export function applySessionActivity(busySessions: Set<string>, event: V2Event): void {
+  switch (event.type) {
+    case 'session.status': {
+      const { sessionID, status } = event.data
+      if (status.type === 'idle') busySessions.delete(sessionID)
+      else busySessions.add(sessionID)
+      return
+    }
+    case 'session.execution.started':
+      busySessions.add(event.data.sessionID)
+      return
+    case 'session.idle':
+    case 'session.execution.succeeded':
+    case 'session.execution.failed':
+    case 'session.execution.interrupted':
+    case 'session.deleted':
+      busySessions.delete(event.data.sessionID)
+  }
+}
+
 export function createReplayEventBuilder(idPrefix: string): ReplayEventBuilder {
   let count = 0
   return (type, directory, data) => {

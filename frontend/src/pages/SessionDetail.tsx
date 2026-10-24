@@ -5,24 +5,23 @@ import { repoQueryOptions } from "@/lib/repoQuery";
 import { MessageThread } from "@/components/message/MessageThread";
 import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
 import { FloatingTTSButton } from '@/components/message/FloatingTTSButton'
-import { X, CornerUpLeft, GitBranch, ArrowDown } from "lucide-react";
+import { X, CornerUpLeft, GitBranch, ArrowDown, Server } from "lucide-react";
 import { SquareFill } from "@/components/ui/square-fill";
 import { Header } from "@/components/ui/header";
 import { Badge } from "@/components/ui/badge";
 import { SessionPickerDialog } from "@/components/session/SessionPickerDialog";
-import { getRepoPath, getServerProjectPath, getServerSessionPath, getSessionListPath, getSessionPath } from '@/lib/navigation'
+import { getServerProjectPath, getSessionListPath, getSessionPath } from '@/lib/navigation'
 import { FetchError } from '@/api/fetchWrapper'
 
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
-import { Button } from "@/components/ui/button";
 import { NotFoundState } from "@/components/ui/not-found-state";
-import { ContextUsageIndicator } from "@/components/session/ContextUsageIndicator";
 import { useSession, useInterruptSession, useUpdateSession, useCreateSession } from "@/hooks/useOpenCode";
 import { useSessionTranscript } from "@/hooks/useSessionTranscript";
 import { useAutoOpenWalkthrough } from "@/hooks/useAutoOpenWalkthrough";
 import { useRepoActivity } from "@/hooks/useRepoActivity";
 import { useRepoSiblings } from "@/hooks/useRepoSiblings";
 import { useSSE } from "@/hooks/useSSE";
+import { useVcsInfo } from "@/hooks/useVcsInfo";
 import { useUIState } from "@/stores/uiStateStore";
 import { useSettings } from "@/hooks/useSettings";
 import { useModelSelection } from "@/hooks/useModelSelection";
@@ -30,6 +29,7 @@ import { useShortcutActions } from "@/contexts/KeyboardShortcutsContext";
 import { useSettingsDialog } from "@/hooks/useSettingsDialog";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useMobile } from "@/hooks/useMobile";
+import { useMobileTabBar } from "@/hooks/useMobileTabBar";
 import { useToolPanelLayout } from "@/hooks/useToolPanelLayout";
 import { useVisualViewport } from "@/hooks/useVisualViewport";
 import { useTTS } from "@/hooks/useTTS";
@@ -49,8 +49,9 @@ import { ProjectActionsMenu } from "@/components/repo/ProjectActionsMenu";
 import { RepoActionsDialog } from "@/components/repo/RepoActionsDialog";
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
 import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
-import { compactSession, forkSession, listProjects, listSessionMessages } from "@/api/opencode";
+import { compactSession, findRemoteProjectForDirectory, forkSession, listSessionMessages, remoteProjectName } from "@/api/opencode";
 import { useOpenCodeServerId, isLocalOpenCodeServer } from "@/contexts/OpenCodeServerContext";
+import { useRemoteProjects } from "@/hooks/useRemoteProjects";
 import { useSwipeNavigation } from "@/contexts/SwipeNavigationContext";
 import { useOpenCodeServers, useOpenCodeServerStatuses } from "@/hooks/useOpenCodeServers";
 import { serverScopedKey } from "@/lib/serverScope";
@@ -70,6 +71,8 @@ import { SourceControlPanel, RemoteSourceControlPanel } from "@/components/sourc
 import { TerminalPanel } from "@/components/terminal/TerminalPanel";
 import { PreviewPanel } from "@/components/preview/PreviewPanel";
 import { SessionSendErrorBanner } from "@/components/session/SessionSendErrorBanner";
+import { ReconnectingBanner } from "@/components/session/ReconnectingBanner";
+import { SessionDetailsSheet } from "@/components/session/SessionDetailsSheet";
 import { BackgroundWorkBar } from "@/components/session/BackgroundWorkBar";
 import { SessionGoalBar } from "@/components/session/SessionGoalBar";
 import { useDialogParam } from "@/hooks/useDialogParam";
@@ -81,6 +84,7 @@ import { ChangesWalkthroughSheet, type WalkthroughSourceRequest } from "@/compon
 import { ToolSidePanel } from "@/components/navigation/ToolSidePanel";
 import type { WalkthroughSource } from "@opencode-manager/shared/schemas";
 import { useToolPanel } from "@/hooks/useToolPanel";
+import { useSessionPickerNavigation } from "@/hooks/useSessionPickerNavigation";
 
 const OLDER_HISTORY_SCROLL_THRESHOLD_PX = 200
 
@@ -134,6 +138,7 @@ export function SessionDetail() {
   const [messageContainer, setMessageContainer] = useState<HTMLDivElement | null>(null);
   const promptInputRef = useRef<PromptInputHandle>(null);
   const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false);
+  const [sessionDetailsOpen, setSessionDetailsOpen] = useState(false);
   const [fileBrowserOpen, setFileBrowserOpen] = useDialogParam('files');
   const [mcpDialogOpen, setMcpDialogOpen] = useDialogParam('mcp');
   const [skillsDialogOpen, setSkillsDialogOpen] = useDialogParam('skills');
@@ -156,6 +161,7 @@ export function SessionDetail() {
   const [forkPickerLoading, setForkPickerLoading] = useState(false);
 
   const isMobile = useMobile();
+  const { open: openMobileSheet } = useMobileTabBar();
   const { docked, showRail } = useToolPanelLayout();
   const sidePanel = useToolPanel(showRail);
   const { keyboardHeight } = useVisualViewport();
@@ -187,8 +193,6 @@ export function SessionDetail() {
 
   useRepoActivity(repoId, Boolean(repo) && !isRemoteServer);
 
-  const sessionRouteSuffix = isAssistantSession && !isRemoteServer ? '?assistant=1' : '';
-
   const repoDirectory = repo?.fullPath;
   const [resolvedSessionDirectory, setResolvedSessionDirectory] = useState<{ sessionId: string; directory: string } | null>(null);
   const resolvedDirectory = (
@@ -213,25 +217,26 @@ export function SessionDetail() {
 
   const { servers: linkedServers } = useOpenCodeServers({ enabled: isRemoteServer });
 
-  const { data: remoteProjects } = useQuery({
-    queryKey: serverScopedKey(['opencode', 'projects'], serverId),
-    queryFn: () => listProjects(serverId),
-    enabled: isRemoteServer,
-    retry: false,
-  });
+  const { projects: remoteProjects } = useRemoteProjects(serverId, { enabled: isRemoteServer });
 
-  const remoteProjectDirectory = useMemo(() => {
+  const remoteProject = useMemo(() => {
     if (!isRemoteServer || !sessionDirectory) return undefined;
-    const project = remoteProjects?.find(
-      (entry) => sessionDirectory === entry.canonical || sessionDirectory.startsWith(`${entry.canonical}/`),
-    );
-    return project?.canonical ?? sessionDirectory;
+    return findRemoteProjectForDirectory(remoteProjects, sessionDirectory);
   }, [isRemoteServer, remoteProjects, sessionDirectory]);
+
+  const remoteProjectDirectory = isRemoteServer && sessionDirectory
+    ? remoteProject?.canonical ?? sessionDirectory
+    : undefined;
+
+  const remoteProjectDisplayName = remoteProject ? remoteProjectName(remoteProject) : undefined;
 
   const sessionBranch = useMemo(
     () => (repo && !isAssistantSession ? resolveSessionBranch(repo, sessionDirectory, repoSiblings) : null),
     [repo, isAssistantSession, sessionDirectory, repoSiblings],
   );
+
+  const { data: remoteVcsInfo } = useVcsInfo(sessionDirectory, serverId, { enabled: isRemoteServer });
+  const headerBranch = isRemoteServer ? remoteVcsInfo?.branch.current ?? null : sessionBranch;
 
   const { data: session, isLoading: sessionLoading, error: sessionQueryError } = useSession(
     sessionId,
@@ -368,7 +373,13 @@ export function SessionDetail() {
     enabled: !isVoiceConversationActive,
   });
 
-  const handleShowSessionsDialog = useCallback(() => setSessionsDialogOpen(true), []);
+  const handleShowSessionsDialog = useCallback(() => {
+    if (isMobile) {
+      openMobileSheet('sessions');
+      return;
+    }
+    setSessionsDialogOpen(true);
+  }, [isMobile, openMobileSheet]);
   const handleShowMcpDialog = useCallback(() => setMcpDialogOpen(true), [setMcpDialogOpen]);
   const handleShowSkillsDialog = useCallback(() => setSkillsDialogOpen(true), [setSkillsDialogOpen]);
   const handleShowWalkthrough = useCallback((source?: WalkthroughSource) => {
@@ -539,6 +550,12 @@ export function SessionDetail() {
     navigate(getSessionListPath(repoId, isAssistantSession, tab))
   }, [navigate, repoId, isAssistantSession, isRemoteServer, remoteProjectBackPath, location.search])
 
+  const pickerNavigation = useSessionPickerNavigation({
+    mode: 'push',
+    onClose: () => setSessionsDialogOpen(false),
+    onDeleteActiveSession: isRemoteServer ? handleCloseSession : undefined,
+  })
+
   const handleOpenModelDialog = useCallback(() => {
     promptInputRef.current?.openModelPicker();
   }, [])
@@ -558,18 +575,22 @@ export function SessionDetail() {
     setFileBrowserOpen(true)
   }, [repo?.fullPath, repo?.localPath, sessionDirectory, setFileBrowserOpen]);
 
+  const renameSession = useCallback(async (title: string) => {
+    if (!sessionId) throw new Error('No active session');
+    await updateSessionAsync({ sessionID: sessionId, title: title.trim() });
+  }, [sessionId, updateSessionAsync]);
+
   const handleRenameSession = useCallback(async (title: string) => {
-    if (!sessionId) return;
     const trimmedTitle = title.trim();
     try {
-      await updateSessionAsync({ sessionID: sessionId, title: trimmedTitle });
+      await renameSession(title);
       if (!trimmedTitle) {
         showToast.success('Session title regenerated');
       }
     } catch (error) {
       showToast.error(`Rename failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }, [sessionId, updateSessionAsync]);
+  }, [renameSession]);
 
   const handleFileBrowserClose = useCallback(() => setFileBrowserOpen(false), [setFileBrowserOpen]);
 
@@ -777,10 +798,8 @@ export function SessionDetail() {
   }
 
   const linkedServer = linkedServers.find((candidate) => candidate.id === serverId);
-  const workspaceDisplayName = isRemoteServer
-    ? [linkedServer?.name ?? 'Linked server', sessionDirectory ? getDirectoryName(sessionDirectory) : undefined]
-        .filter(Boolean)
-        .join(' · ')
+  const projectDisplayName = isRemoteServer
+    ? remoteProjectDisplayName ?? (sessionDirectory ? getDirectoryName(sessionDirectory) : 'Project')
     : isAssistantSession || !repo
       ? 'Assistant'
       : getRepoDisplayName(repo);
@@ -799,51 +818,54 @@ export function SessionDetail() {
       >
         <Header className="bg-background [&_button]:bg-background [&_button]:text-foreground [&_button]:border-border [&_button:hover]:bg-accent">
           <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
-            {session?.parentID ? (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleParentSessionClick}
-                  className="text-primary hover:text-primary-hover hover:bg-primary/10 h-7 px-2 gap-1"
-                  title="Back to parent session"
+            <Header.BackButton to={sessionBackPath} className="text-xs sm:text-sm" />
+            <div className="min-w-0 flex-1">
+              <h1 className="min-w-0 max-w-full text-xs sm:text-base font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setSessionDetailsOpen(true)}
+                  aria-label={`Session details: ${session?.title || "Untitled Session"}`}
+                  className="block min-w-0 max-w-full cursor-pointer text-left"
                 >
-                  <CornerUpLeft className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline text-xs">Parent</span>
-                </Button>
-                <div className="hidden sm:block">
-                  <Header.BackButton to={sessionBackPath} className="text-xs sm:text-sm" />
-                </div>
-              </>
-            ) : (
-              <Header.BackButton to={sessionBackPath} className="text-xs sm:text-sm" />
-            )}
-            <Header.EditableTitle
-              value={session?.title || "Untitled Session"}
-              onChange={handleRenameSession}
-              subtitle={
-                <span className="text-highlight">
-                  {isRemoteServer ? (
-                    <>
-                      <span className="text-info">{linkedServer?.name ?? 'Linked server'}</span>
-                      {sessionDirectory && ` · ${getDirectoryName(sessionDirectory)}`}
-                    </>
-                  ) : (
-                    workspaceDisplayName
+                  <span className="block truncate bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent transition-opacity hover:opacity-80">
+                    {session?.title || "Untitled Session"}
+                  </span>
+                </button>
+              </h1>
+              {session?.parentID ? (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleParentSessionClick();
+                  }}
+                  aria-label="Parent session"
+                  className="mt-0.5 inline-flex max-w-full items-center gap-1 rounded-full border border-info/40 px-2 py-0.5 text-[10px] sm:text-xs text-info transition-colors hover:bg-info/10"
+                >
+                  <CornerUpLeft className="h-3 w-3 shrink-0" />
+                  <span className="truncate">Parent session</span>
+                </button>
+              ) : (
+                <p className="flex min-w-0 items-center gap-1 text-[10px] sm:text-xs text-muted-foreground">
+                  {isRemoteServer && (
+                    <Server aria-label="Remote server" className="h-3 w-3 shrink-0 text-highlight" />
                   )}
-                  {sessionBranch && <span className="font-mono sm:hidden"> · {sessionBranch}</span>}
-                </span>
-              }
-            />
-            {sessionBranch && (
+                  <span className="truncate text-highlight">{projectDisplayName}</span>
+                  {headerBranch && (
+                    <span className="truncate font-mono sm:hidden"> · {headerBranch}</span>
+                  )}
+                </p>
+              )}
+            </div>
+            {headerBranch && (
               <Badge
                 variant="outline"
                 data-testid="session-branch"
-                title={`Branch: ${sessionBranch}`}
+                title={`Branch: ${headerBranch}`}
                 className="hidden sm:inline-flex max-w-44 shrink-0 items-center gap-1 border-border bg-card px-2 font-mono text-[11px] font-normal text-muted-foreground"
               >
                 <GitBranch className="h-3 w-3 shrink-0" />
-                <span className="truncate">{sessionBranch}</span>
+                <span className="truncate">{headerBranch}</span>
               </Badge>
             )}
           </div>
@@ -854,17 +876,10 @@ export function SessionDetail() {
               )}
               <PendingActionsGroup showScheduleReports={!isRemoteServer} />
             </div>
-            <ContextUsageIndicator
-              directory={sessionDirectory}
-              sessionID={sessionId}
-              isConnected={streamConnected}
-              isReconnecting={streamReconnecting}
-              revertMessageID={revertMessageID}
-            />
             <SessionMoreButton />
           </Header.Actions>
         </Header>
-
+        <ReconnectingBanner key={sessionId} connected={streamConnected} />
       </div>
 
       <div className="flex flex-1 min-h-0">
@@ -1034,29 +1049,27 @@ export function SessionDetail() {
         activeSessionID={sessionId || undefined}
         remote={
           isRemoteServer
-            ? { serverId, serverName: linkedServer?.name, projectDirectory: remoteProjectDirectory }
+            ? {
+                serverId,
+                serverName: linkedServer?.name,
+                projectDirectory: remoteProjectDirectory,
+                isPending: sessionLoading,
+              }
             : undefined
         }
-        onSelectSession={(session, sessionRepo) => {
-          if (!isRemoteServer && sessionRepo.id === repoId) {
-            navigate(`/repos/${repoId}/sessions/${session.id}${sessionRouteSuffix}`)
-          } else {
-            navigate(getSessionPath(sessionRepo.id, session.id))
-          }
-          setSessionsDialogOpen(false)
-        }}
-        onSelectRemoteSession={(session, targetServerId) => {
-          navigate(getServerSessionPath(targetServerId, session.id))
-          setSessionsDialogOpen(false)
-        }}
-        onDeleteActiveSession={() => {
-          setSessionsDialogOpen(false)
-          handleCloseSession()
-        }}
-        onSelectRepo={(selectedRepo) => {
-          navigate(getRepoPath(selectedRepo.id))
-          setSessionsDialogOpen(false)
-        }}
+        {...pickerNavigation}
+      />
+
+      <SessionDetailsSheet
+        open={sessionDetailsOpen}
+        onOpenChange={setSessionDetailsOpen}
+        title={session?.title}
+        serverName={linkedServer?.name}
+        remote={isRemoteServer}
+        project={projectDisplayName}
+        branch={headerBranch}
+        directory={sessionDirectory}
+        onRename={renameSession}
       />
 
       {sideQuestion && sessionId && (
@@ -1090,7 +1103,7 @@ export function SessionDetail() {
           isOpen={!docked && fileBrowserOpen}
           onClose={handleFileBrowserClose}
           basePath={workspaceBasePath}
-          repoName={workspaceDisplayName}
+          repoName={projectDisplayName}
           repoId={repoId}
           initialSelectedFile={selectedFilePath}
         />
@@ -1148,7 +1161,7 @@ export function SessionDetail() {
             isOpen={!docked && sourceControlOpen}
             onClose={() => setSourceControlOpen(false)}
             currentBranch={repo?.currentBranch || repo?.branch || "main"}
-            repoName={workspaceDisplayName}
+            repoName={projectDisplayName}
           />
         )}
 
