@@ -86,7 +86,7 @@ function RemoteProjectListLoading() {
 }
 
 function RemoteProjectListContent({ serverId }: { serverId: string }) {
-  const { servers, isLoading: serversLoading } = useOpenCodeServers()
+  const { servers, showsInitialLoading: serversLoading } = useOpenCodeServers()
   const { openTab } = useSettingsDialog()
   const [openDirectoryOpen, setOpenDirectoryOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -94,8 +94,8 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
   const server = servers.find((candidate) => candidate.id === serverId)
   const isDisabled = server !== undefined && !server.enabled
 
-  const { projects, activityById, isLoading, isError, hasData, error, refetch } = useRemoteProjectsByActivity(serverId)
-  const showsProjectError = isError && !hasData
+  const { projects, activityById, showsInitialLoading, showsError, error, refetch } =
+    useRemoteProjectsByActivity(serverId)
 
   const filteredProjects = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
@@ -121,6 +121,8 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
         />
       ) : null}
 
+      {serversLoading ? <RemoteProjectListLoading /> : null}
+
       {isDisabled ? (
         <LinkedServerStateCard
           icon={Server}
@@ -131,15 +133,13 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
         />
       ) : null}
 
-      {server && !isDisabled && showsProjectError ? (
+      {server && !isDisabled && showsError ? (
         <Card className="flex flex-col items-center gap-3 p-6 text-center">
           <Server className="h-8 w-8 text-muted-foreground" />
           <div>
             <p className="font-medium">Could not load projects</p>
             <p className="text-sm text-muted-foreground">
-              {error instanceof Error
-                ? error.message
-                : 'The server did not respond.'}
+              {error instanceof Error ? error.message : 'The server did not respond.'}
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => refetch()}>
@@ -148,8 +148,8 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
         </Card>
       ) : null}
 
-      {server && !isDisabled && !showsProjectError ? (
-        isLoading ? (
+      {server && !isDisabled && !showsError ? (
+        showsInitialLoading ? (
           <RemoteProjectListLoading />
         ) : projects.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center p-12 text-center">

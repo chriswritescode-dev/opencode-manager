@@ -99,7 +99,7 @@ describe('useRemoteProjects', () => {
       wrapper: createWrapper(),
     })
 
-    expect(result.current.isLoading).toBe(false)
+    expect(result.current.showsInitialLoading).toBe(false)
     expect(result.current.projects).toEqual([])
     expect(mocks.listProjects).not.toHaveBeenCalled()
   })
@@ -110,6 +110,30 @@ describe('useRemoteProjects', () => {
     })
 
     expect(mocks.listProjects).not.toHaveBeenCalled()
+  })
+
+  it('reports the initial loading state while nothing is cached, including a restored pending query', () => {
+    mocks.listProjects.mockReturnValue(new Promise(() => {}))
+
+    const { result } = renderHook(() => useRemoteProjects('srv_kitchen'), {
+      wrapper: createWrapper(),
+    })
+
+    expect(result.current.showsInitialLoading).toBe(true)
+    expect(result.current.showsError).toBe(false)
+    expect(result.current.projects).toEqual([])
+  })
+
+  it('reports the error state only when the load failed with nothing cached', async () => {
+    mocks.listProjects.mockRejectedValue(new Error('offline'))
+
+    const { result } = renderHook(() => useRemoteProjects('srv_kitchen'), {
+      wrapper: createWrapper(),
+    })
+
+    await waitFor(() => expect(result.current.showsError).toBe(true))
+    expect(result.current.showsInitialLoading).toBe(false)
+    expect(result.current.error?.message).toBe('offline')
   })
 
   it('keeps the cached projects and reports the failure when a refetch fails', async () => {
@@ -125,8 +149,9 @@ describe('useRemoteProjects', () => {
 
     result.current.refetch()
 
-    await waitFor(() => expect(result.current.isError).toBe(true))
-    expect(result.current.hasData).toBe(true)
+    await waitFor(() => expect(result.current.error?.message).toBe('offline'))
+    expect(result.current.showsError).toBe(false)
+    expect(result.current.showsInitialLoading).toBe(false)
     expect(result.current.projects.map((project) => project.id)).toEqual(['app'])
     expect(result.current.error?.message).toBe('offline')
   })
