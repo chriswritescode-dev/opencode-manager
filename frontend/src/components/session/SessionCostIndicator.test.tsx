@@ -28,7 +28,7 @@ describe('SessionCostIndicator', () => {
     })
     renderIndicator()
 
-    expect(screen.getByText('$0.1234 • 1,234 tokens')).toBeInTheDocument()
+    expect(screen.getByText('$0.1234 • 1.2K tokens')).toBeInTheDocument()
     expect(screen.getByTestId('session-cost-indicator')).toHaveAttribute(
       'title',
       '3 assistant messages • 1,234 tokens • $0.123400',
@@ -44,11 +44,27 @@ describe('SessionCostIndicator', () => {
     })
     renderIndicator()
 
-    expect(screen.getByText('1,234 tokens')).toBeInTheDocument()
+    expect(screen.getByText('1.2K tokens')).toBeInTheDocument()
     expect(screen.queryByText(/\$0\.0000/)).not.toBeInTheDocument()
     expect(screen.getByTestId('session-cost-indicator')).toHaveAttribute(
       'title',
       '2 assistant messages • 1,234 tokens • free',
+    )
+  })
+
+  it('abbreviates large token totals', () => {
+    mocks.useSessionCost.mockReturnValue({
+      totalCost: 1.25,
+      totalTokens: 3_700_000,
+      messageCount: 12,
+      isLoading: false,
+    })
+    renderIndicator()
+
+    expect(screen.getByText('$1.2500 • 3.7M tokens')).toBeInTheDocument()
+    expect(screen.getByTestId('session-cost-indicator')).toHaveAttribute(
+      'title',
+      '12 assistant messages • 3,700,000 tokens • $1.250000',
     )
   })
 

@@ -5,6 +5,11 @@ interface SessionCostIndicatorProps {
   revertMessageID?: string
 }
 
+const compactTokenFormatter = new Intl.NumberFormat('en-US', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+})
+
 export function SessionCostIndicator({ sessionID, revertMessageID }: SessionCostIndicatorProps) {
   const { totalCost, totalTokens, messageCount, isLoading } = useSessionCost(sessionID, revertMessageID)
 
@@ -21,11 +26,12 @@ export function SessionCostIndicator({ sessionID, revertMessageID }: SessionCost
   }
 
   const hasCost = totalCost > 0
-  const tokens = totalTokens.toLocaleString()
+  const exactTokens = totalTokens.toLocaleString()
+  const tokens = compactTokenFormatter.format(totalTokens)
   const summary = hasCost ? `$${totalCost.toFixed(4)} • ${tokens} tokens` : `${tokens} tokens`
   const tooltip = hasCost
-    ? `${messageCount} assistant messages • ${tokens} tokens • $${totalCost.toFixed(6)}`
-    : `${messageCount} assistant messages • ${tokens} tokens • free`
+    ? `${messageCount} assistant messages • ${exactTokens} tokens • $${totalCost.toFixed(6)}`
+    : `${messageCount} assistant messages • ${exactTokens} tokens • free`
 
   return (
     <div className="flex items-center gap-2">
