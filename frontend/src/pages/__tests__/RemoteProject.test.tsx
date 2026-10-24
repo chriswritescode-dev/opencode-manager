@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
   lastSessionListProps: { current: undefined as SessionListCapture | undefined },
   openTab: vi.fn(),
+  refetchServers: vi.fn(),
 }))
 
 vi.mock('@/api/opencode', async (importOriginal) => {
@@ -98,7 +99,12 @@ describe('RemoteProject', () => {
     mocks.listProjects.mockResolvedValue([project])
     mocks.getVcsInfo.mockResolvedValue({ branch: { current: 'main', default: 'main' } })
     mocks.useCreateSession.mockReturnValue({ mutate: mocks.createSession, isPending: false })
-    mocks.useOpenCodeServers.mockReturnValue({ servers: [server], showsInitialLoading: false })
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [server],
+      showsInitialLoading: false,
+      isPaused: false,
+      refetch: mocks.refetchServers,
+    })
     mocks.useSettingsDialog.mockReturnValue({ openTab: mocks.openTab })
     mocks.useSSE.mockReturnValue({ isConnected: true, isReconnecting: false })
   })
@@ -203,6 +209,39 @@ describe('RemoteProject', () => {
     expect(screen.queryByText('Server not found')).not.toBeInTheDocument()
     expect(screen.queryByTestId('session-list')).not.toBeInTheDocument()
     expect(mocks.listProjects).not.toHaveBeenCalled()
+  })
+
+  it('shows an unavailable state instead of a missing server while the server list is paused offline', async () => {
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [],
+      showsInitialLoading: false,
+      isPaused: true,
+      refetch: mocks.refetchServers,
+    })
+
+    renderProject()
+
+    expect(await screen.findByText('Servers unavailable')).toBeInTheDocument()
+    expect(screen.queryByText('Server not found')).not.toBeInTheDocument()
+    expect(screen.queryByRole('status', { name: 'Loading project' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    expect(mocks.refetchServers).toHaveBeenCalled()
+  })
+
+  it('keeps the cached project while a server list refetch is paused offline', async () => {
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [server],
+      showsInitialLoading: false,
+      isPaused: true,
+      refetch: mocks.refetchServers,
+    })
+
+    renderProject()
+
+    expect(screen.getByTestId('session-list')).toHaveTextContent('/home/me/app')
+    expect(screen.queryByText('Servers unavailable')).not.toBeInTheDocument()
   })
 
   it('opens server settings from the disabled state', async () => {

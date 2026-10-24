@@ -384,6 +384,29 @@ describe('RemoteProjectNavList', () => {
     expect(screen.queryByText('Server not found')).not.toBeInTheDocument()
   })
 
+  it('reports an unreachable server list instead of a missing server while paused offline', () => {
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [],
+      isLoading: false,
+      showsInitialLoading: false,
+      isPaused: true,
+    })
+
+    render(
+      <RemoteProjectNavList
+        serverId="srv_kitchen"
+        isVisible
+        onOpenProject={vi.fn()}
+        onSelectSession={vi.fn()}
+      />,
+      { wrapper: createWrapper('/') },
+    )
+
+    expect(screen.getByText('Servers unavailable')).toBeInTheDocument()
+    expect(screen.queryByText('Server not found')).not.toBeInTheDocument()
+    expect(mocks.listProjects).not.toHaveBeenCalled()
+  })
+
   it('reports an unreachable server on a failed project load', async () => {
     mocks.listProjects.mockRejectedValue(new Error('offline'))
     mocks.useOpenCodeServerStatuses.mockReturnValue({

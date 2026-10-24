@@ -13,6 +13,7 @@ import { ActivityStateIndicator } from '@/components/activity/ActivityStateIndic
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { LinkedServerStateCard } from '@/components/servers/LinkedServerStateCard'
+import { ServersUnavailableCard } from '@/components/servers/ServersUnavailableCard'
 import { OpenDirectoryDialog } from '@/components/servers/OpenDirectoryDialog'
 import { RemoteProjectRowActions } from '@/components/servers/RemoteProjectRowActions'
 import { RepoCardShell } from '@/components/repo/RepoCardShell'
@@ -86,12 +87,18 @@ function RemoteProjectListLoading() {
 }
 
 function RemoteProjectListContent({ serverId }: { serverId: string }) {
-  const { servers, showsInitialLoading: serversLoading } = useOpenCodeServers()
+  const {
+    servers,
+    showsInitialLoading: serversLoading,
+    isPaused: serversPaused,
+    refetch: refetchServers,
+  } = useOpenCodeServers()
   const { openTab } = useSettingsDialog()
   const [openDirectoryOpen, setOpenDirectoryOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
 
   const server = servers.find((candidate) => candidate.id === serverId)
+  const serversUnavailable = serversPaused && servers.length === 0
   const isDisabled = server !== undefined && !server.enabled
 
   const { projects, activityById, showsInitialLoading, showsError, error, refetch } =
@@ -111,7 +118,9 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
 
   return (
     <div className="flex h-full flex-col px-0 md:px-4 md:pt-4">
-      {!serversLoading && !server ? (
+      {serversUnavailable ? <ServersUnavailableCard onRetry={refetchServers} /> : null}
+
+      {!serversLoading && !serversUnavailable && !server ? (
         <LinkedServerStateCard
           icon={Server}
           title="Server not found"

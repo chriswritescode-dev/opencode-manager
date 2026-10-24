@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   useOpenCodeServers: vi.fn(),
   useSettingsDialog: vi.fn(),
   openTab: vi.fn(),
+  refetchServers: vi.fn(),
   createSession: vi.fn(),
   isMobile: true,
 }))
@@ -152,6 +153,8 @@ describe('RemoteProjectList', () => {
       servers: [server],
       isLoading: false,
       showsInitialLoading: false,
+      isPaused: false,
+      refetch: mocks.refetchServers,
     })
     mocks.useSettingsDialog.mockReturnValue({ openTab: mocks.openTab })
   })
@@ -433,6 +436,42 @@ describe('RemoteProjectList', () => {
 
     expect(screen.queryByText('Server not found')).not.toBeInTheDocument()
     expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0)
+  })
+
+  it('shows an unavailable state instead of a missing server while the server list is paused offline', () => {
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [],
+      isLoading: false,
+      showsInitialLoading: false,
+      isPaused: true,
+      refetch: mocks.refetchServers,
+    })
+
+    const { container } = renderProjectList('srv_kitchen')
+
+    expect(screen.getByText('Servers unavailable')).toBeInTheDocument()
+    expect(screen.queryByText('Server not found')).not.toBeInTheDocument()
+    expect(container.querySelectorAll('.animate-pulse')).toHaveLength(0)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    expect(mocks.refetchServers).toHaveBeenCalled()
+    expect(mocks.listProjects).not.toHaveBeenCalled()
+  })
+
+  it('keeps the cached project list while a server list refetch is paused offline', async () => {
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [server],
+      isLoading: false,
+      showsInitialLoading: false,
+      isPaused: true,
+      refetch: mocks.refetchServers,
+    })
+
+    renderProjectList()
+
+    expect(await screen.findByText('App')).toBeInTheDocument()
+    expect(screen.queryByText('Servers unavailable')).not.toBeInTheDocument()
   })
 
   it('shows an empty state when the server has no projects', async () => {
