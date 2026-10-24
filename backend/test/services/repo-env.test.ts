@@ -11,13 +11,25 @@ import { createGitService } from '../../src/services/git/GitService'
 import { ProjectConfigService } from '../../src/services/project-config'
 import { SecretsService } from '../../src/services/secrets'
 import { RepoEnvService } from '../../src/services/repo-env'
+import { deleteRepoFiles } from '../../src/services/repo'
+import { invalidateRepoEnvCache } from '../../src/utils/repo-env-cache'
+import { executeCommand } from '../../src/utils/process'
 import { logger } from '../../src/utils/logger'
 import type { GitAuthService } from '../../src/services/git-auth'
 import type { Repo } from '@opencode-manager/shared/types'
 
+vi.mock('../../src/utils/process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/utils/process')>()
+  return { ...actual, executeCommand: vi.fn(actual.executeCommand) }
+})
+
 const gitAuthService = { getGitEnvironment: () => ({}) } as unknown as GitAuthService
 
-const EMPTY = { env: {}, maskValues: [], missing: [] }
+const EMPTY = { env: {}, maskValues: [] }
+
+function topLevelProbes(): number {
+  return vi.mocked(executeCommand).mock.calls.filter(([args]) => args.includes('--show-toplevel')).length
+}
 
 describe('RepoEnvService', () => {
   let db: Database
@@ -62,6 +74,7 @@ describe('RepoEnvService', () => {
   }
 
   beforeEach(() => {
+    vi.mocked(executeCommand).mockClear()
     db = new Database(':memory:')
     migrate(db, allMigrations)
     projectConfigService = new ProjectConfigService(db, createGitService(gitAuthService), gitAuthService)
@@ -101,7 +114,6 @@ describe('RepoEnvService', () => {
       PLAIN: 'literal',
     })
     expect(result.maskValues).toEqual(['prod-token'])
-    expect(result.missing).toEqual([])
   })
 
   it('returns an empty result for an untrusted mapping', async () => {
@@ -161,7 +173,7 @@ describe('RepoEnvService', () => {
     expect(await repoEnvService.resolveForDirectory(plain)).toEqual(EMPTY)
   })
 
-  it('reports missing references and resolves them to an empty string', async () => {
+  it('resolves missing references to an empty string', async () => {
     const root = createTempDir('ocm-repo-env-')
     initGitRepo(root)
     const repo = registerRepo(root)
@@ -174,7 +186,6 @@ describe('RepoEnvService', () => {
     const result = await repoEnvService.resolveForDirectory(root)
 
     expect(result.env).toEqual({ MISSING: '-' })
-    expect(result.missing).toEqual(['secrets.NOPE', 'vars.NOPE2'])
   })
 
   it('excludes vars and short secret values from maskValues', async () => {
@@ -214,5 +225,112 @@ describe('RepoEnvService', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining(root), expect.anything())
 
     warn.mockRestore()
+  })
+
+  describe('caching', () => {
+    async function createTrustedRepo(env: Record<string, string>): Promise<{ root: string; repo: Repo }> {
+      const root = createTempDir('ocm-repo-env-')
+      initGitRepo(root)
+      const repo = registerRepo(root)
+      writeProjectFile(root, { version: 1, env })
+      await trust(root, repo)
+      return { root, repo }
+    }
+
+    it('reuses the directory resolution within the TTL without spawning git', async () => {
+      const { root } = await createTrustedRepo({ PLAIN: 'literal' })
+
+      await repoEnvService.resolveForDirectory(root)
+      const probes = topLevelProbes()
+      expect(probes).toBeGreaterThan(0)
+
+      const result = await repoEnvService.resolveForDirectory(root)
+
+      expect(result.env).toEqual({ PLAIN: 'literal' })
+      expect(topLevelProbes()).toBe(probes)
+    })
+
+    it('caches misses for directories without a repository', async () => {
+      const plain = createTempDir('ocm-repo-env-plain-')
+
+      expect(await repoEnvService.resolveForDirectory(plain)).toEqual(EMPTY)
+      const probes = topLevelProbes()
+
+      expect(await repoEnvService.resolveForDirectory(plain)).toEqual(EMPTY)
+      expect(topLevelProbes()).toBe(probes)
+    })
+
+    it('re-reads the project file when it changes', async () => {
+      const { root, repo } = await createTrustedRepo({ PLAIN: 'first' })
+      expect((await repoEnvService.resolveForDirectory(root)).env).toEqual({ PLAIN: 'first' })
+      const probes = topLevelProbes()
+
+      writeProjectFile(root, { version: 1, env: { PLAIN: 'second-value' } })
+      await trust(root, repo)
+
+      expect((await repoEnvService.resolveForDirectory(root)).env).toEqual({ PLAIN: 'second-value' })
+      expect(topLevelProbes()).toBe(probes)
+    })
+
+    it('applies a trust decision made after the file was cached', async () => {
+      const root = createTempDir('ocm-repo-env-')
+      initGitRepo(root)
+      const repo = registerRepo(root)
+      writeProjectFile(root, { version: 1, env: { PLAIN: 'literal' } })
+
+      expect(await repoEnvService.resolveForDirectory(root)).toEqual(EMPTY)
+
+      await trust(root, repo)
+
+      expect((await repoEnvService.resolveForDirectory(root)).env).toEqual({ PLAIN: 'literal' })
+    })
+
+    it('applies secret edits made after the directory was cached', async () => {
+      const { root, repo } = await createTrustedRepo({ TOKEN: '${{ secrets.TOKEN }}' })
+      secretsService.set('secret', repo.id, null, 'TOKEN', 'first-token')
+
+      expect((await repoEnvService.resolveForDirectory(root)).env).toEqual({ TOKEN: 'first-token' })
+
+      secretsService.set('secret', repo.id, null, 'TOKEN', 'second-token')
+
+      const result = await repoEnvService.resolveForDirectory(root)
+      expect(result.env).toEqual({ TOKEN: 'second-token' })
+      expect(result.maskValues).toEqual(['second-token'])
+    })
+
+    it('invalidates the cached miss when the repository is registered', async () => {
+      const root = createTempDir('ocm-repo-env-')
+      initGitRepo(root)
+      writeProjectFile(root, { version: 1, env: { PLAIN: 'literal' } })
+
+      expect(await repoEnvService.resolveForDirectory(root)).toEqual(EMPTY)
+
+      const repo = registerRepo(root)
+      await trust(root, repo)
+
+      expect((await repoEnvService.resolveForDirectory(root)).env).toEqual({ PLAIN: 'literal' })
+    })
+
+    it('invalidates the cached resolution when the repository is deleted', async () => {
+      const { root, repo } = await createTrustedRepo({ PLAIN: 'literal' })
+      expect((await repoEnvService.resolveForDirectory(root)).env).toEqual({ PLAIN: 'literal' })
+      const probes = topLevelProbes()
+
+      await deleteRepoFiles(db, repo.id)
+
+      expect(await repoEnvService.resolveForDirectory(root)).toEqual(EMPTY)
+      expect(topLevelProbes()).toBeGreaterThan(probes)
+    })
+
+    it('invalidates the cached resolution when the repo environment cache is reset', async () => {
+      const { root } = await createTrustedRepo({ PLAIN: 'literal' })
+      expect((await repoEnvService.resolveForDirectory(root)).env).toEqual({ PLAIN: 'literal' })
+      const probes = topLevelProbes()
+
+      invalidateRepoEnvCache()
+
+      expect((await repoEnvService.resolveForDirectory(root)).env).toEqual({ PLAIN: 'literal' })
+      expect(topLevelProbes()).toBeGreaterThan(probes)
+    })
   })
 })

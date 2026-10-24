@@ -1,24 +1,59 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import type { Database } from 'bun:sqlite'
 import type { Repo } from '@opencode-manager/shared/types'
 import { interpolateEnvExpressions, type EnvExpressionReference } from '@opencode-manager/shared/utils'
 import { getRepoByDirectory } from '../db/queries'
-import { executeCommand } from '../utils/process'
+import { canonicalPathSync } from '../utils/fs-safe'
 import { logger } from '../utils/logger'
-import { resolveMainCheckoutPath, resolveRepoForDirectory } from './repo'
-import type { ProjectConfigService } from './project-config'
+import { repoEnvCacheEpoch } from '../utils/repo-env-cache'
+import { findGitRepoRoot, resolveRepoForDirectory } from './repo'
+import type { ProjectConfigService, RepoFileState } from './project-config'
 import type { SecretsService } from './secrets'
+
+const DIRECTORY_CACHE_TTL_MS = 60_000
+const DIRECTORY_CACHE_LIMIT = 500
+const REPO_FILE_RELATIVE_PATH = path.join('.ocm', 'project.json')
 
 export interface ResolvedRepoEnv {
   env: Record<string, string>
   maskValues: string[]
-  missing: string[]
+}
+
+interface DirectoryResolution {
+  topLevel: string | null
+  repo: Repo | null
+  projectRepo: Repo | null
+  expiresAt: number
+}
+
+interface RepoFileResolution {
+  signature: string
+  state: RepoFileState
 }
 
 function emptyResult(): ResolvedRepoEnv {
-  return { env: {}, maskValues: [], missing: [] }
+  return { env: {}, maskValues: [] }
+}
+
+function entrySignature(target: string): string {
+  try {
+    const stats = fs.lstatSync(target)
+    return `${stats.isSymbolicLink() ? 'link' : 'entry'}:${stats.mtimeMs}:${stats.size}`
+  } catch {
+    return 'missing'
+  }
+}
+
+function repoFileSignature(filePath: string): string {
+  return `${entrySignature(path.dirname(filePath))}|${entrySignature(filePath)}`
 }
 
 export class RepoEnvService {
+  private readonly directoryCache = new Map<string, DirectoryResolution>()
+  private readonly repoFileCache = new Map<string, RepoFileResolution>()
+  private cacheEpoch = repoEnvCacheEpoch()
+
   constructor(
     private readonly db: Database,
     private readonly projectConfigService: ProjectConfigService,
@@ -33,19 +68,14 @@ export class RepoEnvService {
    */
   async resolveForDirectory(cwd: string): Promise<ResolvedRepoEnv> {
     try {
-      const topLevel = await this.findTopLevel(cwd)
-      if (!topLevel) {
+      this.syncCacheEpoch()
+      const directory = await this.resolveDirectory(cwd)
+      if (!directory.topLevel || !directory.repo || !directory.projectRepo) {
         return emptyResult()
       }
 
-      const repo = await this.findRepo(topLevel)
-      if (!repo) {
-        return emptyResult()
-      }
-
-      const projectRepo = await this.projectConfigService.resolveProjectRepo(repo)
-      const repoFile = this.projectConfigService.readRepoFile(topLevel)
-      if (!repoFile.file || !this.projectConfigService.isRepoFileTrusted(projectRepo, repoFile)) {
+      const repoFile = this.readRepoFile(directory.topLevel)
+      if (!repoFile.file || !this.projectConfigService.isRepoFileTrusted(directory.projectRepo, repoFile)) {
         return emptyResult()
       }
 
@@ -54,15 +84,13 @@ export class RepoEnvService {
         return emptyResult()
       }
 
-      const resolved = this.secretsService.resolveValues(projectRepo.id, repoFile.file.environment ?? null)
+      const resolved = this.secretsService.resolveValues(directory.projectRepo.id, repoFile.file.environment ?? null)
       const maskValues = new Set<string>()
-      const missing = new Set<string>()
 
       const lookup = (reference: EnvExpressionReference): string | undefined => {
         const values = reference.context === 'secrets' ? resolved.secrets : resolved.vars
         const found = values[reference.name]
         if (found === undefined) {
-          missing.add(`${reference.context}.${reference.name}`)
           return undefined
         }
         if (reference.context === 'secrets') {
@@ -79,7 +107,6 @@ export class RepoEnvService {
       return {
         env,
         maskValues: [...maskValues].filter((value) => value.length >= 4).sort((a, b) => b.length - a.length),
-        missing: [...missing],
       }
     } catch (error) {
       logger.warn(`Failed to resolve repository environment for ${cwd}`, error)
@@ -87,30 +114,66 @@ export class RepoEnvService {
     }
   }
 
-  private async findTopLevel(cwd: string): Promise<string | null> {
-    try {
-      const output = await executeCommand(['git', '-C', cwd, 'rev-parse', '--show-toplevel'], { silent: true })
-      const topLevel = output.trim()
-      return topLevel.length > 0 ? topLevel : null
-    } catch {
-      return null
+  private syncCacheEpoch(): void {
+    const epoch = repoEnvCacheEpoch()
+    if (epoch === this.cacheEpoch) {
+      return
+    }
+    this.cacheEpoch = epoch
+    this.directoryCache.clear()
+  }
+
+  private async resolveDirectory(cwd: string): Promise<DirectoryResolution> {
+    const key = canonicalPathSync(path.resolve(cwd))
+    const now = Date.now()
+    const cached = this.directoryCache.get(key)
+    if (cached && cached.expiresAt > now) {
+      return cached
+    }
+
+    const topLevel = await findGitRepoRoot(cwd)
+    const repo = topLevel
+      ? getRepoByDirectory(this.db, topLevel) ?? (await resolveRepoForDirectory(this.db, topLevel))
+      : null
+    const projectRepo = repo ? await this.projectConfigService.resolveProjectRepo(repo) : null
+
+    this.pruneDirectoryCache(now)
+    const resolution: DirectoryResolution = {
+      topLevel,
+      repo,
+      projectRepo,
+      expiresAt: now + DIRECTORY_CACHE_TTL_MS,
+    }
+    this.directoryCache.set(key, resolution)
+    return resolution
+  }
+
+  private pruneDirectoryCache(now: number): void {
+    if (this.directoryCache.size < DIRECTORY_CACHE_LIMIT) {
+      return
+    }
+    for (const [key, resolution] of this.directoryCache) {
+      if (resolution.expiresAt <= now) {
+        this.directoryCache.delete(key)
+      }
+    }
+    for (const key of this.directoryCache.keys()) {
+      if (this.directoryCache.size < DIRECTORY_CACHE_LIMIT) {
+        break
+      }
+      this.directoryCache.delete(key)
     }
   }
 
-  private async findRepo(topLevel: string): Promise<Repo | null> {
-    const direct = getRepoByDirectory(this.db, topLevel)
-    if (direct) {
-      return direct
+  private readRepoFile(topLevel: string): RepoFileState {
+    const signature = repoFileSignature(path.join(topLevel, REPO_FILE_RELATIVE_PATH))
+    const cached = this.repoFileCache.get(topLevel)
+    if (cached?.signature === signature) {
+      return cached.state
     }
 
-    const mainCheckout = await resolveMainCheckoutPath(topLevel)
-    if (mainCheckout) {
-      const mainRepo = getRepoByDirectory(this.db, mainCheckout)
-      if (mainRepo) {
-        return mainRepo
-      }
-    }
-
-    return resolveRepoForDirectory(this.db, topLevel)
+    const state = this.projectConfigService.readRepoFile(topLevel)
+    this.repoFileCache.set(topLevel, { signature, state })
+    return state
   }
 }

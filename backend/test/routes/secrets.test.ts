@@ -145,6 +145,35 @@ describe('secret routes', () => {
     expect(res.status).toBe(400)
   })
 
+  it('rejects an invalid JSON body', async () => {
+    const global = await app.request('/secrets/token', {
+      method: 'PUT',
+      headers: jsonHeaders,
+      body: '{not json',
+    })
+    expect(global.status).toBe(400)
+    expect(await global.json()).toEqual({ error: 'Invalid JSON' })
+
+    const repoId = seedRepo(db)
+    const repo = await app.request(`/repos/${repoId}/secrets/token`, {
+      method: 'PUT',
+      headers: jsonHeaders,
+      body: '{not json',
+    })
+    expect(repo.status).toBe(400)
+    expect(await repo.json()).toEqual({ error: 'Invalid JSON' })
+  })
+
+  it('rejects a body that fails validation', async () => {
+    const res = await app.request('/secrets/token', {
+      method: 'PUT',
+      headers: jsonHeaders,
+      body: JSON.stringify({ value: '' }),
+    })
+    expect(res.status).toBe(400)
+    expect(await res.json()).toMatchObject({ error: expect.any(String) })
+  })
+
   it('deletes a global secret and returns 404 when missing', async () => {
     await app.request('/secrets/token', {
       method: 'PUT',

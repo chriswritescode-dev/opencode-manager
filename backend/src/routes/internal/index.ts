@@ -16,6 +16,7 @@ import { createInternalOpenCodeWorkspacesRoutes } from './opencode-workspaces'
 import { createInternalSessionRoutes } from './sessions'
 import { createInternalAssistantRoutes } from './assistant'
 import { createInternalShellEnvRoutes } from './shell-env'
+import { createInternalGitCredentialsRoutes } from './git-credentials'
 import { createInternalSandboxRoutes } from './sandbox'
 import { createInternalSessionArtifactRoutes } from './session-artifacts'
 import { createSessionGoalRoutes } from '../session-goals'
@@ -67,6 +68,7 @@ export function createInternalRoutes(
   app.route('/walkthrough-sessions', createInternalWalkthroughSessionRoutes(changeWalkthroughService))
   app.route('/session-artifacts', createInternalSessionArtifactRoutes(openCodeClient))
   app.route('/shell-env', createInternalShellEnvRoutes(db, repoEnvService))
+  app.route('/git-credentials', createInternalGitCredentialsRoutes(db))
   app.route('/sandbox', createInternalSandboxRoutes(db, sessionSandbox, repoEnvService))
   return app
 }

@@ -36,6 +36,22 @@ describe('RepoProjectFileSchema env', () => {
     expect(parseEnv({ OPENCODE_TOKEN: 'x' }).success).toBe(false)
   })
 
+  it('rejects git authentication names with an actionable message', () => {
+    for (const name of ['GH_TOKEN', 'GITHUB_TOKEN', 'GIT_AUTHOR_NAME', 'git_committer_email']) {
+      const result = parseEnv({ [name]: 'x' })
+
+      expect(result.success, name).toBe(false)
+      if (!result.success) {
+        expect(result.error.issues[0]?.message).toBe(
+          `${name} is reserved for git authentication; map the value in a local env file or use a secret instead`,
+        )
+        expect(result.error.issues[0]?.path).toEqual(['env', name])
+      }
+    }
+    expect(parseEnv({ GITHUB_ACTIONS_SUMMARY: 'x' }).success).toBe(false)
+    expect(parseEnv({ GITLAB_TOKEN: 'x' }).success).toBe(true)
+  })
+
   it('rejects an invalid environment variable name with an actionable message', () => {
     const result = parseEnv({ '1BAD': 'x' })
 

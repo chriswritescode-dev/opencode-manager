@@ -6,7 +6,7 @@ import path from 'node:path'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 import { sessionSandboxName } from '../../../src/services/sandbox/command'
 import {
-  SANDBOX_FORWARDED_ENV_NAMES,
+  SANDBOX_MAX_FORWARDED_GIT_CONFIGS,
   SANDBOX_SHELL_ENV_FORWARD,
   SANDBOX_SHELL_ENV_NAME,
   SANDBOX_SHELL_ENV_WORKDIR,
@@ -38,8 +38,22 @@ function writeArgvCapturingFakeMsb(msbPath: string, captureFile: string): void {
 
 function sandboxShellEnv(overrides: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env = { ...process.env }
-  for (const name of SANDBOX_FORWARDED_ENV_NAMES) delete env[name]
-  delete env[SANDBOX_SHELL_ENV_FORWARD]
+  const inherited = [
+    'GIT_TERMINAL_PROMPT',
+    'GIT_CONFIG_COUNT',
+    ...Array.from({ length: SANDBOX_MAX_FORWARDED_GIT_CONFIGS }, (_, index) => [
+      `GIT_CONFIG_KEY_${index}`,
+      `GIT_CONFIG_VALUE_${index}`,
+    ]).flat(),
+    'GIT_AUTHOR_NAME',
+    'GIT_AUTHOR_EMAIL',
+    'GIT_COMMITTER_NAME',
+    'GIT_COMMITTER_EMAIL',
+    'GH_TOKEN',
+    'GITHUB_TOKEN',
+    SANDBOX_SHELL_ENV_FORWARD,
+  ]
+  for (const name of inherited) delete env[name]
   return { ...env, ...overrides }
 }
 
@@ -98,7 +112,7 @@ describe('sandbox shell shim', () => {
     }
   })
 
-  it('forwards the planned names and the always-forwarded git names as -e pairs, ahead of the command', async () => {
+  it('forwards exactly the plan-approved names as -e pairs, ahead of the command', async () => {
     const fakeBin = mkdtempSync(path.join(tmpdir(), 'ocm-shim-msb-'))
     const configHome = mkdtempSync(path.join(tmpdir(), 'ocm-shim-config-'))
     const msbPath = path.join(fakeBin, 'msb')
@@ -125,6 +139,7 @@ describe('sandbox shell shim', () => {
           GIT_CONFIG_KEY_0: 'http.https://github.com/.extraheader',
           GIT_CONFIG_VALUE_0: extraheaderValue,
           GH_TOKEN: 'inherited-must-not-be-forwarded',
+          GIT_AUTHOR_NAME: 'Inherited Author',
           OCM_INTERNAL_TOKEN: 'must-not-be-forwarded',
         }),
       })
@@ -139,10 +154,60 @@ describe('sandbox shell shim', () => {
 
       const separatorIndex = argv.indexOf('--')
       expect(argv.slice(separatorIndex)).toEqual(['--', 'sh', '-c', 'echo -e sentinel'])
-      expect(argv.slice(0, separatorIndex).filter((element) => element === '-e')).toHaveLength(4)
+      expect(argv.slice(0, separatorIndex).filter((element) => element === '-e')).toHaveLength(3)
 
-      expect(argv).toContain('GH_TOKEN=inherited-must-not-be-forwarded')
+      expect(argv.some((element) => element.startsWith('GH_TOKEN='))).toBe(false)
+      expect(argv.some((element) => element.startsWith('GIT_AUTHOR_NAME='))).toBe(false)
       expect(argv.some((element) => element.startsWith('OCM_INTERNAL_TOKEN='))).toBe(false)
+    } finally {
+      if (originalMsbPath === undefined) {
+        delete process.env.MSB_PATH
+      } else {
+        process.env.MSB_PATH = originalMsbPath
+      }
+      rmSync(fakeBin, { recursive: true, force: true })
+      rmSync(configHome, { recursive: true, force: true })
+    }
+  })
+
+  it('forwards nothing but the plan-approved names when the spawn env carries git and GitHub credentials', async () => {
+    const fakeBin = mkdtempSync(path.join(tmpdir(), 'ocm-shim-msb-'))
+    const configHome = mkdtempSync(path.join(tmpdir(), 'ocm-shim-config-'))
+    const msbPath = path.join(fakeBin, 'msb')
+    const captureFile = path.join(fakeBin, 'argv.txt')
+    writeArgvCapturingFakeMsb(msbPath, captureFile)
+    const originalMsbPath = process.env.MSB_PATH
+    process.env.MSB_PATH = msbPath
+    try {
+      vi.resetModules()
+      const shimMod = await import('../../../src/services/sandbox/shell-shim')
+      const commandMod = await import('../../../src/services/sandbox/command')
+      commandMod.overrideSandboxExecutableTrustValidator(() => true)
+      const shimPath = await shimMod.ensureSandboxShellShim(configHome)
+
+      const directory = path.join(getReposPath(), 'foo')
+      const result = spawnSync(shimPath, ['-c', 'echo sentinel'], {
+        encoding: 'utf8',
+        env: sandboxShellEnv({
+          [SANDBOX_SHELL_ENV_WORKDIR]: directory,
+          [SANDBOX_SHELL_ENV_NAME]: SANDBOX_NAME,
+          GH_TOKEN: 'inherited-gh-token',
+          GITHUB_TOKEN: 'inherited-github-token',
+          GIT_CONFIG_COUNT: '1',
+          GIT_CONFIG_KEY_0: 'http.https://github.com/.extraheader',
+          GIT_CONFIG_VALUE_0: 'AUTHORIZATION: basic inherited',
+          GIT_AUTHOR_NAME: 'Inherited Author',
+          GIT_COMMITTER_EMAIL: 'inherited@example.com',
+        }),
+      })
+      expect(result.status).toBe(0)
+
+      const argv = readFileSync(captureFile, 'utf8').split('\0').filter((element) => element !== '')
+
+      expect(argv.filter((element) => element === '-e')).toHaveLength(0)
+      expect(argv).not.toContain('GH_TOKEN=inherited-gh-token')
+      expect(argv).not.toContain('GITHUB_TOKEN=inherited-github-token')
+      expect(argv).not.toContain('GIT_CONFIG_COUNT=1')
     } finally {
       if (originalMsbPath === undefined) {
         delete process.env.MSB_PATH

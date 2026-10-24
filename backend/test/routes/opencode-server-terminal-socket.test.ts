@@ -10,16 +10,12 @@ import { TerminalService } from '../../src/services/terminal'
 import { OpenCodeServerNotFoundError } from '../../src/services/opencode-server-registry'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { CredentialProvider } from '../../src/services/credential-provider'
-import type { RepoEnvService } from '../../src/services/repo-env'
+import { createStubRepoEnvService } from '../helpers/stub-repo-env-service'
 import { startWebSocketServer, type WebSocketTestServer } from '../helpers/websocket-server'
 import { rawWebSocketHandshake } from '../helpers/raw-websocket-handshake'
 
 const TRUSTED_ORIGIN = 'http://localhost:5003'
 const SERVER_ID = 'srv_kitchen'
-function stubRepoEnvService(): RepoEnvService {
-  return { resolveForDirectory: async () => ({ env: {}, maskValues: [], missing: [] }) } as unknown as RepoEnvService
-}
-
 const UNKNOWN_SERVER_ID = 'srv_missing'
 const DIRECTORY = '/home/me/app'
 
@@ -64,9 +60,9 @@ const managerApp = new Hono()
 const managerWs = createNodeWebSocket({ app: managerApp })
 
 const terminalService = new TerminalService(
-  { client: remoteClient, baseUrl: () => `http://127.0.0.1:${upstream.port}`, includeLocalCredentials: false },
+  { client: remoteClient, baseUrl: () => `http://127.0.0.1:${upstream.port}`, includeLocalEnv: false },
   credentialProvider,
-  stubRepoEnvService(),
+  createStubRepoEnvService(),
 )
 
 const resolveTerminalService: ServerTerminalServiceResolver = (serverId) => {

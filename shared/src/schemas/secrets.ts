@@ -7,7 +7,16 @@ export type SecretKind = z.infer<typeof SecretKindSchema>
 
 export const SECRET_VALUE_MAX_BYTES = 48 * 1024
 
+export const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
+
 const RESERVED_ENV_PREFIXES = ['OCM_', 'OPENCODE_', 'GIT_CONFIG_', 'MSB_', 'LD_'] as const
+
+/**
+ * Prefixes the sandbox owns: a plan-provided or forwarded variable using one of
+ * them could replace the sandbox control variables, so they never cross into a
+ * microVM from a plan.
+ */
+export const SANDBOX_CONTROL_ENV_PREFIXES = ['OCM_', 'MSB_'] as const satisfies readonly (typeof RESERVED_ENV_PREFIXES)[number][]
 
 const RESERVED_ENV_NAMES = ['PATH', 'HOME', 'NODE_OPTIONS'] as const
 
@@ -24,7 +33,7 @@ export const SecretNameSchema = z
   .string()
   .max(255, 'Name must be at most 255 characters')
   .regex(
-    /^[A-Za-z_][A-Za-z0-9_]*$/,
+    ENV_NAME_PATTERN,
     'Name must start with a letter or underscore and contain only letters, numbers, and underscores',
   )
   .refine((name) => !name.toUpperCase().startsWith('GITHUB_'), 'Name must not start with GITHUB_')

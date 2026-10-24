@@ -6,7 +6,7 @@ import { EnvironmentNameSchema, SecretNameSchema, SetSecretRequestSchema, type S
 import { getRepoById } from '../db/queries'
 import { SecretsService, SecretsServiceError } from '../services/secrets'
 import type { ProjectConfigService } from '../services/project-config'
-import { handleServiceError } from '../utils/route-helpers'
+import { handleServiceError, parseJsonBody } from '../utils/route-helpers'
 
 function readName(c: Context): { name: string } | Response {
   const parsed = SecretNameSchema.safeParse(c.req.param('name'))
@@ -29,28 +29,32 @@ function readEnvironmentQuery(c: Context): { environment: string | null } | Resp
   return { environment: parsed.data }
 }
 
+async function putEntry(
+  c: Context,
+  secretsService: SecretsService,
+  kind: SecretKind,
+  repoId: number | null,
+): Promise<Response> {
+  const name = readName(c)
+  if (name instanceof Response) return name
+
+  const body = await parseJsonBody(c, SetSecretRequestSchema)
+  if (!body.ok) return body.response
+
+  try {
+    secretsService.set(kind, repoId, body.data.environment ?? null, name.name, body.data.value)
+    return c.body(null, 204)
+  } catch (error: unknown) {
+    return handleServiceError(c, error, 'Failed to store secret', SecretsServiceError)
+  }
+}
+
 export function createGlobalSecretRoutes(secretsService: SecretsService, kind: SecretKind) {
   const app = new Hono()
 
   app.get('/', (c) => c.json({ items: secretsService.list(kind, null) }))
 
-  app.put('/:name', async (c) => {
-    const name = readName(c)
-    if (name instanceof Response) return name
-
-    const body = await c.req.json().catch(() => ({}))
-    const parsed = SetSecretRequestSchema.safeParse(body)
-    if (!parsed.success) {
-      return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request' }, 400)
-    }
-
-    try {
-      secretsService.set(kind, null, parsed.data.environment ?? null, name.name, parsed.data.value)
-      return c.body(null, 204)
-    } catch (error: unknown) {
-      return handleServiceError(c, error, 'Failed to store secret', SecretsServiceError)
-    }
-  })
+  app.put('/:name', (c) => putEntry(c, secretsService, kind, null))
 
   app.delete('/:name', (c) => {
     const name = readName(c)
@@ -98,24 +102,10 @@ export function createRepoSecretRoutes(deps: RepoSecretRouteDeps, kind: SecretKi
   })
 
   app.put(`/:id/${segment}/:name`, async (c) => {
-    const name = readName(c)
-    if (name instanceof Response) return name
-
-    const body = await c.req.json().catch(() => ({}))
-    const parsed = SetSecretRequestSchema.safeParse(body)
-    if (!parsed.success) {
-      return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request' }, 400)
-    }
-
     const repo = await resolveProjectRepo(c)
     if (repo instanceof Response) return repo
 
-    try {
-      secretsService.set(kind, repo.id, parsed.data.environment ?? null, name.name, parsed.data.value)
-      return c.body(null, 204)
-    } catch (error: unknown) {
-      return handleServiceError(c, error, 'Failed to store secret', SecretsServiceError)
-    }
+    return putEntry(c, secretsService, kind, repo.id)
   })
 
   app.delete(`/:id/${segment}/:name`, async (c) => {

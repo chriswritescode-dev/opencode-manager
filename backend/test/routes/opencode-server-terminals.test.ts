@@ -9,7 +9,7 @@ import { TerminalService } from '../../src/services/terminal'
 import { OpenCodeServerNotFoundError } from '../../src/services/opencode-server-registry'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { CredentialProvider } from '../../src/services/credential-provider'
-import type { RepoEnvService } from '../../src/services/repo-env'
+import { createStubRepoEnvService } from '../helpers/stub-repo-env-service'
 
 const DIRECTORY = '/home/me/app'
 const SERVER_ID = 'srv_kitchen'
@@ -44,19 +44,15 @@ function createRemoteClient(terminals: Array<Record<string, unknown>> = [createP
   return { client, list, create, update, remove }
 }
 
-function stubRepoEnvService(): RepoEnvService {
-  return { resolveForDirectory: async () => ({ env: {}, maskValues: [], missing: [] }) } as unknown as RepoEnvService
-}
-
-function createService(includeLocalCredentials = false, terminals?: Array<Record<string, unknown>>) {
+function createService(includeLocalEnv = false, terminals?: Array<Record<string, unknown>>) {
   const remote = createRemoteClient(terminals)
   const credentialProvider = {
     getGhCliEnv: vi.fn(() => ({ GH_TOKEN: 'local-token' })),
   } as unknown as CredentialProvider
   const service = new TerminalService(
-    { client: remote.client, baseUrl: () => 'https://remote.internal', includeLocalCredentials },
+    { client: remote.client, baseUrl: () => 'https://remote.internal', includeLocalEnv },
     credentialProvider,
-    stubRepoEnvService(),
+    createStubRepoEnvService(),
   )
   return { service, credentialProvider, ...remote }
 }

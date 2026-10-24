@@ -2,14 +2,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { SecretEntry, SecretKind } from '@opencode-manager/shared/schemas'
 import { deleteSecret, listSecrets, setSecret, type SecretScope } from '@/api/secrets'
 
-export interface SetSecretVariables {
+interface SetSecretVariables {
   kind: SecretKind
   name: string
   value: string
   environment?: string
 }
 
-export interface DeleteSecretVariables {
+interface DeleteSecretVariables {
   kind: SecretKind
   name: string
   environment?: string
@@ -19,7 +19,7 @@ function scopeKey(scope: SecretScope): string {
   return scope.scope === 'global' ? 'global' : `repo:${scope.repoId}`
 }
 
-export function secretsQueryKey(scope: SecretScope, kind: SecretKind) {
+function secretsQueryKey(scope: SecretScope, kind: SecretKind) {
   return ['secrets', scopeKey(scope), kind] as const
 }
 

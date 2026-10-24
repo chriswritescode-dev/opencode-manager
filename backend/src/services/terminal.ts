@@ -28,7 +28,7 @@ export interface TerminalSize {
 export interface TerminalTarget {
   client: OpenCodeClient
   baseUrl: () => string
-  includeLocalCredentials: boolean
+  includeLocalEnv: boolean
 }
 
 export class TerminalNotFoundError extends Error {
@@ -84,7 +84,12 @@ export class TerminalService {
       input.command !== undefined && DEFERRED_START_KINDS.has(input.kind) && process.platform !== 'win32'
         ? deferCommandStart(input.command, input.args ?? [])
         : undefined
-    const repoEnv = (await this.repoEnvService.resolveForDirectory(directory)).env
+    const localEnv = this.target.includeLocalEnv
+      ? {
+          ...this.credentialProvider.getGhCliEnv({ cwd: directory }),
+          ...(await this.repoEnvService.resolveForDirectory(directory)).env,
+        }
+      : {}
     const result = await this.target.client.api.pty.create({
       location: { directory },
       title: formatTerminalTitle({ kind: input.kind, name: input.name, actionId: input.actionId }),
@@ -95,8 +100,7 @@ export class TerminalService {
             ...(input.args !== undefined ? { args: input.args } : {}),
           }),
       env: {
-        ...(this.target.includeLocalCredentials ? this.credentialProvider.getGhCliEnv({ cwd: directory }) : {}),
-        ...repoEnv,
+        ...localEnv,
         ...input.env,
       },
     })

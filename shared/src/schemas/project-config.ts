@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { TerminalInfoSchema } from './terminal'
-import { EnvironmentNameSchema, isReservedEnvName } from './secrets'
+import { ENV_NAME_PATTERN, EnvironmentNameSchema, isReservedEnvName } from './secrets'
 import { parseEnvExpressionReferences } from '../utils/env-expressions'
 
 export const ProjectActionIconSchema = z.enum([
@@ -34,7 +34,15 @@ export const ProjectItemSourceSchema = z.enum(['personal', 'repo'])
 
 export const REPO_PROJECT_ENV_MAX_ENTRIES = 100
 
-export const REPO_PROJECT_ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
+const REPO_PROJECT_ENV_RESERVED_NAMES = ['GH_TOKEN'] as const
+
+const REPO_PROJECT_ENV_RESERVED_PREFIXES = ['GITHUB_', 'GIT_'] as const
+
+function isRepoProjectEnvGitReserved(name: string): boolean {
+  const normalized = name.toUpperCase()
+  if ((REPO_PROJECT_ENV_RESERVED_NAMES as readonly string[]).includes(normalized)) return true
+  return REPO_PROJECT_ENV_RESERVED_PREFIXES.some((prefix) => normalized.startsWith(prefix))
+}
 
 export const RepoProjectEnvValueSchema = z
   .string()
@@ -50,10 +58,16 @@ export const RepoProjectEnvSchema = z
   .record(z.string(), RepoProjectEnvValueSchema)
   .superRefine((env, ctx) => {
     for (const key of Object.keys(env)) {
-      if (!REPO_PROJECT_ENV_NAME_PATTERN.test(key)) {
+      if (!ENV_NAME_PATTERN.test(key)) {
         ctx.addIssue({ code: 'custom', message: `${key} is not a valid environment variable name`, path: [key] })
       } else if (isReservedEnvName(key)) {
         ctx.addIssue({ code: 'custom', message: `${key} is reserved for Manager or the runtime`, path: [key] })
+      } else if (isRepoProjectEnvGitReserved(key)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `${key} is reserved for git authentication; map the value in a local env file or use a secret instead`,
+          path: [key],
+        })
       }
     }
   })
@@ -164,7 +178,6 @@ export type ProjectAction = z.infer<typeof ProjectActionSchema>
 export type WorktreeSetupCommands = z.infer<typeof WorktreeSetupCommandsSchema>
 export type ProjectItemSource = z.infer<typeof ProjectItemSourceSchema>
 export type RepoProjectFile = z.infer<typeof RepoProjectFileSchema>
-export type RepoProjectEnv = z.infer<typeof RepoProjectEnvSchema>
 export type ProjectConfigResponse = z.infer<typeof ProjectConfigResponseSchema>
 export type UpdateProjectActionsRequest = z.infer<typeof UpdateProjectActionsRequestSchema>
 export type UpdateWorktreeSetupRequest = z.infer<typeof UpdateWorktreeSetupRequestSchema>

@@ -19,13 +19,7 @@ interface SecretRow {
   updated_at: number
 }
 
-interface SecretValueRow {
-  kind: SecretKind
-  repo_id: number | null
-  environment: string
-  name: string
-  value: string
-}
+type SecretValueRow = Omit<SecretRow, 'updated_at'>
 
 export interface ResolvedSecretValues {
   secrets: Record<string, string>
@@ -97,17 +91,9 @@ export class SecretsService {
   }
 
   private selectRows(kind: SecretKind, repoId: number | null): SecretRow[] {
-    if (repoId === null) {
-      return this.db
-        .prepare(
-          'SELECT kind, repo_id, environment, name, value, updated_at FROM secrets WHERE kind = ? AND repo_id IS NULL ORDER BY name',
-        )
-        .all(kind) as SecretRow[]
-    }
-
     return this.db
       .prepare(
-        'SELECT kind, repo_id, environment, name, value, updated_at FROM secrets WHERE kind = ? AND repo_id = ? ORDER BY name',
+        'SELECT kind, repo_id, environment, name, value, updated_at FROM secrets WHERE kind = ? AND repo_id IS ? ORDER BY name',
       )
       .all(kind, repoId) as SecretRow[]
   }

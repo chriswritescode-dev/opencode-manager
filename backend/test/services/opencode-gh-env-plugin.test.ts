@@ -3,9 +3,41 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import os from 'os'
 import { installManagedPlugins, getOpenCodePluginDir } from '../../src/services/opencode/plugin-registry'
-import { loadGeneratedPlugin, type ToolExecuteAfterEvent } from '../helpers/opencode-plugin-context'
+import { SANDBOX_SHELL_STATE_KEY } from '../../src/services/opencode-plugin-state'
+import {
+  loadGeneratedPlugin,
+  type GeneratedPlugin,
+  type GeneratedTool,
+  type GeneratedToolExecuteContext,
+  type ShellCreateBeforeEvent,
+  type ToolExecuteAfterEvent,
+} from '../helpers/opencode-plugin-context'
 
 const INTERNAL_API_URL = 'http://localhost:5003/api/internal'
+const MASK_STATE_KEY = Symbol.for('ocm-secret-masks.v1')
+const PLAN_NAME = 'ocm-session-0123456789ab'
+
+type MaskState = { byCwd: Map<string, string[]>; version: number; unionVersion: number; union: string[] }
+
+type ShellSandboxState = { inFlightSandboxedCommands: Map<string, number> }
+
+function maskStateForTests(): MaskState | undefined {
+  return (globalThis as Record<symbol, unknown>)[MASK_STATE_KEY] as MaskState | undefined
+}
+
+function shellSandboxStateForTests(): ShellSandboxState | undefined {
+  return (globalThis as Record<symbol, unknown>)[Symbol.for(SANDBOX_SHELL_STATE_KEY)] as ShellSandboxState | undefined
+}
+
+function shellTool(plugin: GeneratedPlugin, execute: (input: unknown, context: GeneratedToolExecuteContext) => Promise<unknown>): GeneratedTool {
+  const tool = plugin.applyToolTransforms([{ name: 'shell', execute }]).find((candidate) => candidate.name === 'shell')
+  if (!tool) throw new Error('the shell tool was not found after transforms')
+  return tool
+}
+
+function shellCreateEvent(command: string, cwd: string): ShellCreateBeforeEvent {
+  return { command, cwd, env: {} }
+}
 
 describe('ocm-gh-env plugin', () => {
   let configHome: string
@@ -41,6 +73,9 @@ describe('ocm-gh-env plugin', () => {
   afterEach(async () => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
+    delete (globalThis as Record<symbol, unknown>)[MASK_STATE_KEY]
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for(SANDBOX_SHELL_STATE_KEY)]
+    delete process.env.OCM_SANDBOX_ENFORCED
     delete process.env.OCM_INTERNAL_API_URL
     delete process.env.OCM_INTERNAL_TOKEN
     await fs.rm(configHome, { recursive: true, force: true })
@@ -215,18 +250,6 @@ describe('ocm-gh-env plugin', () => {
     expect(event.result).toEqual({ output: 'token ***' })
   })
 
-  it('replaces overlapping mask values longest first', async () => {
-    stubShellEnvFetch({ env: {}, mask: ['abc', 'abcdef'] })
-    const plugin = await loadPlugin()
-    await plugin.triggerShellCreateBefore({ command: 'ls', cwd: '/repo', env: {} })
-
-    const event: ToolExecuteAfterEvent = { tool: 'shell', status: 'completed', result: { output: 'abcdef' } }
-
-    await plugin.triggerToolExecuteAfter(event)
-
-    expect(event.result).toEqual({ output: '***' })
-  })
-
   it('leaves error results untouched', async () => {
     stubShellEnvFetch({ env: {}, mask: ['s3cret-value'] })
     const plugin = await loadPlugin()
@@ -253,7 +276,7 @@ describe('ocm-gh-env plugin', () => {
     expect(event.result).toBe(result)
   })
 
-  it('keeps masking values learned earlier even after they rotate out of the response', async () => {
+  it('replaces the masks for a cwd instead of keeping values that rotated out', async () => {
     const realNow = Date.now
     const fetchMock = stubShellEnvFetch({ env: {}, mask: ['first-secret'] })
     const plugin = await loadPlugin()
@@ -267,8 +290,111 @@ describe('ocm-gh-env plugin', () => {
 
     await plugin.triggerToolExecuteAfter(event)
 
+    expect(event.result).toEqual({ output: 'first-secret and ***' })
+    expect(maskStateForTests()?.byCwd.get('/repo')).toEqual(['second-secret'])
+  })
+
+  it('keeps masks per cwd and masks a result with the masks of the cwd its shell ran in', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: URL) => {
+      const mask = String(url).includes('%2Frepo-a') ? ['a-secret'] : ['b-secret']
+      return Promise.resolve({ ok: true, json: async () => ({ env: {}, mask }) })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const plugin = await loadPlugin()
+    await plugin.triggerShellCreateBefore({ command: 'ls', cwd: '/repo-a', env: {} })
+    await plugin.triggerShellCreateBefore({ command: 'ls', cwd: '/repo-b', env: {} })
+
+    const fromA: ToolExecuteAfterEvent = {
+      tool: 'shell',
+      status: 'completed',
+      input: { command: 'ls', workdir: '/repo-a' },
+      result: { output: 'a-secret and b-secret' },
+    }
+    await plugin.triggerToolExecuteAfter(fromA)
+
+    expect(fromA.result).toEqual({ output: '*** and b-secret' })
+  })
+
+  it('masks a result without a cwd with the union of the current per-cwd masks', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: URL) => {
+      const mask = String(url).includes('%2Frepo-a') ? ['a-secret'] : ['b-secret']
+      return Promise.resolve({ ok: true, json: async () => ({ env: {}, mask }) })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const plugin = await loadPlugin()
+    await plugin.triggerShellCreateBefore({ command: 'ls', cwd: '/repo-a', env: {} })
+    await plugin.triggerShellCreateBefore({ command: 'ls', cwd: '/repo-b', env: {} })
+
+    const event: ToolExecuteAfterEvent = {
+      tool: 'read',
+      status: 'completed',
+      result: { output: 'a-secret and b-secret' },
+    }
+    await plugin.triggerToolExecuteAfter(event)
+
     expect(event.result).toEqual({ output: '*** and ***' })
   })
+
+  it('masks overlapping values longest first without sorting per string', async () => {
+    stubShellEnvFetch({ env: {}, mask: ['abc', 'abcdef', 'abc'] })
+    const plugin = await loadPlugin()
+    await plugin.triggerShellCreateBefore({ command: 'ls', cwd: '/repo', env: {} })
+
+    expect(maskStateForTests()?.byCwd.get('/repo')).toEqual(['abcdef', 'abc'])
+
+    const event: ToolExecuteAfterEvent = { tool: 'shell', status: 'completed', result: { output: 'abcdef' } }
+    await plugin.triggerToolExecuteAfter(event)
+
+    expect(event.result).toEqual({ output: '***' })
+  })
+
+  for (const order of ['gh-env first', 'sandbox first'] as const) {
+    it(`lets a sandboxed shell register the plan masks and skips the repository env (${order})`, async () => {
+      process.env.OCM_SANDBOX_ENFORCED = 'true'
+      const shellEnvCalls: string[] = []
+      vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+        const target = String(url)
+        if (target.includes('/sandbox/sessions/')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ sandboxed: true, source: 'default', since: 1 }) })
+        }
+        if (target.endsWith('/sandbox/shell')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ mode: 'sandbox', workdir: '/repo', name: PLAN_NAME, mask: ['plan-secret'] }),
+          })
+        }
+        shellEnvCalls.push(target)
+        return Promise.resolve({ ok: true, json: async () => ({ env: { GH_TOKEN: 'ghp' }, mask: ['repo-secret'] }) })
+      }))
+      const ghEnv = await loadPlugin()
+      const sandbox = await loadGeneratedPlugin(path.join(getOpenCodePluginDir(configHome), 'ocm-sandbox.js'))
+      const base = vi.fn().mockImplementation(async (input: { command: string }) => {
+        const event = shellCreateEvent(input.command, '/repo')
+        if (order === 'gh-env first') {
+          await ghEnv.triggerShellCreateBefore(event)
+          await sandbox.triggerShellCreateBefore(event)
+        } else {
+          await sandbox.triggerShellCreateBefore(event)
+          await ghEnv.triggerShellCreateBefore(event)
+        }
+        return { output: 'ok' }
+      })
+      const shell = shellTool(sandbox, base)
+
+      await shell.execute!({ command: 'git push' }, { signal: new AbortController().signal, sessionID: 'ses_test', id: 'call_test' })
+
+      expect(shellEnvCalls).toHaveLength(1)
+      expect(shellEnvCalls[0]).toContain('sandboxed=1')
+      expect(maskStateForTests()?.byCwd.get('/repo')).toEqual(['plan-secret'])
+      expect(shellSandboxStateForTests()?.inFlightSandboxedCommands.size).toBe(0)
+
+      const event: ToolExecuteAfterEvent = { tool: 'shell', status: 'completed', result: { output: 'plan-secret and repo-secret' } }
+      await ghEnv.triggerToolExecuteAfter(event)
+
+      expect(event.result).toEqual({ output: '*** and repo-secret' })
+    })
+  }
 
   it('fails loudly when the generated module does not match the V2 plugin contract', async () => {
     const modulePath = path.join(configHome, 'not-a-plugin.js')

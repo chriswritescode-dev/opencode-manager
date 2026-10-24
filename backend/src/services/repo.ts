@@ -252,11 +252,12 @@ async function safeGetCurrentBranch(repoPath: string, env: Record<string, string
   }
 }
 
-async function findGitRepoRoot(targetPath: string, env: Record<string, string>): Promise<string | null> {
+export async function findGitRepoRoot(targetPath: string, env: Record<string, string> = {}): Promise<string | null> {
   try {
     const resolvedPath = normalizeAbsolutePath(targetPath)
     const repoRoot = await executeCommand(['git', '-C', resolvedPath, 'rev-parse', '--show-toplevel'], { env, silent: true })
-    return normalizeAbsolutePath(repoRoot.trim())
+    const trimmed = repoRoot.trim()
+    return trimmed ? normalizeAbsolutePath(trimmed) : null
   } catch {
     return null
   }

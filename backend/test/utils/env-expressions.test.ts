@@ -68,25 +68,28 @@ describe('interpolateEnvExpressions', () => {
   it('replaces references and interpolates inside a larger string', () => {
     expect(interpolateEnvExpressions('https://${{ vars.HOST }}/${{ secrets.TOKEN }}', lookup)).toEqual({
       value: 'https://example.com/super-secret',
-      missing: [],
     })
   })
 
-  it('resolves a missing reference to an empty string and reports it', () => {
+  it('resolves a missing reference to an empty string', () => {
     expect(interpolateEnvExpressions('x-${{ secrets.MISSING }}-y', lookup)).toEqual({
       value: 'x--y',
-      missing: [{ context: 'secrets', name: 'MISSING' }],
     })
   })
 
   it('leaves an unsupported expression untouched', () => {
     expect(interpolateEnvExpressions('${{ github.sha }}', lookup)).toEqual({
       value: '${{ github.sha }}',
-      missing: [],
+    })
+  })
+
+  it('leaves an expression with an invalid name untouched', () => {
+    expect(interpolateEnvExpressions('${{ secrets.1BAD }}', lookup)).toEqual({
+      value: '${{ secrets.1BAD }}',
     })
   })
 
   it('leaves a literal value untouched', () => {
-    expect(interpolateEnvExpressions('literal', lookup)).toEqual({ value: 'literal', missing: [] })
+    expect(interpolateEnvExpressions('literal', lookup)).toEqual({ value: 'literal' })
   })
 })

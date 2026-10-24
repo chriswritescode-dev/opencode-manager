@@ -9,8 +9,8 @@ import os from 'os'
 import {
   SANDBOX_CLAIM_TIMEOUT_MS,
   SANDBOX_PLAN_TIMEOUT_MS,
-  SANDBOX_SHELL_STATE_KEY,
 } from '../../src/services/opencode-sandbox-plugin'
+import { SANDBOX_SHELL_STATE_KEY } from '../../src/services/opencode-plugin-state'
 import { installManagedPlugins, getOpenCodePluginDir } from '../../src/services/opencode/plugin-registry'
 import {
   SANDBOX_SHELL_ENV_FORWARD,
@@ -138,6 +138,7 @@ type ShellSandboxState = {
   pendingMarkers: Map<string, { callID: string; sessionID?: string }>
   sandboxedCallIDs: Set<string>
   foreignOwners: Map<string, string>
+  inFlightSandboxedCommands: Map<string, number>
 }
 
 function shellSandboxState(): ShellSandboxState | undefined {
@@ -146,6 +147,18 @@ function shellSandboxState(): ShellSandboxState | undefined {
 
 function clearShellSandboxState(): void {
   delete (globalThis as Record<symbol, unknown>)[Symbol.for(SANDBOX_SHELL_STATE_KEY)]
+}
+
+type MaskState = { byCwd: Map<string, string[]>; version: number; unionVersion: number; union: string[] }
+
+const MASK_STATE_KEY = Symbol.for('ocm-secret-masks.v1')
+
+function maskStateForTests(): MaskState | undefined {
+  return (globalThis as Record<symbol, unknown>)[MASK_STATE_KEY] as MaskState | undefined
+}
+
+function clearMaskState(): void {
+  delete (globalThis as Record<symbol, unknown>)[MASK_STATE_KEY]
 }
 
 type TestClaim = { tier: 'workload' | 'explicit' | 'default'; since: number }
@@ -264,6 +277,7 @@ describe('ocm-sandbox plugin', () => {
   afterEach(async () => {
     vi.unstubAllGlobals()
     clearShellSandboxState()
+    clearMaskState()
     clearArbiterRegistry()
     delete process.env.OCM_INTERNAL_API_URL
     delete process.env.OCM_INTERNAL_TOKEN
@@ -455,6 +469,64 @@ describe('ocm-sandbox plugin', () => {
       expect(createEvent.env.NUMERIC).toBeUndefined()
       expect(createEvent.env[SANDBOX_SHELL_ENV_FORWARD]).toBe('GH_TOKEN GIT_CONFIG_COUNT OPENAI_API_KEY')
       expect(Object.getOwnPropertyDescriptor(createEvent.env, SANDBOX_SHELL_ENV_FORWARD)?.configurable).toBe(false)
+    })
+
+    it('registers the plan mask values for the spawned cwd', async () => {
+      const plugin = await loadPlugin(configHome)
+      const fetchMock = managerFetch({
+        session: { sandboxed: true },
+        plan: { body: { mode: 'sandbox', workdir: WORKDIR, name: PLAN_NAME, mask: ['s3cret-value', 'other-value'] } },
+      })
+      const { shell } = await runSandboxedShellCall(plugin, fetchMock)
+
+      await shell.execute!({ command: 'echo sentinel' }, toolContext())
+
+      expect(maskStateForTests()?.byCwd.get(WORKDIR)).toEqual(['s3cret-value', 'other-value'])
+    })
+
+    it('clears the registered masks for the cwd when the plan carries none', async () => {
+      const plugin = await loadPlugin(configHome)
+      const masked = await runSandboxedShellCall(
+        plugin,
+        managerFetch({
+          session: { sandboxed: true },
+          plan: { body: { mode: 'sandbox', workdir: WORKDIR, name: PLAN_NAME, mask: ['s3cret-value'] } },
+        }),
+      )
+      await masked.shell.execute!({ command: 'echo sentinel' }, toolContext())
+      expect(maskStateForTests()?.byCwd.get(WORKDIR)).toEqual(['s3cret-value'])
+
+      const unmasked = await runSandboxedShellCall(
+        plugin,
+        managerFetch({ session: { sandboxed: true }, plan: { body: { mode: 'sandbox', workdir: WORKDIR, name: PLAN_NAME } } }),
+      )
+      await unmasked.shell.execute!({ command: 'echo other' }, toolContext())
+
+      expect(maskStateForTests()?.byCwd.get(WORKDIR)).toBeUndefined()
+    })
+
+    it('pins the forward list only from the plan instead of a static env list', async () => {
+      const plugin = await loadPlugin(configHome)
+      const source = await fs.readFile(path.join(getOpenCodePluginDir(configHome), 'ocm-sandbox.js'), 'utf-8')
+      let pinned: ShellCreateBeforeEvent | undefined
+      const { shell } = await runSandboxedShellCall(
+        plugin,
+        managerFetch({ session: { sandboxed: true }, plan: { body: { mode: 'sandbox', workdir: WORKDIR, name: PLAN_NAME } } }),
+        (marked) => {
+          pinned = shellCreateEvent({
+            command: marked,
+            env: { PATH: '/usr/bin', GH_TOKEN: 'spawn-token', GIT_CONFIG_COUNT: '1' },
+          })
+          return pinned
+        },
+      )
+
+      await shell.execute!({ command: 'echo sentinel' }, toolContext())
+
+      expect(source).not.toContain('FORWARDED_ENV_NAMES')
+      expect(pinned?.env[SANDBOX_SHELL_ENV_FORWARD]).toBe('')
+      expect(pinned?.env.GH_TOKEN).toBe('spawn-token')
+      expect(pinned?.env.GIT_CONFIG_COUNT).toBe('1')
     })
 
     it('leaves an unmarked spawn on the host without planning', async () => {
@@ -708,6 +780,22 @@ describe('ocm-sandbox plugin', () => {
 
       expect(input).toEqual({ command: 'echo sentinel', workdir: '/tmp' })
       expect(marked).toMatch(/^ocm-sandbox-required-[0-9a-f-]{36} && echo sentinel$/)
+    })
+
+    it('records the sandboxed command as in flight for the duration of the spawn', async () => {
+      const plugin = await loadPlugin(configHome)
+      const inFlightDuringSpawn: string[][] = []
+      vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true } }))
+      const shell = shellTool(plugin, vi.fn().mockImplementation(async () => {
+        inFlightDuringSpawn.push([...(shellSandboxState()?.inFlightSandboxedCommands.keys() ?? [])])
+        return { output: 'ok' }
+      }))
+
+      await shell.execute!({ command: 'echo sentinel' }, toolContext())
+
+      expect(inFlightDuringSpawn[0]).toContain('echo sentinel')
+      expect(inFlightDuringSpawn[0]?.some((command) => command.endsWith(' && echo sentinel'))).toBe(true)
+      expect(shellSandboxState()?.inFlightSandboxedCommands.size).toBe(0)
     })
 
     it('refuses to run a sandboxed shell call without a command', async () => {

@@ -1,5 +1,6 @@
 import { createInternalRoutes } from '../../src/routes/internal'
 import { createStubOpenCodeClient } from './stub-opencode-client'
+import { createStubRepoEnvService } from './stub-repo-env-service'
 
 type CreateInternalRoutesParams = Parameters<typeof createInternalRoutes>
 
@@ -17,12 +18,6 @@ type InternalTestAppOverrides = Partial<{
   sessionSandbox: CreateInternalRoutesParams[11]
   repoEnvService: CreateInternalRoutesParams[12]
 }>
-
-function createStubRepoEnvService(): CreateInternalRoutesParams[12] {
-  return {
-    resolveForDirectory: async () => ({ env: {}, maskValues: [], missing: [] }),
-  } as unknown as CreateInternalRoutesParams[12]
-}
 
 export function createInternalTestApp(
   db: CreateInternalRoutesParams[0],

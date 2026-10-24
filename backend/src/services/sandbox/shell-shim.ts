@@ -1,5 +1,6 @@
 import path from 'path'
 import { ENV } from '@opencode-manager/shared/config/env'
+import { SANDBOX_CONTROL_ENV_PREFIXES } from '@opencode-manager/shared/schemas'
 import { isPathWithinRoot, writeFileAtomic } from '../../utils/fs-safe'
 import {
   quoteForShell,
@@ -29,26 +30,7 @@ export const SANDBOX_SHELL_ENV_FORWARD = 'OCM_SANDBOX_FORWARD_ENV'
  */
 export const SANDBOX_MAX_FORWARDED_GIT_CONFIGS = 16
 
-/**
- * Variables the shim always copies from its own environment into the microVM
- * with `msb exec -e`, independent of the plan-approved allow-list. The guest
- * environment is otherwise empty, so anything absent from this list and from
- * the allow-list never reaches a sandboxed command.
- */
-export const SANDBOX_FORWARDED_ENV_NAMES: readonly string[] = [
-  'GIT_TERMINAL_PROMPT',
-  'GIT_CONFIG_COUNT',
-  ...Array.from({ length: SANDBOX_MAX_FORWARDED_GIT_CONFIGS }, (_, index) => [
-    `GIT_CONFIG_KEY_${index}`,
-    `GIT_CONFIG_VALUE_${index}`,
-  ]).flat(),
-  'GIT_AUTHOR_NAME',
-  'GIT_AUTHOR_EMAIL',
-  'GIT_COMMITTER_NAME',
-  'GIT_COMMITTER_EMAIL',
-  'GH_TOKEN',
-  'GITHUB_TOKEN',
-]
+const SANDBOX_CONTROL_ENV_CASE_PATTERN = SANDBOX_CONTROL_ENV_PREFIXES.map((prefix) => `${prefix}*`).join('|')
 
 /**
  * Drops `http.<host>.extraheader` pairs beyond the forwarding cap, so the
@@ -94,13 +76,10 @@ export function buildSandboxShellShimScript(): string {
     `${timeoutSeconds}s`,
   ].join(' ')
   const forwardEnv = [
-    ...SANDBOX_FORWARDED_ENV_NAMES.map(
-      (name) => `if [ -n "\${${name}+x}" ]; then set -- "$@" -e "${name}=$${name}"; fi`,
-    ),
     'set -f',
     `for OCM_SHIM_NAME in \${${SANDBOX_SHELL_ENV_FORWARD}}; do`,
     `  case "$OCM_SHIM_NAME" in`,
-    `    ''|[0-9]*|*[!A-Za-z0-9_]*|OCM_*|MSB_*|${SANDBOX_FORWARDED_ENV_NAMES.join('|')}) continue ;;`,
+    `    ''|[0-9]*|*[!A-Za-z0-9_]*|${SANDBOX_CONTROL_ENV_CASE_PATTERN}) continue ;;`,
     '  esac',
     `  eval "OCM_SHIM_SET=\\\${$OCM_SHIM_NAME+x}"`,
     `  [ -n "$OCM_SHIM_SET" ] || continue`,

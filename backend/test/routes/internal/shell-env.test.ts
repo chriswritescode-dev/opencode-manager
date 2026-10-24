@@ -31,7 +31,7 @@ describe('internal shell-env routes', () => {
         { name: 'github', host: 'github.com', type: 'pat', token: 'ghp_test_token' } as GitCredential,
       ],
     })
-    const repoEnvService = createRepoEnvService(async () => ({ env: {}, maskValues: [], missing: [] }))
+    const repoEnvService = createRepoEnvService(async () => ({ env: {}, maskValues: [] }))
     const app = appWith(repoEnvService)
 
     const res = await app.request('/')
@@ -42,7 +42,7 @@ describe('internal shell-env routes', () => {
   })
 
   it('returns an empty GH env when no GitHub credential exists', async () => {
-    const app = appWith(createRepoEnvService(async () => ({ env: {}, maskValues: [], missing: [] })))
+    const app = appWith(createRepoEnvService(async () => ({ env: {}, maskValues: [] })))
 
     const res = await app.request('/')
 
@@ -60,7 +60,6 @@ describe('internal shell-env routes', () => {
     const repoEnvService = createRepoEnvService(async () => ({
       env: { API_URL: 'https://internal.example', GITHUB_TOKEN: 'mapped' },
       maskValues: ['super-secret'],
-      missing: [],
     }))
     const app = appWith(repoEnvService)
 
@@ -72,5 +71,27 @@ describe('internal shell-env routes', () => {
       mask: ['super-secret'],
     })
     expect(repoEnvService.resolveForDirectory).toHaveBeenCalledWith('/tmp/any-repo')
+  })
+
+  it('skips the repository env resolution when the shell is sandboxed', async () => {
+    settingsService.updateSettings({
+      gitCredentials: [
+        { name: 'github', host: 'github.com', type: 'pat', token: 'ghp_repo_token' } as GitCredential,
+      ],
+    })
+    const repoEnvService = createRepoEnvService(async () => ({
+      env: { API_URL: 'https://internal.example' },
+      maskValues: ['super-secret'],
+    }))
+    const app = appWith(repoEnvService)
+
+    const res = await app.request('/?cwd=/tmp/any-repo&sandboxed=1')
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      env: { GH_TOKEN: 'ghp_repo_token', GITHUB_TOKEN: 'ghp_repo_token' },
+      mask: [],
+    })
+    expect(repoEnvService.resolveForDirectory).not.toHaveBeenCalled()
   })
 })

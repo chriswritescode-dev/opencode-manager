@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { TerminalService, TerminalNotFoundError } from '../../src/services/terminal'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { CredentialProvider } from '../../src/services/credential-provider'
-import type { RepoEnvService } from '../../src/services/repo-env'
+import { createStubRepoEnvService } from '../helpers/stub-repo-env-service'
 
 interface PtyRecord {
   id: string
@@ -46,23 +46,17 @@ function createCredentialProvider(shellEnv: Record<string, string> = {}): Creden
   return { getGhCliEnv: vi.fn(() => shellEnv) } as unknown as CredentialProvider
 }
 
-function createRepoEnvService(env: Record<string, string> = {}): RepoEnvService {
-  return {
-    resolveForDirectory: vi.fn(async () => ({ env, maskValues: [], missing: [] })),
-  } as unknown as RepoEnvService
-}
-
 function createTerminalService(
   client: OpenCodeClient,
   provider: CredentialProvider,
   openSocket: (url: string) => WebSocket = createSocketFactory().openSocket,
   baseUrl = 'http://127.0.0.1:5551',
-  includeLocalCredentials = true,
+  includeLocalEnv = true,
 ): TerminalService {
   return new TerminalService(
-    { client, baseUrl: () => baseUrl, includeLocalCredentials },
+    { client, baseUrl: () => baseUrl, includeLocalEnv },
     provider,
-    createRepoEnvService(),
+    createStubRepoEnvService(),
     openSocket,
   )
 }
@@ -239,9 +233,9 @@ describe('TerminalService', () => {
         data: createPty({ id: 'pty-new', title: 'Terminal' }),
       }))
       const credentialProvider = createCredentialProvider({ GH_TOKEN: 'gh', SHARED: 'gh' })
-      const repoEnvService = createRepoEnvService({ REPO_VAR: 'repo', SHARED: 'repo' })
+      const repoEnvService = createStubRepoEnvService({ REPO_VAR: 'repo', SHARED: 'repo' })
       const service = new TerminalService(
-        { client: createClient({ create }), baseUrl: () => 'http://127.0.0.1:5551', includeLocalCredentials: true },
+        { client: createClient({ create }), baseUrl: () => 'http://127.0.0.1:5551', includeLocalEnv: true },
         credentialProvider,
         repoEnvService,
       )
@@ -445,23 +439,23 @@ describe('TerminalService', () => {
   })
 
   describe('remote target', () => {
-    it('does not inject local GitHub credentials when creating a terminal', async () => {
+    it('does not inject local GitHub credentials or repository environment when creating a terminal', async () => {
       const create = vi.fn(async () => ({
         location: { directory: '/repo' },
         data: createPty({ id: 'pty-remote', title: 'Terminal' }),
       }))
       const credentialProvider = createCredentialProvider({ GH_TOKEN: 'gh' })
-      const service = createTerminalService(
-        createClient({ create }),
+      const repoEnvService = createStubRepoEnvService({ REPO_VAR: 'repo' })
+      const service = new TerminalService(
+        { client: createClient({ create }), baseUrl: () => 'https://remote.internal', includeLocalEnv: false },
         credentialProvider,
-        undefined,
-        'https://remote.internal',
-        false,
+        repoEnvService,
       )
 
       await service.create('/repo', { kind: 'shell', name: 'Terminal', env: { FOO: 'bar' } })
 
       expect(credentialProvider.getGhCliEnv).not.toHaveBeenCalled()
+      expect(repoEnvService.resolveForDirectory).not.toHaveBeenCalled()
       expect(create).toHaveBeenCalledWith(expect.objectContaining({ env: { FOO: 'bar' } }))
     })
 
@@ -507,7 +501,7 @@ describe('TerminalService', () => {
       const remote = service.forTarget({
         client: remoteClient,
         baseUrl: () => 'https://remote.internal',
-        includeLocalCredentials: false,
+        includeLocalEnv: false,
       })
 
       await remote.connect('/repo', 'pty-1', undefined, createPeer())

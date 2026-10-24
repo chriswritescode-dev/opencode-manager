@@ -10,7 +10,7 @@ export function createInternalShellEnvRoutes(db: Database, repoEnvService: RepoE
     const provider = new CredentialProvider(db)
     const cwd = c.req.query('cwd')
     const ghEnv = provider.getGhCliEnv({ cwd })
-    if (!cwd) {
+    if (!cwd || c.req.query('sandboxed') === '1') {
       return c.json({ env: ghEnv, mask: [] })
     }
 

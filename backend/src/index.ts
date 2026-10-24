@@ -264,7 +264,7 @@ const terminalService = new TerminalService(
   {
     client: openCodeClient,
     baseUrl: () => getOpenCodeUpstreamBaseUrl(opencodeServerManager.getEffectiveServerHost()),
-    includeLocalCredentials: true,
+    includeLocalEnv: true,
   },
   new CredentialProvider(db),
   repoEnvService,
@@ -274,7 +274,7 @@ const resolveServerTerminalService = (serverId: string): TerminalService => {
   return terminalService.forTarget({
     client: opencodeServerRegistry.getClient(serverId),
     baseUrl: () => connection.baseUrl,
-    includeLocalCredentials: false,
+    includeLocalEnv: false,
   })
 }
 const scheduleWorktreeManager = new ScheduleWorktreeManager(gitAuthService, db)
