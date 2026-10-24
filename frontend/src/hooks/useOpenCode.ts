@@ -90,6 +90,7 @@ export const useSessionsAcrossDirectories = (
   const persistedGcTime = normalizedSearch === undefined ? PERSISTED_CACHE_MAX_AGE_MS : undefined;
   const directoryKey = uniqueDirectories.join('|');
   const childSessionsParam = includeChildren ? { includeChildren: true } : {};
+  const isQueryEnabled = uniqueDirectories.length > 0 || allDirectories;
 
   const query = useInfiniteQuery<
     SessionListPage,
@@ -183,7 +184,7 @@ export const useSessionsAcrossDirectories = (
         }
       : undefined,
     getNextPageParam: (lastPage) => lastPage.nextParam,
-    enabled: uniqueDirectories.length > 0 || allDirectories,
+    enabled: isQueryEnabled,
     staleTime: 10000,
     gcTime: persistedGcTime,
     refetchOnWindowFocus: true,
@@ -198,7 +199,7 @@ export const useSessionsAcrossDirectories = (
   return {
     data,
     isLoading: query.isLoading,
-    isPending: query.isPending && uniqueDirectories.length > 0,
+    isPending: query.isPending && isQueryEnabled,
     isPlaceholderData: query.isPlaceholderData,
     isError: query.isError,
     fetchNextPage: query.fetchNextPage,

@@ -187,12 +187,16 @@ export function serializePersistedClient(client: PersistedClient): string {
  * The sync persister re-serializes after each retry, so removing one query at a time burns a whole
  * write per query on a large cache. Halving the remaining set converges in a few passes, and the
  * age order is sorted once per save so the retries only filter it.
+ *
+ * Returning `undefined` once no query is left ends the retry loop instead of rewriting an empty
+ * client that a full quota still rejects.
  */
 export function createDropOldestHalfRetryer(): PersistRetryer {
   let ageOrderedQueries: readonly DehydratedQuery[] = []
 
   return ({ persistedClient }) => {
     const queries = persistedClient.clientState.queries
+    if (queries.length === 0) return undefined
     const isRetryOfSameSave = queries.length < ageOrderedQueries.length
       && queries.every((query) => ageOrderedQueries.includes(query))
     if (!isRetryOfSameSave) {
@@ -215,6 +219,16 @@ export function createDropOldestHalfRetryer(): PersistRetryer {
   }
 }
 
+/** Reads `localStorage`, which throws instead of returning `null` when the browser has storage disabled. */
+function readBrowserStorage(): QueryCacheStorage | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
 /**
  * Creates the localStorage persister that stores the dehydrated cache under
  * {@link QUERY_CACHE_STORAGE_KEY}. Infinite queries are capped to their first page before the write,
@@ -224,7 +238,7 @@ export function createDropOldestHalfRetryer(): PersistRetryer {
  * level instead, so the persister it wraps is created with a zero throttle.
  */
 export function createQueryCachePersister(
-  storage: QueryCacheStorage | null = typeof window === 'undefined' ? null : window.localStorage,
+  storage: QueryCacheStorage | null = readBrowserStorage(),
   throttleTime: number = PERSIST_THROTTLE_MS,
 ): QueryCachePersister {
   const persister = createSyncStoragePersister({

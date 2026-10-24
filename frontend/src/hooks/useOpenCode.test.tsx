@@ -183,10 +183,13 @@ describe('useSessionsAcrossDirectories', () => {
       { wrapper: createWrapper(queryClient) },
     )
 
+    expect(result.current.isPending).toBe(true)
+
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false)
     })
 
+    expect(result.current.isPending).toBe(false)
     expect(mocks.listSessionPage).toHaveBeenCalledWith({
       limit: 25,
       order: 'desc',

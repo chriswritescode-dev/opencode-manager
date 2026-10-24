@@ -460,10 +460,12 @@ describe('createDropOldestHalfRetryer', () => {
     const first = retryer(props)
     const second = retryer({ ...props, persistedClient: first!, errorCount: 2 })
     const third = retryer({ ...props, persistedClient: second!, errorCount: 3 })
+    const fourth = retryer({ ...props, persistedClient: third!, errorCount: 4 })
 
     expect(first?.clientState.queries.map((query) => query.state.dataUpdatedAt)).toEqual([3, 4])
     expect(second?.clientState.queries.map((query) => query.state.dataUpdatedAt)).toEqual([4])
     expect(third?.clientState.queries).toEqual([])
+    expect(fourth).toBeUndefined()
   })
 
   it('sorts once per save and starts over for the next save', () => {
@@ -525,6 +527,27 @@ describe('createQueryCachePersister', () => {
     })
 
     expect(persister.hasPersistedClient()).toBe(false)
+  })
+
+  it('falls back to no storage when reading localStorage throws', () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(window, 'localStorage')
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get: () => {
+        throw new DOMException('denied', 'SecurityError')
+      },
+    })
+
+    try {
+      const persister = createQueryCachePersister(undefined)
+
+      expect(() =>
+        persister.persistClient(buildPersistedClient({ mutations: [], queries: [] })),
+      ).not.toThrow()
+      expect(persister.hasPersistedClient()).toBe(false)
+    } finally {
+      if (originalDescriptor) Object.defineProperty(window, 'localStorage', originalDescriptor)
+    }
   })
 
   it('still writes after dropping the oldest half when the quota rejects a save', async () => {

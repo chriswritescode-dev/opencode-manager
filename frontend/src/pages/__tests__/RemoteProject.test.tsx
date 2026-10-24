@@ -193,12 +193,15 @@ describe('RemoteProject', () => {
     expect(await screen.findByText('Server not found')).toBeInTheDocument()
   })
 
-  it('keeps the loading state instead of reporting a missing server while the server list restores', () => {
+  it('shows a loading state instead of a blank body while the server list restores', () => {
     mocks.useOpenCodeServers.mockReturnValue({ servers: [], showsInitialLoading: true })
 
-    renderProject()
+    const { container } = renderProject()
 
+    expect(screen.getByRole('status', { name: 'Loading project' })).toBeInTheDocument()
+    expect(container.querySelectorAll('.animate-spin').length).toBeGreaterThan(0)
     expect(screen.queryByText('Server not found')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('session-list')).not.toBeInTheDocument()
     expect(mocks.listProjects).not.toHaveBeenCalled()
   })
 

@@ -120,7 +120,15 @@ function RemoteProjectContent({ serverId, directory }: { serverId: string; direc
         </Header>
 
         <div className="flex min-h-0 flex-1 flex-col">
-          {!serversLoading && !server ? (
+          {serversLoading && directory ? (
+            <div
+              role="status"
+              aria-label="Loading project"
+              className="flex flex-1 items-center justify-center"
+            >
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : !serversLoading && !server ? (
             <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-3 sm:p-4">
               <LinkedServerStateCard
                 icon={Server}
