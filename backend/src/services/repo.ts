@@ -37,6 +37,9 @@ export class RepoInputError extends Error {
   }
 }
 
+const HTTP_AUTH_STATUS_PATTERN = /\b(?:http|status|error):?\s+401\b/
+const HTTP_NOT_FOUND_STATUS_PATTERN = /\b(?:http|status|error):?\s+404\b/
+
 function notFoundOrDeniedMessage(repoUrl: string): string {
   return `Repository not found or access denied: ${repoUrl}. Check the URL and add credentials in Settings > Git Credentials if it is private.`
 }
@@ -52,7 +55,26 @@ function enhanceCloneError(repoUrl: string, originalMessage: string): RepoInputE
     return new RepoInputError(`Repository not reachable: ${repoUrl}. Check the URL and your network connection.`)
   }
 
-  if (message.includes('repository not found') || message.includes('not found') || message.includes('does not exist') || message.includes('404')) {
+  if (
+    message.includes('authentication failed') ||
+    message.includes('could not authenticate') ||
+    message.includes('invalid credentials') ||
+    message.includes('invalid username or password') ||
+    message.includes('could not read username') ||
+    message.includes('could not read password') ||
+    HTTP_AUTH_STATUS_PATTERN.test(message)
+  ) {
+    return isGitHubHttpsUrl(repoUrl)
+      ? new RepoInputError(notFoundOrDeniedMessage(repoUrl))
+      : new RepoInputError(`Authentication failed for ${repoUrl}. Check your credentials in Settings > Git Credentials.`)
+  }
+
+  if (
+    message.includes('repository not found') ||
+    message.includes('not found') ||
+    message.includes('does not exist') ||
+    HTTP_NOT_FOUND_STATUS_PATTERN.test(message)
+  ) {
     return new RepoInputError(notFoundOrDeniedMessage(repoUrl))
   }
 
@@ -60,12 +82,6 @@ function enhanceCloneError(repoUrl: string, originalMessage: string): RepoInputE
     return isSSHUrl(repoUrl)
       ? new RepoInputError(`Access denied to ${repoUrl}. Add your SSH credentials in Settings > Git Credentials and ensure your SSH key has access.`)
       : new RepoInputError(notFoundOrDeniedMessage(repoUrl))
-  }
-
-  if (message.includes('authentication failed') || message.includes('could not authenticate') || message.includes('invalid credentials') || message.includes('could not read username')) {
-    return isGitHubHttpsUrl(repoUrl)
-      ? new RepoInputError(notFoundOrDeniedMessage(repoUrl))
-      : new RepoInputError(`Authentication failed for ${repoUrl}. Check your credentials in Settings > Git Credentials.`)
   }
 
   if (message.includes('not a git repository') || message.includes('fatal:')) {
