@@ -102,6 +102,18 @@ async function findPasswordHash(auth: AuthInstance, userId: string): Promise<str
   return account!.password
 }
 
+function insertPushSubscription(db: ReturnType<typeof createAuthDatabase>, endpoint: string, sessionId: string | null): void {
+  db.prepare(
+    `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, session_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run('default', endpoint, 'p256dh-key', 'auth-key', sessionId, Date.now())
+}
+
+function pushSubscriptionEndpoints(db: ReturnType<typeof createAuthDatabase>): string[] {
+  return (db.prepare('SELECT endpoint FROM push_subscriptions ORDER BY endpoint').all() as Array<{ endpoint: string }>)
+    .map((row) => row.endpoint)
+}
+
 function createSession(): Session {
   return {
     session: {
@@ -188,7 +200,7 @@ describe('syncAdminFromEnv', () => {
   })
 
   it('does nothing when the admin credentials are not configured', async () => {
-    await syncAdminFromEnv(auth)
+    await syncAdminFromEnv(auth, db)
 
     expect(await countRows(auth, 'user')).toBe(0)
     expect(mockLoggerInfo).not.toHaveBeenCalled()
@@ -197,7 +209,7 @@ describe('syncAdminFromEnv', () => {
   it('does nothing when only one admin credential is configured', async () => {
     ENV.AUTH.ADMIN_EMAIL = 'admin@example.com'
 
-    await syncAdminFromEnv(auth)
+    await syncAdminFromEnv(auth, db)
 
     expect(await countRows(auth, 'user')).toBe(0)
   })
@@ -208,7 +220,7 @@ describe('syncAdminFromEnv', () => {
     ENV.AUTH.ADMIN_EMAIL = 'admin@example.com'
     ENV.AUTH.ADMIN_PASSWORD = 'new-password'
 
-    await syncAdminFromEnv(auth)
+    await syncAdminFromEnv(auth, db)
 
     expect((await signInRequest(auth, 'admin@example.com', 'old-password')).status).toBe(200)
     expect((await signInRequest(auth, 'admin@example.com', 'new-password')).status).toBe(401)
@@ -221,11 +233,30 @@ describe('syncAdminFromEnv', () => {
     ENV.AUTH.ADMIN_PASSWORD = 'new-password'
     ENV.AUTH.ADMIN_PASSWORD_RESET = true
 
-    await syncAdminFromEnv(auth)
+    await syncAdminFromEnv(auth, db)
 
     expect(await countRows(auth, 'user')).toBe(1)
     expect((await signInRequest(auth, 'Admin@Example.com', 'new-password')).status).toBe(200)
     expect((await signInRequest(auth, 'admin@example.com', 'old-password')).status).toBe(401)
+  }, 30000)
+
+  it('finds the existing admin user when the stored email differs only by case', async () => {
+    await auth.api.signUpEmail({ body: { email: 'admin@example.com', password: 'old-password', name: 'Admin' } })
+    const cookies = await createUserSession(auth, 'admin@example.com', 'old-password')
+    const adminId = (await auth.api.getSession({ headers: cookies }))!.user.id
+    db.prepare('UPDATE "user" SET email = ? WHERE id = ?').run('Admin@Example.com', adminId)
+    ENV.AUTH.ADMIN_EMAIL = 'admin@example.com'
+    ENV.AUTH.ADMIN_PASSWORD = 'new-password'
+    ENV.AUTH.ADMIN_PASSWORD_RESET = true
+
+    await syncAdminFromEnv(auth, db)
+
+    const ctx = await auth.$context
+    expect(await countRows(auth, 'user')).toBe(1)
+    expect(await ctx.password.verify({
+      password: 'new-password',
+      hash: await findPasswordHash(auth, adminId),
+    })).toBe(true)
   }, 30000)
 
   it('resets the credential account password for an existing user', async () => {
@@ -234,7 +265,7 @@ describe('syncAdminFromEnv', () => {
     ENV.AUTH.ADMIN_PASSWORD = 'new-password'
     ENV.AUTH.ADMIN_PASSWORD_RESET = true
 
-    await syncAdminFromEnv(auth)
+    await syncAdminFromEnv(auth, db)
 
     expect((await signInRequest(auth, 'admin@example.com', 'new-password')).status).toBe(200)
     expect((await signInRequest(auth, 'admin@example.com', 'old-password')).status).toBe(401)
@@ -255,10 +286,32 @@ describe('syncAdminFromEnv', () => {
     ENV.AUTH.ADMIN_PASSWORD = 'new-password'
     ENV.AUTH.ADMIN_PASSWORD_RESET = true
 
-    await syncAdminFromEnv(auth)
+    await syncAdminFromEnv(auth, db)
 
     expect(await countRows(auth, 'session', adminId)).toBe(0)
     expect(await countRows(auth, 'session', otherId)).toBe(otherSessionsBefore)
+  }, 30000)
+
+  it('deletes the push subscriptions of the revoked admin sessions and keeps the others', async () => {
+    await auth.api.signUpEmail({ body: { email: 'admin@example.com', password: 'admin-password', name: 'Admin' } })
+    await auth.api.signUpEmail({ body: { email: 'other@example.com', password: 'other-password', name: 'Other' } })
+    const adminCookies = await createUserSession(auth, 'admin@example.com', 'admin-password')
+    const otherCookies = await createUserSession(auth, 'other@example.com', 'other-password')
+    const adminSessionId = (await auth.api.getSession({ headers: adminCookies }))!.session.id
+    const otherSessionId = (await auth.api.getSession({ headers: otherCookies }))!.session.id
+    insertPushSubscription(db, 'https://push.example.com/phone', adminSessionId)
+    insertPushSubscription(db, 'https://push.example.com/tablet', otherSessionId)
+    insertPushSubscription(db, 'https://push.example.com/legacy', null)
+    ENV.AUTH.ADMIN_EMAIL = 'admin@example.com'
+    ENV.AUTH.ADMIN_PASSWORD = 'new-password'
+    ENV.AUTH.ADMIN_PASSWORD_RESET = true
+
+    await syncAdminFromEnv(auth, db)
+
+    expect(pushSubscriptionEndpoints(db)).toEqual([
+      'https://push.example.com/legacy',
+      'https://push.example.com/tablet',
+    ])
   }, 30000)
 
   it('runs the session delete hook for every revoked admin session', async () => {
@@ -271,7 +324,7 @@ describe('syncAdminFromEnv', () => {
     ENV.AUTH.ADMIN_PASSWORD = 'new-password'
     ENV.AUTH.ADMIN_PASSWORD_RESET = true
 
-    await syncAdminFromEnv(auth)
+    await syncAdminFromEnv(auth, db)
 
     expect(close).toHaveBeenCalledTimes(1)
   }, 30000)
@@ -286,7 +339,7 @@ describe('syncAdminFromEnv', () => {
     ENV.AUTH.ADMIN_PASSWORD = 'new-password'
     ENV.AUTH.ADMIN_PASSWORD_RESET = true
 
-    await syncAdminFromEnv(auth)
+    await syncAdminFromEnv(auth, db)
 
     expect(mockLoggerWarn).toHaveBeenCalledWith(expect.stringContaining('No credential account found'))
     expect(mockLoggerInfo).toHaveBeenCalledWith(expect.stringContaining('Admin password reset'))
@@ -302,7 +355,7 @@ describe('syncAdminFromEnv', () => {
     ENV.AUTH.ADMIN_PASSWORD = 'new-password'
     ENV.AUTH.ADMIN_PASSWORD_RESET = true
 
-    await expect(syncAdminFromEnv(auth)).rejects.toThrow()
+    await expect(syncAdminFromEnv(auth, db)).rejects.toThrow()
 
     const ctx = await auth.$context
     expect(await ctx.password.verify({
@@ -315,7 +368,7 @@ describe('syncAdminFromEnv', () => {
     ENV.AUTH.ADMIN_EMAIL = 'admin@example.com'
     ENV.AUTH.ADMIN_PASSWORD = 'admin-password'
 
-    await syncAdminFromEnv(auth)
+    await syncAdminFromEnv(auth, db)
 
     expect(await countRows(auth, 'user')).toBe(1)
     expect((await signInRequest(auth, 'admin@example.com', 'admin-password')).status).toBe(200)
@@ -326,7 +379,7 @@ describe('syncAdminFromEnv', () => {
     ENV.AUTH.ADMIN_EMAIL = 'admin@example.com'
     ENV.AUTH.ADMIN_PASSWORD = 'short'
 
-    await expect(syncAdminFromEnv(auth)).resolves.toBeUndefined()
+    await expect(syncAdminFromEnv(auth, db)).resolves.toBeUndefined()
 
     expect(await countRows(auth, 'user')).toBe(0)
     expect(mockLoggerError).toHaveBeenCalledWith('Failed to create admin user from environment:', expect.anything())

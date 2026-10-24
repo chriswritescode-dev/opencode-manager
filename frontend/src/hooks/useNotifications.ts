@@ -7,6 +7,7 @@ import {
   urlBase64ToUint8Array,
 } from "@/lib/serviceWorker";
 import type { NotificationPreferences } from "@/api/types/settings";
+import type { PushSubscriptionRecord } from "@opencode-manager/shared/types";
 import { DEFAULT_NOTIFICATION_PREFERENCES } from "@opencode-manager/shared/schemas";
 
 type PermissionState = NotificationPermission | "unsupported";
@@ -14,6 +15,18 @@ type PermissionState = NotificationPermission | "unsupported";
 function getPermissionState(): PermissionState {
   if (!("Notification" in window)) return "unsupported";
   return Notification.permission;
+}
+
+export async function sendRegisteredSubscription(
+  deviceName?: string
+): Promise<{ subscription: PushSubscriptionRecord } | null> {
+  const registration = await getServiceWorkerRegistration();
+  if (!registration) return null;
+
+  const existingSubscription = await registration.pushManager.getSubscription();
+  if (!existingSubscription) return null;
+
+  return notificationsApi.subscribe(existingSubscription.toJSON(), deviceName);
 }
 
 export function useNotifications() {
@@ -44,15 +57,12 @@ export function useNotifications() {
 
   const subscribeMutation = useMutation({
     mutationFn: async (deviceName?: string) => {
+      const registered = await sendRegisteredSubscription(deviceName);
+      if (registered) return registered;
+
       const reg = await getServiceWorkerRegistration();
       if (!reg) throw new Error("Service worker not registered");
       if (!vapidData?.publicKey) throw new Error("VAPID key not available");
-
-      const existingSub = await reg.pushManager.getSubscription();
-      if (existingSub) {
-        const json = existingSub.toJSON();
-        return notificationsApi.subscribe(json, deviceName);
-      }
 
       const subscription = await reg.pushManager.subscribe({
         userVisibleOnly: true,

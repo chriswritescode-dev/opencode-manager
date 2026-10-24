@@ -3,6 +3,18 @@ export function trimUrlTrailingSlashes(url: string): string {
   return url.trim().replace(/\/+$/, '')
 }
 
+/** Parses a value into a URL, or returns null when it is not an absolute http(s) URL. */
+export function parseHttpUrl(value: string): URL | null {
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    return null
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+  return url
+}
+
 /** Reports whether two URLs share the same origin; false when either URL is invalid. */
 export function haveSameUrlOrigin(first: string, second: string): boolean {
   const origin = readUrlOrigin(first)
@@ -36,6 +48,15 @@ export function isPrivateNetworkHost(hostname: string): boolean {
   return firstHextet >= 0xfc00 && firstHextet <= 0xfdff
 }
 
+/** Reports whether a URL uses plain HTTP on a host other than loopback or a private network. */
+export function isPublicPlainHttpUrl(url: URL): boolean {
+  return (
+    url.protocol === 'http:' &&
+    !isLoopbackHost(url.hostname) &&
+    !isPrivateNetworkHost(url.hostname)
+  )
+}
+
 function normalizeHostname(hostname: string): string {
   return hostname.trim().toLowerCase().replace(/^\[/, '').replace(/\]$/, '')
 }
@@ -54,9 +75,5 @@ function parseIpv4Octets(host: string): [number, number, number, number] | null 
 }
 
 function readUrlOrigin(value: string): string | null {
-  try {
-    return new URL(value).origin
-  } catch {
-    return null
-  }
+  return parseHttpUrl(value)?.origin ?? null
 }

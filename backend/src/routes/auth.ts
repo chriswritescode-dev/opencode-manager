@@ -1,8 +1,10 @@
 import { Hono } from 'hono'
+import type { Database } from 'bun:sqlite'
 import { isAdminConfigured, type AuthInstance } from '../auth'
 import { applyClientIpHeaders, resolveSocketIp } from '../auth/client-ip'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { logger } from '../utils/logger'
+import { deletePushSubscriptionsForSessions } from '../db/push-subscriptions'
 
 export function createAuthRoutes(auth: AuthInstance): Hono {
   const app = new Hono()
@@ -15,18 +17,21 @@ export function createAuthRoutes(auth: AuthInstance): Hono {
   return app
 }
 
-export async function syncAdminFromEnv(auth: AuthInstance): Promise<void> {
+export async function syncAdminFromEnv(auth: AuthInstance, db: Database): Promise<void> {
   if (!isAdminConfigured()) return
 
   const adminEmail = ENV.AUTH.ADMIN_EMAIL!
   const adminPassword = ENV.AUTH.ADMIN_PASSWORD!
 
   const ctx = await auth.$context
-  const existingAdmin = await ctx.internalAdapter.findUserByEmail(adminEmail)
+  const existingAdmin = await ctx.adapter.findOne<{ id: string }>({
+    model: 'user',
+    where: [{ field: 'email', value: adminEmail, mode: 'insensitive' }],
+  })
 
   if (existingAdmin) {
     if (ENV.AUTH.ADMIN_PASSWORD_RESET) {
-      const credentialAccount = (await ctx.internalAdapter.findAccounts(existingAdmin.user.id))
+      const credentialAccount = (await ctx.internalAdapter.findAccounts(existingAdmin.id))
         .find((account) => account.providerId === 'credential')
 
       if (credentialAccount) {
@@ -37,7 +42,9 @@ export async function syncAdminFromEnv(auth: AuthInstance): Promise<void> {
         logger.warn(`No credential account found for ${adminEmail}; skipped the password reset`)
       }
 
-      await ctx.internalAdapter.deleteUserSessions(existingAdmin.user.id)
+      const sessions = await ctx.internalAdapter.listSessions(existingAdmin.id)
+      await ctx.internalAdapter.deleteUserSessions(existingAdmin.id)
+      deletePushSubscriptionsForSessions(db, sessions.map((session) => session.id))
       logger.info(`Admin password reset from environment for ${adminEmail}`)
       logger.warn('Remove ADMIN_PASSWORD_RESET=true from environment after password reset')
     }

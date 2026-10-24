@@ -7,7 +7,7 @@ export interface LoggerMocks {
   debug: Mock
 }
 
-export function loggedArguments(loggerMocks: LoggerMocks): unknown[][] {
+function loggedArguments(loggerMocks: LoggerMocks): unknown[][] {
   return [...loggerMocks.info.mock.calls, ...loggerMocks.warn.mock.calls, ...loggerMocks.error.mock.calls]
 }
 

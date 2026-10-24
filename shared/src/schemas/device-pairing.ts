@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { trimUrlTrailingSlashes } from "../utils/url";
+import { parseHttpUrl, trimUrlTrailingSlashes } from "../utils/url";
 
 export const REMOTE_ACCESS_HEADER_MAX_COUNT = 8;
 export const REMOTE_ACCESS_HEADER_VALUE_MAX_LENGTH = 512;
@@ -204,13 +204,8 @@ export function readPairingCodeFromHash(hash: string): string | null {
 
 /** Parses a browser pairing link into its origin and code, or null when the text is not one. */
 export function parseManagerBrowserPairingLink(text: string): { origin: string; code: string } | null {
-  let url: URL;
-  try {
-    url = new URL(text.trim());
-  } catch {
-    return null;
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+  const url = parseHttpUrl(text.trim());
+  if (!url) return null;
   if (url.pathname !== DEVICE_PAIRING_PATH) return null;
   const code = readPairingCodeFromHash(url.hash);
   return code === null ? null : { origin: url.origin, code };
