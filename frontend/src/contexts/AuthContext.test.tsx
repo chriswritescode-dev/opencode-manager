@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { act, render, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider, dehydrate } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { LocationCatcher } from '@/test/test-utils'
 import { AuthProvider } from './AuthContext'
+import { QueryCachePersistenceProvider } from './QueryCachePersistenceContext'
 import { useAuth } from '@/hooks/useAuth'
-import { QUERY_CACHE_STORAGE_KEY } from '@/lib/queryPersistence'
+import { QUERY_CACHE_STORAGE_KEY, queryCacheBuster } from '@/lib/queryPersistence'
 import { STORED_AUTH_USER_KEY } from '@/lib/authSession'
 
 const mocks = vi.hoisted(() => ({
@@ -30,7 +31,7 @@ type AuthValue = ReturnType<typeof useAuth>
 
 const STORED_USER = { id: 'user-1', email: 'user@example.com', name: 'Ada' }
 
-function renderAuth(initialEntry: string) {
+function renderAuth(initialEntry: string, options: { persistence?: boolean } = {}) {
   const capturedPathname: { current: string } = { current: '' }
   const capturedSearch: { current: string } = { current: '' }
   const captured: { current: AuthValue | null } = { current: null }
@@ -45,7 +46,13 @@ function renderAuth(initialEntry: string) {
             path="/login"
             element={(
               <AuthProvider>
-                <AuthProbe captured={captured} />
+                {options.persistence ? (
+                  <QueryCachePersistenceProvider persistThrottleMs={0}>
+                    <AuthProbe captured={captured} />
+                  </QueryCachePersistenceProvider>
+                ) : (
+                  <AuthProbe captured={captured} />
+                )}
               </AuthProvider>
             )}
           />
@@ -205,21 +212,76 @@ describe('AuthProvider session restore', () => {
     expect(localStorage.getItem(STORED_AUTH_USER_KEY)).toBeNull()
   })
 
-  it('clears the stored user, the persisted cache and the query cache on logout', async () => {
+  it('clears the stored user on logout and leaves the cache teardown to its owner', async () => {
     localStorage.setItem(STORED_AUTH_USER_KEY, JSON.stringify(STORED_USER))
-    localStorage.setItem(QUERY_CACHE_STORAGE_KEY, '{}')
-    const { captured, queryClient } = renderAuth('/login')
-    const clearSpy = vi.spyOn(queryClient, 'clear')
-    queryClient.setQueryData(['repos'], [{ id: 1 }])
+    const { captured } = renderAuth('/login')
     mocks.signOut.mockImplementation(async (options: { fetchOptions?: { onSuccess?: () => void } }) => {
       options.fetchOptions?.onSuccess?.()
       return { data: null }
     })
 
-    await captured.current?.logout()
+    await act(async () => {
+      await captured.current?.logout()
+    })
 
     expect(localStorage.getItem(STORED_AUTH_USER_KEY)).toBeNull()
-    expect(localStorage.getItem(QUERY_CACHE_STORAGE_KEY)).toBeNull()
-    expect(clearSpy).toHaveBeenCalled()
+    expect(captured.current?.isAuthenticated).toBe(false)
+    expect(mocks.signOut).toHaveBeenCalled()
+  })
+
+  it('signs out and clears the persisted cache when sign-out fails offline', async () => {
+    localStorage.setItem(STORED_AUTH_USER_KEY, JSON.stringify(STORED_USER))
+    mocks.useSession.mockReturnValue({
+      data: { user: STORED_USER },
+      error: null,
+      isPending: false,
+      refetch: mocks.refetch,
+    })
+    const seededClient = new QueryClient()
+    seededClient.setQueryData(['repos'], [{ id: 1 }])
+    localStorage.setItem(QUERY_CACHE_STORAGE_KEY, JSON.stringify({
+      buster: queryCacheBuster(STORED_USER.id),
+      timestamp: Date.now(),
+      clientState: dehydrate(seededClient),
+    }))
+    mocks.signOut.mockRejectedValue(new TypeError('Failed to fetch'))
+
+    const { captured } = renderAuth('/login', { persistence: true })
+    await waitFor(() => expect(localStorage.getItem(QUERY_CACHE_STORAGE_KEY)).not.toBeNull())
+
+    await act(async () => {
+      await captured.current?.logout()
+    })
+
+    expect(localStorage.getItem(STORED_AUTH_USER_KEY)).toBeNull()
+    await waitFor(() => expect(captured.current?.isAuthenticated).toBe(false))
+    await waitFor(() => expect(localStorage.getItem(QUERY_CACHE_STORAGE_KEY)).toBeNull())
+  })
+
+  it.each([
+    ['removes the stored user', () => localStorage.removeItem(STORED_AUTH_USER_KEY)],
+    ['switches the stored user', () => localStorage.setItem(
+      STORED_AUTH_USER_KEY,
+      JSON.stringify({ id: 'user-2', email: 'two@example.com', name: 'Grace' }),
+    )],
+  ])('signs out when another tab %s', async (_label, changeStoredUser) => {
+    localStorage.setItem(STORED_AUTH_USER_KEY, JSON.stringify(STORED_USER))
+    mocks.useSession.mockReturnValue({
+      data: { user: STORED_USER },
+      error: null,
+      isPending: false,
+      refetch: mocks.refetch,
+    })
+
+    const { captured } = renderAuth('/login')
+    await waitFor(() => expect(captured.current?.isAuthenticated).toBe(true))
+
+    act(() => {
+      changeStoredUser()
+      window.dispatchEvent(new StorageEvent('storage', { key: STORED_AUTH_USER_KEY }))
+    })
+
+    await waitFor(() => expect(captured.current?.isAuthenticated).toBe(false))
+    expect(mocks.signOut).toHaveBeenCalled()
   })
 })

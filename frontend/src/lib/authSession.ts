@@ -59,3 +59,29 @@ export function isTransientSessionError(error: unknown): boolean {
   }
   return true
 }
+
+/**
+ * Applies the stored-profile rule to one session read and keeps storage in step with it.
+ *
+ * A validated user replaces the saved profile; a transient failure keeps whatever was saved, so an
+ * offline cold start still opens the app; anything else is authoritative and deletes the profile.
+ *
+ * @param user The user of a validated session, or `null` when the read returned none.
+ * @param error The session read error, if the read failed.
+ * @returns The profile that now stands for the session, or `null` when the app is signed out.
+ */
+export function reconcileStoredAuthUser(
+  user: StoredAuthUser | null,
+  error: unknown,
+): StoredAuthUser | null {
+  if (user !== null) {
+    const storedUser = toStoredAuthUser(user)
+    writeStoredAuthUser(storedUser)
+    return storedUser
+  }
+
+  if (isTransientSessionError(error)) return readStoredAuthUser()
+
+  clearStoredAuthUser()
+  return null
+}

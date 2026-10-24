@@ -98,7 +98,7 @@ describe('RemoteProject', () => {
     mocks.listProjects.mockResolvedValue([project])
     mocks.getVcsInfo.mockResolvedValue({ branch: { current: 'main', default: 'main' } })
     mocks.useCreateSession.mockReturnValue({ mutate: mocks.createSession, isPending: false })
-    mocks.useOpenCodeServers.mockReturnValue({ servers: [server], isLoading: false })
+    mocks.useOpenCodeServers.mockReturnValue({ servers: [server], showsInitialLoading: false })
     mocks.useSettingsDialog.mockReturnValue({ openTab: mocks.openTab })
     mocks.useSSE.mockReturnValue({ isConnected: true, isReconnecting: false })
   })
@@ -175,7 +175,7 @@ describe('RemoteProject', () => {
   it('shows the disabled state without loading projects', async () => {
     mocks.useOpenCodeServers.mockReturnValue({
       servers: [{ ...server, enabled: false }],
-      isLoading: false,
+      showsInitialLoading: false,
     })
 
     renderProject()
@@ -186,17 +186,26 @@ describe('RemoteProject', () => {
   })
 
   it('shows the missing-server state', async () => {
-    mocks.useOpenCodeServers.mockReturnValue({ servers: [], isLoading: false })
+    mocks.useOpenCodeServers.mockReturnValue({ servers: [], showsInitialLoading: false })
 
     renderProject()
 
     expect(await screen.findByText('Server not found')).toBeInTheDocument()
   })
 
+  it('keeps the loading state instead of reporting a missing server while the server list restores', () => {
+    mocks.useOpenCodeServers.mockReturnValue({ servers: [], showsInitialLoading: true })
+
+    renderProject()
+
+    expect(screen.queryByText('Server not found')).not.toBeInTheDocument()
+    expect(mocks.listProjects).not.toHaveBeenCalled()
+  })
+
   it('opens server settings from the disabled state', async () => {
     mocks.useOpenCodeServers.mockReturnValue({
       servers: [{ ...server, enabled: false }],
-      isLoading: false,
+      showsInitialLoading: false,
     })
 
     renderProject()

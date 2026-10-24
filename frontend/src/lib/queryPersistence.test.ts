@@ -1,20 +1,23 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { QueryClient, dehydrate, hydrate, type Query } from '@tanstack/react-query'
+import { QueryClient, dehydrate, hydrate, type Query, type QueryCacheNotifyEvent } from '@tanstack/react-query'
 import type { PersistedClient } from '@tanstack/react-query-persist-client'
 import { SESSION_PINS_QUERY_KEY } from '@/hooks/useSessionPins'
 import {
   PERSISTED_CACHE_MAX_AGE_MS,
   PERSISTED_QUERY_RULES,
+  PERSIST_THROTTLE_MS,
   QUERY_CACHE_STORAGE_KEY,
   applyPersistedQueryDefaults,
   capInfiniteQueryPages,
-  clearPersistedQueryCache,
+  createBusterGuardedPersister,
   createDropOldestHalfRetryer,
   createQueryCachePersister,
   isPersistedQueryKey,
   queryCacheBuster,
   serializePersistedClient,
+  shouldPersistCacheEvent,
   shouldPersistQuery,
+  type QueryCachePersister,
 } from './queryPersistence'
 
 type DehydratedQuery = PersistedClient['clientState']['queries'][number]
@@ -503,6 +506,27 @@ describe('createQueryCachePersister', () => {
     })
   })
 
+  it('reports whether a cache is already stored', () => {
+    const { store, storage } = createStorage()
+    const persister = createQueryCachePersister(storage)
+
+    expect(persister.hasPersistedClient()).toBe(false)
+    store.set(QUERY_CACHE_STORAGE_KEY, '{}')
+    expect(persister.hasPersistedClient()).toBe(true)
+  })
+
+  it('reports no stored cache when the storage read throws', () => {
+    const persister = createQueryCachePersister({
+      getItem: () => {
+        throw new Error('denied')
+      },
+      setItem: () => {},
+      removeItem: () => {},
+    })
+
+    expect(persister.hasPersistedClient()).toBe(false)
+  })
+
   it('still writes after dropping the oldest half when the quota rejects a save', async () => {
     vi.useFakeTimers()
     const { store, storage } = createStorage()
@@ -560,15 +584,184 @@ describe('applyPersistedQueryDefaults', () => {
   })
 })
 
-describe('clearPersistedQueryCache', () => {
+describe('persister teardown', () => {
   it('removes only the persisted cache key', () => {
     const { store, storage } = createStorage()
     store.set(QUERY_CACHE_STORAGE_KEY, '{}')
     store.set('ocm.auth.user', '{}')
 
-    clearPersistedQueryCache(storage)
+    createQueryCachePersister(storage).removeClient()
 
     expect(store.has(QUERY_CACHE_STORAGE_KEY)).toBe(false)
     expect(store.has('ocm.auth.user')).toBe(true)
+  })
+})
+
+describe('shouldPersistCacheEvent', () => {
+  const queryClient = createClient()
+
+  function updateEvent(
+    queryKey: readonly unknown[],
+    action: { type: string } & Record<string, unknown>,
+  ): QueryCacheNotifyEvent {
+    return {
+      type: 'updated',
+      query: buildQuery(queryClient, queryKey),
+      action,
+    } as QueryCacheNotifyEvent
+  }
+
+  it.each([
+    ['added', { type: 'added' }],
+    ['removed', { type: 'removed' }],
+  ])('reports an allowlisted query that was %s', (_label, event) => {
+    expect(
+      shouldPersistCacheEvent({
+        ...event,
+        query: buildQuery(queryClient, ['repos']),
+      } as QueryCacheNotifyEvent),
+    ).toBe(true)
+    expect(
+      shouldPersistCacheEvent({
+        ...event,
+        query: buildQuery(queryClient, ['opencode', 'transcript', 'ses_1']),
+      } as QueryCacheNotifyEvent),
+    ).toBe(false)
+  })
+
+  it.each([
+    ['success', { type: 'success', data: null }],
+    ['error', { type: 'error', error: new Error('boom') }],
+    ['failed', { type: 'failed', failureCount: 1, error: new Error('boom') }],
+    ['invalidate', { type: 'invalidate' }],
+  ])('reports an allowlisted query updated on %s', (_label, action) => {
+    expect(shouldPersistCacheEvent(updateEvent(['repos'], action))).toBe(true)
+  })
+
+  it.each([
+    ['fetch', { type: 'fetch' }],
+    ['pause', { type: 'pause' }],
+    ['continue', { type: 'continue' }],
+  ])('ignores a %s action, which only moves the fetch status', (_label, action) => {
+    expect(shouldPersistCacheEvent(updateEvent(['repos'], action))).toBe(false)
+  })
+
+  it('ignores a transcript update, which streams once per frame', () => {
+    expect(
+      shouldPersistCacheEvent(updateEvent(['opencode', 'transcript', 'ses_1'], { type: 'success', data: null })),
+    ).toBe(false)
+  })
+
+  it('ignores observer-only events', () => {
+    expect(
+      shouldPersistCacheEvent({
+        type: 'observerResultsUpdated',
+        query: buildQuery(queryClient, ['repos']),
+      } as QueryCacheNotifyEvent),
+    ).toBe(false)
+  })
+})
+
+describe('createBusterGuardedPersister', () => {
+  function createBasePersister(
+    storage: ReturnType<typeof createStorage>['storage'],
+  ): QueryCachePersister {
+    return createQueryCachePersister(storage, 0)
+  }
+
+  it('writes the pending client once the throttle elapses', async () => {
+    vi.useFakeTimers()
+    const { store, storage } = createStorage()
+    const persister = createBusterGuardedPersister({
+      persister: createBasePersister(storage),
+      readBuster: () => 'http://localhost|user-1',
+    })
+
+    void persister.persistClient(buildPersistedClient({ mutations: [], queries: [] }))
+    await vi.advanceTimersByTimeAsync(PERSIST_THROTTLE_MS)
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(store.has(QUERY_CACHE_STORAGE_KEY)).toBe(true)
+  })
+
+  it('coalesces the saves inside one throttle window into the last one', async () => {
+    vi.useFakeTimers()
+    const { store, storage } = createStorage()
+    const persister = createBusterGuardedPersister({
+      persister: createBasePersister(storage),
+      readBuster: () => 'http://localhost|user-1',
+    })
+
+    void persister.persistClient(buildPersistedClient({ mutations: [], queries: [] }))
+    void persister.persistClient(
+      buildPersistedClient({ mutations: [], queries: [buildDehydratedQuery(['repos'], 1)] }),
+    )
+    await vi.advanceTimersByTimeAsync(PERSIST_THROTTLE_MS)
+    await vi.advanceTimersByTimeAsync(1)
+
+    const persisted = JSON.parse(store.get(QUERY_CACHE_STORAGE_KEY) ?? '{}')
+    expect(persisted.clientState.queries).toHaveLength(1)
+  })
+
+  it('drops a save whose buster is no longer active when the throttle elapses', async () => {
+    vi.useFakeTimers()
+    const { store, storage } = createStorage()
+    let buster: string | null = 'http://localhost|user-1'
+    const persister = createBusterGuardedPersister({
+      persister: createBasePersister(storage),
+      readBuster: () => buster,
+    })
+
+    void persister.persistClient(buildPersistedClient({ mutations: [], queries: [] }))
+    buster = null
+    await vi.advanceTimersByTimeAsync(PERSIST_THROTTLE_MS)
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(store.has(QUERY_CACHE_STORAGE_KEY)).toBe(false)
+  })
+
+  it('drops a save queued for the previous account after the user changes', async () => {
+    vi.useFakeTimers()
+    const { store, storage } = createStorage()
+    let buster: string | null = 'http://localhost|user-1'
+    const persister = createBusterGuardedPersister({
+      persister: createBasePersister(storage),
+      readBuster: () => buster,
+    })
+
+    void persister.persistClient(buildPersistedClient({ mutations: [], queries: [] }))
+    buster = 'http://localhost|user-2'
+    await vi.advanceTimersByTimeAsync(PERSIST_THROTTLE_MS)
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(store.has(QUERY_CACHE_STORAGE_KEY)).toBe(false)
+  })
+
+  it('forgets the pending save on removeClient', async () => {
+    vi.useFakeTimers()
+    const { store, storage } = createStorage()
+    const persister = createBusterGuardedPersister({
+      persister: createBasePersister(storage),
+      readBuster: () => 'http://localhost|user-1',
+    })
+
+    void persister.persistClient(buildPersistedClient({ mutations: [], queries: [] }))
+    persister.removeClient()
+    await vi.advanceTimersByTimeAsync(PERSIST_THROTTLE_MS)
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(store.has(QUERY_CACHE_STORAGE_KEY)).toBe(false)
+  })
+
+  it('reports whether a cache is stored through the wrapped persister', () => {
+    const { store, storage } = createStorage()
+    const persister = createBusterGuardedPersister({
+      persister: createBasePersister(storage),
+      readBuster: () => 'http://localhost|user-1',
+    })
+
+    expect(persister.hasPersistedClient()).toBe(false)
+    store.set(QUERY_CACHE_STORAGE_KEY, '{}')
+    expect(persister.hasPersistedClient()).toBe(true)
   })
 })
