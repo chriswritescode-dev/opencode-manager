@@ -111,6 +111,27 @@ describe('useContextUsage', () => {
     expect(result.current.usage?.usagePercentage).toBe(152)
   })
 
+  it('reports the context limit measured against', () => {
+    mocks.useProviders.mockReturnValue({
+      data: { models: [{ providerID: 'anthropic', id: 'claude-sonnet', limit: { context: 1000 } }] },
+    })
+    const queryClient = createQueryClient()
+    seedTranscript(queryClient, [
+      assistantMessage('assistant-1', {
+        input: 10,
+        output: 5,
+        reasoning: 0,
+        cache: { read: 1000, write: 500 },
+      }),
+    ])
+
+    const { result } = renderHook(() => useContextUsage(SESSION_ID, DIRECTORY), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    expect(result.current.usage?.contextLimit).toBe(1000)
+  })
+
   it('hides usage when the latest assistant has all-zero tokens even if an earlier one had usage', () => {
     const queryClient = createQueryClient()
     seedTranscript(queryClient, [

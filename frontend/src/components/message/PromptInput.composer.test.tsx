@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   useSendErrorStore: vi.fn(),
   useHasBackgroundActivity: vi.fn(),
   useSendPrompt: vi.fn(),
+  useContextUsage: vi.fn(),
+  sessionData: undefined as { revert?: { messageID: string } } | undefined,
   hasPendingPermission: vi.fn(() => false),
   setShowDialog: vi.fn(),
 }))
@@ -54,9 +56,11 @@ vi.mock('@/hooks/useOpenCode', () => ({
   useSendShell: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(() => Promise.resolve()), isPending: false }),
   useAgents: () => ({ data: [] }),
   useSkills: () => ({ data: [] }),
+  useSession: () => ({ data: mocks.sessionData }),
 }))
 
 vi.mock('@/hooks/useProviders', () => ({ useProviders: () => ({ data: undefined }) }))
+vi.mock('@/hooks/useContextUsage', () => ({ useContextUsage: mocks.useContextUsage }))
 
 vi.mock('@/contexts/EventContext', () => ({
   usePermissions: () => ({
@@ -153,6 +157,8 @@ describe('PromptInput composer layout', () => {
     mocks.useSessionAgentStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ setAgent: vi.fn() }))
     mocks.useSendErrorStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ errors: {} }))
     mocks.useHasBackgroundActivity.mockReturnValue(false)
+    mocks.useContextUsage.mockReturnValue({ usage: null, isLoading: false })
+    mocks.sessionData = undefined
   })
 
   it('anchors the activity bar in the gap above the controls row', () => {
@@ -239,6 +245,71 @@ describe('PromptInput composer layout', () => {
       renderComponent({ isSessionActive: true })
 
       expect(screen.getByTestId('model-quick-select')).toBeInTheDocument()
+    })
+  })
+
+  describe('model pill context usage', () => {
+    const setUsage = (usage: { totalTokens: number, usagePercentage: number | null, contextLimit: number | null }) => {
+      mocks.useContextUsage.mockReturnValue({ usage, isLoading: false })
+    }
+
+    it('shows the percentage with its tone and the meter on the model pill', () => {
+      setUsage({ totalTokens: 84000, usagePercentage: 42, contextLimit: 200000 })
+      renderComponent()
+
+      const pill = screen.getByRole('button', { name: /test-model, context 42% used/ })
+      const usage = screen.getByTestId('model-pill-context-usage')
+
+      expect(pill).toContainElement(usage)
+      expect(usage).toHaveTextContent('42%')
+      expect(usage).toHaveClass('text-success')
+      expect(screen.getByTestId('context-usage-meter-fill')).toHaveStyle({ width: '42%' })
+    })
+
+    it('tints the warning tone from 50 percent', () => {
+      setUsage({ totalTokens: 120000, usagePercentage: 50, contextLimit: 240000 })
+      renderComponent()
+
+      expect(screen.getByTestId('model-pill-context-usage')).toHaveClass('text-warning')
+    })
+
+    it('tints the destructive tone from 80 percent', () => {
+      setUsage({ totalTokens: 176000, usagePercentage: 88, contextLimit: 200000 })
+      renderComponent()
+
+      expect(screen.getByTestId('model-pill-context-usage')).toHaveClass('text-destructive')
+      expect(screen.getByTestId('context-usage-meter-fill')).toHaveStyle({ width: '88%' })
+    })
+
+    it('caps the meter at full width when usage exceeds the context window', () => {
+      setUsage({ totalTokens: 260000, usagePercentage: 130, contextLimit: 200000 })
+      renderComponent()
+
+      expect(screen.getByTestId('context-usage-meter-fill')).toHaveStyle({ width: '100%' })
+    })
+
+    it('falls back to a compact token count without a known context limit', () => {
+      setUsage({ totalTokens: 12400, usagePercentage: null, contextLimit: null })
+      renderComponent()
+
+      expect(screen.getByRole('button', { name: /test-model, context 12k tokens used/ })).toBeInTheDocument()
+      expect(screen.getByTestId('model-pill-context-usage')).toHaveTextContent('12k')
+      expect(screen.getByTestId('context-usage-meter-fill')).toHaveStyle({ width: '0%' })
+    })
+
+    it('hides the usage without context data', () => {
+      renderComponent()
+
+      expect(screen.getByRole('button', { name: 'test-model' })).toBeInTheDocument()
+      expect(screen.queryByTestId('model-pill-context-usage')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('context-usage-meter')).not.toBeInTheDocument()
+    })
+
+    it('measures usage up to the staged revert boundary', () => {
+      mocks.sessionData = { revert: { messageID: 'msg_2' } }
+      renderComponent()
+
+      expect(mocks.useContextUsage).toHaveBeenCalledWith('test-session', '/test', 'msg_2')
     })
   })
 

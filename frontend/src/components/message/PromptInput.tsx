@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useImperativeHandle, forwardRef, memo, useCallback, type KeyboardEvent } from 'react'
-import { useSendPrompt, useInterruptSession, useSendShell, useAgents, useSkills } from '@/hooks/useOpenCode'
+import { useContextUsage } from '@/hooks/useContextUsage'
+import { useSendPrompt, useInterruptSession, useSendShell, useAgents, useSkills, useSession } from '@/hooks/useOpenCode'
 import { useCommands } from '@/hooks/useCommands'
 import { useCommandHandler } from '@/hooks/useCommandHandler'
 import { useFileSearch } from '@/hooks/useFileSearch'
@@ -13,7 +14,7 @@ import { useSessionAgentStore } from '@/stores/sessionAgentStore'
 import { useSendErrorStore } from '@/stores/sendErrorStore'
 import { useComposerDraftStore, type ComposerDraft } from '@/stores/composerDraftStore'
 import { useRecentCommandsStore } from '@/stores/recentCommandsStore'
-import { useHasBackgroundActivity } from '@/stores/sessionStatusStore'
+import { useHasBackgroundActivity, useSessionStatusForSession } from '@/stores/sessionStatusStore'
 import { useTouchTapSelect } from '@/hooks/useTouchTapSelect'
 import { useMobile } from '@/hooks/useMobile'
 import { FINE_POINTER_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
@@ -32,6 +33,7 @@ import { AgentQuickSelect } from '@/components/agent/AgentQuickSelect'
 import { VoiceConversation, type VoiceConversationHandle } from './VoiceConversation'
 import { PermissionModeToggle } from '@/components/session/PermissionModeToggle'
 import { SessionSandboxMenu } from '@/components/session/SessionSandboxMenu'
+import { ContextUsageMeter } from '@/components/session/ContextUsageMeter'
 import { ComposerToolsMenu } from './ComposerToolsMenu'
 import { useSessionGoal, useStartSessionGoal } from '@/hooks/useSessionGoals'
 import { useSessionPermissionMode } from '@/hooks/useSessionPermissionMode'
@@ -39,7 +41,8 @@ import { detectMentionTrigger, parsePromptToInput, getFilename, getDirectory, ty
 import { matchText, rankByMatch, type MatchRange } from '@/lib/fuzzyMatch'
 import { getNextPrimaryAgentId } from '@/lib/primaryAgents'
 import { getNextFavoriteModel } from '@/lib/favoriteModels'
-import { randomId } from '@/lib/utils'
+import { randomId, cn } from '@/lib/utils'
+import { CONTEXT_USAGE_TEXT_CLASS, contextUsageAccessibleLabel, contextUsageTone, formatContextUsage } from '@/lib/contextUsage'
 import { showToast } from '@/lib/toast'
 import { findModelInfo, isSameModelSelection } from '@opencode-manager/shared/opencode'
 import { isOpenSessionGoal } from '@opencode-manager/shared/schemas'
@@ -1012,6 +1015,18 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   const { setShowDialog, hasForSession: hasPermissionsForSession } = usePermissions()
   const hasPendingPermissionForSession = hasPermissionsForSession(sessionID)
   const { hasVariants, currentVariant, cycleVariant } = useVariants(directory, modelSelectionSession)
+  const { data: session } = useSession(sessionID, directory)
+  const revertMessageID = session?.revert?.messageID
+  const { usage: contextUsage } = useContextUsage(sessionID, directory, revertMessageID)
+  const isCompacting = useSessionStatusForSession(sessionID).type === 'compact'
+  const modelPillVariant = hasVariants && currentVariant ? currentVariant : null
+  const modelPillUsage = contextUsage ? formatContextUsage(contextUsage) : null
+  const modelPillUsageTone = CONTEXT_USAGE_TEXT_CLASS[contextUsageTone(contextUsage?.usagePercentage ?? null)]
+  const modelPillLabel = [
+    displayModelName || 'Select model',
+    modelPillVariant ? `${modelPillVariant} variant` : null,
+    contextUsage ? contextUsageAccessibleLabel(contextUsage) : null,
+  ].filter((part): part is string => part !== null).join(', ')
 
   const handleAgentChange = useCallback((agentId: string) => {
     setLocalMode(agentId)
@@ -1345,13 +1360,38 @@ return (
                 open={isModelPickerOpen}
                 onOpenChange={setIsModelPickerOpen}
                 session={modelSelectionSession}
+                contextUsage={contextUsage}
+                isCompacting={isCompacting}
+                onCompact={() => commandActions.compact('')}
               >
                 <button
-                  className="px-2.5 py-0.5 md:px-3 min-h-11 md:min-h-9 min-w-0 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer flex-1 md:flex-initial md:w-auto md:max-w-[220px] dark:border-border/30 flex flex-col items-start justify-center overflow-hidden"
+                  aria-label={modelPillLabel}
+                  className="relative px-2.5 py-0.5 md:px-3 min-h-11 md:min-h-9 min-w-0 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer flex-1 md:flex-initial md:w-auto md:max-w-[220px] dark:border-border/30 flex flex-col items-start justify-center overflow-hidden"
                 >
                   <span className="truncate w-full text-left">{displayModelName || 'Select model'}</span>
-                  {hasVariants && currentVariant && (
-                    <span className="text-[10px] text-highlight truncate w-full text-left capitalize">{currentVariant}</span>
+                  {(modelPillVariant || modelPillUsage) && (
+                    <span className="flex w-full min-w-0 items-center gap-1 text-[10px] leading-tight">
+                      {modelPillVariant && (
+                        <span className="truncate text-left capitalize text-highlight">{modelPillVariant}</span>
+                      )}
+                      {modelPillVariant && modelPillUsage && (
+                        <span aria-hidden="true" className="text-muted-foreground">·</span>
+                      )}
+                      {modelPillUsage && (
+                        <span
+                          data-testid="model-pill-context-usage"
+                          className={cn('shrink-0 font-medium', modelPillUsageTone)}
+                        >
+                          {modelPillUsage}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                  {contextUsage && (
+                    <ContextUsageMeter
+                      percentage={contextUsage.usagePercentage}
+                      className="absolute inset-x-0 bottom-0"
+                    />
                   )}
                 </button>
               </ModelQuickSelect>

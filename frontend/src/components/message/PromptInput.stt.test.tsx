@@ -59,6 +59,7 @@ vi.mock('@/hooks/useOpenCode', () => ({
   useSendShell: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(() => Promise.resolve()), isPending: false }),
   useAgents: () => ({ data: [] }),
   useSkills: () => ({ data: [] }),
+  useSession: () => ({ data: undefined }),
 }))
 
 vi.mock('@/hooks/useCommands', () => ({

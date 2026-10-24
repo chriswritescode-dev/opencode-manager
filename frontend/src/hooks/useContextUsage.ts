@@ -7,11 +7,7 @@ import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
 import { serverScopedKey } from '@/lib/serverScope'
 import type { TranscriptCache } from '@/lib/session-projection'
-
-export interface ContextUsage {
-  totalTokens: number
-  usagePercentage: number | null
-}
+import type { ContextUsage } from '@/lib/contextUsage'
 
 interface ContextUsageResult {
   usage: ContextUsage | null
@@ -77,9 +73,9 @@ export const useContextUsage = (
     const model = models
       ? findModelInfo(models, { providerID: assistant.model.providerID, modelID: assistant.model.id })
       : undefined
-    const contextLimit = model?.limit.context
+    const contextLimit = model?.limit.context ?? null
     const usagePercentage = contextLimit ? Math.round((totalTokens / contextLimit) * 100) : null
 
-    return { usage: { totalTokens, usagePercentage }, isLoading: messagesLoading }
+    return { usage: { totalTokens, usagePercentage, contextLimit }, isLoading: messagesLoading }
   }, [transcriptData, messagesLoading, models, revertMessageID])
 }

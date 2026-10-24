@@ -563,3 +563,73 @@ describe('ModelQuickSelect keyboard navigation', () => {
     }
   })
 })
+
+describe('ModelQuickSelect context strip', () => {
+  const session = { id: 'ses_1' }
+  const usage = { totalTokens: 12000, usagePercentage: 6, contextLimit: 200000 }
+
+  it('shows the used and limit tokens with the percentage and meter', () => {
+    render(<ModelQuickSelect open session={session} contextUsage={usage} onCompact={vi.fn()} />)
+
+    const summary = screen.getByTestId('context-usage-summary')
+
+    expect(summary).toHaveTextContent('12k / 200k · 6%')
+    expect(summary).toHaveClass('text-success')
+    expect(summary).toHaveAttribute('aria-label', 'context 6% used')
+    expect(screen.getByTestId('context-usage-meter-fill')).toHaveStyle({ width: '6%' })
+  })
+
+  it('tints the summary with the warning and destructive tones', () => {
+    const { rerender } = render(
+      <ModelQuickSelect open session={session} contextUsage={{ ...usage, usagePercentage: 60 }} />,
+    )
+    expect(screen.getByTestId('context-usage-summary')).toHaveClass('text-warning')
+
+    rerender(<ModelQuickSelect open session={session} contextUsage={{ ...usage, usagePercentage: 85 }} />)
+    expect(screen.getByTestId('context-usage-summary')).toHaveClass('text-destructive')
+  })
+
+  it('compacts the session from the strip', async () => {
+    const user = userEvent.setup()
+    const onCompact = vi.fn()
+
+    render(<ModelQuickSelect open session={session} contextUsage={usage} onCompact={onCompact} />)
+
+    await user.click(screen.getByRole('button', { name: 'Compact session' }))
+
+    expect(onCompact).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables compaction while compacting or without a session', () => {
+    const onCompact = vi.fn()
+    const { rerender } = render(
+      <ModelQuickSelect open session={session} contextUsage={usage} isCompacting onCompact={onCompact} />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Compact session' })).toBeDisabled()
+
+    rerender(<ModelQuickSelect open contextUsage={usage} onCompact={onCompact} />)
+
+    expect(screen.getByRole('button', { name: 'Compact session' })).toBeDisabled()
+    expect(onCompact).not.toHaveBeenCalled()
+  })
+
+  it('falls back to tokens and an empty meter without a known limit', () => {
+    render(
+      <ModelQuickSelect
+        open
+        session={session}
+        contextUsage={{ totalTokens: 12000, usagePercentage: null, contextLimit: null }}
+      />,
+    )
+
+    expect(screen.getByTestId('context-usage-summary')).toHaveTextContent('12k tokens')
+    expect(screen.getByTestId('context-usage-meter-fill')).toHaveStyle({ width: '0%' })
+  })
+
+  it('omits the strip without context usage', () => {
+    render(<ModelQuickSelect open session={session} />)
+
+    expect(screen.queryByTestId('context-usage-strip')).not.toBeInTheDocument()
+  })
+})
