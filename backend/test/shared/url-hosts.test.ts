@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { isLoopbackHost, isPrivateNetworkHost } from '@opencode-manager/shared/utils'
+import {
+  isLoopbackHost,
+  isPrivateNetworkHost,
+  isPublicPlainHttpUrl,
+  parseHttpUrl,
+} from '@opencode-manager/shared/utils'
 
 describe('isLoopbackHost', () => {
   it.each(['localhost', 'LOCALHOST', '127.0.0.1', '127.4.5.6', '::1', '[::1]'])(
@@ -47,4 +52,50 @@ describe('isPrivateNetworkHost', () => {
   ])('treats %s as public', (host) => {
     expect(isPrivateNetworkHost(host)).toBe(false)
   })
+})
+
+describe('isPublicPlainHttpUrl', () => {
+  it.each([
+    'http://example.com',
+    'http://example.com.',
+    'http://203.0.113.5:5003',
+    'http://8.8.8.8:5003/path',
+  ])('treats %s as public plain http', (url) => {
+    expect(isPublicPlainHttpUrl(new URL(url))).toBe(true)
+  })
+
+  it.each([
+    'https://example.com',
+    'https://203.0.113.5:5003',
+    'http://localhost:5173',
+    'http://127.0.0.1:5003',
+    'http://[::1]:5003',
+    'http://192.168.1.20:5003',
+    'http://172.16.0.1:5003',
+    'http://100.64.0.1:5003',
+    'http://[fd00::1]:5003',
+  ])('treats %s as not public plain http', (url) => {
+    expect(isPublicPlainHttpUrl(new URL(url))).toBe(false)
+  })
+})
+
+describe('parseHttpUrl', () => {
+  it('parses an absolute http url', () => {
+    expect(parseHttpUrl('http://m.example.com:5003/pair?x=1')?.origin).toBe(
+      'http://m.example.com:5003',
+    )
+  })
+
+  it('parses an absolute https url with surrounding whitespace', () => {
+    expect(parseHttpUrl('  https://m.example.com/settings?tab=pairing  ')?.origin).toBe(
+      'https://m.example.com',
+    )
+  })
+
+  it.each(['', 'not a url', '//m.example.com', 'ocm://link?v=2&kind=manager', 'ftp://example.com'])(
+    'returns null for %s',
+    (value) => {
+      expect(parseHttpUrl(value)).toBeNull()
+    },
+  )
 })

@@ -12,7 +12,7 @@ import {
   type OpenCodeServerLink,
   type OpenCodeServerTestResult,
 } from '@opencode-manager/shared/schemas'
-import { haveSameUrlOrigin, isLoopbackHost, isPrivateNetworkHost } from '@opencode-manager/shared/utils'
+import { haveSameUrlOrigin, isPublicPlainHttpUrl, parseHttpUrl } from '@opencode-manager/shared/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -85,16 +85,8 @@ const serverFormSchema = z.object({
 type ServerFormValues = z.infer<typeof serverFormSchema>
 
 function sendsCredentialsInClear(baseUrl: string): boolean {
-  try {
-    const url = new URL(baseUrl)
-    return (
-      url.protocol === 'http:' &&
-      !isLoopbackHost(url.hostname) &&
-      !isPrivateNetworkHost(url.hostname)
-    )
-  } catch {
-    return false
-  }
+  const url = parseHttpUrl(baseUrl)
+  return url !== null && isPublicPlainHttpUrl(url)
 }
 
 function buildDefaultValues(server?: OpenCodeServer | null): ServerFormValues {

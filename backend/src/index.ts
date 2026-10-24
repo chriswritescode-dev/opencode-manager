@@ -237,7 +237,7 @@ try {
   await gitAuthService.initialize(ipcServer, db)
   logger.info(`Git IPC server running at ${ipcServer.ipcHandlePath}`)
 
-  await syncAdminFromEnv(auth)
+  await syncAdminFromEnv(auth, db)
 
   opencodeServerManager.setDatabase(db)
   detectSandboxCapability()

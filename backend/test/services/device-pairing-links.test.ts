@@ -17,6 +17,7 @@ describe('resolveDevicePairingAvailability', () => {
       available: true,
       reason: null,
       message: null,
+      originUrl: new URL('https://m.example.com'),
     })
   })
 

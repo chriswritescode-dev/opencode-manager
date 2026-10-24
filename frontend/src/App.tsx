@@ -44,6 +44,7 @@ import { useOpenCodeFailureToast } from '@/hooks/useOpenCodeFailureToast'
 import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 import { useGlobalShortcutActions } from '@/hooks/useGlobalShortcutActions'
 import { useSidebarServerRouteSync } from '@/hooks/useSidebarServerSelection'
+import { usePushSubscriptionSessionSync } from '@/hooks/usePushSubscriptionSessionSync'
 import { sessionQueryOptions } from '@/hooks/useOpenCode'
 import { RestartServerDialog } from '@/components/settings/RestartServerDialog'
 
@@ -156,6 +157,11 @@ function SidebarServerRouteSync() {
   return null
 }
 
+function PushSubscriptionSessionSync() {
+  usePushSubscriptionSessionSync()
+  return null
+}
+
 function ServerScope({ children }: { children: ReactNode }) {
   const { serverId } = useParams<{ serverId: string }>()
 
@@ -179,7 +185,7 @@ function RootLayout() {
   )
 }
 
-function AppShell() {
+export function AppShell() {
   const navigate = useNavigate()
   const location = useLocation()
   const rootRef = useRef<HTMLDivElement>(null)
@@ -253,6 +259,7 @@ function AppShell() {
         <KeyboardShortcutsProvider>
           <GlobalShortcuts />
           <SidebarServerRouteSync />
+          <PushSubscriptionSessionSync />
           <div className="flex h-dvh w-full min-w-0 flex-col">
             <PwaUpdatePrompt />
             <div ref={rootRef} className="flex flex-1 min-h-0 w-full min-w-0">

@@ -47,29 +47,28 @@ export function createDevicePairingRoutes(deps: DevicePairingRouteDeps) {
     const origin = normalizeDevicePairingOrigin(requestedOrigin)
     if (!origin) return c.json({ error: INVALID_ORIGIN_QUERY_MESSAGE }, 400)
 
-    return c.json(
-      resolveDevicePairingAvailability(origin, {
-        trustedOrigins: resolveTrustedOrigins(),
-        isDevelopment: isDevelopment(),
-      }),
-    )
+    const { available, reason, message } = resolveDevicePairingAvailability(origin, {
+      trustedOrigins: resolveTrustedOrigins(),
+      isDevelopment: isDevelopment(),
+    })
+
+    return c.json({ available, reason, message })
   })
 
   app.post('/links', async (c) => {
     const body = await parseJsonBody(c, CreateDevicePairingLinksRequestSchema, { allowEmpty: true })
     if (!body.ok) return body.response
 
-    const origin = c.req.header('origin')
-    const availability = resolveDevicePairingAvailability(origin, {
+    const availability = resolveDevicePairingAvailability(c.req.header('origin'), {
       trustedOrigins: resolveTrustedOrigins(),
       isDevelopment: isDevelopment(),
     })
-    if (!origin || !availability.available) {
+    if (!availability.available) {
       return c.json({ error: availability.message, code: availability.reason }, 400)
     }
 
     try {
-      const originUrl = new URL(origin)
+      const originUrl = availability.originUrl
       const policy = resolveAppLinkPolicy(originUrl, {
         allowPrivateNetworkHttp: deps.readAllowPrivateNetworkHttp(),
       })

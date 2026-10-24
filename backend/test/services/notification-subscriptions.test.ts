@@ -78,6 +78,16 @@ describe('push subscription sessions', () => {
     expect(service.getSubscriptions(USER_ID)).toHaveLength(1)
   })
 
+  it('keeps the stored device name when the same endpoint subscribes again without one', () => {
+    const endpoint = 'https://push.example.com/phone'
+    service.saveSubscription(USER_ID, endpoint, 'p256dh-key', 'auth-key', 'Phone', 'ses_old')
+    const resubscribed = service.saveSubscription(USER_ID, endpoint, 'p256dh-key', 'auth-key', undefined, 'ses_new')
+
+    expect(resubscribed.deviceName).toBe('Phone')
+    expect(sessionIdOf(db, endpoint)).toBe('ses_new')
+    expect(service.getSubscriptions(USER_ID)).toHaveLength(1)
+  })
+
   it('adds the session id column to a database created before it existed', () => {
     const legacyDb = new Database(':memory:')
     legacyDb.run(LEGACY_TABLE)

@@ -3,25 +3,33 @@ import {
   buildManagerAppLink,
   buildManagerBrowserPairingLink,
   type AppLinkBlockedReason,
-  type DevicePairingAvailability,
   type DevicePairingLinkWarning,
   type DevicePairingLinksResponse,
   type DevicePairingUnavailableReason,
   type RemoteAccessHeader,
 } from '@opencode-manager/shared/schemas'
-import { isLoopbackHost, isPrivateNetworkHost } from '@opencode-manager/shared/utils'
+import {
+  isLoopbackHost,
+  isPrivateNetworkHost,
+  isPublicPlainHttpUrl,
+  parseHttpUrl,
+} from '@opencode-manager/shared/utils'
 
-export const MISSING_ORIGIN_MESSAGE =
+const MISSING_ORIGIN_MESSAGE =
   'The request had no Origin header. Open the Manager at an address listed in AUTH_TRUSTED_ORIGINS to pair a device.'
-export const LOOPBACK_ORIGIN_MESSAGE =
+const LOOPBACK_ORIGIN_MESSAGE =
   'This page is open on localhost, which other devices cannot reach. Open the Manager at its public or LAN address to pair a device.'
-export const INSECURE_ORIGIN_MESSAGE =
+const INSECURE_ORIGIN_MESSAGE =
   'Pairing needs HTTPS on a public address. Serve the Manager over HTTPS, or open it at a private network address.'
 
 type AppLinkPolicy = {
   blockedReason: AppLinkBlockedReason | null
   warnings: DevicePairingLinkWarning[]
 }
+
+type DevicePairingAvailabilityResult =
+  | { available: true; reason: null; message: null; originUrl: URL }
+  | { available: false; reason: DevicePairingUnavailableReason; message: string }
 
 type DevicePairingAvailabilityOptions = {
   trustedOrigins: string[]
@@ -35,37 +43,26 @@ function untrustedOriginMessage(origin: string): string {
 function unavailable(
   reason: DevicePairingUnavailableReason,
   message: string,
-): DevicePairingAvailability {
+): DevicePairingAvailabilityResult {
   return { available: false, reason, message }
-}
-
-function parseHttpOrigin(value: string): URL | null {
-  let url: URL
-  try {
-    url = new URL(value)
-  } catch {
-    return null
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
-  return url
 }
 
 /** Normalises an address to its origin, or null when it is not an absolute http(s) URL. */
 export function normalizeDevicePairingOrigin(value: string): string | null {
-  return parseHttpOrigin(value)?.origin ?? null
+  return parseHttpUrl(value)?.origin ?? null
 }
 
 /** Reports whether an origin can mint a pairing code, and why it cannot when blocked. */
 export function resolveDevicePairingAvailability(
   origin: string | undefined,
   options: DevicePairingAvailabilityOptions,
-): DevicePairingAvailability {
+): DevicePairingAvailabilityResult {
   if (!origin) return unavailable('untrusted-origin', MISSING_ORIGIN_MESSAGE)
   if (!isTrustedOrigin(origin, { requireOrigin: true }, options.trustedOrigins)) {
     return unavailable('untrusted-origin', untrustedOriginMessage(origin))
   }
 
-  const originUrl = parseHttpOrigin(origin)
+  const originUrl = parseHttpUrl(origin)
   if (!originUrl) return unavailable('untrusted-origin', untrustedOriginMessage(origin))
 
   const isLoopback = isLoopbackHost(originUrl.hostname)
@@ -73,11 +70,11 @@ export function resolveDevicePairingAvailability(
     return unavailable('loopback', LOOPBACK_ORIGIN_MESSAGE)
   }
 
-  if (originUrl.protocol === 'http:' && !isLoopback && !isPrivateNetworkHost(originUrl.hostname)) {
+  if (isPublicPlainHttpUrl(originUrl)) {
     return unavailable('insecure-origin', INSECURE_ORIGIN_MESSAGE)
   }
 
-  return { available: true, reason: null, message: null }
+  return { available: true, reason: null, message: null, originUrl }
 }
 
 /** Decides whether an origin can carry an app link and which warnings it raises. */

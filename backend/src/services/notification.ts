@@ -222,7 +222,7 @@ export class NotificationService {
            user_id = excluded.user_id,
            p256dh = excluded.p256dh,
            auth = excluded.auth,
-           device_name = excluded.device_name,
+           device_name = COALESCE(excluded.device_name, push_subscriptions.device_name),
            session_id = excluded.session_id,
            last_used_at = excluded.last_used_at`
       )

@@ -26,7 +26,16 @@ export function ensurePushSubscriptionsTable(db: Database): void {
   db.run('CREATE INDEX IF NOT EXISTS idx_push_sub_session ON push_subscriptions(session_id)')
 }
 
+/** Deletes the push subscriptions registered by any of the given Better Auth sessions. */
+export function deletePushSubscriptionsForSessions(db: Database, sessionIds: string[]): number {
+  if (sessionIds.length === 0) return 0
+  const placeholders = sessionIds.map(() => '?').join(', ')
+  return db
+    .prepare(`DELETE FROM push_subscriptions WHERE session_id IN (${placeholders})`)
+    .run(...sessionIds).changes
+}
+
 /** Deletes the push subscriptions a revoked Better Auth session registered. */
 export function deletePushSubscriptionsForSession(db: Database, sessionId: string): number {
-  return db.prepare('DELETE FROM push_subscriptions WHERE session_id = ?').run(sessionId).changes
+  return deletePushSubscriptionsForSessions(db, [sessionId])
 }
