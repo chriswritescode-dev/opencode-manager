@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { getSessionListPath, getSwipeBackTarget, getAssistantPath, getAssistantSessionListPath, isAssistantPath, getPathWithReturnTo, getReturnToPath, getRepoPath, getServerProjectPath, getServerSessionPath, getSessionPath, isSessionDetailRoute, parseRepoRoute, parseServerProjectRoute, parseServerSessionRoute } from './navigation';
+import { getSessionListPath, getSwipeBackTarget, getAssistantPath, getAssistantSessionListPath, isAssistantPath, getPathWithReturnTo, getReturnToPath, getRepoPath, getServerProjectPath, getServerSessionPath, getSessionPath, isSessionDetailRoute, parseActivePickerSession, parseRepoRoute, parseServerProjectRoute, parseServerSessionRoute } from './navigation';
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas';
 
 describe('getAssistantPath', () => {
   it('returns /assistant', () => {
@@ -188,6 +189,27 @@ describe('parseServerSessionRoute', () => {
       serverId: 'srv a/b',
       sessionId: 'ses 1',
     });
+  });
+});
+
+describe('parseActivePickerSession', () => {
+  it('reads a local session route on the local server', () => {
+    expect(parseActivePickerSession('/repos/5/sessions/ses_1')).toEqual({
+      sessionId: 'ses_1',
+      serverId: LOCAL_OPENCODE_SERVER_ID,
+    });
+  });
+
+  it('reads a linked-server session route on its own server', () => {
+    expect(parseActivePickerSession('/servers/srv_kitchen/sessions/ses_1')).toEqual({
+      sessionId: 'ses_1',
+      serverId: 'srv_kitchen',
+    });
+  });
+
+  it('returns no session outside a session route', () => {
+    expect(parseActivePickerSession('/repos/5')).toEqual({});
+    expect(parseActivePickerSession('/servers/srv_kitchen/projects')).toEqual({});
   });
 });
 

@@ -1,6 +1,8 @@
 import { useEffect, useId, useMemo, useState } from 'react'
 import type { Repo } from '@/api/types'
 import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
+import { LocalRepoNewSessionButton } from '@/components/navigation/RepoSessionNav'
+import { isRepoReady } from '@/components/navigation/sidebar-session-tree'
 import { cn, getRepoBranchLabel, getRepoDisplayName } from '@/lib/utils'
 import {
   PickerSearchBar,
@@ -13,8 +15,10 @@ interface ProjectPickerContentProps {
   open: boolean
   currentRepo: Repo | undefined
   onSelectRepo: (repo: Repo) => void
+  onNavigate: (path: string) => void
   switchHint: string
   searchInputRef: React.RefObject<HTMLInputElement | null>
+  searchTrailing?: React.ReactNode
 }
 
 interface ProjectPickerRow {
@@ -26,8 +30,10 @@ export function ProjectPickerContent({
   open,
   currentRepo,
   onSelectRepo,
+  onNavigate,
   switchHint,
   searchInputRef,
+  searchTrailing,
 }: ProjectPickerContentProps) {
   const { repos, isLoading } = useNavigableRepos()
   const listId = useId()
@@ -89,6 +95,7 @@ export function ProjectPickerContent({
         onKeyDown={handleSearchKeyDown}
         placeholder="Search projects..."
         name="project-picker-search"
+        trailing={searchTrailing}
       />
 
       <div
@@ -149,6 +156,11 @@ export function ProjectPickerContent({
                     </span>
                   )}
                 </div>
+                {isRepoReady(repo) ? (
+                  <LocalRepoNewSessionButton repo={repo} onOpenSession={onNavigate} />
+                ) : (
+                  <span className="shrink-0 pr-2 text-xs text-muted-foreground">Not ready</span>
+                )}
               </div>
             )
           })

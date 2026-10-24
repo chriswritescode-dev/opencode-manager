@@ -104,6 +104,7 @@ interface ApiFixture {
   permissions?: Record<string, unknown[]>
   forms?: Record<string, unknown[]>
   active?: Record<string, { type: 'running' }>
+  sessionDirectories?: Record<string, string>
 }
 
 function makeApi(fixture: ApiFixture = {}): OpenCodeApi {
@@ -126,6 +127,9 @@ function makeApi(fixture: ApiFixture = {}): OpenCodeApi {
     },
     session: {
       active: vi.fn(async () => fixture.active ?? {}),
+      get: vi.fn(async (input: { sessionID: string }) => ({
+        location: { directory: fixture.sessionDirectories?.[input.sessionID] ?? '' },
+      })),
     },
   } as unknown as OpenCodeApi
 }
@@ -779,8 +783,13 @@ describe('RemoteServerEventHub pending action replay', () => {
     sseAggregator.shutdown()
   })
 
+  function trackSessionStatus(sessionID: string, directory: string, status: string): void {
+    sources.sources[0]!.message(remoteEvent('session.status', { sessionID, status: { type: status } }, directory))
+  }
+
   it('replays pending remote actions to the subscribing client only', async () => {
     hub.start()
+    trackSessionStatus('ses-1', '/repo', 'busy')
     const client = createCapturingClient()
     const other = createCapturingClient()
     sseAggregator.addClient('replay-a', client.callback, client.writeFrame, ['srv_a|/repo'])
@@ -802,11 +811,57 @@ describe('RemoteServerEventHub pending action replay', () => {
     expect(other.frames).toHaveLength(0)
   })
 
+  it('skips the replay for a linked directory with no active session', async () => {
+    hub.start()
+    const client = createCapturingClient()
+    sseAggregator.addClient('idle', client.callback, client.writeFrame, ['srv_a|/repo'])
+
+    await flushPromises()
+
+    expect(fake.api.permission.request.list).not.toHaveBeenCalled()
+    expect(fake.api.form.list).not.toHaveBeenCalled()
+    expect(client.frames).toHaveLength(0)
+  })
+
+  it('stops replaying for a linked directory once its session goes idle', async () => {
+    hub.start()
+    trackSessionStatus('ses-1', '/repo', 'busy')
+    trackSessionStatus('ses-1', '/repo', 'idle')
+    const client = createCapturingClient()
+    sseAggregator.addClient('settled', client.callback, client.writeFrame, ['srv_a|/repo'])
+
+    await flushPromises()
+
+    expect(fake.api.permission.request.list).not.toHaveBeenCalled()
+    expect(client.frames).toHaveLength(0)
+  })
+
+  it('resolves the directory of an active session before gating the replay', async () => {
+    fake = createRegistry([SERVER_A], {
+      active: { 'ses-1': { type: 'running' } },
+      sessionDirectories: { 'ses-1': '/repo' },
+      permissions: { '/repo': [{ id: 'perm-1', sessionID: 'ses-1', action: 'shell', resources: ['ls'] }] },
+    })
+    hub = new RemoteServerEventHub(fake.registry, sseAggregator, { eventSourceFactory: sources.factory })
+    hub.start()
+    sources.sources[0]!.open()
+    await flushPromises()
+
+    const client = createCapturingClient()
+    sseAggregator.addClient('resolved', client.callback, client.writeFrame, ['srv_a|/repo'])
+    await flushPromises()
+
+    expect(fake.api.session.get).toHaveBeenCalledWith({ sessionID: 'ses-1' })
+    expect(fake.api.permission.request.list).toHaveBeenCalledWith({ location: { directory: '/repo' } })
+    expect(client.frames.map(parseFrame).map(frame => frame.payload.type)).toEqual(['permission.asked'])
+  })
+
   it('does not use the local pending action fetcher for remote keys', async () => {
     const localApi = makeApi({ permissions: { '/repo': [{ id: 'local-perm' }] } })
     sseAggregator.setPendingActionsFetcher({ api: localApi })
 
     hub.start()
+    trackSessionStatus('ses-1', '/repo', 'busy')
     const client = createCapturingClient()
     sseAggregator.addClient('mixed', client.callback, client.writeFrame, ['/repo', 'srv_a|/repo'])
 
@@ -820,6 +875,7 @@ describe('RemoteServerEventHub pending action replay', () => {
 
   it('replays remote actions when a client subscribes later', async () => {
     hub.start()
+    trackSessionStatus('ses-1', '/repo', 'busy')
     const client = createCapturingClient()
     sseAggregator.addClient('late', client.callback, client.writeFrame, [])
 
@@ -838,6 +894,7 @@ describe('RemoteServerEventHub pending action replay', () => {
     vi.mocked(fake.api.form.list).mockResolvedValue({ location: { directory: '/repo' }, data: [] })
 
     hub.start()
+    trackSessionStatus('ses-1', '/repo', 'busy')
     const client = createCapturingClient()
     sseAggregator.addClient('unsubscribed', client.callback, client.writeFrame, ['srv_a|/repo'])
     sseAggregator.removeDirectories('unsubscribed', ['srv_a|/repo'])

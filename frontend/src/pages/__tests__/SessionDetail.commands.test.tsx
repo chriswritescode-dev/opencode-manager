@@ -124,6 +124,7 @@ vi.mock('@/hooks/useSettingsDialog', () => ({
 vi.mock('@/hooks/useMobile', () => ({
   useMobile: mocks.useMobile,
   useSwipeBack: vi.fn(() => ({ ref: vi.fn() })),
+  useSwipeDismiss: vi.fn(() => ({ bind: vi.fn(), swipeProgress: 0, swipeStyles: {} })),
 }))
 
 vi.mock('@/hooks/useVisualViewport', () => ({
@@ -474,6 +475,37 @@ describe('SessionDetail command actions', () => {
       sessionID: SESSION_ID,
       initialQuestion: 'why?',
     })
+  })
+
+  it('opens the sessions picker dialog from the sessions command on desktop', async () => {
+    const { SessionPickerDialog } = await import('@/components/session/SessionPickerDialog')
+
+    renderSessionDetail()
+    const showSessions = await commandHandler('showSessions')
+
+    act(() => {
+      showSessions()
+    })
+
+    const props = vi.mocked(SessionPickerDialog).mock.calls.at(-1)?.[0] as Record<string, unknown>
+    expect(props).toMatchObject({ open: true })
+  })
+
+  it('opens the mobile sessions sheet instead of the dialog from the sessions command', async () => {
+    const { SessionPickerDialog } = await import('@/components/session/SessionPickerDialog')
+    mocks.useMobile.mockReturnValue(true)
+    const captured = { search: { current: '' }, pathname: { current: '' } }
+
+    renderSessionDetail(captured)
+    const showSessions = await commandHandler('showSessions')
+
+    act(() => {
+      showSessions()
+    })
+
+    await waitFor(() => expect(captured.search.current).toBe('?mobileTab=sessions'))
+    const props = vi.mocked(SessionPickerDialog).mock.calls.at(-1)?.[0] as Record<string, unknown>
+    expect(props).toMatchObject({ open: false })
   })
 
   it('shows the error toast when the transcript fetch fails', async () => {

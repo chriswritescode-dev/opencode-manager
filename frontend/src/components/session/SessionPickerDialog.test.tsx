@@ -7,6 +7,7 @@ import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import type { Repo, Session } from '@/api/types'
 import type { ActiveWorkGroups, ActiveWorkItem, ActiveWorkState } from '@/lib/activeWork'
 import { stubMatchMedia } from '@/test/test-utils'
+import { makeRepo, makeSession } from '@/test/fixtures/session-picker'
 import { DEFAULT_ACTIVITY_WINDOW_MINUTES } from '@/api/types/settings'
 import { KeyboardShortcutsProvider } from '@/contexts/KeyboardShortcutsContext'
 import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
@@ -21,9 +22,11 @@ const mocks = vi.hoisted(() => ({
     | { directory: string; project: { id: string; directory: string; canonical: string } }
     | undefined,
   sessionsHook: vi.fn(),
+  lastSessionServerId: null as string | null,
   fetchNextPage: vi.fn(),
   deleteSessionMock: vi.fn(),
   deletedSessionServerId: null as string | null,
+  createSessionDirectories: [] as string[],
   togglePinMock: vi.fn(),
   getOpenCodeLocation: vi.fn(),
   sessionPins: [] as Array<{ sessionId: string; directory: string; pinnedAt: number }>,
@@ -44,6 +47,12 @@ vi.mock('@/hooks/useSettings', () => ({
   useSettings: () => ({ preferences: mocks.preferences }),
 }))
 
+vi.mock('@/api/repos', () => ({
+  listRepos: vi.fn().mockResolvedValue([]),
+  createRepo: vi.fn(),
+  discoverRepos: vi.fn(),
+}))
+
 vi.mock('@/api/opencode', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/opencode')>()
   return { ...actual, getOpenCodeLocation: mocks.getOpenCodeLocation }
@@ -59,6 +68,7 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
       options?: { search?: string; allDirectories?: boolean; project?: { id: string; subpath: string } },
     ) => {
       mocks.sessionsHook()
+      mocks.lastSessionServerId = useOpenCodeServerId()
       mocks.lastDirectories = directories
       mocks.lastAllDirectories = options?.allDirectories ?? false
       mocks.lastProject = options?.project
@@ -87,12 +97,25 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
         isPending: false,
       }
     },
+    useCreateSession: (directory: string, onSuccess?: (session: { id: string }) => void) => ({
+      mutate: () => {
+        mocks.createSessionDirectories.push(directory)
+        onSuccess?.({ id: 'ses_new' })
+      },
+      isPending: false,
+    }),
   }
 })
 
 vi.mock('@/hooks/useSessionPins', () => ({
   useSessionPins: () => ({ data: mocks.sessionPins }),
   useToggleSessionPin: () => ({ mutate: mocks.togglePinMock }),
+}))
+
+vi.mock('@/components/navigation/RemoteProjectNav', () => ({
+  RemoteProjectNavList: ({ serverId }: { serverId: string }) => (
+    <div data-testid="remote-project-nav" data-server={serverId} />
+  ),
 }))
 
 vi.mock('@/hooks/useSidebarRepoGroups', () => ({
@@ -113,30 +136,6 @@ vi.mock('@/stores/sessionStatusStore', async (importOriginal) => {
   return { ...actual, useSessionStatusForSession: () => ({ type: 'idle' }) }
 })
 
-function session(id: string, title: string, directory: string, updated = Date.now()): Session {
-  return {
-    id,
-    projectID: 'proj',
-    title,
-    time: { created: updated, updated },
-    location: { directory },
-    cost: 0,
-    tokens: {},
-  } as unknown as Session
-}
-
-function repo(id: number, name: string, fullPath: string): Repo {
-  return {
-    id,
-    name,
-    localPath: fullPath,
-    fullPath,
-    defaultBranch: 'main',
-    cloneStatus: 'ready',
-    clonedAt: 0,
-  }
-}
-
 function activeWorkItem(
   id: string,
   title: string,
@@ -144,7 +143,7 @@ function activeWorkItem(
   state: ActiveWorkState = 'recent',
 ): ActiveWorkItem {
   const itemRepo = mocks.repos.find((candidate) => candidate.fullPath === directory) ?? mocks.repos[0]
-  const itemSession = session(id, title, directory)
+  const itemSession = makeSession(id, title, directory)
   return {
     key: `${directory}:${id}`,
     session: itemSession,
@@ -202,7 +201,7 @@ const openProjectsTab = () => {
 }
 
 const openActiveTab = () => {
-  fireEvent.mouseDown(screen.getByRole('tab', { name: 'Active' }))
+  fireEvent.mouseDown(screen.getByRole('tab', { name: 'Activity' }))
 }
 
 describe('SessionPickerDialog', () => {
@@ -212,14 +211,16 @@ describe('SessionPickerDialog', () => {
     localStorage.clear()
     mocks.deleteSessionMock.mockResolvedValue(undefined)
     mocks.deletedSessionServerId = null
+    mocks.createSessionDirectories.length = 0
     mocks.locationData = {
       directory: '/w/a',
       project: { id: 'global', directory: '/w/a', canonical: '/w/a' },
     }
     mocks.getOpenCodeLocation.mockResolvedValue(mocks.locationData)
     mocks.lastProject = undefined
+    mocks.lastSessionServerId = null
     mocks.sessionPins = []
-    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    mocks.repos = [makeRepo(1, 'alpha', '/w/a'), makeRepo(2, 'beta', '/w/b')]
     mocks.sessionsData = []
     mocks.activeWorkGroups = { needsInput: [], running: [], recent: [] }
     mocks.activeWorkWindowMs = 0
@@ -232,8 +233,8 @@ describe('SessionPickerDialog', () => {
 
   it('opens with the active session as the cursor and marks it with a dot', () => {
     mocks.sessionsData = [
-      session('ses_active', 'Active session', '/w/a', 3000),
-      session('ses_other', 'Other session', '/w/a', 2000),
+      makeSession('ses_active', 'Active session', '/w/a', 3000),
+      makeSession('ses_other', 'Other session', '/w/a', 2000),
     ]
 
     renderPicker({ activeSessionID: 'ses_active' })
@@ -247,8 +248,8 @@ describe('SessionPickerDialog', () => {
 
   it('filters rows immediately as the query is typed', () => {
     mocks.sessionsData = [
-      session('ses_alpha', 'alpha task', '/w/a', 2000),
-      session('ses_beta', 'beta task', '/w/a', 1000),
+      makeSession('ses_alpha', 'alpha task', '/w/a', 2000),
+      makeSession('ses_beta', 'beta task', '/w/a', 1000),
     ]
 
     renderPicker()
@@ -261,9 +262,9 @@ describe('SessionPickerDialog', () => {
 
   it('moves the cursor with arrow keys and Ctrl+N/Ctrl+P, wrapping, and opens the row on Enter', () => {
     mocks.sessionsData = [
-      session('ses_1', 'First', '/w/a', 3000),
-      session('ses_2', 'Second', '/w/a', 2000),
-      session('ses_3', 'Third', '/w/a', 1000),
+      makeSession('ses_1', 'First', '/w/a', 3000),
+      makeSession('ses_2', 'Second', '/w/a', 2000),
+      makeSession('ses_3', 'Third', '/w/a', 1000),
     ]
     const { onSelectSession } = renderPicker()
 
@@ -297,14 +298,15 @@ describe('SessionPickerDialog', () => {
 
   it('toggles scope with Ctrl+A, persists it, queries every repo directory and shows repo labels', () => {
     mocks.sessionsData = [
-      session('ses_a', 'Alpha session', '/w/a', 2000),
-      session('ses_b', 'Beta session', '/w/b', 1000),
+      makeSession('ses_a', 'Alpha session', '/w/a', 2000),
+      makeSession('ses_b', 'Beta session', '/w/b', 1000),
     ]
 
     renderPicker()
 
     expect(mocks.lastDirectories).toEqual(['/w/a'])
     expect(mocks.lastAllDirectories).toBe(false)
+    expect(screen.getByRole('tab', { name: 'This project' })).toBeInTheDocument()
     expect(screen.getByText('Alpha session')).toBeInTheDocument()
     expect(screen.queryByText('Beta session')).not.toBeInTheDocument()
 
@@ -313,6 +315,7 @@ describe('SessionPickerDialog', () => {
     expect(mocks.lastDirectories).toEqual(['/w/a', '/w/b'])
     expect(mocks.lastAllDirectories).toBe(true)
     expect(localStorage.getItem('oc:session-picker:all-projects')).toBe('true')
+    expect(screen.getByRole('tab', { name: 'All sessions' })).toBeInTheDocument()
     expect(screen.getByText('Beta session')).toBeInTheDocument()
     expect(screen.getByText('alpha')).toBeInTheDocument()
     expect(screen.getByText('beta')).toBeInTheDocument()
@@ -321,18 +324,127 @@ describe('SessionPickerDialog', () => {
     expect(mocks.lastDirectories).toEqual(['/w/a'])
     expect(mocks.lastAllDirectories).toBe(false)
     expect(localStorage.getItem('oc:session-picker:all-projects')).toBe('false')
+    expect(screen.getByRole('tab', { name: 'This project' })).toBeInTheDocument()
+  })
+
+  it('toggles the scope when the selected sessions tab is clicked again', async () => {
+    const user = userEvent.setup()
+    renderPicker()
+
+    await user.click(screen.getByRole('tab', { name: 'This project' }))
+
+    expect(screen.getByRole('tab', { name: 'All sessions', selected: true })).toBeInTheDocument()
+    expect(localStorage.getItem('oc:session-picker:all-projects')).toBe('true')
+
+    await user.click(screen.getByRole('tab', { name: 'All sessions' }))
+
+    expect(screen.getByRole('tab', { name: 'This project', selected: true })).toBeInTheDocument()
+    expect(localStorage.getItem('oc:session-picker:all-projects')).toBe('false')
+  })
+
+  it('selects the sessions tab without toggling the scope when it was not selected', async () => {
+    const user = userEvent.setup()
+    renderPicker()
+
+    await user.click(screen.getByRole('tab', { name: 'Activity' }))
+    await user.click(screen.getByRole('tab', { name: 'This project' }))
+
+    expect(screen.getByRole('tab', { name: 'This project', selected: true })).toBeInTheDocument()
+    expect(localStorage.getItem('oc:session-picker:all-projects')).toBeNull()
+  })
+
+  it('toggles the scope with Enter on the focused selected sessions tab', async () => {
+    const user = userEvent.setup()
+    renderPicker()
+
+    await waitFor(() => expect(combobox()).toHaveFocus())
+
+    const sessionsTab = screen.getByRole('tab', { name: 'This project' })
+    act(() => {
+      sessionsTab.focus()
+    })
+    expect(sessionsTab).toHaveFocus()
+
+    await user.keyboard('{Enter}')
+
+    expect(await screen.findByRole('tab', { name: 'All sessions', selected: true })).toBeInTheDocument()
+    expect(localStorage.getItem('oc:session-picker:all-projects')).toBe('true')
+  })
+
+  it('labels the sessions tab Sessions and lists every project without a current repo', () => {
+    mocks.sessionsData = [
+      makeSession('ses_a', 'Alpha session', '/w/a', 2000),
+      makeSession('ses_b', 'Beta session', '/w/b', 1000),
+    ]
+
+    renderPicker({ currentRepo: undefined })
+
+    expect(screen.getByRole('tab', { name: 'Sessions', selected: true })).toBeInTheDocument()
+    expect(mocks.lastDirectories).toEqual(['/w/a', '/w/b'])
+    expect(mocks.lastAllDirectories).toBe(true)
+    expect(screen.getByText('Beta session')).toBeInTheDocument()
+    expect(localStorage.getItem('oc:session-picker:all-projects')).toBeNull()
+  })
+
+  it('leaves the persisted scope preference unchanged on Ctrl+A without a current repo', () => {
+    localStorage.setItem('oc:session-picker:all-projects', 'false')
+
+    renderPicker({ currentRepo: undefined })
+
+    fireEvent.keyDown(combobox(), { key: 'a', ctrlKey: true })
+
+    expect(localStorage.getItem('oc:session-picker:all-projects')).toBe('false')
+    expect(mocks.lastAllDirectories).toBe(true)
+    expect(screen.getByRole('tab', { name: 'Sessions', selected: true })).toBeInTheDocument()
+  })
+
+  it('starts a new session in the current repo from the sessions tab header action', () => {
+    const onNavigate = vi.fn()
+    renderPicker({ onNavigate })
+
+    fireEvent.click(screen.getByRole('button', { name: 'New session in alpha' }))
+
+    expect(mocks.createSessionDirectories).toEqual(['/w/a'])
+    expect(onNavigate).toHaveBeenCalledWith('/repos/1/sessions/ses_new')
+  })
+
+  it('opens the add repository dialog from the projects tab header action', async () => {
+    renderPicker()
+
+    openProjectsTab()
+    fireEvent.click(await screen.findByRole('button', { name: 'Add repository' }))
+
+    expect(await screen.findByRole('dialog', { name: 'Add Repository' })).toBeInTheDocument()
+  })
+
+  it('starts a new session in a project row and marks a repo that is not ready', async () => {
+    const onNavigate = vi.fn()
+    mocks.repos = [
+      makeRepo(1, 'alpha', '/w/a'),
+      { ...makeRepo(2, 'beta', '/w/b'), cloneStatus: 'cloning' },
+    ]
+    renderPicker({ onNavigate })
+
+    openProjectsTab()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New session in alpha' }))
+
+    expect(mocks.createSessionDirectories).toEqual(['/w/a'])
+    expect(onNavigate).toHaveBeenCalledWith('/repos/1/sessions/ses_new')
+    expect(screen.queryByRole('button', { name: 'New session in beta' })).not.toBeInTheDocument()
+    expect(screen.getByText('Not ready')).toBeInTheDocument()
   })
 
   it('lists project sessions across worktrees and labels them with the folder name', async () => {
-    mocks.repos = [repo(1, 'alpha', '/w/a')]
+    mocks.repos = [makeRepo(1, 'alpha', '/w/a')]
     mocks.locationData = {
       directory: '/w/a',
       project: { id: 'proj_x', directory: '/w/a', canonical: '/w/a' },
     }
     mocks.sessionsData = [
-      session('ses_root', 'Root session', '/w/a', 3000),
-      session('ses_wt', 'Worktree session', '/w/.opencode/state/opencode/worktree/proj_x/test', 2000),
-      session('ses_schedule', 'Schedule session', '/w/schedule-worktrees/job-11-run-361', 1000),
+      makeSession('ses_root', 'Root session', '/w/a', 3000),
+      makeSession('ses_wt', 'Worktree session', '/w/.opencode/state/opencode/worktree/proj_x/test', 2000),
+      makeSession('ses_schedule', 'Schedule session', '/w/schedule-worktrees/job-11-run-361', 1000),
     ]
 
     renderPicker()
@@ -351,10 +463,10 @@ describe('SessionPickerDialog', () => {
   })
 
   it('falls back to the repo directory listing when the location project is global', async () => {
-    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    mocks.repos = [makeRepo(1, 'alpha', '/w/a'), makeRepo(2, 'beta', '/w/b')]
     mocks.sessionsData = [
-      session('ses_a', 'Alpha session', '/w/a', 2000),
-      session('ses_b', 'Beta session', '/w/b', 1000),
+      makeSession('ses_a', 'Alpha session', '/w/a', 2000),
+      makeSession('ses_b', 'Beta session', '/w/b', 1000),
     ]
 
     renderPicker()
@@ -366,12 +478,12 @@ describe('SessionPickerDialog', () => {
   })
 
   it('falls back to the repo directory listing when the location lookup fails', async () => {
-    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    mocks.repos = [makeRepo(1, 'alpha', '/w/a'), makeRepo(2, 'beta', '/w/b')]
     mocks.locationData = undefined
     mocks.getOpenCodeLocation.mockRejectedValue(new Error('location unavailable'))
     mocks.sessionsData = [
-      session('ses_a', 'Alpha session', '/w/a', 2000),
-      session('ses_b', 'Beta session', '/w/b', 1000),
+      makeSession('ses_a', 'Alpha session', '/w/a', 2000),
+      makeSession('ses_b', 'Beta session', '/w/b', 1000),
     ]
 
     renderPicker()
@@ -387,7 +499,7 @@ describe('SessionPickerDialog', () => {
       | undefined
     mocks.locationData = undefined
     mocks.getOpenCodeLocation.mockReturnValue(new Promise((resolve) => { resolveLocation = resolve }))
-    mocks.sessionsData = [session('ses_a', 'Alpha session', '/w/a', 2000)]
+    mocks.sessionsData = [makeSession('ses_a', 'Alpha session', '/w/a', 2000)]
 
     renderPicker()
 
@@ -406,7 +518,7 @@ describe('SessionPickerDialog', () => {
   })
 
   it('does not query sessions while closed and queries after opening', async () => {
-    mocks.sessionsData = [session('ses_1', 'First', '/w/a', 3000)]
+    mocks.sessionsData = [makeSession('ses_1', 'First', '/w/a', 3000)]
 
     function Host() {
       const [open, setOpen] = useState(false)
@@ -436,8 +548,8 @@ describe('SessionPickerDialog', () => {
 
   it('deletes on a second Ctrl+D and clears the pending state on a move', async () => {
     mocks.sessionsData = [
-      session('ses_1', 'First', '/w/a', 3000),
-      session('ses_2', 'Second', '/w/a', 2000),
+      makeSession('ses_1', 'First', '/w/a', 3000),
+      makeSession('ses_2', 'Second', '/w/a', 2000),
     ]
     const { onDeleteActiveSession } = renderPicker()
 
@@ -461,7 +573,7 @@ describe('SessionPickerDialog', () => {
   })
 
   it('notifies when the active session is deleted before the delete completes', async () => {
-    mocks.sessionsData = [session('ses_active', 'Active', '/w/a', 3000)]
+    mocks.sessionsData = [makeSession('ses_active', 'Active', '/w/a', 3000)]
     let resolveDelete: () => void = () => undefined
     mocks.deleteSessionMock.mockReturnValue(
       new Promise<void>((resolve) => {
@@ -483,8 +595,8 @@ describe('SessionPickerDialog', () => {
 
   it('moves the cursor when a mouse pointer moves over a row', () => {
     mocks.sessionsData = [
-      session('ses_1', 'First', '/w/a', 3000),
-      session('ses_2', 'Second', '/w/a', 2000),
+      makeSession('ses_1', 'First', '/w/a', 3000),
+      makeSession('ses_2', 'Second', '/w/a', 2000),
     ]
     renderPicker()
 
@@ -497,7 +609,7 @@ describe('SessionPickerDialog', () => {
   })
 
   it('opens the delete confirmation from the row menu', async () => {
-    mocks.sessionsData = [session('ses_1', 'First', '/w/a', 3000)]
+    mocks.sessionsData = [makeSession('ses_1', 'First', '/w/a', 3000)]
     renderPicker()
     const user = userEvent.setup()
 
@@ -509,8 +621,8 @@ describe('SessionPickerDialog', () => {
 
   it('groups older sessions under per-day headings', () => {
     mocks.sessionsData = [
-      session('ses_jan2', 'Jan two', '/w/a', new Date(2020, 0, 2, 12).getTime()),
-      session('ses_jan1', 'Jan one', '/w/a', new Date(2020, 0, 1, 12).getTime()),
+      makeSession('ses_jan2', 'Jan two', '/w/a', new Date(2020, 0, 2, 12).getTime()),
+      makeSession('ses_jan1', 'Jan one', '/w/a', new Date(2020, 0, 1, 12).getTime()),
     ]
 
     renderPicker()
@@ -521,8 +633,8 @@ describe('SessionPickerDialog', () => {
 
   it('resets the query and cursor on reopen', async () => {
     mocks.sessionsData = [
-      session('ses_active', 'Active session', '/w/a', 3000),
-      session('ses_other', 'Other session', '/w/a', 2000),
+      makeSession('ses_active', 'Active session', '/w/a', 3000),
+      makeSession('ses_other', 'Other session', '/w/a', 2000),
     ]
 
     function Host() {
@@ -556,11 +668,11 @@ describe('SessionPickerDialog', () => {
     expect(screen.getByRole('option', { name: /Active session/ })).toHaveAttribute('aria-selected', 'true')
   })
 
-  it('renders an Active/Sessions/Projects tab switcher and defaults to the sessions tab', () => {
+  it('renders an Activity/Sessions/Projects tab switcher and defaults to the sessions tab', () => {
     renderPicker()
 
-    expect(screen.getByRole('tab', { name: 'Sessions' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('tab', { name: 'Active' })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('tab', { name: 'This project' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'false')
     expect(screen.getByRole('tab', { name: 'Projects' })).toHaveAttribute('aria-selected', 'false')
     expect(combobox()).toHaveAttribute('placeholder', 'Search sessions...')
   })
@@ -568,7 +680,7 @@ describe('SessionPickerDialog', () => {
   it('exposes a tabpanel labelled by the active tab and swaps panels on tab switch', async () => {
     renderPicker()
 
-    const sessionsPanel = screen.getByRole('tabpanel', { name: 'Sessions' })
+    const sessionsPanel = screen.getByRole('tabpanel', { name: 'This project' })
     expect(sessionsPanel).toHaveAttribute('data-state', 'active')
     expect(screen.queryByRole('tabpanel', { name: 'Projects' })).not.toBeInTheDocument()
 
@@ -576,11 +688,11 @@ describe('SessionPickerDialog', () => {
 
     const projectsPanel = await screen.findByRole('tabpanel', { name: 'Projects' })
     expect(projectsPanel).toHaveAttribute('data-state', 'active')
-    expect(screen.queryByRole('tabpanel', { name: 'Sessions' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tabpanel', { name: 'This project' })).not.toBeInTheDocument()
   })
 
   it('focuses the projects search input after clicking the Projects tab and filters on typing', async () => {
-    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    mocks.repos = [makeRepo(1, 'alpha', '/w/a'), makeRepo(2, 'beta', '/w/b')]
     const user = userEvent.setup()
     renderPicker()
 
@@ -595,7 +707,7 @@ describe('SessionPickerDialog', () => {
   })
 
   it('focuses the projects search input after switching tabs with the shortcut', async () => {
-    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    mocks.repos = [makeRepo(1, 'alpha', '/w/a'), makeRepo(2, 'beta', '/w/b')]
     const user = userEvent.setup()
     renderPicker()
 
@@ -607,7 +719,7 @@ describe('SessionPickerDialog', () => {
 
   it('focuses the projects search input after the switch shortcut on a coarse pointer device', async () => {
     stubMatchMedia(false)
-    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    mocks.repos = [makeRepo(1, 'alpha', '/w/a'), makeRepo(2, 'beta', '/w/b')]
     const user = userEvent.setup()
     renderPicker()
 
@@ -619,7 +731,7 @@ describe('SessionPickerDialog', () => {
 
   it('does not focus the projects search input when switching tabs by pointer on a coarse pointer device', async () => {
     stubMatchMedia(false)
-    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    mocks.repos = [makeRepo(1, 'alpha', '/w/a'), makeRepo(2, 'beta', '/w/b')]
     const user = userEvent.setup()
     renderPicker()
 
@@ -629,7 +741,7 @@ describe('SessionPickerDialog', () => {
   })
 
   it('lists repos in the projects tab and opens the cursor repo on Enter', async () => {
-    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    mocks.repos = [makeRepo(1, 'alpha', '/w/a'), makeRepo(2, 'beta', '/w/b')]
     const { onSelectRepo } = renderPicker()
 
     openProjectsTab()
@@ -645,7 +757,7 @@ describe('SessionPickerDialog', () => {
 
   it('navigates the projects tab with wrapping arrows, PageUp/PageDown and Enter', async () => {
     mocks.repos = Array.from({ length: 12 }, (_, index) =>
-      repo(index + 1, `repo-${index + 1}`, `/w/r${index + 1}`),
+      makeRepo(index + 1, `repo-${index + 1}`, `/w/r${index + 1}`),
     )
     const { onSelectRepo } = renderPicker()
 
@@ -673,7 +785,7 @@ describe('SessionPickerDialog', () => {
   })
 
   it('opens a repo on click in the projects tab', async () => {
-    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    mocks.repos = [makeRepo(1, 'alpha', '/w/a'), makeRepo(2, 'beta', '/w/b')]
     const { onSelectRepo } = renderPicker()
 
     openProjectsTab()
@@ -685,8 +797,8 @@ describe('SessionPickerDialog', () => {
 
   it('filters projects by name and branch', async () => {
     mocks.repos = [
-      { ...repo(1, 'alpha', '/w/a'), currentBranch: 'feature/x' },
-      repo(2, 'beta', '/w/b'),
+      { ...makeRepo(1, 'alpha', '/w/a'), currentBranch: 'feature/x' },
+      makeRepo(2, 'beta', '/w/b'),
     ]
     renderPicker()
 
@@ -713,19 +825,19 @@ describe('SessionPickerDialog', () => {
     expect(screen.getByText('No projects found')).toBeInTheDocument()
   })
 
-  it('cycles Active, Sessions and Projects with the default Ctrl+S binding', async () => {
+  it('cycles Activity, Sessions and Projects with the default Ctrl+S binding', async () => {
     renderPicker()
 
-    expect(screen.getByRole('tab', { name: 'Sessions', selected: true })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'This project', selected: true })).toBeInTheDocument()
 
     fireEvent.keyDown(combobox(), { key: 's', ctrlKey: true })
     expect(await screen.findByRole('tab', { name: 'Projects', selected: true })).toBeInTheDocument()
 
     fireEvent.keyDown(combobox(), { key: 's', ctrlKey: true })
-    expect(await screen.findByRole('tab', { name: 'Active', selected: true })).toBeInTheDocument()
+    expect(await screen.findByRole('tab', { name: 'Activity', selected: true })).toBeInTheDocument()
 
     fireEvent.keyDown(combobox(), { key: 's', ctrlKey: true })
-    expect(await screen.findByRole('tab', { name: 'Sessions', selected: true })).toBeInTheDocument()
+    expect(await screen.findByRole('tab', { name: 'This project', selected: true })).toBeInTheDocument()
   })
 
   it('honors a configured switch binding and shows it in the footer', async () => {
@@ -756,7 +868,7 @@ describe('SessionPickerDialog', () => {
 
     fireEvent.keyDown(combobox(), { key: 'o', ctrlKey: true })
 
-    expect(screen.getByRole('tab', { name: 'Sessions', selected: true })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'This project', selected: true })).toBeInTheDocument()
   })
 
   it('resets to the sessions tab when the dialog reopens', async () => {
@@ -787,12 +899,12 @@ describe('SessionPickerDialog', () => {
     fireEvent.click(screen.getByText('open-picker'))
 
     await waitFor(() =>
-      expect(screen.getByRole('tab', { name: 'Sessions' })).toHaveAttribute('aria-selected', 'true'),
+      expect(screen.getByRole('tab', { name: 'This project' })).toHaveAttribute('aria-selected', 'true'),
     )
   })
 
   it('groups active work into needs input, running and recent sections with repo labels', async () => {
-    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    mocks.repos = [makeRepo(1, 'alpha', '/w/a'), makeRepo(2, 'beta', '/w/b')]
     mocks.activeWorkGroups = {
       needsInput: [activeWorkItem('ses_ni', 'Needs input task', '/w/a', 'needs-input')],
       running: [activeWorkItem('ses_run', 'Running task', '/w/b', 'running')],
@@ -838,7 +950,7 @@ describe('SessionPickerDialog', () => {
   })
 
   it('opens the cursor active row with Enter and selects its session and repo', async () => {
-    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    mocks.repos = [makeRepo(1, 'alpha', '/w/a'), makeRepo(2, 'beta', '/w/b')]
     mocks.activeWorkGroups = {
       needsInput: [],
       running: [activeWorkItem('ses_run', 'Running task', '/w/b', 'running')],
@@ -859,7 +971,7 @@ describe('SessionPickerDialog', () => {
   })
 
   it('filters active work rows by title and drops sections left empty', async () => {
-    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    mocks.repos = [makeRepo(1, 'alpha', '/w/a'), makeRepo(2, 'beta', '/w/b')]
     mocks.activeWorkGroups = {
       needsInput: [activeWorkItem('ses_ni', 'Needs input task', '/w/a', 'needs-input')],
       running: [],
@@ -879,7 +991,7 @@ describe('SessionPickerDialog', () => {
   })
 
   it('pins an active work row from the shared row menu', async () => {
-    mocks.repos = [repo(1, 'alpha', '/w/a'), repo(2, 'beta', '/w/b')]
+    mocks.repos = [makeRepo(1, 'alpha', '/w/a'), makeRepo(2, 'beta', '/w/b')]
     mocks.activeWorkGroups = {
       needsInput: [],
       running: [activeWorkItem('ses_run', 'Running task', '/w/b', 'running')],
@@ -902,11 +1014,11 @@ describe('SessionPickerDialog', () => {
 
   describe('linked-server mode', () => {
     beforeEach(() => {
-      mocks.repos = [repo(1, 'alpha', '/w/a')]
-      mocks.sessionsData = [session('ses_remote', 'Remote session', '/home/me/app')]
+      mocks.repos = [makeRepo(1, 'alpha', '/w/a')]
+      mocks.sessionsData = [makeSession('ses_remote', 'Remote session', '/home/me/app')]
     })
 
-    it('lists the project sessions without Manager-only tabs and reports the chosen server session', async () => {
+    it('lists the project sessions with the linked server projects tab and reports the chosen server session', async () => {
       const onSelectRemoteSession = vi.fn()
       renderPicker({
         remote: {
@@ -917,8 +1029,8 @@ describe('SessionPickerDialog', () => {
         onSelectRemoteSession,
       })
 
-      expect(screen.queryByRole('tab', { name: 'Projects' })).not.toBeInTheDocument()
-      expect(screen.getByRole('tab', { name: 'Active' })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'Projects' })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'Activity' })).toBeInTheDocument()
 
       const row = await screen.findByRole('option', { name: /Remote session/ })
       expect(row).toHaveTextContent('Kitchen')
@@ -931,13 +1043,33 @@ describe('SessionPickerDialog', () => {
       )
     })
 
+    it('renders the linked server projects tab through the shared activity-ordered project list', async () => {
+      renderPicker({
+        remote: { serverId: 'srv_kitchen', serverName: 'Kitchen', projectDirectory: '/home/me/app' },
+      })
+
+      openProjectsTab()
+
+      const nav = await screen.findByTestId('remote-project-nav')
+      expect(nav).toHaveAttribute('data-server', 'srv_kitchen')
+    })
+
+    it('queries the linked server sessions without a host-supplied server provider', async () => {
+      renderPicker({
+        remote: { serverId: 'srv-1', serverName: 'Kitchen', projectDirectory: '/home/me/app' },
+      })
+
+      expect(await screen.findByRole('option', { name: /Remote session/ })).toBeInTheDocument()
+      expect(mocks.lastSessionServerId).toBe('srv-1')
+    })
+
     it('navigates a remote active work row through the owning server', async () => {
       const onSelectRemoteSession = vi.fn()
       mocks.activeWorkGroups = {
         needsInput: [
           {
             key: '/home/me/app/ses_remote',
-            session: session('ses_remote', 'Remote pending', '/home/me/app'),
+            session: makeSession('ses_remote', 'Remote pending', '/home/me/app'),
             repo: null,
             serverId: 'srv_kitchen',
             serverName: 'Kitchen',

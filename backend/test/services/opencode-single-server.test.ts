@@ -17,6 +17,15 @@ const spawnMock = vi.hoisted(() => vi.fn(() => ({
 
 const spawnSyncMock = vi.hoisted(() => vi.fn())
 
+const processKillMock = vi.hoisted(() => vi.fn((_pid: number, signal?: number | NodeJS.Signals) => {
+  if (signal === 0) {
+    const error = new Error('kill ESRCH') as NodeJS.ErrnoException
+    error.code = 'ESRCH'
+    throw error
+  }
+  return true
+}))
+
 const readFileSyncMock = vi.hoisted(() => vi.fn())
 
 vi.mock('bun:sqlite', () => ({
@@ -185,6 +194,16 @@ const routeVersionProbeThroughExecSyncStub = () => {
 }
 
 beforeEach(routeVersionProbeThroughExecSyncStub)
+
+const originalProcessKill = process.kill
+
+beforeEach(() => {
+  process.kill = processKillMock as unknown as typeof process.kill
+})
+
+afterEach(() => {
+  process.kill = originalProcessKill
+})
 
 // Reset singleton before any tests run to clear any polluted state from previous test files
 beforeAll(async () => {
@@ -2823,6 +2842,7 @@ describe('OpenCodeServerManager - server auth', () => {
       await manager.start()
       await manager.stop()
 
+      expect(processKillMock).toHaveBeenCalledWith(1234, 'SIGTERM')
       const rmMock = fs.rm as unknown as ReturnType<typeof vi.fn>
       expect(rmMock).toHaveBeenCalledWith('/test/workspace/.opencode/state/opencode-server-child.json', { force: true })
     } finally {
@@ -2869,6 +2889,7 @@ describe('OpenCodeServerManager - server auth', () => {
       await secondManager.start()
 
       expect(spawnMock).toHaveBeenCalledTimes(2)
+      expect(processKillMock).toHaveBeenCalledWith(1234, 'SIGKILL')
     } finally {
       readFileMock.mockReset()
       Object.defineProperty(ENV.SERVER, 'NODE_ENV', { value: originalNodeEnv, configurable: true, writable: true })

@@ -54,6 +54,7 @@ vi.mock('@/hooks/useOpenCode', () => ({
   useSendShell: () => ({ mutate: mocks.useSendShell, mutateAsync: mocks.useSendShell, isPending: false }),
   useAgents: () => ({ data: [] }),
   useSkills: () => ({ data: [] }),
+  useSession: () => ({ data: undefined }),
 }))
 
 vi.mock('@/hooks/useProviders', () => ({ useProviders: () => ({ data: undefined }) }))

@@ -52,7 +52,7 @@ function SidebarServerRouteSync() {
   return null
 }
 
-function renderNav(pathname = '/', variant?: 'sidebar' | 'rail' | 'sheet') {
+function renderNav(pathname = '/', variant?: 'sidebar' | 'rail') {
   return render(
     <MemoryRouter initialEntries={[pathname]}>
       <SidebarServerRouteSync />
@@ -252,19 +252,5 @@ describe('LinkedServersNav', () => {
     renderNav('/', 'rail')
 
     expect(screen.queryByRole('button', { name: /Switch server/ })).not.toBeInTheDocument()
-  })
-
-  it('renders a thin trigger row in the sheet variant', async () => {
-    const user = userEvent.setup()
-    setServers([kitchen])
-
-    renderNav('/', 'sheet')
-
-    expect(screen.queryByRole('heading', { name: 'Servers' })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: triggerName('OC Manager') }))
-    await user.click(await screen.findByRole('menuitem', { name: /Kitchen/ }))
-
-    expect(await screen.findByRole('button', { name: triggerName('Kitchen') })).toBeInTheDocument()
-    expect(screen.getByTestId('location')).toHaveTextContent('/')
   })
 })

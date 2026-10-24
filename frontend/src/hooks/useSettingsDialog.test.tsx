@@ -270,7 +270,7 @@ describe('useSettingsDialog', () => {
       }
 
       render(
-        <MemoryRouter initialEntries={['/?mobileTab=repos']}>
+        <MemoryRouter initialEntries={['/?mobileTab=sessions']}>
           <Harness />
         </MemoryRouter>,
       )
@@ -285,7 +285,7 @@ describe('useSettingsDialog', () => {
 
       act(() => { screen.getByText('back').click() })
 
-      expect(screen.getByTestId('search').textContent).toBe('?mobileTab=repos')
+      expect(screen.getByTestId('search').textContent).toBe('?mobileTab=sessions')
       expect(screen.getByTestId('dialog-state').textContent).toBe('closed')
     })
 

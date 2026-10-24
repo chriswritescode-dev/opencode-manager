@@ -2946,16 +2946,27 @@ describe('EventProvider permissions and forms', () => {
 
     await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
 
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+    const onResync = lastSubscribeCall[0].onResync as
+      | ((directories: string[], serverId?: string) => void)
+      | undefined
+
+    mocks.listActiveSessions.mockImplementation((serverId?: string) =>
+      Promise.resolve(serverId === 'srv_remote' ? { 'remote-session': { type: 'running' } } : {}),
+    )
+    act(() => {
+      onEvent({ type: 'session.status', data: { sessionID: 'remote-session', status: { type: 'busy' } }, directory: '/remote/repo', serverId: 'srv_remote' })
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
     mocks.listActiveSessions.mockClear()
     mocks.listPendingPermissions.mockClear()
     mocks.listPendingForms.mockClear()
     mocks.listShells.mockClear()
     invalidateQueries.mockClear()
-
-    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
-    const onResync = lastSubscribeCall[0].onResync as
-      | ((directories: string[], serverId?: string) => void)
-      | undefined
 
     await act(async () => {
       onResync?.(['/repo', 'srv_remote|/remote/repo'], 'srv_remote')
@@ -2976,6 +2987,93 @@ describe('EventProvider permissions and forms', () => {
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'agents', 'srv_remote'] })
     })
     expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['opencode', 'commands'] })
+  })
+
+  it('reconciles only linked directories with active work on a remote resync', async () => {
+    mocks.servers = [{ id: 'srv_remote', enabled: true }]
+    mocks.listProjects.mockResolvedValue([
+      { id: 'proj-busy', canonical: '/remote/busy' },
+      { id: 'proj-idle', canonical: '/remote/idle' },
+      { id: 'proj-other', canonical: '/remote/other' },
+    ])
+    mocks.listActiveSessions.mockImplementation((serverId?: string) =>
+      Promise.resolve(serverId === 'srv_remote' ? { 'remote-busy': { type: 'running' } } : {}),
+    )
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.listProjects).toHaveBeenCalledWith('srv_remote'))
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+    const onResync = lastSubscribeCall[0].onResync as
+      | ((directories: string[], serverId?: string) => void)
+      | undefined
+
+    act(() => {
+      onEvent({ type: 'session.status', data: { sessionID: 'remote-busy', status: { type: 'busy' } }, directory: '/remote/busy', serverId: 'srv_remote' })
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    mocks.listPendingPermissions.mockClear()
+    mocks.listPendingForms.mockClear()
+    mocks.listShells.mockClear()
+
+    await act(async () => {
+      onResync?.(
+        ['srv_remote|/remote/busy', 'srv_remote|/remote/idle', 'srv_remote|/remote/other'],
+        'srv_remote',
+      )
+    })
+
+    await waitFor(() => {
+      expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/remote/busy', 'srv_remote')
+      expect(mocks.listPendingForms).toHaveBeenCalledWith('/remote/busy', 'srv_remote')
+      expect(mocks.listShells).toHaveBeenCalledWith('/remote/busy', 'srv_remote')
+    })
+    expect(mocks.listPendingPermissions).not.toHaveBeenCalledWith('/remote/idle', 'srv_remote')
+    expect(mocks.listPendingPermissions).not.toHaveBeenCalledWith('/remote/other', 'srv_remote')
+    expect(mocks.listShells).not.toHaveBeenCalledWith('/remote/idle', 'srv_remote')
+  })
+
+  it('reconciles the viewed linked directory even when its session is idle', async () => {
+    mocks.servers = [{ id: 'srv_remote', enabled: true }]
+    mocks.listActiveSessions.mockResolvedValue({})
+
+    render(<Harness />, {
+      wrapper: createWrapper(createTestQueryClient(), '/servers/srv_remote/sessions/remote-viewed'),
+    })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+    const onResync = lastSubscribeCall[0].onResync as
+      | ((directories: string[], serverId?: string) => void)
+      | undefined
+
+    act(() => {
+      onEvent({ type: 'session.status', data: { sessionID: 'remote-viewed', status: { type: 'idle' } }, directory: '/remote/viewed', serverId: 'srv_remote' })
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    mocks.listPendingPermissions.mockClear()
+    mocks.listShells.mockClear()
+
+    await act(async () => {
+      onResync?.(['srv_remote|/remote/viewed', 'srv_remote|/remote/idle'], 'srv_remote')
+    })
+
+    await waitFor(() => {
+      expect(mocks.listPendingPermissions).toHaveBeenCalledWith('/remote/viewed', 'srv_remote')
+      expect(mocks.listShells).toHaveBeenCalledWith('/remote/viewed', 'srv_remote')
+    })
+    expect(mocks.listPendingPermissions).not.toHaveBeenCalledWith('/remote/idle', 'srv_remote')
   })
 
   it('clears a stale remote busy status on a remote resync', async () => {
@@ -3201,6 +3299,7 @@ describe('EventProvider permissions and forms', () => {
 
     act(() => {
       useSessionStatus.getState().setSessionDirectory('remote-session', 'srv_remote|/remote/repo')
+      useSessionStatus.getState().setStatus('remote-session', { type: 'busy' })
     })
 
     mocks.servers = [{ id: 'srv_remote', enabled: true }]

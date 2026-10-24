@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BranchesTab } from './BranchesTab'
@@ -39,7 +39,8 @@ vi.mock('@/components/repo/CreateWorktreeDialog', () => ({
   CreateWorktreeDialog: () => null,
 }))
 
-import { listBranches, getRepo } from '@/api/repos'
+import { listBranches, getRepo, switchBranch } from '@/api/repos'
+import { fetchGitStatus } from '@/api/git'
 
 const createWrapper = () => {
   const queryClient = new QueryClient({
@@ -88,5 +89,36 @@ describe('BranchesTab', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'Delete' }))
 
     expect(await screen.findByText('origin/feature')).toBeInTheDocument()
+  })
+
+  it('invalidates the vcs info of the switched repository', async () => {
+    vi.mocked(switchBranch).mockResolvedValue({
+      id: 1,
+      fullPath: '/abs/repos/my-repo',
+      currentBranch: 'feature',
+    } as never)
+    vi.mocked(fetchGitStatus).mockResolvedValue({
+      branch: 'feature',
+      ahead: 0,
+      behind: 0,
+      files: [],
+      hasChanges: false,
+      operation: null,
+    })
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+    const user = userEvent.setup()
+    render(<BranchesTab repoId={1} currentBranch="main" />, {
+      wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>,
+    })
+
+    await user.click(await screen.findByRole('button', { name: /^feature/ }))
+
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['opencode', 'vcs', '/abs/repos/my-repo', 'info'],
+      exact: true,
+    }))
   })
 })

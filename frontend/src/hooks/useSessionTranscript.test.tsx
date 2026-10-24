@@ -8,7 +8,7 @@ import type {
   V2Event,
 } from '@opencode-manager/shared/opencode'
 import { useSessionTranscript } from './useSessionTranscript'
-import { ContextUsageIndicator } from '@/components/session/ContextUsageIndicator'
+import { useContextUsage } from './useContextUsage'
 import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
 import { applySessionEvent, emptySessionTranscript } from '@/lib/session-projection'
 import type { TranscriptCache } from '@/lib/session-projection'
@@ -1129,13 +1129,8 @@ describe('useSessionTranscript', () => {
     function PageConsumers() {
       const { messages } = useSessionTranscript(SESSION_ID, DIRECTORY)
       pageMessages.current = messages
-      return (
-        <ContextUsageIndicator
-          directory={DIRECTORY}
-          sessionID={SESSION_ID}
-          isConnected
-        />
-      )
+      useContextUsage(SESSION_ID, DIRECTORY)
+      return null
     }
 
     render(<PageConsumers />, { wrapper: createWrapper(queryClient) })

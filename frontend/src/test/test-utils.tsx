@@ -2,7 +2,7 @@
 
 import { useEffect, type ReactNode } from 'react'
 import { renderHook } from '@testing-library/react'
-import { MemoryRouter, useLocation } from 'react-router-dom'
+import { MemoryRouter, useLocation, useNavigationType } from 'react-router-dom'
 import { vi } from 'vitest'
 import type { useSettings } from '@/hooks/useSettings'
 import type { VoiceConversationController } from '@/hooks/useVoiceConversation'
@@ -89,14 +89,18 @@ export function renderHookWithRouter<T>(renderFn: () => T, initialEntries?: stri
 export function LocationCatcher({
   capturedSearch,
   capturedPathname,
+  capturedNavigationType,
 }: {
   capturedSearch: { current: string }
   capturedPathname?: { current: string }
+  capturedNavigationType?: { current: string }
 }) {
   const location = useLocation()
+  const navigationType = useNavigationType()
   useEffect(() => {
     capturedSearch.current = location.search
     if (capturedPathname) capturedPathname.current = location.pathname
+    if (capturedNavigationType) capturedNavigationType.current = navigationType
   })
   return null
 }

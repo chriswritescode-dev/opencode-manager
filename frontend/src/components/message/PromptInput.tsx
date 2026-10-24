@@ -13,7 +13,7 @@ import { useSessionAgentStore } from '@/stores/sessionAgentStore'
 import { useSendErrorStore } from '@/stores/sendErrorStore'
 import { useComposerDraftStore, type ComposerDraft } from '@/stores/composerDraftStore'
 import { useRecentCommandsStore } from '@/stores/recentCommandsStore'
-import { useHasBackgroundActivity } from '@/stores/sessionStatusStore'
+import { useHasBackgroundActivity, useSessionStatusForSession } from '@/stores/sessionStatusStore'
 import { useTouchTapSelect } from '@/hooks/useTouchTapSelect'
 import { useMobile } from '@/hooks/useMobile'
 import { FINE_POINTER_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
@@ -27,11 +27,11 @@ import { IconToggleButton } from '@/components/ui/icon-toggle-button'
 
 import { PromptSuggestions, type PromptSuggestion } from './PromptSuggestions'
 import { ComposerActivityBar } from './ComposerActivityBar'
-import { ModelQuickSelect } from '@/components/model/ModelQuickSelect'
 import { AgentQuickSelect } from '@/components/agent/AgentQuickSelect'
 import { VoiceConversation, type VoiceConversationHandle } from './VoiceConversation'
 import { PermissionModeToggle } from '@/components/session/PermissionModeToggle'
 import { SessionSandboxMenu } from '@/components/session/SessionSandboxMenu'
+import { ComposerModelPill } from './ComposerModelPill'
 import { ComposerToolsMenu } from './ComposerToolsMenu'
 import { useSessionGoal, useStartSessionGoal } from '@/hooks/useSessionGoals'
 import { useSessionPermissionMode } from '@/hooks/useSessionPermissionMode'
@@ -1012,6 +1012,9 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   const { setShowDialog, hasForSession: hasPermissionsForSession } = usePermissions()
   const hasPendingPermissionForSession = hasPermissionsForSession(sessionID)
   const { hasVariants, currentVariant, cycleVariant } = useVariants(directory, modelSelectionSession)
+  const isCompacting = useSessionStatusForSession(sessionID).type === 'compact'
+  const modelPillVariant = hasVariants && currentVariant ? currentVariant : null
+  const handleCompact = useCallback(() => commandActions.compact(''), [commandActions])
 
   const handleAgentChange = useCallback((agentId: string) => {
     setLocalMode(agentId)
@@ -1340,21 +1343,17 @@ return (
                   </IconToggleButton>
                 </>
               ) : null}
-              <ModelQuickSelect
+              <ComposerModelPill
                 directory={directory}
+                sessionID={sessionID}
+                modelName={displayModelName}
+                variant={modelPillVariant}
+                modelSelectionSession={modelSelectionSession}
                 open={isModelPickerOpen}
                 onOpenChange={setIsModelPickerOpen}
-                session={modelSelectionSession}
-              >
-                <button
-                  className="px-2.5 py-0.5 md:px-3 min-h-11 md:min-h-9 min-w-0 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer flex-1 md:flex-initial md:w-auto md:max-w-[220px] dark:border-border/30 flex flex-col items-start justify-center overflow-hidden"
-                >
-                  <span className="truncate w-full text-left">{displayModelName || 'Select model'}</span>
-                  {hasVariants && currentVariant && (
-                    <span className="text-[10px] text-highlight truncate w-full text-left capitalize">{currentVariant}</span>
-                  )}
-                </button>
-              </ModelQuickSelect>
+                isCompacting={isCompacting}
+                onCompact={handleCompact}
+              />
             </>
           )}
         </div>

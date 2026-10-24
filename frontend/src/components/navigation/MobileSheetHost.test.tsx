@@ -8,9 +8,9 @@ vi.mock('@/components/file-browser/FileBrowserSheet', () => ({
   FileBrowserSheet: ({ isOpen, basePath, repoName }: { isOpen: boolean; basePath: string; repoName: string }) =>
     isOpen ? <div data-testid="file-browser-sheet" data-base-path={basePath} data-repo-name={repoName}>FileBrowserSheet</div> : null,
 }))
-vi.mock('@/components/navigation/RepoQuickSwitchSheet', () => ({
-  RepoQuickSwitchSheet: ({ isOpen }: { isOpen: boolean }) =>
-    isOpen ? <div data-testid="repo-quick-switch-sheet">RepoQuickSwitchSheet</div> : null,
+vi.mock('@/components/session/SessionPickerSheet', () => ({
+  SessionPickerSheet: ({ isOpen }: { isOpen: boolean }) =>
+    isOpen ? <div data-testid="session-picker-sheet">SessionPickerSheet</div> : null,
 }))
 vi.mock('@/components/navigation/NotificationsSheet', () => ({
   NotificationsSheet: ({ isOpen }: { isOpen: boolean }) =>
@@ -58,18 +58,18 @@ describe('MobileSheetHost', () => {
     expect(container.firstChild).toBeNull()
   })
 
-  it('renders RepoQuickSwitchSheet when mobileTab=repos', () => {
+  it('renders SessionPickerSheet when mobileTab=sessions', () => {
     vi.mocked(useMobileTabBar).mockReturnValue({
-      openSheet: 'repos',
+      openSheet: 'sessions',
       open: vi.fn(),
       close: vi.fn(),
     })
     render(
-      <MemoryRouter initialEntries={['/?mobileTab=repos']}>
+      <MemoryRouter initialEntries={['/?mobileTab=sessions']}>
         <MobileSheetHost />
       </MemoryRouter>,
     )
-    expect(screen.getByTestId('repo-quick-switch-sheet')).toBeInTheDocument()
+    expect(screen.getByTestId('session-picker-sheet')).toBeInTheDocument()
   })
 
   it('renders FileBrowserSheet with correct props when mobileTab=files', () => {
@@ -134,15 +134,15 @@ describe('MobileSheetHost', () => {
   it('closes sheet when onClose is called', () => {
     const mockClose = vi.fn()
     vi.mocked(useMobileTabBar).mockReturnValue({
-      openSheet: 'repos',
+      openSheet: 'sessions',
       open: vi.fn(),
       close: mockClose,
     })
     render(
-      <MemoryRouter initialEntries={['/?mobileTab=repos']}>
+      <MemoryRouter initialEntries={['/?mobileTab=sessions']}>
         <MobileSheetHost />
       </MemoryRouter>,
     )
-    expect(screen.getByTestId('repo-quick-switch-sheet')).toBeInTheDocument()
+    expect(screen.getByTestId('session-picker-sheet')).toBeInTheDocument()
   })
 })

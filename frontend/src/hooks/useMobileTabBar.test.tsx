@@ -13,9 +13,9 @@ describe('useMobileTabBar', () => {
 
   it('returns the correct openSheet when mobileTab param is set', () => {
     const { result } = renderHook(() => useMobileTabBar(), {
-      wrapper: createRouterWrapper(['/?mobileTab=repos']),
+      wrapper: createRouterWrapper(['/?mobileTab=sessions']),
     })
-    expect(result.current.openSheet).toBe('repos')
+    expect(result.current.openSheet).toBe('sessions')
   })
 
   it('open sets the mobileTab param', () => {
@@ -45,7 +45,7 @@ describe('useMobileTabBar', () => {
   })
 
   it('handles all valid MobileSheetKey values', () => {
-    const validKeys = ['repos', 'files', 'notifications', 'more'] as const
+    const validKeys = ['sessions', 'files', 'notifications', 'more'] as const
     validKeys.forEach((key) => {
       const { result } = renderHook(() => useMobileTabBar(), {
         wrapper: createRouterWrapper([`/?mobileTab=${key}`]),
@@ -56,7 +56,7 @@ describe('useMobileTabBar', () => {
 
   it('returns stable openSheet identity across rerenders when search is unchanged', () => {
     const { result, rerender } = renderHook(() => useMobileTabBar(), {
-      wrapper: createRouterWrapper(['/?mobileTab=repos']),
+      wrapper: createRouterWrapper(['/?mobileTab=sessions']),
     })
     const firstOpenSheet = result.current.openSheet
     rerender()
