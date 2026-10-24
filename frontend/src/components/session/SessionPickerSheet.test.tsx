@@ -88,6 +88,7 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
 })
 
 vi.mock('@/hooks/useSessionPins', () => ({
+  SESSION_PINS_QUERY_KEY: ['session-pins'],
   useSessionPins: () => ({ data: [] }),
   useToggleSessionPin: () => ({ mutate: vi.fn() }),
 }))

@@ -31,6 +31,7 @@ import { useSendErrorStore } from "../stores/sendErrorStore";
 import { useSessionStatus, useChildLifecycleForSession } from "../stores/sessionStatusStore";
 import { isRunningLifecycle } from "../lib/backgroundWork";
 import { childSessionReconciliationQueryKey, invalidateSessionListCaches, sessionTranscriptQueryKey } from "../lib/queryInvalidation";
+import { PERSISTED_CACHE_MAX_AGE_MS } from "../lib/queryPersistence";
 import { buildPinnedSessionKeys, buildSessionKey } from "../lib/sessionKey";
 import { toggleSessionPin } from "../api/sessionPins";
 import { SESSION_PINS_QUERY_KEY } from "./useSessionPins";
@@ -82,6 +83,11 @@ export const useSessionsAcrossDirectories = (
   const projectScoped = !allDirectories && projectId !== undefined;
   const singleCursor = allDirectories || projectScoped;
   const includeChildren = options?.includeChildren ?? false;
+  /**
+   * Only the unfiltered list is restored from disk, so only it keeps the longer `gcTime`; a search
+   * result stays at the default and is collected as soon as it goes unused.
+   */
+  const persistedGcTime = normalizedSearch === undefined ? PERSISTED_CACHE_MAX_AGE_MS : undefined;
   const directoryKey = uniqueDirectories.join('|');
   const childSessionsParam = includeChildren ? { includeChildren: true } : {};
 
@@ -179,6 +185,7 @@ export const useSessionsAcrossDirectories = (
     getNextPageParam: (lastPage) => lastPage.nextParam,
     enabled: uniqueDirectories.length > 0 || allDirectories,
     staleTime: 10000,
+    gcTime: persistedGcTime,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
   });
