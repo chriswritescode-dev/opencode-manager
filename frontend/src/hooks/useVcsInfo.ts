@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { getVcsInfo } from '@/api/opencode'
-import { serverScopedKey } from '@/lib/serverScope'
+import { vcsInfoQueryKey } from '@/lib/queryInvalidation'
 
 export interface UseVcsInfoOptions {
   enabled?: boolean
@@ -14,7 +14,7 @@ export function useVcsInfo(
   const { enabled = true } = options
 
   return useQuery({
-    queryKey: [...serverScopedKey(['opencode', 'vcs', directory ?? ''], serverId), 'info'],
+    queryKey: vcsInfoQueryKey(directory, serverId),
     queryFn: () => getVcsInfo(directory ?? '', serverId),
     enabled: enabled && Boolean(directory),
     staleTime: 30_000,

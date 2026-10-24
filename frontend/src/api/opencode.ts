@@ -112,7 +112,7 @@ export function remoteProjectName(project: OpenCodeProject): string {
 
 /**
  * Finds the project that owns a directory, matching its canonical directory and anything nested
- * inside it.
+ * inside it. Nested projects share a canonical prefix, so the deepest match owns the directory.
  *
  * @param projects Projects of the server that owns the directory.
  * @param directory Directory whose owning project is resolved.
@@ -122,9 +122,14 @@ export function findRemoteProjectForDirectory(
   projects: OpenCodeProject[],
   directory: string,
 ): OpenCodeProject | undefined {
-  return projects.find(
-    (project) => directory === project.canonical || directory.startsWith(`${project.canonical}/`),
-  )
+  let owner: OpenCodeProject | undefined
+  for (const project of projects) {
+    if (directory !== project.canonical && !directory.startsWith(`${project.canonical}/`)) continue
+    if (!owner || project.canonical.length > owner.canonical.length) {
+      owner = project
+    }
+  }
+  return owner
 }
 
 export type VcsInfo = Awaited<ReturnType<OpenCodeApi['vcs']['get']>>['data']

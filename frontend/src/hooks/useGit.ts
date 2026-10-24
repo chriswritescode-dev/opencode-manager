@@ -3,9 +3,10 @@ import type { QueryClient } from '@tanstack/react-query'
 import { gitFetch, gitPull, gitPush, gitCommit, gitStageFiles, gitUnstageFiles, gitDiscardFiles, fetchGitLog, fetchGitDiff, gitReset, gitRenameBranch, gitDeleteBranch, gitStashPush, gitStashApply, gitStashDrop, gitContinueOperation, gitAbortOperation, gitGenerateCommitMessage, gitIntegrateBranch, getApiErrorMessage, fetchGitStatus } from '@/api/git'
 import { createBranch } from '@/api/repos'
 import type { DeleteBranchRequest, DeleteBranchResult, IntegrateBranchRequest, RenameBranchRequest, StashPushRequest } from '@opencode-manager/shared'
+import type { Repo } from '@/api/types'
 import type { GitStatusResponse } from '@/types/git'
 import { showToast } from '@/lib/toast'
-import { invalidateRepoGitCaches, setRepoGitStatusCaches } from '@/lib/queryInvalidation'
+import { invalidateRepoGitCaches, invalidateVcsInfoCache, setRepoGitStatusCaches } from '@/lib/queryInvalidation'
 
 interface RepoGitMutationConfig<TData, TVariables> {
   mutationFn: (repoId: number, variables: TVariables) => Promise<TData>
@@ -160,12 +161,13 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
   const createBranchMutation = useMutation({
     mutationFn: async (branchName: string) => {
       if (!repoId) throw new Error('No repo ID')
-      await createBranch(repoId, branchName)
-      return fetchGitStatus(repoId)
+      const createdRepo = await createBranch(repoId, branchName)
+      return { createdRepo, status: await fetchGitStatus(repoId) }
     },
-    onSuccess: (data) => {
-      if (repoId) setRepoGitStatusCaches(queryClient, repoId, data)
+    onSuccess: ({ createdRepo, status }) => {
+      if (repoId) setRepoGitStatusCaches(queryClient, repoId, status)
       invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false })
+      invalidateVcsInfoCache(queryClient, createdRepo.fullPath)
       showToast.success('Branch created')
     },
     onError: handleError,
@@ -191,7 +193,10 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
     {
       mutationFn: gitRenameBranch,
       statusFromData: (data) => data,
-      invalidate: (client, id) => invalidateRepoGitCaches(client, id, { invalidateStatus: false }),
+      invalidate: (client, id) => {
+        invalidateRepoGitCaches(client, id, { invalidateStatus: false })
+        invalidateVcsInfoCache(client, client.getQueryData<Repo>(['repo', id])?.fullPath)
+      },
       successMessage: 'Branch renamed',
     },
   )

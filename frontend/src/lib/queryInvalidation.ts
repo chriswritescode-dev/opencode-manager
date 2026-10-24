@@ -1,5 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
+import { serverScopedKey } from '@/lib/serverScope'
 import type { GitStatusResponse } from '@/types/git'
 
 export function sessionTranscriptQueryKey(sessionID: string | null | undefined) {
@@ -12,6 +13,36 @@ export function shellsQueryKey(directory: string | null | undefined) {
 
 export function invalidateShellCaches(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ['opencode', 'shells'] })
+}
+
+/**
+ * Query key of the VCS info cached for one directory on one server.
+ *
+ * @param directory Directory the info describes; a missing directory keeps the placeholder key.
+ * @param serverId Server that owns the directory; defaults to the local one.
+ */
+export function vcsInfoQueryKey(
+  directory: string | null | undefined,
+  serverId: string = LOCAL_OPENCODE_SERVER_ID,
+) {
+  return [...serverScopedKey(['opencode', 'vcs', directory ?? ''], serverId), 'info']
+}
+
+/**
+ * Invalidates the VCS info of one directory so a branch change reaches every surface that shows the
+ * branch, while the status and diff caches of the same directory stay untouched.
+ *
+ * @param queryClient Client that owns the cache.
+ * @param directory Directory whose info is invalidated; a missing directory is ignored.
+ * @param serverId Server that owns the directory; defaults to the local one.
+ */
+export function invalidateVcsInfoCache(
+  queryClient: QueryClient,
+  directory: string | null | undefined,
+  serverId: string = LOCAL_OPENCODE_SERVER_ID,
+) {
+  if (!directory) return
+  queryClient.invalidateQueries({ queryKey: vcsInfoQueryKey(directory, serverId), exact: true })
 }
 
 export function childSessionReconciliationQueryKey(sessionID: string | null | undefined) {

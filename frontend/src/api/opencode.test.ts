@@ -851,6 +851,37 @@ describe('project helpers', () => {
     expect(findRemoteProjectForDirectory(projects, '/work/beta/packages/web')?.id).toBe('p2')
   })
 
+  it('picks the deepest project when one canonical directory contains another', () => {
+    const projects = [
+      project('p_parent', 'Repo', '/work/repo', { created: 1, updated: 2 }),
+      project('p_child', 'App', '/work/repo/packages/app', { created: 1, updated: 3 }),
+    ]
+
+    expect(findRemoteProjectForDirectory(projects, '/work/repo')?.id).toBe('p_parent')
+    expect(findRemoteProjectForDirectory(projects, '/work/repo/packages/app')?.id).toBe('p_child')
+    expect(findRemoteProjectForDirectory(projects, '/work/repo/packages/app/src')?.id).toBe('p_child')
+  })
+
+  it('credits a session in a nested project to the deepest project', () => {
+    const projects = [
+      project('p_parent', 'Repo', '/work/repo', { created: 1, updated: 20 }),
+      project('p_child', 'App', '/work/repo/packages/app', { created: 1, updated: 10 }),
+    ]
+
+    const ranked = rankProjectsBySessionActivity(projects, [
+      session('ses_nested', '/work/repo/packages/app/src', 400),
+    ])
+
+    expect(ranked.find((entry) => entry.project.id === 'p_child')?.activityAt).toBe(400)
+    expect(ranked.find((entry) => entry.project.id === 'p_parent')?.activityAt).toBe(20)
+  })
+
+  it('returns no project when no canonical directory contains the directory', () => {
+    const projects = [project('p1', 'Alpha', '/work/alpha', { created: 1, updated: 2 })]
+
+    expect(findRemoteProjectForDirectory(projects, '/srv/elsewhere')).toBeUndefined()
+  })
+
   it('does not match a directory that only shares a prefix with a canonical directory', () => {
     const projects = [project('p1', 'Alpha', '/work/alpha', { created: 1, updated: 2 })]
 

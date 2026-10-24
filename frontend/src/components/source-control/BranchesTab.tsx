@@ -14,7 +14,7 @@ import { useGit } from '@/hooks/useGit'
 import { GIT_UI_COLORS } from '@/lib/git-status-styles'
 import { CreateWorktreeDialog } from '@/components/repo/CreateWorktreeDialog'
 import { IntegrateBranchDialog } from '@/components/source-control/IntegrateBranchDialog'
-import { invalidateRepoGitCaches, setRepoGitStatusCaches } from '@/lib/queryInvalidation'
+import { invalidateRepoGitCaches, invalidateVcsInfoCache, setRepoGitStatusCaches } from '@/lib/queryInvalidation'
 
 interface BranchesTabProps {
   repoId: number
@@ -72,6 +72,7 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
       queryClient.setQueryData(['repo', repoId], updatedRepo)
       setRepoGitStatusCaches(queryClient, repoId, status)
       invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false })
+      invalidateVcsInfoCache(queryClient, updatedRepo.fullPath)
       refetch()
       showToast.success(`Switched to branch: ${updatedRepo.currentBranch}`)
     },
