@@ -1,8 +1,18 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useEffect, useMemo, useState, useCallback, type ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useSession, signIn, signUp, signOut, authClient, type AuthUser } from '@/lib/auth-client'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { getLoginRedirectTarget } from '@/lib/auth-loaders'
+import {
+  clearStoredAuthUser,
+  isTransientSessionError,
+  readStoredAuthUser,
+  toStoredAuthUser,
+  writeStoredAuthUser,
+  type StoredAuthUser,
+} from '@/lib/authSession'
+import { clearPersistedQueryCache } from '@/lib/queryPersistence'
 
 interface AuthConfig {
   enabledProviders: string[]
@@ -11,8 +21,10 @@ interface AuthConfig {
   adminConfigured: boolean
 }
 
+export type AuthContextUser = Pick<AuthUser, 'id' | 'email' | 'name'>
+
 interface AuthContextValue {
-  user: AuthUser | null
+  user: AuthContextUser | null
   isAuthenticated: boolean
   isLoading: boolean
   config: AuthConfig | null
@@ -34,7 +46,9 @@ interface AuthProviderProps {
 }
 
 export function AuthProvider({ children }: AuthProviderProps) {
-  const { data: session, isPending, refetch } = useSession()
+  const { data: session, error: sessionError, isPending, refetch } = useSession()
+  const [storedUser, setStoredUser] = useState<StoredAuthUser | null>(() => readStoredAuthUser())
+  const queryClient = useQueryClient()
   const [config, setConfig] = useState<AuthConfig | null>(null)
   const navigate = useNavigate()
   const location = useLocation()
@@ -42,6 +56,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
     () => getLoginRedirectTarget(location.search),
     [location.search],
   )
+
+  useEffect(() => {
+    if (session?.user) {
+      const validatedUser = toStoredAuthUser(session.user)
+      writeStoredAuthUser(validatedUser)
+      setStoredUser(validatedUser)
+      return
+    }
+    if (isPending) return
+    if (isTransientSessionError(sessionError)) return
+    clearStoredAuthUser()
+    setStoredUser(null)
+  }, [session, sessionError, isPending])
 
   useEffect(() => {
     const fetchConfig = async () => {
@@ -115,6 +142,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [])
 
   const logout = useCallback(async () => {
+    clearStoredAuthUser()
+    setStoredUser(null)
+    clearPersistedQueryCache()
+    queryClient.clear()
     await signOut({
       fetchOptions: {
         onSuccess: () => {
@@ -122,16 +153,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
         },
       },
     })
-  }, [])
+  }, [queryClient])
 
   const refreshSession = useCallback(async () => {
     await refetch()
   }, [refetch])
 
+  const user = session?.user ?? storedUser
+
   const value = useMemo<AuthContextValue>(() => ({
-    user: session?.user ?? null,
-    isAuthenticated: !!session?.user,
-    isLoading: isPending,
+    user,
+    isAuthenticated: !!user,
+    isLoading: isPending && !user,
     config,
     signInWithEmail,
     signInWithProvider,
@@ -141,7 +174,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     logout,
     refreshSession,
   }), [
-    session,
+    user,
     isPending,
     config,
     signInWithEmail,

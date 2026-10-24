@@ -148,7 +148,11 @@ describe('RemoteProjectList', () => {
     mocks.listProjects.mockResolvedValue([project])
     mocks.listSessionPage.mockResolvedValue({ items: [] })
     mocks.useCreateSession.mockReturnValue({ mutateAsync: mocks.createSession, isPending: false })
-    mocks.useOpenCodeServers.mockReturnValue({ servers: [server], isLoading: false })
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [server],
+      isLoading: false,
+      showsInitialLoading: false,
+    })
     mocks.useSettingsDialog.mockReturnValue({ openTab: mocks.openTab })
   })
 
@@ -396,6 +400,7 @@ describe('RemoteProjectList', () => {
     mocks.useOpenCodeServers.mockReturnValue({
       servers: [{ ...server, enabled: false }],
       isLoading: false,
+      showsInitialLoading: false,
     })
 
     renderProjectList()
@@ -405,12 +410,29 @@ describe('RemoteProjectList', () => {
   })
 
   it('shows a missing server state when the server is no longer configured', async () => {
-    mocks.useOpenCodeServers.mockReturnValue({ servers: [], isLoading: false })
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [],
+      isLoading: false,
+      showsInitialLoading: false,
+    })
 
     renderProjectList('srv_gone')
 
     expect(screen.getByText('Server not found')).toBeInTheDocument()
     expect(mocks.listProjects).not.toHaveBeenCalled()
+  })
+
+  it('loads instead of reporting a missing server while the server list is restoring', () => {
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [],
+      isLoading: false,
+      showsInitialLoading: true,
+    })
+
+    const { container } = renderProjectList('srv_gone')
+
+    expect(screen.queryByText('Server not found')).not.toBeInTheDocument()
+    expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0)
   })
 
   it('shows an empty state when the server has no projects', async () => {

@@ -28,6 +28,7 @@ import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 import { TTSProvider } from './contexts/TTSContext'
 import { ThemeProvider, useThemeMode } from './contexts/ThemeContext'
 import { AuthProvider } from './contexts/AuthContext'
+import { QueryCachePersistenceProvider } from './contexts/QueryCachePersistenceContext'
 import { KeyboardShortcutsProvider } from './contexts/KeyboardShortcutsContext'
 import { EventProvider, usePermissions, useEventContext } from '@/contexts/EventContext'
 import { OpenCodeServerProvider, isLocalOpenCodeServer } from '@/contexts/OpenCodeServerContext'
@@ -38,6 +39,7 @@ import { SSHHostKeyDialog } from './components/ssh/SSHHostKeyDialog'
 import { loginLoader, setupLoader, registerLoader, protectedLoader } from './lib/auth-loaders'
 import { getSwipeBackTarget, isSessionDetailRoute } from '@/lib/navigation'
 import { onNotificationClick } from '@/lib/serviceWorker'
+import { applyPersistedQueryDefaults } from '@/lib/queryPersistence'
 import { useAuth } from '@/hooks/useAuth'
 import { useOpenCodeFailureToast } from '@/hooks/useOpenCodeFailureToast'
 import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
@@ -54,6 +56,8 @@ const queryClient = new QueryClient({
     },
   },
 })
+
+applyPersistedQueryDefaults(queryClient)
 
 function SSHHostKeyDialogWrapper() {
   const { sshHostKey } = useEventContext()
@@ -168,12 +172,14 @@ function ServerScope({ children }: { children: ReactNode }) {
 function RootLayout() {
   return (
     <AuthProvider>
-      <ThemeProvider>
-        <TTSProvider>
-          <ThemedToaster />
-          <Outlet />
-        </TTSProvider>
-      </ThemeProvider>
+      <QueryCachePersistenceProvider>
+        <ThemeProvider>
+          <TTSProvider>
+            <ThemedToaster />
+            <Outlet />
+          </TTSProvider>
+        </ThemeProvider>
+      </QueryCachePersistenceProvider>
     </AuthProvider>
   )
 }

@@ -162,7 +162,7 @@ export function RepoList({ onAddRepo }: { onAddRepo: () => void }) {
 
   const {
     data: repos,
-    isLoading,
+    isPending,
     error,
   } = useQuery({
     queryKey: ["repos"],
@@ -312,7 +312,7 @@ export function RepoList({ onAddRepo }: { onAddRepo: () => void }) {
 
   const renderContent = () => {
     switch (true) {
-      case isLoading && !repos:
+      case isPending && !repos:
         return (
           <div className="px-0 md:px-4 md:pt-4 h-full flex flex-col">
             <div className="px-2 md:px-0">
@@ -332,7 +332,7 @@ export function RepoList({ onAddRepo }: { onAddRepo: () => void }) {
           </div>
         )
 
-      case !!error:
+      case !!error && !repos:
         return (
           <div className="text-center p-8 text-destructive">
             Failed to load repositories:{" "}

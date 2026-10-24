@@ -191,6 +191,7 @@ export const useSessionsAcrossDirectories = (
   return {
     data,
     isLoading: query.isLoading,
+    isPending: query.isPending && uniqueDirectories.length > 0,
     isPlaceholderData: query.isPlaceholderData,
     isError: query.isError,
     fetchNextPage: query.fetchNextPage,
