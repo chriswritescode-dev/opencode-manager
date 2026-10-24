@@ -1,18 +1,15 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useEffect, useMemo, useState, useCallback, type ReactNode } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { useSession, signIn, signUp, signOut, authClient, type AuthUser } from '@/lib/auth-client'
+import { useSession, signIn, signUp, signOut, authClient } from '@/lib/auth-client'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { getLoginRedirectTarget } from '@/lib/auth-loaders'
 import {
+  STORED_AUTH_USER_KEY,
   clearStoredAuthUser,
-  isTransientSessionError,
   readStoredAuthUser,
-  toStoredAuthUser,
-  writeStoredAuthUser,
+  reconcileStoredAuthUser,
   type StoredAuthUser,
 } from '@/lib/authSession'
-import { clearPersistedQueryCache } from '@/lib/queryPersistence'
 
 interface AuthConfig {
   enabledProviders: string[]
@@ -21,10 +18,8 @@ interface AuthConfig {
   adminConfigured: boolean
 }
 
-export type AuthContextUser = Pick<AuthUser, 'id' | 'email' | 'name'>
-
 interface AuthContextValue {
-  user: AuthContextUser | null
+  user: StoredAuthUser | null
   isAuthenticated: boolean
   isLoading: boolean
   config: AuthConfig | null
@@ -48,7 +43,7 @@ interface AuthProviderProps {
 export function AuthProvider({ children }: AuthProviderProps) {
   const { data: session, error: sessionError, isPending, refetch } = useSession()
   const [storedUser, setStoredUser] = useState<StoredAuthUser | null>(() => readStoredAuthUser())
-  const queryClient = useQueryClient()
+  const [signedOut, setSignedOut] = useState(false)
   const [config, setConfig] = useState<AuthConfig | null>(null)
   const navigate = useNavigate()
   const location = useLocation()
@@ -58,16 +53,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
   )
 
   useEffect(() => {
-    if (session?.user) {
-      const validatedUser = toStoredAuthUser(session.user)
-      writeStoredAuthUser(validatedUser)
-      setStoredUser(validatedUser)
-      return
-    }
     if (isPending) return
-    if (isTransientSessionError(sessionError)) return
-    clearStoredAuthUser()
-    setStoredUser(null)
+    const reconciledUser = reconcileStoredAuthUser(session?.user ?? null, sessionError)
+    setStoredUser(reconciledUser)
+    if (reconciledUser !== null) setSignedOut(false)
   }, [session, sessionError, isPending])
 
   useEffect(() => {
@@ -142,24 +131,41 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [])
 
   const logout = useCallback(async () => {
-    clearStoredAuthUser()
+    setSignedOut(true)
     setStoredUser(null)
-    clearPersistedQueryCache()
-    queryClient.clear()
-    await signOut({
-      fetchOptions: {
-        onSuccess: () => {
-          window.location.href = '/login'
+    clearStoredAuthUser()
+    try {
+      await signOut({
+        fetchOptions: {
+          onSuccess: () => {
+            window.location.href = '/login'
+          },
         },
-      },
-    })
-  }, [queryClient])
+      })
+    } catch {
+      return
+    }
+  }, [])
 
   const refreshSession = useCallback(async () => {
     await refetch()
   }, [refetch])
 
-  const user = session?.user ?? storedUser
+  const user = signedOut ? null : session?.user ?? storedUser
+
+  useEffect(() => {
+    if (user === null) return
+
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key !== null && event.key !== STORED_AUTH_USER_KEY) return
+      const nextUser = readStoredAuthUser()
+      if (nextUser !== null && nextUser.id === user.id) return
+      void logout()
+    }
+
+    window.addEventListener('storage', handleStorageChange)
+    return () => window.removeEventListener('storage', handleStorageChange)
+  }, [user, logout])
 
   const value = useMemo<AuthContextValue>(() => ({
     user,

@@ -1,12 +1,6 @@
 import { redirect, type LoaderFunctionArgs } from 'react-router-dom'
 import { getSession } from './auth-client'
-import {
-  clearStoredAuthUser,
-  isTransientSessionError,
-  readStoredAuthUser,
-  toStoredAuthUser,
-  writeStoredAuthUser,
-} from './authSession'
+import { reconcileStoredAuthUser } from './authSession'
 
 export interface AuthConfig {
   enabledProviders: string[]
@@ -118,30 +112,26 @@ export async function registerLoader() {
 }
 
 /**
- * Guards a signed-in route. A validated user is remembered so the next cold start can open the app
- * before the network answers; when the session read fails transiently (network, 5xx, timeout) the
- * remembered user stands in for it. A successful read with no user, or a 401, is authoritative and
- * deletes the remembered profile.
+ * Guards a signed-in route through {@link reconcileStoredAuthUser}: a validated user is let through
+ * and remembered for the next cold start, a transient session failure is let through while a
+ * remembered user stands in for it, and an authoritative empty or rejected session is redirected to
+ * login with the requested location.
  */
 export async function protectedLoader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url)
   let session: Awaited<ReturnType<typeof getSession>> | null = null
+  let failure: unknown = null
   try {
     session = await getSession()
-  } catch {
-    session = null
+  } catch (error) {
+    failure = error
   }
 
-  if (session?.data?.user) {
-    writeStoredAuthUser(toStoredAuthUser(session.data.user))
-    return null
-  }
-
-  if (session === null || isTransientSessionError(session.error)) {
-    if (readStoredAuthUser() !== null) return null
-  } else {
-    clearStoredAuthUser()
-  }
+  const storedUser = reconcileStoredAuthUser(
+    session?.data?.user ?? null,
+    failure ?? session?.error ?? null,
+  )
+  if (storedUser !== null) return null
 
   return redirect(loginRedirectPath(`${url.pathname}${url.search}${url.hash}`))
 }

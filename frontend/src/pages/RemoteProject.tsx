@@ -28,7 +28,7 @@ import { ToolSidePanel } from '@/components/navigation/ToolSidePanel'
 
 function RemoteProjectContent({ serverId, directory }: { serverId: string; directory?: string }) {
   const navigate = useNavigate()
-  const { servers, isLoading: serversLoading } = useOpenCodeServers()
+  const { servers, showsInitialLoading: serversLoading } = useOpenCodeServers()
   const { openTab } = useSettingsDialog()
   const [mcpDialogOpen, setMcpDialogOpen] = useDialogParam('mcp')
   const [skillsDialogOpen, setSkillsDialogOpen] = useDialogParam('skills')

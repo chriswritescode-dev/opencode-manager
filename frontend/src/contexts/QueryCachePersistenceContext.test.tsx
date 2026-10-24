@@ -2,9 +2,12 @@ import { act, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider, dehydrate, useIsRestoring } from '@tanstack/react-query'
 import { createSyncStoragePersister } from '@tanstack/query-sync-storage-persister'
-import type { Persister } from '@tanstack/react-query-persist-client'
 import { QueryCachePersistenceProvider } from './QueryCachePersistenceContext'
-import { QUERY_CACHE_STORAGE_KEY, queryCacheBuster } from '@/lib/queryPersistence'
+import {
+  QUERY_CACHE_STORAGE_KEY,
+  queryCacheBuster,
+  type QueryCachePersister,
+} from '@/lib/queryPersistence'
 
 const mocks = vi.hoisted(() => ({
   useAuth: vi.fn(),
@@ -52,8 +55,16 @@ function createStorage() {
 
 type TestStorage = ReturnType<typeof createStorage>['storage']
 
-function createTestPersister(storage: TestStorage): Persister {
-  return createSyncStoragePersister({ storage, key: QUERY_CACHE_STORAGE_KEY, throttleTime: 0 })
+function createTestPersister(storage: TestStorage, throttleTime = 0): QueryCachePersister {
+  const persister = createSyncStoragePersister({
+    storage,
+    key: QUERY_CACHE_STORAGE_KEY,
+    throttleTime,
+  })
+  return {
+    ...persister,
+    hasPersistedClient: () => storage.getItem(QUERY_CACHE_STORAGE_KEY) !== null,
+  }
 }
 
 function seed(
@@ -72,9 +83,12 @@ function seed(
 }
 
 let restoringValue: boolean | undefined
+let restoringHistory: boolean[] = []
 
 function RestoringProbe() {
-  restoringValue = useIsRestoring()
+  const isRestoring = useIsRestoring()
+  restoringValue = isRestoring
+  restoringHistory.push(isRestoring)
   return null
 }
 
@@ -86,11 +100,16 @@ function createClient(): QueryClient {
   return client
 }
 
-function tree(auth: AuthStub, persister: Persister, client: QueryClient) {
+function tree(
+  auth: AuthStub,
+  persister: QueryCachePersister,
+  client: QueryClient,
+  persistThrottleMs = 0,
+) {
   mocks.useAuth.mockReturnValue(auth)
   return (
     <QueryClientProvider client={client}>
-      <QueryCachePersistenceProvider persister={persister}>
+      <QueryCachePersistenceProvider persister={persister} persistThrottleMs={persistThrottleMs}>
         <RestoringProbe />
       </QueryCachePersistenceProvider>
     </QueryClientProvider>
@@ -105,6 +124,7 @@ async function settle(): Promise<void> {
 
 beforeEach(() => {
   restoringValue = undefined
+  restoringHistory = []
   mocks.useAuth.mockReset()
   localStorage.clear()
 })
@@ -178,7 +198,7 @@ describe('QueryCachePersistenceProvider', () => {
 
   it('is restoring until the restore resolves', async () => {
     let resolveRestore: () => void = () => {}
-    const persister: Persister = {
+    const persister: QueryCachePersister = {
       persistClient: vi.fn(),
       restoreClient: vi.fn(
         () => new Promise<undefined>((resolve) => {
@@ -186,6 +206,7 @@ describe('QueryCachePersistenceProvider', () => {
         }),
       ),
       removeClient: vi.fn(),
+      hasPersistedClient: () => true,
     }
 
     render(tree(signedIn(), persister, createClient()))
@@ -224,5 +245,73 @@ describe('QueryCachePersistenceProvider', () => {
     await waitFor(() => expect(client.getQueryData(['repos'])).toBeUndefined())
     await waitFor(() => expect(store.has(QUERY_CACHE_STORAGE_KEY)).toBe(false))
     await waitFor(() => expect(restoringValue).toBe(false))
+  })
+
+  it('subscribes without a restoring pass when nothing is persisted yet', async () => {
+    const { store, storage } = createStorage()
+    const client = createClient()
+    const persister = createTestPersister(storage)
+
+    render(tree(signedIn(), persister, client))
+
+    expect(restoringHistory).not.toContain(true)
+
+    act(() => {
+      client.setQueryData(['repos'], [{ id: 1 }])
+    })
+    await settle()
+
+    expect(store.has(QUERY_CACHE_STORAGE_KEY)).toBe(true)
+    expect(restoringHistory).not.toContain(true)
+  })
+
+  it('saves an allowlisted update but not a transcript update', async () => {
+    const client = createClient()
+    const persistClient = vi.fn()
+    const persister: QueryCachePersister = {
+      persistClient,
+      restoreClient: () => undefined,
+      removeClient: vi.fn(),
+      hasPersistedClient: () => false,
+    }
+
+    render(tree(signedIn(), persister, client))
+
+    act(() => {
+      client.setQueryData(['opencode', 'transcript', 'ses_1'], [{ text: 'streamed' }])
+    })
+    await settle()
+    expect(persistClient).not.toHaveBeenCalled()
+
+    act(() => {
+      client.setQueryData(['repos'], [{ id: 1 }])
+    })
+    await settle()
+
+    expect(persistClient).toHaveBeenCalledTimes(1)
+    const persisted = persistClient.mock.calls[0][0]
+    expect(persisted.buster).toBe(queryCacheBuster('user-1'))
+    expect(persisted.clientState.queries.map((query: { queryKey: unknown[] }) => query.queryKey)).toEqual([
+      ['repos'],
+    ])
+  })
+
+  it('drops a save scheduled before sign-out instead of rewriting the cache', async () => {
+    const { store, storage } = createStorage()
+    const client = createClient()
+    const persister = createTestPersister(storage)
+
+    const view = render(tree(signedIn(), persister, client, 20))
+    act(() => {
+      client.setQueryData(['repos'], [{ id: 1 }])
+    })
+
+    view.rerender(tree(signedOut(), persister, client, 20))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 60))
+    })
+
+    expect(store.has(QUERY_CACHE_STORAGE_KEY)).toBe(false)
+    expect(client.getQueryData(['repos'])).toBeUndefined()
   })
 })

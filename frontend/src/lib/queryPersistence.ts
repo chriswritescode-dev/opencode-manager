@@ -1,4 +1,9 @@
-import type { DehydratedState, Query, QueryClient } from '@tanstack/react-query'
+import type {
+  DehydratedState,
+  Query,
+  QueryCacheNotifyEvent,
+  QueryClient,
+} from '@tanstack/react-query'
 import { createSyncStoragePersister } from '@tanstack/query-sync-storage-persister'
 import type {
   PersistedClient,
@@ -21,6 +26,11 @@ export interface QueryCacheStorage {
   getItem: (key: string) => string | null
   setItem: (key: string, value: string) => void
   removeItem: (key: string) => void
+}
+
+export interface QueryCachePersister extends Persister {
+  /** Whether a cache for any buster is currently stored, so a first save needs no restore pass. */
+  hasPersistedClient: () => boolean
 }
 
 /**
@@ -50,9 +60,40 @@ export const PERSISTED_QUERY_RULES: readonly PersistedQueryRule[] = [
 
 export const PERSISTED_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000
 
+/** Minimum spacing between persisted saves, so a burst of cache changes costs one write. */
+export const PERSIST_THROTTLE_MS = 1000
+
 export const QUERY_CACHE_STORAGE_KEY = 'ocm.query-cache.v1'
 
 const SESSION_LIST_OPTIONS_INDEX = 3
+
+/**
+ * Cache actions that change stored data or a query status. `fetch`, `pause` and `continue` only move
+ * `fetchStatus`, which is not persisted, so they never justify a save.
+ */
+const PERSISTED_UPDATE_ACTIONS: ReadonlySet<string> = new Set([
+  'success',
+  'error',
+  'failed',
+  'invalidate',
+  'setState',
+])
+
+/**
+ * Whether a query cache event can change the persisted cache: the query key must be allowlisted and,
+ * for an update, the action must change data or status.
+ *
+ * Streaming a transcript rewrites its key once per frame, so filtering here keeps the expensive
+ * dehydrate away from every non-allowlisted update.
+ */
+export function shouldPersistCacheEvent(event: QueryCacheNotifyEvent): boolean {
+  if (event.type === 'added' || event.type === 'removed') {
+    return isPersistedQueryKey(event.query.queryKey)
+  }
+  if (event.type !== 'updated') return false
+  if (!PERSISTED_UPDATE_ACTIONS.has(event.action.type)) return false
+  return isPersistedQueryKey(event.query.queryKey)
+}
 
 function matchesRule(rule: PersistedQueryRule, queryKey: readonly unknown[]): boolean {
   if (queryKey.length < rule.prefix.length) return false
@@ -176,20 +217,78 @@ export function createDropOldestHalfRetryer(): PersistRetryer {
 
 /**
  * Creates the localStorage persister that stores the dehydrated cache under
- * {@link QUERY_CACHE_STORAGE_KEY}, saving at most once per second. Infinite queries are capped to
- * their first page before the write, and {@link createDropOldestHalfRetryer} keeps a full quota
- * from silencing persistence.
+ * {@link QUERY_CACHE_STORAGE_KEY}. Infinite queries are capped to their first page before the write,
+ * and {@link createDropOldestHalfRetryer} keeps a full quota from silencing persistence.
+ *
+ * Writes are spaced by `throttleTime`; {@link createBusterGuardedPersister} throttles at the buster
+ * level instead, so the persister it wraps is created with a zero throttle.
  */
 export function createQueryCachePersister(
   storage: QueryCacheStorage | null = typeof window === 'undefined' ? null : window.localStorage,
-): Persister {
-  return createSyncStoragePersister({
+  throttleTime: number = PERSIST_THROTTLE_MS,
+): QueryCachePersister {
+  const persister = createSyncStoragePersister({
     storage,
     key: QUERY_CACHE_STORAGE_KEY,
-    throttleTime: 1000,
+    throttleTime,
     serialize: serializePersistedClient,
     retry: createDropOldestHalfRetryer(),
   })
+
+  return {
+    ...persister,
+    hasPersistedClient: () => {
+      if (storage === null) return false
+      try {
+        return storage.getItem(QUERY_CACHE_STORAGE_KEY) !== null
+      } catch {
+        return false
+      }
+    },
+  }
+}
+
+export interface BusterGuardedPersisterOptions {
+  persister: QueryCachePersister
+  /** The buster that may still be written, or `null` once the account is signed out. */
+  readBuster: () => string | null
+  throttleTime?: number
+}
+
+/**
+ * Wraps a persister so a save runs only when the buster that owns it is still active at write time.
+ *
+ * The throttle lives here, after the guard, because a save scheduled before sign-out would otherwise
+ * land after `removeClient` and rewrite the previous account's cache.
+ */
+export function createBusterGuardedPersister({
+  persister,
+  readBuster,
+  throttleTime = PERSIST_THROTTLE_MS,
+}: BusterGuardedPersisterOptions): QueryCachePersister {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let pendingClient: PersistedClient | null = null
+
+  const flush = () => {
+    timer = null
+    const client = pendingClient
+    pendingClient = null
+    if (client === null || client.buster !== readBuster()) return
+    void Promise.resolve(persister.persistClient(client)).catch(() => {})
+  }
+
+  return {
+    persistClient: (client) => {
+      pendingClient = client
+      if (timer === null) timer = setTimeout(flush, throttleTime)
+    },
+    restoreClient: () => persister.restoreClient(),
+    removeClient: () => {
+      pendingClient = null
+      return persister.removeClient()
+    },
+    hasPersistedClient: () => persister.hasPersistedClient(),
+  }
 }
 
 /**
@@ -204,16 +303,5 @@ export function applyPersistedQueryDefaults(queryClient: QueryClient): void {
   for (const rule of PERSISTED_QUERY_RULES) {
     if (rule.lastSegment !== undefined || rule.gcTimeInQueryOptions) continue
     queryClient.setQueryDefaults(rule.prefix, { gcTime: PERSISTED_CACHE_MAX_AGE_MS })
-  }
-}
-
-/** Removes the persisted cache from storage, e.g. on logout. */
-export function clearPersistedQueryCache(
-  storage: QueryCacheStorage | null = typeof window === 'undefined' ? null : window.localStorage,
-): void {
-  try {
-    storage?.removeItem(QUERY_CACHE_STORAGE_KEY)
-  } catch {
-    return
   }
 }
