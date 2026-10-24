@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import type { Repo, Session } from '@/api/types'
 import { BottomSheet } from '@/components/ui/bottom-sheet'
 import { LinkedServersNav } from '@/components/navigation/LinkedServersNav'
@@ -17,7 +18,7 @@ interface SessionPickerSheetProps {
 export function SessionPickerSheet({ isOpen, onClose }: SessionPickerSheetProps) {
   const navigate = useNavigate()
   const [addRepoOpen, setAddRepoOpen] = useState(false)
-  const { currentRepo, activeSessionID, remote } = useSessionPickerRouteScope(isOpen)
+  const { currentRepo, activeSessionID, activeServerId, remote } = useSessionPickerRouteScope(isOpen)
 
   const navigateReplacing = useCallback(
     (path: string) => {
@@ -28,24 +29,24 @@ export function SessionPickerSheet({ isOpen, onClose }: SessionPickerSheetProps)
 
   const handleSelectSession = useCallback(
     (session: Session, repo: Repo) => {
-      if (session.id === activeSessionID) {
+      if (session.id === activeSessionID && activeServerId === LOCAL_OPENCODE_SERVER_ID) {
         onClose()
         return
       }
       navigateReplacing(getSessionPath(repo.id, session.id))
     },
-    [activeSessionID, navigateReplacing, onClose],
+    [activeServerId, activeSessionID, navigateReplacing, onClose],
   )
 
   const handleSelectRemoteSession = useCallback(
     (session: Session, serverId: string) => {
-      if (session.id === activeSessionID) {
+      if (session.id === activeSessionID && serverId === activeServerId) {
         onClose()
         return
       }
       navigateReplacing(getServerSessionPath(serverId, session.id))
     },
-    [activeSessionID, navigateReplacing, onClose],
+    [activeServerId, activeSessionID, navigateReplacing, onClose],
   )
 
   const handleDeleteActiveSession = useCallback(() => {

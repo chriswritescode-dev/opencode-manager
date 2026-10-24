@@ -9,6 +9,7 @@ import { useSidebarServerSelection } from '@/hooks/useSidebarServerSelection'
 export interface SessionPickerRouteScope {
   currentRepo: Repo | undefined
   activeSessionID: string | undefined
+  activeServerId: string | undefined
   isRemote: boolean
   remote: { serverId: string; serverName?: string; projectDirectory?: string } | undefined
 }
@@ -21,23 +22,24 @@ export function useSessionPickerRouteScope(enabled: boolean): SessionPickerRoute
 
   const isRemote = selectedServerId !== LOCAL_OPENCODE_SERVER_ID
   const repoRoute = parseRepoRoute(pathname)
+  const serverSessionRoute = parseServerSessionRoute(pathname)
   const currentRepo = isRemote || repoRoute.repoId === null
     ? undefined
     : repos.find((candidate) => candidate.id === repoRoute.repoId)
-  const activeSessionID = repoRoute.sessionId
-    ?? parseServerSessionRoute(pathname)?.sessionId
-    ?? undefined
+  const activeSessionID = repoRoute.sessionId ?? serverSessionRoute?.sessionId ?? undefined
+  const activeServerId = repoRoute.sessionId ? LOCAL_OPENCODE_SERVER_ID : serverSessionRoute?.serverId
   const remoteProjectDirectory = isRemote
     ? parseServerProjectRoute(pathname, search)?.directory
     : undefined
 
   if (!isRemote) {
-    return { currentRepo, activeSessionID, isRemote, remote: undefined }
+    return { currentRepo, activeSessionID, activeServerId, isRemote, remote: undefined }
   }
 
   return {
     currentRepo,
     activeSessionID,
+    activeServerId,
     isRemote,
     remote: {
       serverId: selectedServerId,

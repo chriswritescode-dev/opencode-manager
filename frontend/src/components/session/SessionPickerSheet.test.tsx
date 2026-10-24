@@ -353,7 +353,37 @@ describe('SessionPickerSheet', () => {
     )
   })
 
-  it('opens an activity row of another linked server than the selected one', async () => {
+  it('opens a remote activity row of the same session id that is open on another server', async () => {
+    useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
+    mocks.activeWorkGroups = {
+      needsInput: [],
+      running: [],
+      recent: [activeWorkItem('ses_shared', '/home/me/hall', { id: 'srv_hall', name: 'Hall' })],
+    }
+
+    const { onClose } = renderSheet(['/servers/srv_kitchen/sessions/ses_shared?mobileTab=sessions'])
+
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Activity' }))
+    fireEvent.click(await screen.findByRole('option', { name: /Active ses_shared/ }))
+
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByTestId('location')).toHaveTextContent(
+      '/servers/srv_hall/sessions/ses_shared REPLACE',
+    )
+  })
+
+  it('opens a local session row that shares the id of the open remote session', async () => {
+    mocks.sessionsData = [session('ses_shared', 'Shared session', '/w/a')]
+
+    const { onClose } = renderSheet(['/servers/srv_kitchen/sessions/ses_shared?mobileTab=sessions'])
+
+    fireEvent.click(await screen.findByRole('option', { name: /Shared session/ }))
+
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByTestId('location')).toHaveTextContent('/repos/1/sessions/ses_shared REPLACE')
+  })
+
+  it('opens a session row of another linked server than the selected one', async () => {
     useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
     mocks.activeWorkGroups = {
       needsInput: [],
