@@ -14,6 +14,7 @@ import {
   testOpenCodeServerById,
   updateOpenCodeServer,
 } from '@/api/opencodeServers'
+import { cachedListStates } from '@/lib/queryState'
 
 const OPENCODE_SERVERS_QUERY_KEY = ['opencode-servers']
 const OPENCODE_SERVER_STATUSES_QUERY_KEY = ['opencode-server-statuses']
@@ -55,9 +56,13 @@ export function useOpenCodeServers(options: { enabled?: boolean } = {}) {
     mutationFn: (id: string) => testOpenCodeServerById(id),
   })
 
+  const serversListState = cachedListStates(serversQuery.data, serversQuery.isError)
+
   return {
     servers: serversQuery.data ?? [],
     isLoading: serversQuery.isLoading,
+    /** True only while no server list is cached and no error settled, so a restore is not read as a missing server. */
+    showsInitialLoading: serversListState.showsInitialLoading,
     isSuccess: serversQuery.isSuccess,
     error: serversQuery.error,
     refetch: serversQuery.refetch,

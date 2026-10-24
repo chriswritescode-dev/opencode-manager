@@ -13,3 +13,11 @@ export function writeStoredValue(key: string, value: unknown): void {
     return
   }
 }
+
+export function removeStoredValue(key: string): void {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    return
+  }
+}
