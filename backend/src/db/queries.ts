@@ -4,6 +4,7 @@ import { getReposPath } from '@opencode-manager/shared/config/env'
 import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH, getRepoDisplayName } from '@opencode-manager/shared/utils'
 import { getErrorMessage } from '../utils/error-utils'
 import { canonicalPathSync } from '../utils/fs-safe'
+import { invalidateRepoEnvCache } from '../utils/repo-env-cache'
 import path from 'path'
 
 interface RepoRow {
@@ -185,6 +186,7 @@ export function ensureAssistantRepo(db: Database): Repo {
 }
 
 export function createRepo(db: Database, repo: CreateRepoInput): Repo {
+  invalidateRepoEnvCache()
   const normalizedPath = repo.localPath.trim().replace(/\/+$/, '')
   
   const existing = repo.isLocal 
@@ -351,10 +353,12 @@ export function deleteRepo(db: Database, id: number): void {
     db.prepare('DELETE FROM multi_run_fusions WHERE multi_run_id IN (SELECT id FROM multi_runs WHERE repo_id = ?)').run(id)
     db.prepare('DELETE FROM multi_run_entries WHERE multi_run_id IN (SELECT id FROM multi_runs WHERE repo_id = ?)').run(id)
     db.prepare('DELETE FROM multi_runs WHERE repo_id = ?').run(id)
+    db.prepare('DELETE FROM secrets WHERE repo_id = ?').run(id)
     for (const table of TABLES_WITH_REPO_ID) {
       db.prepare(`DELETE FROM ${table} WHERE repo_id = ?`).run(id)
     }
     db.prepare('DELETE FROM repos WHERE id = ?').run(id)
   })
   remove()
+  invalidateRepoEnvCache()
 }

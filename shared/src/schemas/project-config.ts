@@ -1,5 +1,7 @@
 import { z } from 'zod'
 import { TerminalInfoSchema } from './terminal'
+import { ENV_NAME_PATTERN, EnvironmentNameSchema, isReservedEnvName } from './secrets'
+import { parseEnvExpressionReferences } from '../utils/env-expressions'
 
 export const ProjectActionIconSchema = z.enum([
   'play',
@@ -30,10 +32,56 @@ export const WorktreeSetupCommandsSchema = z.array(z.string().trim().min(1).max(
 
 export const ProjectItemSourceSchema = z.enum(['personal', 'repo'])
 
+export const REPO_PROJECT_ENV_MAX_ENTRIES = 100
+
+const REPO_PROJECT_ENV_RESERVED_NAMES = ['GH_TOKEN'] as const
+
+const REPO_PROJECT_ENV_RESERVED_PREFIXES = ['GITHUB_', 'GIT_'] as const
+
+function isRepoProjectEnvGitReserved(name: string): boolean {
+  const normalized = name.toUpperCase()
+  if ((REPO_PROJECT_ENV_RESERVED_NAMES as readonly string[]).includes(normalized)) return true
+  return REPO_PROJECT_ENV_RESERVED_PREFIXES.some((prefix) => normalized.startsWith(prefix))
+}
+
+export const RepoProjectEnvValueSchema = z
+  .string()
+  .max(4000, 'Environment value must be at most 4000 characters')
+  .superRefine((value, ctx) => {
+    const parsed = parseEnvExpressionReferences(value)
+    if (!parsed.ok) {
+      ctx.addIssue({ code: 'custom', message: parsed.error })
+    }
+  })
+
+export const RepoProjectEnvSchema = z
+  .record(z.string(), RepoProjectEnvValueSchema)
+  .superRefine((env, ctx) => {
+    for (const key of Object.keys(env)) {
+      if (!ENV_NAME_PATTERN.test(key)) {
+        ctx.addIssue({ code: 'custom', message: `${key} is not a valid environment variable name`, path: [key] })
+      } else if (isReservedEnvName(key)) {
+        ctx.addIssue({ code: 'custom', message: `${key} is reserved for Manager or the runtime`, path: [key] })
+      } else if (isRepoProjectEnvGitReserved(key)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `${key} is reserved for git authentication; map the value in a local env file or use a secret instead`,
+          path: [key],
+        })
+      }
+    }
+  })
+  .refine(
+    (env) => Object.keys(env).length <= REPO_PROJECT_ENV_MAX_ENTRIES,
+    `At most ${REPO_PROJECT_ENV_MAX_ENTRIES} environment entries are allowed`,
+  )
+
 export const RepoProjectFileSchema = z.looseObject({
   version: z.literal(1),
   projectActions: z.array(ProjectActionSchema).optional(),
   setupWorktree: WorktreeSetupCommandsSchema.optional(),
+  environment: EnvironmentNameSchema.optional(),
+  env: RepoProjectEnvSchema.optional(),
 })
 
 export const ProjectConfigResponseSchema = z.object({
@@ -66,6 +114,8 @@ export const ProjectConfigResponseSchema = z.object({
           }),
         ),
         setup: z.array(z.string()),
+        environment: z.string().optional(),
+        env: z.record(z.string(), z.string()).optional(),
       })
       .nullable(),
     error: z.string().optional(),

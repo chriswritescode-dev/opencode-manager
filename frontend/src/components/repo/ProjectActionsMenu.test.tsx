@@ -191,6 +191,8 @@ describe('ProjectActionsMenu', () => {
         { id: 'shadowed', name: 'Shadowed action', command: 'pnpm shadowed', url: null, autoOpenUrl: false },
       ],
       setup: ['pnpm install'],
+      environment: 'e2e',
+      env: { OPENAI_API_KEY: '${{ secrets.OPENAI_API_KEY }}' },
     }
     mocks.useProjectConfig.mockReturnValue({ data: makeConfig([repoAction], HASH, executable), isLoading: false, error: null })
     mocks.getProjectConfig.mockResolvedValue(makeConfig([repoAction], HASH, executable))
@@ -207,6 +209,9 @@ describe('ProjectActionsMenu', () => {
     expect(screen.getByText('pnpm shadowed')).toBeInTheDocument()
     expect(screen.getByText('http://localhost:3000')).toBeInTheDocument()
     expect(screen.getByText('Opens URL automatically')).toBeInTheDocument()
+    expect(screen.getByText('Environment variables')).toBeInTheDocument()
+    expect(screen.getByText('e2e')).toBeInTheDocument()
+    expect(screen.getByText('OPENAI_API_KEY = ${{ secrets.OPENAI_API_KEY }}')).toBeInTheDocument()
     expect(screen.getByText('Worktree setup commands')).toBeInTheDocument()
     expect(screen.getByText('pnpm install')).toBeInTheDocument()
   })

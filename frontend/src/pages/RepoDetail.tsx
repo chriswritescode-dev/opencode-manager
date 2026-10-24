@@ -10,6 +10,7 @@ import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 import { ProjectActionsMenu } from "@/components/repo/ProjectActionsMenu";
 import { RepoActionsDialog } from "@/components/repo/RepoActionsDialog";
 import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
+import { RepoSecretsDialog } from "@/components/secrets/RepoSecretsDialog";
 import { MultiRunSheet } from "@/components/repo/MultiRunSheet";
 import { SourceControlPanel } from "@/components/source-control";
 import { TerminalPanel } from "@/components/terminal/TerminalPanel";
@@ -47,6 +48,7 @@ export function RepoDetail() {
   const [fileBrowserOpen, setFileBrowserOpen] = useDialogParam('files');
   const [mcpDialogOpen, setMcpDialogOpen] = useDialogParam('mcp');
   const [skillsDialogOpen, setSkillsDialogOpen] = useDialogParam('skills');
+  const [secretsDialogOpen, setSecretsDialogOpen] = useDialogParam('secrets');
   const [sourceControlOpen, setSourceControlOpen] = useDialogParam('sourceControl');
   const [terminalOpen, setTerminalOpen] = useTerminalDialogParam();
   const [actionsDialogOpen, setActionsDialogOpen] = useDialogParam('actions');
@@ -308,6 +310,12 @@ export function RepoDetail() {
       <RepoSkillsDialog
         open={!docked && skillsDialogOpen}
         onOpenChange={setSkillsDialogOpen}
+        repoId={repoId}
+      />
+
+      <RepoSecretsDialog
+        open={!docked && secretsDialogOpen}
+        onOpenChange={setSecretsDialogOpen}
         repoId={repoId}
       />
 

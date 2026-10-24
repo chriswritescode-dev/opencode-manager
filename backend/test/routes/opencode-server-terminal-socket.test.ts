@@ -10,6 +10,7 @@ import { TerminalService } from '../../src/services/terminal'
 import { OpenCodeServerNotFoundError } from '../../src/services/opencode-server-registry'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { CredentialProvider } from '../../src/services/credential-provider'
+import { createStubRepoEnvService } from '../helpers/stub-repo-env-service'
 import { startWebSocketServer, type WebSocketTestServer } from '../helpers/websocket-server'
 import { rawWebSocketHandshake } from '../helpers/raw-websocket-handshake'
 
@@ -59,8 +60,9 @@ const managerApp = new Hono()
 const managerWs = createNodeWebSocket({ app: managerApp })
 
 const terminalService = new TerminalService(
-  { client: remoteClient, baseUrl: () => `http://127.0.0.1:${upstream.port}`, includeLocalCredentials: false },
+  { client: remoteClient, baseUrl: () => `http://127.0.0.1:${upstream.port}`, includeLocalEnv: false },
   credentialProvider,
+  createStubRepoEnvService(),
 )
 
 const resolveTerminalService: ServerTerminalServiceResolver = (serverId) => {

@@ -19,6 +19,7 @@ import { PreviewWorkspace } from '@/components/preview/PreviewPanel'
 import { RepoMcpContent } from '@/components/repo/RepoMcpDialog'
 import { RepoActionsContent } from '@/components/repo/RepoActionsDialog'
 import { RepoSkillsContent } from '@/components/repo/RepoSkillsDialog'
+import { RepoSecretsContent } from '@/components/secrets/RepoSecretsDialog'
 import { RepoSchedulesContent } from '@/components/schedules/RepoSchedulesContent'
 import type { SkillFileInfo } from '@opencode-manager/shared'
 import type { ModelRef } from '@opencode-manager/shared/opencode'
@@ -384,6 +385,8 @@ export function ToolSidePanel({
         return <RepoActionsContent repoId={repoId} directory={directory} open />
       case 'schedules':
         return <RepoSchedulesContent repoId={repoId} embedded />
+      case 'secrets':
+        return <RepoSecretsContent repoId={repoId} />
     }
   }
 

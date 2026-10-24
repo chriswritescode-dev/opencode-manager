@@ -7,8 +7,20 @@ import { BASE_URL, E2E_TMP, STORAGE_STATE } from './env'
 
 const MOCK_MODEL_ID = 'mock-model'
 
+export type MockTurn =
+  | { content: string }
+  | { toolCall: { name: string; arguments: Record<string, unknown> } }
+
+export interface MockChatRequest {
+  stream?: boolean
+  tools?: unknown[]
+  messages?: Array<{ role?: string }>
+}
+
 export interface MockProvider {
+  readonly port: number
   setReply(text: string): void
+  setResponder(respond: (request: MockChatRequest) => MockTurn): void
   close(): Promise<void>
 }
 
@@ -22,10 +34,19 @@ export interface CreateMockRepoOptions {
   beforeCommit?: (directory: string) => void
 }
 
+function toolCallPayload(toolCall: { name: string; arguments: Record<string, unknown> }): object {
+  return {
+    index: 0,
+    id: 'call_mock',
+    type: 'function',
+    function: { name: toolCall.name, arguments: JSON.stringify(toolCall.arguments) },
+  }
+}
+
 function handleMockRequest(
   request: http.IncomingMessage,
   response: http.ServerResponse,
-  getReply: () => string,
+  respond: (request: MockChatRequest) => MockTurn,
 ): void {
   const chunks: Buffer[] = []
   request.on('data', (chunk: Buffer) => chunks.push(chunk))
@@ -43,14 +64,14 @@ function handleMockRequest(
     }
 
     if (request.method === 'POST' && url.startsWith('/v1/chat/completions')) {
-      let body: { stream?: boolean } = {}
+      let body: MockChatRequest = {}
       try {
-        body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
+        body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as MockChatRequest
       } catch {
         body = {}
       }
 
-      const mockReply = getReply()
+      const turn = respond(body)
       const id = 'chatcmpl-mock'
       const created = Math.floor(Date.now() / 1000)
       const usage = { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
@@ -65,25 +86,37 @@ function handleMockRequest(
         response.write(
           `data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] })}\n\n`,
         )
-        response.write(
-          `data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { content: mockReply }, finish_reason: null }] })}\n\n`,
-        )
-        response.write(
-          `data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage })}\n\n`,
-        )
+        if ('toolCall' in turn) {
+          response.write(
+            `data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { tool_calls: [toolCallPayload(turn.toolCall)] }, finish_reason: null }] })}\n\n`,
+          )
+          response.write(
+            `data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage })}\n\n`,
+          )
+        } else {
+          response.write(
+            `data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { content: turn.content }, finish_reason: null }] })}\n\n`,
+          )
+          response.write(
+            `data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage })}\n\n`,
+          )
+        }
         response.write('data: [DONE]\n\n')
         response.end()
         return
       }
 
       response.writeHead(200, { 'Content-Type': 'application/json' })
+      const message = 'toolCall' in turn
+        ? { role: 'assistant', content: null, tool_calls: [toolCallPayload(turn.toolCall)] }
+        : { role: 'assistant', content: turn.content }
       response.end(
         JSON.stringify({
           id,
           object: 'chat.completion',
           created,
           model: MOCK_MODEL_ID,
-          choices: [{ index: 0, message: { role: 'assistant', content: mockReply }, finish_reason: 'stop' }],
+          choices: [{ index: 0, message, finish_reason: 'toolCall' in turn ? 'tool_calls' : 'stop' }],
           usage,
         }),
       )
@@ -95,18 +128,26 @@ function handleMockRequest(
   })
 }
 
-export async function startMockProvider(port: number): Promise<MockProvider> {
-  let mockReply = ''
+export async function startMockProvider(port = 0): Promise<MockProvider> {
+  let responder: (request: MockChatRequest) => MockTurn = () => ({ content: '' })
   const server = http.createServer((request, response) => {
-    handleMockRequest(request, response, () => mockReply)
+    handleMockRequest(request, response, (body) => responder(body))
   })
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
     server.listen(port, '127.0.0.1', () => resolve())
   })
+  const address = server.address()
+  if (address === null || typeof address === 'string') {
+    throw new Error('mock provider failed to bind a TCP port')
+  }
   return {
+    port: address.port,
     setReply: (text) => {
-      mockReply = text
+      responder = () => ({ content: text })
+    },
+    setResponder: (respond) => {
+      responder = respond
     },
     close: () =>
       new Promise<void>((resolve) => {
@@ -147,7 +188,7 @@ export async function createMockRepo(
             npm: '@ai-sdk/openai-compatible',
             name: 'Mock',
             options: { baseURL: `http://127.0.0.1:${port}/v1`, apiKey: 'mock' },
-            models: { [MOCK_MODEL_ID]: { name: 'Mock Model' } },
+            models: { [MOCK_MODEL_ID]: { name: 'Mock Model', tool_call: true } },
           },
         },
         model: `mock/${MOCK_MODEL_ID}`,
