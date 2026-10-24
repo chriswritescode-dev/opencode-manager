@@ -12,6 +12,7 @@ import { TerminalNotFoundError, type TerminalService } from '../services/termina
 import { parseTerminalCursor } from '../utils/terminal-cursor'
 import { createBridgedSocketEvents, isAllowedUpgradeOrigin } from '../utils/websocket-bridge'
 import { handleOpenCodeError, handleServiceError, parseJsonBody } from '../utils/route-helpers'
+import type { Session } from '../auth'
 
 export type ServerTerminalServiceResolver = (serverId: string) => TerminalService
 
@@ -19,6 +20,7 @@ interface ServerTerminalSocketVariables {
   terminalService: TerminalService
   terminalDirectory: string
   terminalCursor: number | undefined
+  session?: Session['session']
 }
 
 function isAbsoluteDirectory(directory: string): boolean {
@@ -181,7 +183,10 @@ export function createOpenCodeServerTerminalSocketRoutes(
       const cursor = c.get('terminalCursor')
       const ptyID = c.req.param('ptyID')
 
-      return createBridgedSocketEvents((peer) => terminalService.connect(directory, ptyID, cursor, peer))
+      return createBridgedSocketEvents(
+        (peer) => terminalService.connect(directory, ptyID, cursor, peer),
+        { sessionId: c.get('session')?.id },
+      )
     }),
   )
 

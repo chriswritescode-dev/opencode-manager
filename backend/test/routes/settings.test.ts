@@ -2728,4 +2728,13 @@ describe('Settings Routes - versions, directory files, skills, MCP and maintenan
       expect(await res.json()).toEqual({ error: 'Failed to discover models' })
     })
   })
+
+  describe('Remote access header routes', () => {
+    it('serves the remote access header summary under settings', async () => {
+      const res = await app.request(new Request('http://localhost/remote-access-headers'))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ headers: [], unreadable: false })
+    })
+  })
 })

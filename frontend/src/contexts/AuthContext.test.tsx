@@ -1,7 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, render, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { useState } from 'react'
+import { act, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider, dehydrate } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { describeUserAgent } from '@opencode-manager/shared/utils'
+import { PAIRING_CODE_INVALID_MESSAGE } from '@opencode-manager/shared/schemas'
+import { FetchError } from '@/api/fetchWrapper'
 import { LocationCatcher } from '@/test/test-utils'
 import { AuthProvider } from './AuthContext'
 import { QueryCachePersistenceProvider } from './QueryCachePersistenceContext'
@@ -17,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   signInPasskey: vi.fn(),
   signUpEmail: vi.fn(),
   signOut: vi.fn(),
+  redeemDevicePairingCode: vi.fn(),
 }))
 
 vi.mock('@/lib/auth-client', () => ({
@@ -24,12 +30,17 @@ vi.mock('@/lib/auth-client', () => ({
   signIn: { email: mocks.signInEmail, social: mocks.signInSocial },
   signUp: { email: mocks.signUpEmail },
   signOut: mocks.signOut,
-  authClient: { signIn: { passkey: mocks.signInPasskey } },
+  authClient: { signIn: { passkey: mocks.signInPasskey }, passkey: { addPasskey: vi.fn() } },
+}))
+
+vi.mock('@/api/devicePairing', () => ({
+  redeemDevicePairingCode: mocks.redeemDevicePairingCode,
 }))
 
 type AuthValue = ReturnType<typeof useAuth>
 
 const STORED_USER = { id: 'user-1', email: 'user@example.com', name: 'Ada' }
+const pairingCode = 'a'.repeat(43)
 
 function renderAuth(initialEntry: string, options: { persistence?: boolean } = {}) {
   const capturedPathname: { current: string } = { current: '' }
@@ -70,6 +81,48 @@ function AuthProbe({ captured }: { captured: { current: AuthValue | null } }) {
   captured.current = useAuth()
   return null
 }
+
+function PairingSignIn() {
+  const { signInWithPairingCode } = useAuth()
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = async () => {
+    const result = await signInWithPairingCode(pairingCode)
+    setError(result.error ?? null)
+  }
+
+  return (
+    <>
+      <button type="button" onClick={submit}>
+        Pair
+      </button>
+      {error && <p>{error}</p>}
+    </>
+  )
+}
+
+function renderPairing(initialEntry: string) {
+  return render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <AuthProvider>
+        <Routes>
+          <Route path="/login" element={<PairingSignIn />} />
+          <Route path="/repos/1" element={<div>repos marker</div>} />
+          <Route path="/" element={<div>home marker</div>} />
+        </Routes>
+      </AuthProvider>
+    </MemoryRouter>,
+  )
+}
+
+async function pair() {
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('button', { name: 'Pair' }))
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 describe('AuthProvider post-login navigation', () => {
   beforeEach(() => {
@@ -138,6 +191,68 @@ describe('AuthProvider post-login navigation', () => {
     await waitFor(() => {
       expect(capturedPathname.current).toBe('/')
     })
+  })
+})
+
+describe('AuthProvider signInWithPairingCode', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    mocks.useSession.mockReturnValue({ data: null, error: null, isPending: false, refetch: mocks.refetch })
+    mocks.refetch.mockResolvedValue(undefined)
+    mocks.redeemDevicePairingCode.mockResolvedValue({ user: { id: 'u1', name: 'Ada', email: 'ada@example.com' } })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ enabledProviders: ['credentials'], registrationEnabled: true, isFirstUser: false, adminConfigured: true }),
+    }))
+  })
+
+  it('redeems the code with the described device and returns to the redirect target', async () => {
+    renderPairing('/login?redirect=%2Frepos%2F1')
+
+    await pair()
+
+    expect(await screen.findByText('repos marker')).toBeInTheDocument()
+    expect(mocks.redeemDevicePairingCode).toHaveBeenCalledWith({
+      code: pairingCode,
+      deviceName: describeUserAgent(navigator.userAgent),
+    })
+    expect(mocks.refetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('lands home without a redirect target', async () => {
+    renderPairing('/login')
+
+    await pair()
+
+    expect(await screen.findByText('home marker')).toBeInTheDocument()
+  })
+
+  it('shows the server message when the code expired or was already used', async () => {
+    mocks.redeemDevicePairingCode.mockRejectedValue(
+      new FetchError(PAIRING_CODE_INVALID_MESSAGE, 400, 'PAIRING_CODE_INVALID'),
+    )
+    renderPairing('/login?redirect=%2Frepos%2F1')
+
+    await pair()
+
+    expect(await screen.findByText(PAIRING_CODE_INVALID_MESSAGE)).toBeInTheDocument()
+    expect(screen.queryByText('repos marker')).not.toBeInTheDocument()
+    expect(mocks.refetch).not.toHaveBeenCalled()
+  })
+
+  it('shows the rate-limit message for a 429', async () => {
+    mocks.redeemDevicePairingCode.mockRejectedValue(
+      new FetchError('Too many attempts', 429, 'RATE_LIMITED'),
+    )
+    renderPairing('/login')
+
+    await pair()
+
+    expect(
+      await screen.findByText('Too many attempts. Wait a minute and try again.'),
+    ).toBeInTheDocument()
+    expect(mocks.refetch).not.toHaveBeenCalled()
   })
 })
 

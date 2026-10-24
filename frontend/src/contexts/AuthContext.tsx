@@ -1,6 +1,9 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useEffect, useMemo, useState, useCallback, type ReactNode } from 'react'
+import { describeUserAgent } from '@opencode-manager/shared/utils'
 import { useSession, signIn, signUp, signOut, authClient } from '@/lib/auth-client'
+import { redeemDevicePairingCode } from '@/api/devicePairing'
+import { FetchError } from '@/api/fetchWrapper'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { getLoginRedirectTarget } from '@/lib/auth-loaders'
 import {
@@ -10,6 +13,9 @@ import {
   reconcileStoredAuthUser,
   type StoredAuthUser,
 } from '@/lib/authSession'
+
+const RATE_LIMITED_MESSAGE = 'Too many attempts. Wait a minute and try again.'
+const SIGN_IN_FAILED_MESSAGE = 'Sign-in failed'
 
 interface AuthConfig {
   enabledProviders: string[]
@@ -26,6 +32,7 @@ interface AuthContextValue {
   signInWithEmail: (email: string, password: string) => Promise<{ error?: string }>
   signInWithProvider: (provider: 'github' | 'google' | 'discord') => Promise<{ error?: string }>
   signInWithPasskey: () => Promise<{ error?: string }>
+  signInWithPairingCode: (code: string) => Promise<{ error?: string }>
   signUpWithEmail: (email: string, password: string, name: string) => Promise<{ error?: string }>
   addPasskey: (name?: string) => Promise<{ error?: string }>
   logout: () => Promise<void>
@@ -112,6 +119,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [refetch, navigate, redirectTarget])
 
+  const signInWithPairingCode = useCallback(async (code: string) => {
+    try {
+      await redeemDevicePairingCode({
+        code,
+        deviceName: describeUserAgent(navigator.userAgent),
+      })
+      await refetch()
+    } catch (err) {
+      if (err instanceof FetchError && err.statusCode === 429) {
+        return { error: RATE_LIMITED_MESSAGE }
+      }
+      return { error: err instanceof Error && err.message ? err.message : SIGN_IN_FAILED_MESSAGE }
+    }
+    navigate(redirectTarget, { replace: true })
+    return {}
+  }, [refetch, navigate, redirectTarget])
+
   const signUpWithEmail = useCallback(async (email: string, password: string, name: string) => {
     const result = await signUp.email({ email, password, name })
     if (result.error) {
@@ -175,6 +199,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     signInWithEmail,
     signInWithProvider,
     signInWithPasskey,
+    signInWithPairingCode,
     signUpWithEmail,
     addPasskey,
     logout,
@@ -186,6 +211,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     signInWithEmail,
     signInWithProvider,
     signInWithPasskey,
+    signInWithPairingCode,
     signUpWithEmail,
     addPasskey,
     logout,
