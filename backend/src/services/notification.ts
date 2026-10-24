@@ -25,6 +25,7 @@ import { sseAggregator, type SSEEvent } from "./sse-aggregator";
 import { getRepoName } from "../db/queries";
 import { getScheduleRunBySessionId } from "../db/schedules";
 import { ensurePushSubscriptionsTable } from "../db/push-subscriptions";
+import { isAuthSessionActive } from "../db/auth-sessions";
 import type { Repo } from "../types/repo";
 import { buildServerSessionPath, buildSessionPath } from "@opencode-manager/shared/utils";
 import { sessionIDFromEvent } from "@opencode-manager/shared/opencode";
@@ -204,7 +205,26 @@ export class NotificationService {
     return this.vapidConfig !== null;
   }
 
+  /**
+   * Stores a device's push subscription, returning null when the session that registered it was
+   * revoked or expired before the write. The session check and the upsert share one synchronous
+   * transaction so a concurrent logout cannot land between them.
+   */
   saveSubscription(
+    userId: string,
+    endpoint: string,
+    p256dh: string,
+    auth: string,
+    deviceName?: string,
+    sessionId?: string | null
+  ): PushSubscriptionRecord | null {
+    return this.db.transaction(() => {
+      if (sessionId && !isAuthSessionActive(this.db, sessionId)) return null;
+      return this.writeSubscription(userId, endpoint, p256dh, auth, deviceName, sessionId);
+    })();
+  }
+
+  private writeSubscription(
     userId: string,
     endpoint: string,
     p256dh: string,

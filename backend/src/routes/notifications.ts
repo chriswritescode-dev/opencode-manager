@@ -45,6 +45,10 @@ export function createNotificationRoutes(
       sessionId
     );
 
+    if (!subscription) {
+      return c.json({ error: "Session is no longer valid" }, 401);
+    }
+
     return c.json({ subscription });
   });
 

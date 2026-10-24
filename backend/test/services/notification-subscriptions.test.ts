@@ -5,6 +5,7 @@ import {
   deletePushSubscriptionsForSession,
   ensurePushSubscriptionsTable,
 } from '../../src/db/push-subscriptions'
+import { ensureAuthSessionTable, insertAuthSession } from '../helpers/auth-sessions'
 
 const USER_ID = 'user-1'
 
@@ -50,6 +51,7 @@ describe('push subscription sessions', () => {
 
   beforeEach(() => {
     db = new Database(':memory:')
+    ensureAuthSessionTable(db)
     service = new NotificationService(db)
   })
 
@@ -58,6 +60,8 @@ describe('push subscription sessions', () => {
   })
 
   it('stores the session that registered the subscription', () => {
+    insertAuthSession(db, 'ses_phone')
+
     service.saveSubscription(USER_ID, 'https://push.example.com/phone', 'p256dh-key', 'auth-key', 'Phone', 'ses_phone')
 
     expect(sessionIdOf(db, 'https://push.example.com/phone')).toBe('ses_phone')
@@ -71,6 +75,8 @@ describe('push subscription sessions', () => {
 
   it('replaces the session id when the same endpoint subscribes again', () => {
     const endpoint = 'https://push.example.com/phone'
+    insertAuthSession(db, 'ses_old')
+    insertAuthSession(db, 'ses_new')
     service.saveSubscription(USER_ID, endpoint, 'p256dh-key', 'auth-key', 'Phone', 'ses_old')
     service.saveSubscription(USER_ID, endpoint, 'p256dh-key-2', 'auth-key-2', 'Phone', 'ses_new')
 
@@ -80,10 +86,12 @@ describe('push subscription sessions', () => {
 
   it('keeps the stored device name when the same endpoint subscribes again without one', () => {
     const endpoint = 'https://push.example.com/phone'
+    insertAuthSession(db, 'ses_old')
+    insertAuthSession(db, 'ses_new')
     service.saveSubscription(USER_ID, endpoint, 'p256dh-key', 'auth-key', 'Phone', 'ses_old')
     const resubscribed = service.saveSubscription(USER_ID, endpoint, 'p256dh-key', 'auth-key', undefined, 'ses_new')
 
-    expect(resubscribed.deviceName).toBe('Phone')
+    expect(resubscribed?.deviceName).toBe('Phone')
     expect(sessionIdOf(db, endpoint)).toBe('ses_new')
     expect(service.getSubscriptions(USER_ID)).toHaveLength(1)
   })
@@ -120,6 +128,8 @@ describe('push subscription sessions', () => {
   })
 
   it('deletes only the subscriptions of the revoked session', () => {
+    insertAuthSession(db, 'ses_phone')
+    insertAuthSession(db, 'ses_desktop')
     service.saveSubscription(USER_ID, 'https://push.example.com/phone', 'p256dh-key', 'auth-key', 'Phone', 'ses_phone')
     service.saveSubscription(USER_ID, 'https://push.example.com/desktop', 'p256dh-key', 'auth-key', 'Desktop', 'ses_desktop')
     service.saveSubscription(USER_ID, 'https://push.example.com/legacy', 'p256dh-key', 'auth-key', 'Legacy')
@@ -129,5 +139,26 @@ describe('push subscription sessions', () => {
       'https://push.example.com/desktop',
       'https://push.example.com/legacy',
     ])
+  })
+
+  it('keeps the newer session registration when a revoked session saves afterwards', () => {
+    const endpoint = 'https://push.example.com/phone'
+    insertAuthSession(db, 'ses_new')
+    service.saveSubscription(USER_ID, endpoint, 'p256dh-key', 'auth-key', 'Phone', 'ses_new')
+
+    const staleSave = service.saveSubscription(USER_ID, endpoint, 'p256dh-key', 'auth-key', 'Phone', 'ses_old')
+
+    expect(staleSave).toBeNull()
+    expect(sessionIdOf(db, endpoint)).toBe('ses_new')
+    expect(service.getSubscriptions(USER_ID)).toHaveLength(1)
+  })
+
+  it('does not store a subscription whose auth session has expired', () => {
+    insertAuthSession(db, 'ses_expired', { expiresAt: Date.now() - 1_000 })
+
+    const saved = service.saveSubscription(USER_ID, 'https://push.example.com/phone', 'p256dh-key', 'auth-key', 'Phone', 'ses_expired')
+
+    expect(saved).toBeNull()
+    expect(endpointsOf(db)).toEqual([])
   })
 })
