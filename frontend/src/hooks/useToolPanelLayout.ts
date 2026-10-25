@@ -5,7 +5,6 @@ import { useMobile } from './useMobile'
 export const TOOL_PANEL_MIN_WIDTH = 320
 export const TOOL_PANEL_MAX_WIDTH = 720
 export const TOOL_PANEL_DEFAULT_WIDTH = 600
-export const TOOL_PANEL_ACTIVITY_WIDTH = 320
 export const TOOL_PANEL_RAIL_WIDTH = 44
 export const MAIN_CONTENT_MIN_WIDTH = 420
 

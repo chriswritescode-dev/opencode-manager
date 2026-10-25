@@ -12,11 +12,8 @@ import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 import { useSidebarCollapsed } from '@/hooks/useSidebarCollapsed'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import {
-  clearToolPanelParams,
-  panelToolParam,
-  resolveToolPanelToggle,
   toggleToolDialogParams,
-  toggleToolPanelParams,
+  useToolPanelToggle,
   type PanelTool,
 } from '@/hooks/useToolPanel'
 import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
@@ -37,7 +34,7 @@ import {
 export function useGlobalShortcutActions(): void {
   const { pathname } = useLocation()
   const navigate = useNavigate()
-  const { searchParams, updateParams, closePushedParams } = useUrlParams()
+  const { updateParams } = useUrlParams()
   const { open: openSettings } = useSettingsDialog()
   const isMobile = useMobile()
   const serverId = useRouteOpenCodeServerId()
@@ -67,6 +64,7 @@ export function useGlobalShortcutActions(): void {
 
   const toolItems = useMemo(() => buildToolItems(pathname), [pathname])
   const [, toggleSidebarCollapsed] = useSidebarCollapsed()
+  const togglePanelTool = useToolPanelToggle()
 
   const toggleRouteTool = useCallback((tool: PanelTool) => {
     if (toolItems.some((item) => toolKeyOf(item) === tool)) {
@@ -74,18 +72,13 @@ export function useGlobalShortcutActions(): void {
         updateParams((params) => toggleToolDialogParams(params, tool), 'push')
         return
       }
-      const action = resolveToolPanelToggle(panelToolParam(searchParams), tool)
-      if (action === 'close') {
-        closePushedParams(clearToolPanelParams)
-        return
-      }
-      updateParams((params) => toggleToolPanelParams(params, tool), action === 'switch' ? 'replace' : 'push')
+      togglePanelTool(tool)
       return
     }
     if (isRemoteRoute || tool === 'files') return
     const host = repoId !== null ? getRepoPath(repoId) : getAssistantPath()
     navigate(`${host}${dialogSearch(tool)}`)
-  }, [toolItems, isMobile, searchParams, updateParams, closePushedParams, navigate, repoId, isRemoteRoute])
+  }, [toolItems, isMobile, togglePanelTool, updateParams, navigate, repoId, isRemoteRoute])
 
   const newSession = sessionDirectory && !createSession.isPending
     ? () => createSession.mutate({})

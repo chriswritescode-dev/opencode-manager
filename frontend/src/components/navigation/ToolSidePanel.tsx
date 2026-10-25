@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import type { ReactNode, RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { FileBrowser } from '@/components/file-browser/FileBrowser'
 import { SourceControlContent } from '@/components/source-control'
 import { RemoteSourceControlContent } from '@/components/source-control/RemoteSourceControlContent'
@@ -26,22 +26,18 @@ import type { ModelRef } from '@opencode-manager/shared/opencode'
 import { buildToolItems, toolKeyOf, type MoreDrawerItem } from '@/components/navigation/moreDrawerItems'
 import { isPanelTool, type ToolPanelState, type PanelTool } from '@/hooks/useToolPanel'
 import { useOpenNavItem } from '@/hooks/useOpenNavItem'
-import { ActivityList } from '@/components/activity/ActivityList'
 import { ActivityCountPill } from '@/components/activity/ActivityCountPill'
-import { withQueryParam } from '@/lib/navigation'
+import { RouteSessionPicker } from '@/components/session/RouteSessionPicker'
+import { useSessionPickerNavigation } from '@/hooks/useSessionPickerNavigation'
 import type { TerminalTarget } from '@/lib/terminal-target'
-import { useActiveWorkCounts, useActivityWindowMinutes } from '@/hooks/useActiveWork'
-import { formatActivityWindow } from '@/lib/activeWork'
+import { useActiveWorkCounts } from '@/hooks/useActiveWork'
+import { useUIState } from '@/stores/uiStateStore'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, TOOLTIP_OPEN_DELAY_MS } from '@/components/ui/tooltip'
 import { restoreOverlayFocus } from '@/lib/overlayFocus'
 import { useRestoreFocusOnClose } from '@/hooks/useRestoreFocusOnClose'
 import { cn } from '@/lib/utils'
 import { useToolPanelLayout, useToolPanelWidth } from '@/hooks/useToolPanelLayout'
 import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
-
-const PANEL_WIDTH_CLASSES: Partial<Record<PanelTool, string>> = {
-  activity: 'w-80',
-}
 
 interface PanelResizeState {
   pointerId: number
@@ -132,7 +128,7 @@ function PanelResizeHandle({ width, minWidth, maxWidth, onWidthChange }: PanelRe
   )
 }
 
-const REMOTE_TOOL_KEYS: ReadonlySet<string> = new Set(['activity', 'mcp', 'skills', 'source-control', 'terminal'])
+const REMOTE_TOOL_KEYS: ReadonlySet<string> = new Set(['sessions', 'mcp', 'skills', 'source-control', 'terminal'])
 
 /**
  * Escape closes the floating panel, except while a nested menu is open or the terminal owns
@@ -166,33 +162,34 @@ function useFloatingPanelDismiss(
   }, [floating, panelRef])
 }
 
-function ActivityWindowLabel() {
-  const minutes = useActivityWindowMinutes()
-  return (
-    <span className="shrink-0 text-xs text-muted-foreground">
-      Last {formatActivityWindow(minutes)}
-    </span>
-  )
+interface SessionsPanelBodyProps {
+  docked: boolean
+  onClose: () => void
+  deleteActiveSessionPath?: string
 }
 
-function ActivityPanelBody() {
-  const navigate = useNavigate()
-  const minutes = useActivityWindowMinutes()
+/**
+ * Session picker shown in the tool panel. While docked, choosing a session keeps the panel open on
+ * the destination; as an overlay sheet the choice replaces the entry behind it and closes the panel.
+ */
+function SessionsPanelBody({ docked, onClose, deleteActiveSessionPath }: SessionsPanelBodyProps) {
+  const navigation = useSessionPickerNavigation({
+    mode: docked ? 'panel' : 'replace',
+    onClose,
+    deleteActiveSessionPath,
+  })
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <ActivityList
-        minutes={minutes}
-        onNavigate={(item) => navigate(withQueryParam(item.path, 'panel', 'activity'))}
-      />
+    <div className="flex min-h-0 flex-1 flex-col px-3 pb-3">
+      <RouteSessionPicker navigation={navigation} />
     </div>
   )
 }
 
-function ActivityRailIndicator() {
+function SessionsRailIndicator() {
   const { needsInput, running } = useActiveWorkCounts()
   const total = needsInput + running
-  const label = total > 0 ? `Activity, ${needsInput} needs input, ${running} running` : 'Activity'
+  const label = total > 0 ? `Sessions, ${needsInput} needs input, ${running} running` : 'Sessions'
 
   return (
     <>
@@ -222,6 +219,11 @@ interface ToolSidePanelProps {
   walkthroughSourceRequest?: WalkthroughSourceRequest
   walkthroughModel?: ModelRef | null
   walkthroughOnOpenSession?: (id: string) => void
+  /**
+   * Path the session picker opens after the open session is deleted; the session page passes the
+   * remote project path on linked-server routes.
+   */
+  deleteActiveSessionPath?: string
 }
 
 interface RailButtonProps {
@@ -287,6 +289,7 @@ export function ToolSidePanel({
   walkthroughSourceRequest,
   walkthroughModel,
   walkthroughOnOpenSession,
+  deleteActiveSessionPath,
 }: ToolSidePanelProps) {
   const { activeTool, toggleTool, closePanel } = panel
   const location = useLocation()
@@ -298,7 +301,13 @@ export function ToolSidePanel({
   const previousActiveToolRef = useRef(activeTool)
   const panelWidth = useToolPanelWidth()
   const { docked } = useToolPanelLayout()
+  const setToolRailMounted = useUIState((state) => state.setToolRailMounted)
   const floating = activeTool !== null && !docked
+
+  useEffect(() => {
+    setToolRailMounted(true)
+    return () => setToolRailMounted(false)
+  }, [setToolRailMounted])
 
   useRestoreFocusOnClose(floating, panelRef)
   useFloatingPanelDismiss(floating, closePanel, panelRef)
@@ -349,7 +358,9 @@ export function ToolSidePanel({
     if (tool === 'preview') return <PreviewWorkspace isOpen directory={directory} compact />
     if (tool === 'mcp') return repoDirectory ? <RepoMcpContent open directory={repoDirectory} /> : null
     if (tool === 'walkthrough') return sessionId ? <ChangesWalkthroughView /> : null
-    if (tool === 'activity') return <ActivityPanelBody />
+    if (tool === 'sessions') {
+      return <SessionsPanelBody docked={docked} onClose={closePanel} deleteActiveSessionPath={deleteActiveSessionPath} />
+    }
     if (tool === 'terminal') {
       return terminalWorkspaceTarget
         ? <TerminalWorkspace target={terminalWorkspaceTarget} directory={terminalDirectory ?? directory} isOpen onLastTerminalExited={closePanel} />
@@ -390,8 +401,6 @@ export function ToolSidePanel({
     }
   }
 
-  const fixedWidthClass = activeTool ? PANEL_WIDTH_CLASSES[activeTool] : undefined
-
   const panelBody =
     activeTool && activeLabel ? (
       <>
@@ -414,11 +423,10 @@ export function ToolSidePanel({
             docked
               ? 'relative shrink-0'
               : 'fixed inset-y-0 right-11 z-50 w-[min(420px,calc(100vw-2.75rem))] pt-safe pb-safe shadow-2xl',
-            fixedWidthClass,
           )}
-          style={docked && !fixedWidthClass ? { width: panelWidth.width } : undefined}
+          style={docked ? { width: panelWidth.width } : undefined}
         >
-          {docked && !fixedWidthClass ? (
+          {docked ? (
             <PanelResizeHandle
               width={panelWidth.width}
               minWidth={panelWidth.minWidth}
@@ -427,10 +435,7 @@ export function ToolSidePanel({
             />
           ) : null}
           <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
-            <div className="flex min-w-0 flex-1 items-baseline gap-2">
-              <h2 className="min-w-0 truncate text-sm font-semibold text-foreground">{activeLabel}</h2>
-              {activeTool === 'activity' ? <ActivityWindowLabel /> : null}
-            </div>
+            <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{activeLabel}</h2>
             {activeTool === 'walkthrough' ? (
               <>
                 <ChangesWalkthroughSourcePicker />
@@ -484,7 +489,7 @@ export function ToolSidePanel({
               item={item}
               active={tool === activeTool}
               onClick={() => toggleTool(tool)}
-              indicator={tool === 'activity' ? <ActivityRailIndicator /> : undefined}
+              indicator={tool === 'sessions' ? <SessionsRailIndicator /> : undefined}
             />
           ))}
           {actionItems.length > 0 ? <div className="my-1 h-px w-6 shrink-0 bg-border" role="separator" /> : null}

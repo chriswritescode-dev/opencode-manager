@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
-import { isPanelTool, toggleToolDialogParams, toggleToolPanelParams, useToolPanel } from './useToolPanel'
+import { isPanelTool, toggleToolDialogParams, toggleToolPanelParams, useToolPanel, useToolPanelToggle } from './useToolPanel'
 
-describe('activity tool', () => {  it('is a panel tool', () => {
-    expect(isPanelTool('activity')).toBe(true)
+describe('sessions tool', () => {
+  it('is a panel tool', () => {
+    expect(isPanelTool('sessions')).toBe(true)
   })
 
   it('clears without opening a dialog when the panel is not docked', async () => {
@@ -18,13 +19,13 @@ describe('activity tool', () => {  it('is a panel tool', () => {
     render(
       createElement(
         MemoryRouter,
-        { initialEntries: ['/repos/1/sessions/abc?panel=activity'] },
+        { initialEntries: ['/repos/1/sessions/abc?panel=sessions'] },
         createElement(Probe),
       ),
     )
 
-    await waitFor(() => expect(screen.getByTestId('search').textContent).not.toContain('panel=activity'))
-    expect(screen.getByTestId('search').textContent).not.toContain('dialog=activity')
+    await waitFor(() => expect(screen.getByTestId('search').textContent).not.toContain('panel=sessions'))
+    expect(screen.getByTestId('search').textContent).not.toContain('dialog=sessions')
   })
 })
 
@@ -201,5 +202,59 @@ describe('panel history entries', () => {
 
     fireEvent.click(screen.getByText('back'))
     expect(screen.getByTestId('pathname').textContent).toBe('/repos/2')
+  })
+})
+
+describe('useToolPanelToggle', () => {
+  function ToggleHarness() {
+    const toggleTool = useToolPanelToggle()
+    const { activeTool } = useToolPanel(true)
+    const location = useLocation()
+    const navigate = useNavigate()
+
+    return createElement(
+      'div',
+      null,
+      createElement('span', { 'data-testid': 'activeTool' }, activeTool ?? ''),
+      createElement('span', { 'data-testid': 'search' }, location.search),
+      createElement('button', { onClick: () => toggleTool('files') }, 'open files'),
+      createElement('button', { onClick: () => toggleTool('terminal') }, 'open terminal'),
+      createElement('button', { onClick: () => navigate(-1) }, 'back'),
+    )
+  }
+
+  function renderToggleHarness() {
+    render(createElement(MemoryRouter, { initialEntries: ['/repos/1/sessions/ses_1'] }, createElement(ToggleHarness)))
+  }
+
+  it('opens the tool with a new history entry', () => {
+    renderToggleHarness()
+
+    fireEvent.click(screen.getByText('open files'))
+    expect(screen.getByTestId('search').textContent).toBe('?panel=files')
+
+    fireEvent.click(screen.getByText('back'))
+    expect(screen.getByTestId('search').textContent).toBe('')
+  })
+
+  it('switches the open panel in place without a new history entry', () => {
+    renderToggleHarness()
+
+    fireEvent.click(screen.getByText('open files'))
+    fireEvent.click(screen.getByText('open terminal'))
+    expect(screen.getByTestId('search').textContent).toBe('?panel=terminal')
+
+    fireEvent.click(screen.getByText('back'))
+    expect(screen.getByTestId('search').textContent).toBe('')
+  })
+
+  it('closes the panel when the tool is already open', () => {
+    renderToggleHarness()
+
+    fireEvent.click(screen.getByText('open files'))
+    fireEvent.click(screen.getByText('open files'))
+
+    expect(screen.getByTestId('activeTool').textContent).toBe('')
+    expect(screen.getByTestId('search').textContent).toBe('')
   })
 })

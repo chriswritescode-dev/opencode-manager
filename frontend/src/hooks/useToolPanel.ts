@@ -4,7 +4,7 @@ import { useUrlParams } from './useUrlParams'
 
 const PANEL_PARAM = 'panel'
 
-const PANEL_TOOLS = ['sourceControl', 'files', 'terminal', 'walkthrough', 'preview', 'mcp', 'actions', 'skills', 'schedules', 'activity', 'secrets'] as const
+const PANEL_TOOLS = ['sourceControl', 'files', 'terminal', 'walkthrough', 'preview', 'mcp', 'actions', 'skills', 'schedules', 'sessions', 'secrets'] as const
 
 export type PanelTool = (typeof PANEL_TOOLS)[number]
 
@@ -16,7 +16,7 @@ const TOOL_OWNED_PARAMS: Partial<Record<PanelTool, readonly string[]>> = {
   schedules: ['scheduleTab', 'scheduleDialog', 'jobId', 'runId'],
 }
 
-const PANEL_ONLY_TOOLS: ReadonlySet<PanelTool> = new Set(['schedules', 'activity'])
+const PANEL_ONLY_TOOLS: ReadonlySet<PanelTool> = new Set(['schedules', 'sessions'])
 
 export function isPanelTool(value: string | null): value is PanelTool {
   return value !== null && (PANEL_TOOLS as readonly string[]).includes(value)
@@ -63,8 +63,22 @@ export function clearToolPanelParams(params: URLSearchParams): void {
   clearToolParams(params)
 }
 
-export function panelToolParam(params: URLSearchParams): string | null {
-  return params.get(PANEL_PARAM)
+/**
+ * Toggles a tool in the desktop tool panel from anywhere outside the panel: closes it when it is already
+ * open, switches the open panel in place, or opens it with a new history entry.
+ */
+export function useToolPanelToggle(): (tool: PanelTool) => void {
+  const { searchParams, updateParams, closePushedParams } = useUrlParams()
+  const panelParam = searchParams.get(PANEL_PARAM)
+
+  return useCallback((tool: PanelTool) => {
+    const action = resolveToolPanelToggle(panelParam, tool)
+    if (action === 'close') {
+      closePushedParams(clearToolPanelParams)
+      return
+    }
+    updateParams((params) => toggleToolPanelParams(params, tool), action === 'switch' ? 'replace' : 'push')
+  }, [panelParam, updateParams, closePushedParams])
 }
 
 export interface ToolPanelState {
@@ -109,14 +123,7 @@ export function useToolPanel(panelAvailable: boolean): ToolPanelState {
     closePushedParams(clearToolPanelParams)
   }, [closePushedParams])
 
-  const toggleTool = useCallback((tool: PanelTool) => {
-    const action = resolveToolPanelToggle(panelParam, tool)
-    if (action === 'close') {
-      closePanel()
-      return
-    }
-    updateParams((params) => toggleToolPanelParams(params, tool), action === 'switch' ? 'replace' : 'push')
-  }, [panelParam, closePanel, updateParams])
+  const toggleTool = useToolPanelToggle()
 
   return { activeTool, toggleTool, closePanel }
 }

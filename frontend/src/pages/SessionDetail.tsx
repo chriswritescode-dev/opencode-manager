@@ -9,7 +9,6 @@ import { X, CornerUpLeft, GitBranch, ArrowDown, Server } from "lucide-react";
 import { SquareFill } from "@/components/ui/square-fill";
 import { Header } from "@/components/ui/header";
 import { Badge } from "@/components/ui/badge";
-import { SessionPickerDialog } from "@/components/session/SessionPickerDialog";
 import { getServerProjectPath, getSessionListPath, getSessionPath } from '@/lib/navigation'
 import { FetchError } from '@/api/fetchWrapper'
 
@@ -84,7 +83,6 @@ import { ChangesWalkthroughSheet, type WalkthroughSourceRequest } from "@/compon
 import { ToolSidePanel } from "@/components/navigation/ToolSidePanel";
 import type { WalkthroughSource } from "@opencode-manager/shared/schemas";
 import { useToolPanel } from "@/hooks/useToolPanel";
-import { useSessionPickerNavigation } from "@/hooks/useSessionPickerNavigation";
 
 const OLDER_HISTORY_SCROLL_THRESHOLD_PX = 200
 
@@ -137,7 +135,6 @@ export function SessionDetail() {
   const messageContainerRef = useRef<HTMLDivElement>(null);
   const [messageContainer, setMessageContainer] = useState<HTMLDivElement | null>(null);
   const promptInputRef = useRef<PromptInputHandle>(null);
-  const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false);
   const [sessionDetailsOpen, setSessionDetailsOpen] = useState(false);
   const [fileBrowserOpen, setFileBrowserOpen] = useDialogParam('files');
   const [mcpDialogOpen, setMcpDialogOpen] = useDialogParam('mcp');
@@ -164,6 +161,7 @@ export function SessionDetail() {
   const { open: openMobileSheet } = useMobileTabBar();
   const { docked, showRail } = useToolPanelLayout();
   const sidePanel = useToolPanel(showRail);
+  const { activeTool: activePanelTool, toggleTool: togglePanelTool } = sidePanel;
   const { keyboardHeight } = useVisualViewport();
   const inputBottomOffset = isMobile ? keyboardHeight : 0;
   const promptOverlayObserverRef = useRef<ResizeObserver | null>(null);
@@ -223,10 +221,6 @@ export function SessionDetail() {
     if (!isRemoteServer || !sessionDirectory) return undefined;
     return findRemoteProjectForDirectory(remoteProjects, sessionDirectory);
   }, [isRemoteServer, remoteProjects, sessionDirectory]);
-
-  const remoteProjectDirectory = isRemoteServer && sessionDirectory
-    ? remoteProject?.canonical ?? sessionDirectory
-    : undefined;
 
   const remoteProjectDisplayName = remoteProject ? remoteProjectName(remoteProject) : undefined;
 
@@ -378,8 +372,8 @@ export function SessionDetail() {
       openMobileSheet('sessions');
       return;
     }
-    setSessionsDialogOpen(true);
-  }, [isMobile, openMobileSheet]);
+    if (activePanelTool !== 'sessions') togglePanelTool('sessions');
+  }, [isMobile, openMobileSheet, activePanelTool, togglePanelTool]);
   const handleShowMcpDialog = useCallback(() => setMcpDialogOpen(true), [setMcpDialogOpen]);
   const handleShowSkillsDialog = useCallback(() => setSkillsDialogOpen(true), [setSkillsDialogOpen]);
   const handleShowWalkthrough = useCallback((source?: WalkthroughSource) => {
@@ -549,12 +543,6 @@ export function SessionDetail() {
     const tab = new URLSearchParams(location.search).get('repoTab') ?? undefined;
     navigate(getSessionListPath(repoId, isAssistantSession, tab))
   }, [navigate, repoId, isAssistantSession, isRemoteServer, remoteProjectBackPath, location.search])
-
-  const pickerNavigation = useSessionPickerNavigation({
-    mode: 'push',
-    onClose: () => setSessionsDialogOpen(false),
-    onDeleteActiveSession: isRemoteServer ? handleCloseSession : undefined,
-  })
 
   const handleOpenModelDialog = useCallback(() => {
     promptInputRef.current?.openModelPicker();
@@ -1037,28 +1025,10 @@ export function SessionDetail() {
           walkthroughSourceRequest={walkthroughSourceRequest}
           walkthroughModel={modelRef}
           walkthroughOnOpenSession={handleChildSessionClick}
+          deleteActiveSessionPath={isRemoteServer ? remoteProjectBackPath : undefined}
         />
       )}
       </div>
-
-      {/* Sessions Picker */}
-      <SessionPickerDialog
-        open={sessionsDialogOpen}
-        onOpenChange={setSessionsDialogOpen}
-        currentRepo={isRemoteServer ? undefined : repo}
-        activeSessionID={sessionId || undefined}
-        remote={
-          isRemoteServer
-            ? {
-                serverId,
-                serverName: linkedServer?.name,
-                projectDirectory: remoteProjectDirectory,
-                isPending: sessionLoading,
-              }
-            : undefined
-        }
-        {...pickerNavigation}
-      />
 
       <SessionDetailsSheet
         open={sessionDetailsOpen}
