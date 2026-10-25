@@ -13,6 +13,7 @@ import type { PermissionResponse } from '@/api/types'
 import type { PermissionRequest } from '@opencode-manager/shared/opencode'
 import {
   getPermissionLabel,
+  getPermissionPhrase,
   getPermissionDetail,
   getPermissionAlwaysScope,
 } from '@opencode-manager/shared/notifications'
@@ -99,7 +100,7 @@ export function PermissionRequestDialog({
             )}
           </DialogTitle>
           <DialogDescription className="break-all">
-            {`Allow ${typeLabel.toLowerCase()}?`}
+            {`Allow ${getPermissionPhrase(permission.action)}?`}
           </DialogDescription>
         </DialogHeader>
 

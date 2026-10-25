@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   getPermissionLabel,
+  getPermissionPhrase,
   getPermissionDetail,
   getPermissionAlwaysScope,
   getFormText,
@@ -64,6 +65,22 @@ describe('getPermissionLabel', () => {
   })
 })
 
+describe('getPermissionPhrase', () => {
+  it('lowercases every word of a multi-word label', () => {
+    expect(getPermissionPhrase('shell')).toBe('run command')
+    expect(getPermissionPhrase('external_directory')).toBe('external access')
+  })
+  it('preserves acronym words', () => {
+    expect(getPermissionPhrase('webfetch')).toBe('fetch URL')
+  })
+  it('falls back to the generic phrase when the action is missing', () => {
+    expect(getPermissionPhrase('')).toBe('approval')
+  })
+  it('lowercases unknown actions', () => {
+    expect(getPermissionPhrase('frobnicate')).toBe('frobnicate')
+  })
+})
+
 describe('getPermissionDetail', () => {
   it('returns the shell command from resources', () => {
     expect(getPermissionDetail({ action: 'shell', resources: ['rm -rf node_modules'] }).primary).toBe('rm -rf node_modules')
@@ -119,9 +136,13 @@ describe('getPermissionAlwaysScope', () => {
     expect(getPermissionAlwaysScope({ action: 'shell' })).toBeNull()
     expect(getPermissionAlwaysScope({ action: 'shell', save: [] })).toBeNull()
   })
-  it('describes a wildcard scope', () => {
+  it('describes a wildcard scope with the human action phrase', () => {
     expect(getPermissionAlwaysScope({ action: 'shell', save: ['*'] })).toEqual({
-      summary: 'This will always allow shell for this project.',
+      summary: 'This will always allow run command for this project.',
+      patterns: [],
+    })
+    expect(getPermissionAlwaysScope({ action: 'webfetch', save: ['*'] })).toEqual({
+      summary: 'This will always allow fetch URL for this project.',
       patterns: [],
     })
   })
