@@ -8,7 +8,6 @@ import { useQuery } from '@tanstack/react-query'
 import { getRepo } from '@/api/repos'
 import { useRefreshOnOpen } from '@/hooks/useRefreshOnOpen'
 import { SideDrawer, SideDrawerContent } from '@/components/ui/side-drawer'
-import { CompactActivityList } from '@/components/activity/CompactActivityList'
 import { ScheduleReportsList } from '@/components/notifications/ScheduleReportsBell'
 import { useMarkAllScheduleRunsViewed, useUnreadScheduleRuns } from '@/hooks/useSchedules'
 import { buildMoreItems, buildNavModel, isManagerOnlyNavItem, isSessionDetailPath, type MoreDrawerItem } from './moreDrawerItems'
@@ -205,9 +204,6 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
                 maxHeightClass=""
               />
             </div>
-          )}
-          {isOpen && (
-            <CompactActivityList onNavigate={(path) => navigate(path)} />
           )}
           <MenuSection>
             {(isSessionDetail || isRemoteSessionDetail) && (
