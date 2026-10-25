@@ -1508,6 +1508,29 @@ describe('ScheduleService', () => {
       }
     })
 
+    it('retries sandbox removal when the run session sandbox was turned off during the run', async () => {
+      for (const [mode, expected] of [
+        [{ ...SANDBOX_SESSION_MODE, sandboxed: false, source: 'user' }, true],
+        [{ ...SANDBOX_SESSION_MODE, sandboxed: false, source: 'default' }, false],
+      ] as const) {
+        mocks.getScheduleJobById.mockReturnValue(sandboxJob)
+        const stub = createStubScheduleApi({ messages: [] })
+        const { service, runtime } = makeSandboxService(stub.api)
+        const runningRun = runWithSession('ses-run-5')
+        mocks.getScheduleRunById.mockReturnValue(runningRun)
+        mocks.updateScheduleRun.mockReturnValue({ ...runningRun, status: 'cancelled' })
+        mocks.getSessionSandboxMode.mockReturnValue(mode)
+
+        await service.cancelRun(42, 7, 5)
+
+        if (expected) {
+          expect(runtime.removeSessionSandbox).toHaveBeenCalledWith('ses-run-5')
+        } else {
+          expect(runtime.removeSessionSandbox).not.toHaveBeenCalled()
+        }
+      }
+    })
+
     it('leaves the sandbox dependencies untouched for a job without an enabled sandbox', async () => {
       for (const sandbox of [null, { enabled: false, resources: SANDBOX_RESOURCES }] as const) {
         mocks.getScheduleJobById.mockReturnValue({ ...job, sandbox })

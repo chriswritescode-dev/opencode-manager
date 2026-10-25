@@ -1663,7 +1663,8 @@ export class ScheduleService {
   private async removeRunSandbox(sessionId: string | null): Promise<void> {
     const runtime = this.sandbox?.runtime
     if (!sessionId || !runtime) return
-    if (getSessionSandboxMode(this.db, sessionId)?.sandboxed !== true) return
+    const mode = getSessionSandboxMode(this.db, sessionId)
+    if (mode?.sandboxed !== true && mode?.source !== 'user') return
     try {
       await runtime.removeSessionSandbox(sessionId)
     } catch (error) {
