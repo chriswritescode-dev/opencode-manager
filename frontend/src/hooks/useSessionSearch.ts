@@ -33,6 +33,7 @@ export function useSessionSearch(directories: string[], options: UseSessionSearc
   const {
     data: sessions,
     isLoading,
+    isPending,
     isError,
     isPlaceholderData,
     fetchNextPage,
@@ -79,6 +80,7 @@ export function useSessionSearch(directories: string[], options: UseSessionSearc
     filteredSessions,
     isSearchPending,
     isLoading,
+    isPending,
     isError,
     isPlaceholderData,
     fetchNextPage,

@@ -13,7 +13,7 @@
 
 ### Must Flag as Issues
 
-- Any code comments (code must be self-documenting)
+- Inline, explanatory, or section comments (code must be self-documenting); JSDoc/TSDoc attached to the declaration it documents is allowed
 - Console.log statements (use structured logging)
 - Use of `any` type without justification
 - Default exports (named exports only)

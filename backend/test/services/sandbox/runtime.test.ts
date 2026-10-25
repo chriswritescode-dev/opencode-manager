@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { ENV, getOpenCodeAgentTmpPath, getOpenCodeGlobalSkillsPath, getOpenCodeToolOutputPath, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
+import type { GitCredential } from '@opencode-manager/shared'
 import { migrate } from '../../../src/db/migration-runner'
 import { allMigrations } from '../../../src/db/migrations'
 import { SettingsService } from '../../../src/services/settings'
@@ -32,6 +33,7 @@ import { executeCommand } from '../../../src/utils/process'
 import { detectSandboxCapability } from '../../../src/services/sandbox/capability'
 import { logger } from '../../../src/utils/logger'
 import { forceProcessAttestation } from '../../../src/services/opencode/process-identity'
+import type { RepoEnvService } from '../../../src/services/repo-env'
 
 vi.mock('../../../src/utils/process', () => ({
   executeCommand: vi.fn(),
@@ -522,6 +524,66 @@ describe('SandboxRuntimeService', () => {
         GIT_COMMITTER_NAME: 'Local User',
         GIT_COMMITTER_EMAIL: 'local@example.com',
       },
+    })
+  })
+
+  it('forwards the sandbox git credentials from the plan only when the toggle allows them', async () => {
+    enableEnforcement()
+    settingsService.updateSettings({
+      gitCredentials: [{ name: 'github', host: 'github.com', type: 'pat', token: 'ghp_plan_token' } as GitCredential],
+      sandbox: { enabled: true, gitCredentials: true },
+    })
+    installFakeMsb(new Map([[VM_NAME, vm()]]))
+
+    const withCredentials = await service.planShell(repoADir, shellTarget(repoADir))
+
+    expect(withCredentials).toMatchObject({
+      mode: 'sandbox',
+      env: { GIT_CONFIG_COUNT: '1', GH_TOKEN: 'ghp_plan_token' },
+    })
+
+    settingsService.updateSettings({ sandbox: { enabled: true, gitCredentials: false } })
+    const withoutCredentials = await service.planShell(repoADir, shellTarget(repoADir))
+
+    expect(withoutCredentials.mode).toBe('sandbox')
+    expect(withoutCredentials).not.toHaveProperty('env.GH_TOKEN')
+    expect(withoutCredentials).not.toHaveProperty('env.GIT_CONFIG_COUNT')
+  })
+
+  it('includes the repository env in the sandbox plan env after the git env', async () => {
+    enableEnforcement()
+    mockExecuteCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('inspect')) return { exitCode: 0, stdout: runningInspectOutput(inspectConfig(vm(), VM_NAME), VM_NAME), stderr: '' }
+      if (args.includes('config') && args.includes('user.name')) {
+        return { exitCode: 0, stdout: 'local\tfile:/repo/.git/config\tLocal User\n', stderr: '' }
+      }
+      if (args.includes('config') && args.includes('user.email')) {
+        return { exitCode: 0, stdout: 'local\tfile:/repo/.git/config\tlocal@example.com\n', stderr: '' }
+      }
+      return { exitCode: 0, stdout: '[]', stderr: '' }
+    })
+    const repoEnvService = {
+      resolveForDirectory: vi.fn(async () => ({
+        env: { REPO_SECRET: 's3cret', GIT_AUTHOR_NAME: 'Repo User' },
+        maskValues: ['s3cret'],
+      })),
+    } as unknown as RepoEnvService
+    const withRepoEnv = new SandboxRuntimeService(db, repoEnvService)
+
+    const plan = await withRepoEnv.planShell(repoADir, shellTarget(repoADir))
+
+    expect(plan).toEqual({
+      mode: 'sandbox',
+      name: VM_NAME,
+      workdir: repoADir,
+      env: {
+        GIT_AUTHOR_NAME: 'Repo User',
+        GIT_AUTHOR_EMAIL: 'local@example.com',
+        GIT_COMMITTER_NAME: 'Local User',
+        GIT_COMMITTER_EMAIL: 'local@example.com',
+        REPO_SECRET: 's3cret',
+      },
+      mask: ['s3cret'],
     })
   })
 

@@ -3,7 +3,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, FileText, GitBranch, Loader2, RefreshCw } from 'lucide-react'
 import {
   getVcsDiff,
-  getVcsInfo,
   listVcsStatus,
   type VcsFileDiff,
   type VcsFileStatus,
@@ -16,6 +15,7 @@ import { cn } from '@/lib/utils'
 import { serverScopedKey } from '@/lib/serverScope'
 import { useRefreshOnOpen } from '@/hooks/useRefreshOnOpen'
 import { useMobile } from '@/hooks/useMobile'
+import { useVcsInfo } from '@/hooks/useVcsInfo'
 import { GIT_UI_COLORS } from '@/lib/git-status-styles'
 import type { GitFileStatus } from '@/types/git'
 
@@ -60,11 +60,7 @@ export function RemoteSourceControlContent({
     [directory, serverId],
   )
 
-  const infoQuery = useQuery({
-    queryKey: [...vcsKey, 'info'],
-    queryFn: () => getVcsInfo(directory, serverId),
-    retry: false,
-  })
+  const infoQuery = useVcsInfo(directory, serverId)
 
   const statusQuery = useQuery({
     queryKey: [...vcsKey, 'status'],

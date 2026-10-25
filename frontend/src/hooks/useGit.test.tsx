@@ -66,6 +66,7 @@ vi.mock('@tanstack/react-query', async () => {
         invalidateQueries: (...args: unknown[]) => unknown
         setQueryData: (...args: unknown[]) => unknown
         setQueriesData: (...args: unknown[]) => unknown
+        getQueryData: (...args: unknown[]) => unknown
       } | null
       return {
         invalidateQueries: (...args: unknown[]) => {
@@ -80,6 +81,7 @@ vi.mock('@tanstack/react-query', async () => {
           mockSetQueriesData(...args)
           return real?.setQueriesData(...args)
         },
+        getQueryData: (...args: unknown[]) => real?.getQueryData(...args),
       }
     })
   }
@@ -335,6 +337,8 @@ describe('useGit', () => {
 
   describe('renameBranch mutation', () => {
     it('calls correct API and updates the status cache on success', async () => {
+      const realClient = mockRealQueryClient.current as QueryClient
+      realClient.setQueryData(['repo', 1], { fullPath: '/abs/repos/my-repo' })
       const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
 
       await waitFor(() => {
@@ -343,6 +347,10 @@ describe('useGit', () => {
 
       expect(gitApi.gitRenameBranch).toHaveBeenCalledWith(1, { from: 'main', to: 'renamed' })
       expectTargetedStatusCacheUpdate()
+      expect(mockInvalidateQueries).toHaveBeenCalledWith({
+        queryKey: ['opencode', 'vcs', '/abs/repos/my-repo', 'info'],
+        exact: true,
+      })
       expect(toast.showToast.success).toHaveBeenCalledWith('Branch renamed')
     })
 

@@ -1,6 +1,6 @@
 import { useNavigate, useLocation, useParams } from 'react-router-dom'
 import { useRef, useEffect, type ReactNode } from 'react'
-import { ChevronRight, FolderGit2, X, GitBranch, type LucideIcon } from 'lucide-react'
+import { ChevronRight, List, X, GitBranch, type LucideIcon } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useServerHealth } from '@/hooks/useServerHealth'
 import { useUrlParams } from '@/hooks/useUrlParams'
@@ -211,7 +211,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
           )}
           <MenuSection>
             {(isSessionDetail || isRemoteSessionDetail) && (
-              <MenuRow icon={FolderGit2} label="Repos" onClick={() => openMobileSheet('repos')} trailing />
+              <MenuRow icon={List} label="Sessions" onClick={() => openMobileSheet('sessions')} trailing />
             )}
             {assistantCta?.to && (
               <MenuRow icon={assistantCta.icon} label={assistantCta.label} onClick={() => navigate(assistantCta.to!)} />

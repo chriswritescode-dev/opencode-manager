@@ -47,6 +47,7 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
     useInterruptSession: () => ({ mutate: mocks.interrupt }),
     useAgents: () => ({ data: mocks.agents }),
     useSkills: () => ({ data: mocks.skills }),
+    useSession: () => ({ data: undefined }),
   }
 })
 

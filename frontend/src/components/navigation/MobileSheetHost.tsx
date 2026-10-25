@@ -1,7 +1,7 @@
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 import { useMobile } from '@/hooks/useMobile'
 import { FileBrowserSheet } from '@/components/file-browser/FileBrowserSheet'
-import { RepoQuickSwitchSheet } from '@/components/navigation/RepoQuickSwitchSheet'
+import { SessionPickerSheet } from '@/components/session/SessionPickerSheet'
 import { NotificationsSheet } from '@/components/navigation/NotificationsSheet'
 import { MoreDrawer } from '@/components/navigation/MoreDrawer'
 import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
@@ -15,7 +15,7 @@ export function MobileSheetHost() {
 
   return (
     <>
-      <RepoQuickSwitchSheet isOpen={openSheet === 'repos'} onClose={close} />
+      <SessionPickerSheet isOpen={openSheet === 'sessions'} onClose={close} />
       {openSheet === 'files' && !isRemoteRoute && (
         <FileBrowserSheet
           isOpen

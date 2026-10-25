@@ -56,6 +56,7 @@ vi.mock('@/hooks/useOpenCode', async () => {
     ...actual,
     useAgents: () => ({ data: mocks.agents }),
     useSkills: () => ({ data: mocks.skills }),
+    useSession: () => ({ data: undefined }),
   }
 })
 

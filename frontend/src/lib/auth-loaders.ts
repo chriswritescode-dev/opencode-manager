@@ -1,5 +1,6 @@
 import { redirect, type LoaderFunctionArgs } from 'react-router-dom'
 import { getSession } from './auth-client'
+import { reconcileStoredAuthUser } from './authSession'
 
 export interface AuthConfig {
   enabledProviders: string[]
@@ -110,13 +111,27 @@ export async function registerLoader() {
   return { config }
 }
 
+/**
+ * Guards a signed-in route through {@link reconcileStoredAuthUser}: a validated user is let through
+ * and remembered for the next cold start, a transient session failure is let through while a
+ * remembered user stands in for it, and an authoritative empty or rejected session is redirected to
+ * login with the requested location.
+ */
 export async function protectedLoader({ request }: LoaderFunctionArgs) {
-  const session = await getSession()
-
-  if (!session.data?.user) {
-    const url = new URL(request.url)
-    return redirect(loginRedirectPath(`${url.pathname}${url.search}${url.hash}`))
+  const url = new URL(request.url)
+  let session: Awaited<ReturnType<typeof getSession>> | null = null
+  let failure: unknown = null
+  try {
+    session = await getSession()
+  } catch (error) {
+    failure = error
   }
 
-  return null
+  const storedUser = reconcileStoredAuthUser(
+    session?.data?.user ?? null,
+    failure ?? session?.error ?? null,
+  )
+  if (storedUser !== null) return null
+
+  return redirect(loginRedirectPath(`${url.pathname}${url.search}${url.hash}`))
 }

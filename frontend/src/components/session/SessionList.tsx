@@ -52,6 +52,7 @@ export const SessionList = ({
     filteredSessions,
     isSearchPending,
     isLoading,
+    isPending,
     isPlaceholderData,
     fetchNextPage,
     hasNextPage,
@@ -186,7 +187,9 @@ export const SessionList = ({
     );
   };
 
-  if (!isLoading && !isPlaceholderData && (!sessions || sessions.length === 0)) {
+  const isInitialLoading = isPending && (!sessions || sessions.length === 0);
+
+  if (!isInitialLoading && !isPlaceholderData && (!sessions || sessions.length === 0)) {
     if (isFetchNextPageError) {
       return (
         <div className="flex flex-col items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
@@ -286,7 +289,7 @@ export const SessionList = ({
         onScroll={handleSessionsScroll}
       >
         <div className="flex flex-col gap-4">
-          {isLoading && !renderSessions ? (
+          {isPending && !renderSessions ? (
             <div className="text-sm text-muted-foreground text-center py-4">Loading sessions...</div>
           ) : renderSessions ? (
             renderSessions({

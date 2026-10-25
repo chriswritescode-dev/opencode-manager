@@ -9,7 +9,7 @@ import { useRepoSiblings } from '@/hooks/useRepoSiblings'
 import { useSidebarRepoGroups } from '@/hooks/useSidebarRepoGroups'
 import { buildWorktreeActivity, type ActiveWorktree } from '@/lib/activeWork'
 import { cn, formatShortRelativeTime, getRepoBranchLabel, getRepoDisplayName } from '@/lib/utils'
-import { getRepoPath } from '@/lib/navigation'
+import { getRepoPath, getSessionPath } from '@/lib/navigation'
 import {
   isCurrentSessionItem,
   isRepoReady,
@@ -346,5 +346,25 @@ export function NewSessionButton({
         {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
       </span>
     </button>
+  )
+}
+
+interface LocalRepoNewSessionButtonProps {
+  repo: Repo
+  onOpenSession: (path: string) => void
+}
+
+/**
+ * Creates a session in a local repository, deriving the session directory, accessible label, and
+ * session route from the repository so callers only choose what to render and where to navigate.
+ */
+export function LocalRepoNewSessionButton({ repo, onOpenSession }: LocalRepoNewSessionButtonProps) {
+  return (
+    <NewSessionButton
+      directory={repo.fullPath}
+      label={getRepoDisplayName(repo)}
+      sessionPath={(sessionId) => getSessionPath(repo.id, sessionId)}
+      onOpenSession={onOpenSession}
+    />
   )
 }

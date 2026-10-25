@@ -9,8 +9,16 @@ import { TerminalService } from '../../src/services/terminal'
 import type { GitAuthService } from '../../src/services/git-auth'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { CredentialProvider } from '../../src/services/credential-provider'
+import type { Session } from '../../src/auth'
+import {
+  closeSessionConnections,
+  registerSessionConnection,
+  SESSION_CONNECTION_CLOSE_CODE,
+  SESSION_CONNECTION_CLOSE_REASON,
+} from '../../src/services/session-connections'
 import { startWebSocketServer, type WebSocketTestServer } from '../helpers/websocket-server'
 import { rawWebSocketHandshake } from '../helpers/raw-websocket-handshake'
+import { createStubRepoEnvService } from '../helpers/stub-repo-env-service'
 
 vi.mock('../../src/services/repo', () => ({
   resolveRepoOrAssistant: vi.fn(),
@@ -50,6 +58,7 @@ const credentialProvider = { getGhCliEnv: vi.fn(() => ({})) } as unknown as Cred
 let upstream: WebSocketTestServer
 let manager: WebSocketTestServer
 let authenticated: WebSocketTestServer
+let sessionServer: WebSocketTestServer
 let managerPort = 0
 let upstreamBase = ''
 let capturedUrl: URL | undefined
@@ -79,8 +88,9 @@ upstreamApp.get(
 )
 
 const terminalService = new TerminalService(
-  { client: openCodeClient, baseUrl: () => upstreamBase, includeLocalCredentials: true },
+  { client: openCodeClient, baseUrl: () => upstreamBase, includeLocalEnv: true },
   credentialProvider,
+  createStubRepoEnvService(),
 )
 
 const managerApp = new Hono()
@@ -121,8 +131,41 @@ authenticatedApp.route(
 
 let authenticatedPort = 0
 
+const SESSION_ID = 'session-terminal'
+const sessionApp = new Hono<{ Variables: { session: Session['session'] } }>()
+const sessionWs = createNodeWebSocket({ app: sessionApp })
+sessionApp.use('/*', async (c, next) => {
+  c.set('session', {
+    id: SESSION_ID,
+    userId: 'user-1',
+    token: 'token-terminal',
+    expiresAt: new Date(Date.now() + 60_000),
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  })
+  await next()
+})
+sessionApp.route(
+  '/',
+  createRepoTerminalSocketRoutes(
+    database,
+    gitAuthService,
+    openCodeClient,
+    terminalService,
+    sessionWs.upgradeWebSocket,
+  ),
+)
+
+let sessionPort = 0
+
 function clientUrl(ptyID: string, directory = '/tmp/repo'): string {
   const url = new URL(`ws://127.0.0.1:${managerPort}/1/terminals/${ptyID}/connect`)
+  url.searchParams.set('directory', directory)
+  return url.toString()
+}
+
+function sessionClientUrl(ptyID: string, directory = '/tmp/repo'): string {
+  const url = new URL(`ws://127.0.0.1:${sessionPort}/1/terminals/${ptyID}/connect`)
   url.searchParams.set('directory', directory)
   return url.toString()
 }
@@ -164,6 +207,9 @@ beforeAll(async () => {
   authenticated = await startWebSocketServer({ app: authenticatedApp, injectWebSocket: authenticatedWs.injectWebSocket })
   authenticatedPort = authenticated.port
 
+  sessionServer = await startWebSocketServer({ app: sessionApp, injectWebSocket: sessionWs.injectWebSocket })
+  sessionPort = sessionServer.port
+
   vi.mocked(resolveRepoOrAssistant).mockImplementation((_db, id) => (id === 1 ? readyRepo : null))
   vi.mocked(resolveRepoWorkingDirectory).mockImplementation(async (_repo, directory) => {
     if (directory === undefined || directory === '/tmp/repo') return '/tmp/repo'
@@ -176,9 +222,11 @@ afterAll(async () => {
   upstreamWs.wss.close()
   managerWs.wss.close()
   authenticatedWs.wss.close()
+  sessionWs.wss.close()
   await upstream.close()
   await manager.close()
   await authenticated.close()
+  await sessionServer.close()
 })
 
 describe('Repo Terminal Socket Route', () => {
@@ -227,6 +275,59 @@ describe('Repo Terminal Socket Route', () => {
     })
 
     expect(closeEvent.code).toBe(4404)
+  })
+})
+
+describe('Repo Terminal Socket session binding', () => {
+  it('closes the socket when its session is deleted', async () => {
+    const socket = new WebSocket(sessionClientUrl('pty-1'))
+    socket.binaryType = 'arraybuffer'
+    const messages: Array<string | ArrayBuffer> = []
+    socket.addEventListener('message', (event) => {
+      messages.push(event.data as string | ArrayBuffer)
+    })
+
+    await openEvent(socket)
+    await waitFor(() => messages.length === 1)
+
+    const closeEvent = new Promise<CloseEvent>((resolve) => {
+      socket.addEventListener('close', (event) => resolve(event), { once: true })
+    })
+    const otherSessionClose = vi.fn()
+    registerSessionConnection('session-terminal-other', otherSessionClose)
+
+    closeSessionConnections(SESSION_ID)
+
+    const event = await closeEvent
+    expect(event.code).toBe(SESSION_CONNECTION_CLOSE_CODE)
+    expect(event.reason).toBe(SESSION_CONNECTION_CLOSE_REASON)
+    expect(otherSessionClose).not.toHaveBeenCalled()
+    closeSessionConnections('session-terminal-other')
+  })
+
+  it('unregisters the socket so a repeated session close does not fire again', async () => {
+    const socket = new WebSocket(sessionClientUrl('pty-1'))
+    socket.binaryType = 'arraybuffer'
+    const messages: Array<string | ArrayBuffer> = []
+    socket.addEventListener('message', (event) => {
+      messages.push(event.data as string | ArrayBuffer)
+    })
+
+    await openEvent(socket)
+    await waitFor(() => messages.length === 1)
+
+    const closeEvent = new Promise<CloseEvent>((resolve) => {
+      socket.addEventListener('close', (event) => resolve(event), { once: true })
+    })
+    const survivor = vi.fn()
+    registerSessionConnection(SESSION_ID, survivor)
+
+    closeSessionConnections(SESSION_ID)
+    await closeEvent
+
+    expect(survivor).toHaveBeenCalledTimes(1)
+    closeSessionConnections(SESSION_ID)
+    expect(survivor).toHaveBeenCalledTimes(1)
   })
 })
 

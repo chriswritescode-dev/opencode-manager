@@ -11,7 +11,7 @@ import { useSessionPins } from '@/hooks/useSessionPins'
 import { useSidebarServerSelection } from '@/hooks/useSidebarServerSelection'
 import { RemoteProjectNavList } from '@/components/navigation/RemoteProjectNav'
 import {
-  NewSessionButton,
+  LocalRepoNewSessionButton,
   RepoNavGroup,
   RepoSessionNavList,
   SearchClearButton,
@@ -25,7 +25,7 @@ import {
   isCurrentSessionItem,
   isRepoReady,
 } from '@/components/navigation/sidebar-session-tree'
-import { getRepoPath, getSessionPath } from '@/lib/navigation'
+import { getRepoPath } from '@/lib/navigation'
 import { getRepoDisplayName } from '@/lib/utils'
 import { buildPinnedSessionKeys } from '@/lib/sessionKey'
 
@@ -124,12 +124,7 @@ function SessionSearchResults({
           onOpenRepo={() => navigate(getRepoPath(group.repo.id))}
           indicator={<RepoActivityIndicator repo={group.repo} />}
           actions={
-            <NewSessionButton
-              directory={group.repo.fullPath}
-              label={group.label}
-              sessionPath={(sessionId) => getSessionPath(group.repo.id, sessionId)}
-              onOpenSession={navigate}
-            />
+            <LocalRepoNewSessionButton repo={group.repo} onOpenSession={navigate} />
           }
         >
           {group.items.map((item) => (
@@ -199,12 +194,7 @@ function LocalSessionTree() {
           onOpenRepo={(repoId) => navigate(getRepoPath(repoId))}
           onSelectSession={navigate}
           renderActions={(repo) => (
-            <NewSessionButton
-              directory={repo.fullPath}
-              label={getRepoDisplayName(repo)}
-              sessionPath={(sessionId) => getSessionPath(repo.id, sessionId)}
-              onOpenSession={navigate}
-            />
+            <LocalRepoNewSessionButton repo={repo} onOpenSession={navigate} />
           )}
         />
       )}

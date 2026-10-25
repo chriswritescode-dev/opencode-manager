@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { useSyncExternalStore } from 'react'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptInput } from './PromptInput'
 import { useComposerDraftStore } from '@/stores/composerDraftStore'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 import { createCommandActionsMock, createVoiceConversationControllerMock } from '@/test/test-utils'
+import type { ContextUsage } from '@/lib/contextUsage'
 
 const mocks = vi.hoisted(() => ({
   useSTT: vi.fn(),
@@ -21,6 +23,11 @@ const mocks = vi.hoisted(() => ({
   useSendErrorStore: vi.fn(),
   useHasBackgroundActivity: vi.fn(),
   useSendPrompt: vi.fn(),
+  useContextUsage: vi.fn(),
+  contextUsageListeners: new Set<() => void>(),
+  contextUsageValue: null as ContextUsage | null,
+  agentQuickSelectRenders: { current: 0 },
+  sessionData: undefined as { revert?: { messageID: string } } | undefined,
   hasPendingPermission: vi.fn(() => false),
   setShowDialog: vi.fn(),
 }))
@@ -54,9 +61,11 @@ vi.mock('@/hooks/useOpenCode', () => ({
   useSendShell: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(() => Promise.resolve()), isPending: false }),
   useAgents: () => ({ data: [] }),
   useSkills: () => ({ data: [] }),
+  useSession: () => ({ data: mocks.sessionData }),
 }))
 
 vi.mock('@/hooks/useProviders', () => ({ useProviders: () => ({ data: undefined }) }))
+vi.mock('@/hooks/useContextUsage', () => ({ useContextUsage: mocks.useContextUsage }))
 
 vi.mock('@/contexts/EventContext', () => ({
   usePermissions: () => ({
@@ -66,7 +75,10 @@ vi.mock('@/contexts/EventContext', () => ({
 }))
 
 vi.mock('@/components/agent/AgentQuickSelect', () => ({
-  AgentQuickSelect: () => <div data-testid="agent-quick-select" />,
+  AgentQuickSelect: () => {
+    mocks.agentQuickSelectRenders.current += 1
+    return <div data-testid="agent-quick-select" />
+  },
 }))
 
 vi.mock('@/components/model/ModelQuickSelect', () => ({
@@ -86,6 +98,22 @@ vi.mock('@/hooks/useSessionGoals', () => ({
   useStartSessionGoal: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
 vi.mock('@/hooks/useSessionPermissionMode', () => ({ useSessionPermissionMode: () => ({ data: undefined }) }))
+
+function subscribeContextUsage(listener: () => void) {
+  mocks.contextUsageListeners.add(listener)
+  return () => {
+    mocks.contextUsageListeners.delete(listener)
+  }
+}
+
+function getContextUsageSnapshot() {
+  return mocks.contextUsageValue
+}
+
+function setContextUsage(usage: ContextUsage | null) {
+  mocks.contextUsageValue = usage
+  mocks.contextUsageListeners.forEach((listener) => listener())
+}
 
 const createTestQueryClient = () => new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -153,6 +181,11 @@ describe('PromptInput composer layout', () => {
     mocks.useSessionAgentStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ setAgent: vi.fn() }))
     mocks.useSendErrorStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ errors: {} }))
     mocks.useHasBackgroundActivity.mockReturnValue(false)
+    mocks.useContextUsage.mockReturnValue(null)
+    mocks.contextUsageListeners.clear()
+    mocks.contextUsageValue = null
+    mocks.agentQuickSelectRenders.current = 0
+    mocks.sessionData = undefined
   })
 
   it('anchors the activity bar in the gap above the controls row', () => {
@@ -239,6 +272,89 @@ describe('PromptInput composer layout', () => {
       renderComponent({ isSessionActive: true })
 
       expect(screen.getByTestId('model-quick-select')).toBeInTheDocument()
+    })
+  })
+
+  describe('model pill context usage', () => {
+    const setUsage = (usage: ContextUsage) => {
+      mocks.useContextUsage.mockReturnValue(usage)
+    }
+
+    it('shows the percentage with its tone and the meter on the model pill', () => {
+      setUsage({ totalTokens: 84000, usagePercentage: 42, contextLimit: 200000 })
+      renderComponent()
+
+      const pill = screen.getByRole('button', { name: /test-model, context 42% used/ })
+      const usage = screen.getByTestId('model-pill-context-usage')
+
+      expect(pill).toContainElement(usage)
+      expect(usage).toHaveTextContent('42%')
+      expect(usage).toHaveClass('text-success')
+      expect(screen.getByTestId('context-usage-meter-fill')).toHaveStyle({ width: '42%' })
+    })
+
+    it('tints the warning tone from 50 percent', () => {
+      setUsage({ totalTokens: 120000, usagePercentage: 50, contextLimit: 240000 })
+      renderComponent()
+
+      expect(screen.getByTestId('model-pill-context-usage')).toHaveClass('text-warning')
+    })
+
+    it('tints the destructive tone from 80 percent', () => {
+      setUsage({ totalTokens: 176000, usagePercentage: 88, contextLimit: 200000 })
+      renderComponent()
+
+      expect(screen.getByTestId('model-pill-context-usage')).toHaveClass('text-destructive')
+      expect(screen.getByTestId('context-usage-meter-fill')).toHaveStyle({ width: '88%' })
+    })
+
+    it('caps the meter at full width when usage exceeds the context window', () => {
+      setUsage({ totalTokens: 260000, usagePercentage: 130, contextLimit: 200000 })
+      renderComponent()
+
+      expect(screen.getByTestId('context-usage-meter-fill')).toHaveStyle({ width: '100%' })
+    })
+
+    it('falls back to a compact token count without a known context limit', () => {
+      setUsage({ totalTokens: 12400, usagePercentage: null, contextLimit: null })
+      renderComponent()
+
+      expect(screen.getByRole('button', { name: /test-model, context 12k tokens used/ })).toBeInTheDocument()
+      expect(screen.getByTestId('model-pill-context-usage')).toHaveTextContent('12k')
+      expect(screen.getByTestId('context-usage-meter-fill')).toHaveStyle({ width: '0%' })
+    })
+
+    it('hides the usage without context data', () => {
+      renderComponent()
+
+      expect(screen.getByRole('button', { name: 'test-model' })).toBeInTheDocument()
+      expect(screen.queryByTestId('model-pill-context-usage')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('context-usage-meter')).not.toBeInTheDocument()
+    })
+
+    it('re-renders only the pill when the context usage changes', () => {
+      mocks.useContextUsage.mockImplementation(() => useSyncExternalStore(subscribeContextUsage, getContextUsageSnapshot))
+      setContextUsage({ totalTokens: 84000, usagePercentage: 42, contextLimit: 200000 })
+      renderComponent()
+
+      const siblingRenders = mocks.agentQuickSelectRenders.current
+      expect(screen.getByTestId('model-pill-context-usage')).toHaveTextContent('42%')
+      expect(siblingRenders).toBeGreaterThan(0)
+
+      act(() => {
+        setContextUsage({ totalTokens: 100000, usagePercentage: 50, contextLimit: 200000 })
+      })
+
+      expect(screen.getByTestId('model-pill-context-usage')).toHaveTextContent('50%')
+      expect(screen.getByTestId('model-pill-context-usage')).toHaveClass('text-warning')
+      expect(mocks.agentQuickSelectRenders.current).toBe(siblingRenders)
+    })
+
+    it('measures usage up to the staged revert boundary', () => {
+      mocks.sessionData = { revert: { messageID: 'msg_2' } }
+      renderComponent()
+
+      expect(mocks.useContextUsage).toHaveBeenCalledWith('test-session', '/test', 'msg_2')
     })
   })
 

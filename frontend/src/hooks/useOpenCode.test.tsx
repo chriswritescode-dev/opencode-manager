@@ -174,6 +174,30 @@ describe('useSessionsAcrossDirectories', () => {
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_all1', 'ses_all2'])
   })
 
+  it('queries all directories when allDirectories is set without a directory scope', async () => {
+    mocks.listSessionPage.mockResolvedValue({ items: [sessionInfo('ses_all', '/w/a')] })
+
+    const queryClient = createQueryClient()
+    const { result } = renderHook(
+      () => useSessionsAcrossDirectories([], { allDirectories: true }),
+      { wrapper: createWrapper(queryClient) },
+    )
+
+    expect(result.current.isPending).toBe(true)
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false)
+    })
+
+    expect(result.current.isPending).toBe(false)
+    expect(mocks.listSessionPage).toHaveBeenCalledWith({
+      limit: 25,
+      order: 'desc',
+      search: undefined,
+    }, 'local')
+    expect(result.current.data.map((session) => session.id)).toEqual(['ses_all'])
+  })
+
   it('requests child sessions and records includeChildren in the query key', async () => {
     mocks.listSessionPage.mockResolvedValue({ items: [sessionInfo('ses_child', '/w/a')] })
 

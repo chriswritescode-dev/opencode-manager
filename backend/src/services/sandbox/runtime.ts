@@ -13,6 +13,7 @@ import { isPathWithinRoot, mkdirSafe } from '../../utils/fs-safe'
 import { logger } from '../../utils/logger'
 import { SettingsService } from '../settings'
 import { CredentialProvider } from '../credential-provider'
+import type { RepoEnvService } from '../repo-env'
 import { getGitIdentityEnvForDirectory } from '../git-identity'
 import { getProcessIdentityAttestationError } from '../opencode/process-identity'
 import { detectSandboxCapability } from './capability'
@@ -66,7 +67,7 @@ export type SandboxShellTarget = {
 
 export type SandboxShellPlan =
   | { mode: 'host' }
-  | { mode: 'sandbox'; name: string; workdir: string; env?: Record<string, string> }
+  | { mode: 'sandbox'; name: string; workdir: string; env?: Record<string, string>; mask?: string[] }
   | { mode: 'blocked'; reason: string }
 
 export type SandboxStatus = {
@@ -1049,7 +1050,10 @@ function sandboxMaxRunningVms(db: Database): number {
 }
 
 export class SandboxRuntimeService {
-  constructor(private readonly db: Database) {}
+  constructor(
+    private readonly db: Database,
+    private readonly repoEnvService?: RepoEnvService,
+  ) {}
 
   async prepareSandboxOnBoot(): Promise<void> {
     if (!this.isSandboxEnabled()) return
@@ -1119,9 +1123,19 @@ export class SandboxRuntimeService {
         ...new CredentialProvider(this.db).getSandboxGitEnv({ cwd: directory }),
         ...await getGitIdentityEnvForDirectory(directory, this.db),
       }
-      return Object.keys(env).length > 0
-        ? { mode: 'sandbox', name: spec.name, workdir: workDirectory, env }
-        : { mode: 'sandbox', name: spec.name, workdir: workDirectory }
+      let mask: string[] = []
+      if (this.repoEnvService) {
+        const repoEnv = await this.repoEnvService.resolveForDirectory(directory)
+        Object.assign(env, repoEnv.env)
+        mask = repoEnv.maskValues
+      }
+      return {
+        mode: 'sandbox',
+        name: spec.name,
+        workdir: workDirectory,
+        ...(Object.keys(env).length > 0 ? { env } : {}),
+        ...(mask.length > 0 ? { mask } : {}),
+      }
     } catch (error) {
       logger.error('Failed to prepare the session sandbox', error)
       return { mode: 'blocked', reason: error instanceof Error ? error.message : String(error) }

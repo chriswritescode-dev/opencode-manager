@@ -3,6 +3,7 @@ import { formatTerminalTitle, parseTerminalTitle } from '@opencode-manager/share
 import type { TerminalInfo, TerminalKind } from '@opencode-manager/shared/types'
 import type { OpenCodeClient } from './opencode/client'
 import type { CredentialProvider } from './credential-provider'
+import type { RepoEnvService } from './repo-env'
 import { toWebSocketUrl } from './opencode/upstream'
 import { bridgeWebSocket, type WebSocketBridge, type WebSocketPeer } from '../utils/websocket-bridge'
 import { TerminalHub, TerminalHubRegistry } from './terminal-hub'
@@ -27,7 +28,7 @@ export interface TerminalSize {
 export interface TerminalTarget {
   client: OpenCodeClient
   baseUrl: () => string
-  includeLocalCredentials: boolean
+  includeLocalEnv: boolean
 }
 
 export class TerminalNotFoundError extends Error {
@@ -56,13 +57,21 @@ export class TerminalService {
   constructor(
     private readonly target: TerminalTarget,
     private readonly credentialProvider: CredentialProvider,
+    private readonly repoEnvService: RepoEnvService,
     private readonly openSocket: (url: string) => WebSocket = (url) => new WebSocket(url),
     private readonly hubs: TerminalHubRegistry = new TerminalHubRegistry(),
     private readonly deferredReleases: Map<string, DeferredRelease> = new Map(),
   ) {}
 
   forTarget(target: TerminalTarget): TerminalService {
-    return new TerminalService(target, this.credentialProvider, this.openSocket, this.hubs, this.deferredReleases)
+    return new TerminalService(
+      target,
+      this.credentialProvider,
+      this.repoEnvService,
+      this.openSocket,
+      this.hubs,
+      this.deferredReleases,
+    )
   }
 
   async list(directory: string): Promise<TerminalInfo[]> {
@@ -75,6 +84,12 @@ export class TerminalService {
       input.command !== undefined && DEFERRED_START_KINDS.has(input.kind) && process.platform !== 'win32'
         ? deferCommandStart(input.command, input.args ?? [])
         : undefined
+    const localEnv = this.target.includeLocalEnv
+      ? {
+          ...this.credentialProvider.getGhCliEnv({ cwd: directory }),
+          ...(await this.repoEnvService.resolveForDirectory(directory)).env,
+        }
+      : {}
     const result = await this.target.client.api.pty.create({
       location: { directory },
       title: formatTerminalTitle({ kind: input.kind, name: input.name, actionId: input.actionId }),
@@ -85,7 +100,7 @@ export class TerminalService {
             ...(input.args !== undefined ? { args: input.args } : {}),
           }),
       env: {
-        ...(this.target.includeLocalCredentials ? this.credentialProvider.getGhCliEnv({ cwd: directory }) : {}),
+        ...localEnv,
         ...input.env,
       },
     })

@@ -10,6 +10,13 @@ import { TerminalService } from '../../src/services/terminal'
 import { OpenCodeServerNotFoundError } from '../../src/services/opencode-server-registry'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { CredentialProvider } from '../../src/services/credential-provider'
+import type { Session } from '../../src/auth'
+import {
+  closeSessionConnections,
+  SESSION_CONNECTION_CLOSE_CODE,
+  SESSION_CONNECTION_CLOSE_REASON,
+} from '../../src/services/session-connections'
+import { createStubRepoEnvService } from '../helpers/stub-repo-env-service'
 import { startWebSocketServer, type WebSocketTestServer } from '../helpers/websocket-server'
 import { rawWebSocketHandshake } from '../helpers/raw-websocket-handshake'
 
@@ -37,7 +44,9 @@ const credentialProvider = { getGhCliEnv: vi.fn(() => ({})) } as unknown as Cred
 
 let upstream: WebSocketTestServer
 let manager: WebSocketTestServer
+let sessionServer: WebSocketTestServer
 let managerPort = 0
+let sessionPort = 0
 let capturedUrl: URL | undefined
 
 const upstreamApp = new Hono()
@@ -59,8 +68,9 @@ const managerApp = new Hono()
 const managerWs = createNodeWebSocket({ app: managerApp })
 
 const terminalService = new TerminalService(
-  { client: remoteClient, baseUrl: () => `http://127.0.0.1:${upstream.port}`, includeLocalCredentials: false },
+  { client: remoteClient, baseUrl: () => `http://127.0.0.1:${upstream.port}`, includeLocalEnv: false },
   credentialProvider,
+  createStubRepoEnvService(),
 )
 
 const resolveTerminalService: ServerTerminalServiceResolver = (serverId) => {
@@ -71,6 +81,25 @@ const resolveTerminalService: ServerTerminalServiceResolver = (serverId) => {
 managerApp.route(
   '/',
   createOpenCodeServerTerminalSocketRoutes(resolveTerminalService, managerWs.upgradeWebSocket, [TRUSTED_ORIGIN]),
+)
+
+const SESSION_ID = 'session-server-terminal'
+const sessionApp = new Hono<{ Variables: { session: Session['session'] } }>()
+const sessionWs = createNodeWebSocket({ app: sessionApp })
+sessionApp.use('/*', async (c, next) => {
+  c.set('session', {
+    id: SESSION_ID,
+    userId: 'user-1',
+    token: 'token-server-terminal',
+    expiresAt: new Date(Date.now() + 60_000),
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  })
+  await next()
+})
+sessionApp.route(
+  '/',
+  createOpenCodeServerTerminalSocketRoutes(resolveTerminalService, sessionWs.upgradeWebSocket, [TRUSTED_ORIGIN]),
 )
 
 function clientUrl(ptyID: string, directory = DIRECTORY, cursor?: number): string {
@@ -103,13 +132,17 @@ beforeAll(async () => {
   upstream = await startWebSocketServer({ app: upstreamApp, injectWebSocket: upstreamWs.injectWebSocket })
   manager = await startWebSocketServer({ app: managerApp, injectWebSocket: managerWs.injectWebSocket })
   managerPort = manager.port
+  sessionServer = await startWebSocketServer({ app: sessionApp, injectWebSocket: sessionWs.injectWebSocket })
+  sessionPort = sessionServer.port
 })
 
 afterAll(async () => {
   upstreamWs.wss.close()
   managerWs.wss.close()
+  sessionWs.wss.close()
   await upstream.close()
   await manager.close()
+  await sessionServer.close()
 })
 
 describe('OpenCode Server Terminal Socket Route', () => {
@@ -173,5 +206,30 @@ describe('OpenCode Server Terminal Socket Route', () => {
     })
 
     expect(outcome).toEqual({ upgraded: false, status: 400 })
+  })
+})
+
+describe('OpenCode Server Terminal Socket session binding', () => {
+  it('closes the socket when its session is deleted', async () => {
+    const socket = new WebSocket(`ws://127.0.0.1:${sessionPort}/${SERVER_ID}/terminals/pty-1/connect?directory=${encodeURIComponent(DIRECTORY)}`)
+    socket.binaryType = 'arraybuffer'
+    const messages: Array<string | ArrayBuffer> = []
+    socket.addEventListener('message', (event) => {
+      messages.push(event.data as string | ArrayBuffer)
+    })
+
+    await openEvent(socket)
+    socket.send('echo session')
+    await waitFor(() => messages.includes('echo session'))
+
+    const closeEvent = new Promise<CloseEvent>((resolve) => {
+      socket.addEventListener('close', (event) => resolve(event), { once: true })
+    })
+
+    closeSessionConnections(SESSION_ID)
+
+    const event = await closeEvent
+    expect(event.code).toBe(SESSION_CONNECTION_CLOSE_CODE)
+    expect(event.reason).toBe(SESSION_CONNECTION_CLOSE_REASON)
   })
 })

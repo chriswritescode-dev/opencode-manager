@@ -6,49 +6,36 @@ import { SettingsService } from '../../../src/services/settings'
 import { createInternalGitCredentialsRoutes } from '../../../src/routes/internal/git-credentials'
 import type { GitCredential } from '@opencode-manager/shared'
 
-describe('internal git-credentials routes', () => {
+describe('legacy internal git-credentials routes', () => {
   let db: Database
   let settingsService: SettingsService
-  let app: ReturnType<typeof createInternalGitCredentialsRoutes>
 
   beforeEach(() => {
     db = new Database(':memory:')
     migrate(db, allMigrations)
     settingsService = new SettingsService(db)
-    app = createInternalGitCredentialsRoutes(db)
   })
 
-  it('GET /gh-env returns GH_TOKEN and GITHUB_TOKEN for a GitHub PAT', async () => {
+  it('answers the adopted-process gh-env path with the flat GitHub CLI env', async () => {
     settingsService.updateSettings({
       gitCredentials: [
-        { name: 'github', host: 'github.com', type: 'pat', token: 'ghp_test_token' } as GitCredential,
+        { name: 'github', host: 'github.com', type: 'pat', token: 'ghp_legacy_token' } as GitCredential,
       ],
     })
+    const app = createInternalGitCredentialsRoutes(db)
 
     const res = await app.request('/gh-env')
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ GH_TOKEN: 'ghp_test_token', GITHUB_TOKEN: 'ghp_test_token' })
+    expect(await res.json()).toEqual({ GH_TOKEN: 'ghp_legacy_token', GITHUB_TOKEN: 'ghp_legacy_token' })
   })
 
-  it('GET /gh-env returns an empty object when no GitHub credential exists', async () => {
-    const res = await app.request('/gh-env')
-
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({})
-  })
-
-  it('GET /gh-env returns only GH env for a repo cwd', async () => {
-    settingsService.updateSettings({
-      gitCredentials: [
-        { name: 'github', host: 'github.com', type: 'pat', token: 'ghp_repo_token' } as GitCredential,
-      ],
-      gitIdentities: [{ id: 'work', name: 'Work User', email: 'work@example.com' }],
-    })
+  it('accepts the legacy cwd query parameter', async () => {
+    const app = createInternalGitCredentialsRoutes(db)
 
     const res = await app.request('/gh-env?cwd=/tmp/any-repo')
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ GH_TOKEN: 'ghp_repo_token', GITHUB_TOKEN: 'ghp_repo_token' })
+    expect(await res.json()).toEqual({})
   })
 })

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { Hono } from 'hono'
 
 const sseMocks = vi.hoisted(() => ({
   addClient: vi.fn(),
@@ -20,13 +21,48 @@ vi.mock('../../src/utils/logger', () => ({
     info: vi.fn(),
     error: vi.fn(),
     warn: vi.fn(),
+    debug: vi.fn(),
   },
 }))
 
 import { createSSERoutes } from '../../src/routes/sse'
+import { createAuthMiddleware } from '../../src/auth/middleware'
+import { closeSessionConnections } from '../../src/services/session-connections'
+import type { AuthInstance, Session } from '../../src/auth'
 import { encodeSSEFrame } from '../../src/utils/sse-frame'
 
 const decoder = new TextDecoder()
+
+function createSession(sessionId: string): Session {
+  return {
+    session: {
+      id: sessionId,
+      userId: 'user-1',
+      token: `token-${sessionId}`,
+      expiresAt: new Date(Date.now() + 60_000),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    user: {
+      id: 'user-1',
+      name: 'Test User',
+      email: 'test@example.com',
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      role: 'user',
+    },
+  }
+}
+
+function createAuthenticatedApp(sessionId: string) {
+  const app = new Hono<{ Variables: { session: Session['session']; user: Session['user'] } }>()
+  app.use('/*', createAuthMiddleware({
+    api: { getSession: async () => createSession(sessionId) },
+  } as unknown as AuthInstance))
+  app.route('/', createSSERoutes())
+  return app
+}
 
 async function readChunk(reader: { read(): Promise<{ value?: Uint8Array }> }): Promise<string> {
   const { value } = await reader.read()
@@ -315,6 +351,58 @@ describe('SSE Routes', () => {
         directories: ['/a', '/b'],
         activeSessions: { '/a': ['session-1'] },
       })
+    })
+  })
+
+  describe('GET /stream session binding', () => {
+    it('ends the stream once its session is closed', async () => {
+      const cleanup = vi.fn()
+      sseMocks.addClient.mockReturnValue(cleanup)
+      const sessionId = 'session-revoked'
+      const authenticatedApp = createAuthenticatedApp(sessionId)
+
+      const res = await authenticatedApp.fetch(new Request('http://localhost/stream'))
+      const reader = res.body!.getReader()
+      try {
+        expect(await readChunk(reader)).toContain('event: connected')
+
+        closeSessionConnections(sessionId)
+
+        await vi.waitFor(() => expect(cleanup).toHaveBeenCalledTimes(1))
+        expect(await reader.read()).toEqual({ done: true, value: undefined })
+
+        closeSessionConnections(sessionId)
+        expect(cleanup).toHaveBeenCalledTimes(1)
+      } finally {
+        await reader.cancel()
+      }
+    })
+
+    it('keeps streaming while another session is closed', async () => {
+      const cleanup = vi.fn()
+      sseMocks.addClient.mockReturnValue(cleanup)
+      const sessionId = 'session-active'
+      const authenticatedApp = createAuthenticatedApp(sessionId)
+
+      const res = await authenticatedApp.fetch(new Request('http://localhost/stream'))
+      const reader = res.body!.getReader()
+      try {
+        expect(await readChunk(reader)).toContain('event: connected')
+        const [, writeEvent] = sseMocks.addClient.mock.calls[0] as [
+          string,
+          (event: string, data: string) => void,
+        ]
+
+        closeSessionConnections('session-other')
+
+        writeEvent('message', '{"still":"open"}')
+        expect(await readChunk(reader)).toBe('event: message\ndata: {"still":"open"}\n\n')
+        expect(cleanup).not.toHaveBeenCalled()
+      } finally {
+        await reader.cancel()
+      }
+
+      expect(cleanup).toHaveBeenCalledTimes(1)
     })
   })
 })

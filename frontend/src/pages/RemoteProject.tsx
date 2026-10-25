@@ -1,8 +1,9 @@
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
 import { FolderGit2, GitBranch, Loader2, Plus, Server } from 'lucide-react'
-import { getVcsInfo, listProjects } from '@/api/opencode'
+import { remoteProjectName } from '@/api/opencode'
 import { useCreateSession } from '@/hooks/useOpenCode'
+import { useRemoteProjects } from '@/hooks/useRemoteProjects'
+import { useVcsInfo } from '@/hooks/useVcsInfo'
 import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
 import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 import { useSSE } from '@/hooks/useSSE'
@@ -10,7 +11,6 @@ import { useToolPanelLayout } from '@/hooks/useToolPanelLayout'
 import { useToolPanel } from '@/hooks/useToolPanel'
 import { useDialogParam } from '@/hooks/useDialogParam'
 import { useTerminalDialogParam, useTerminalDirectoryParam } from '@/hooks/useOpenTerminal'
-import { serverScopedKey } from '@/lib/serverScope'
 import { getServerSessionPath } from '@/lib/navigation'
 import { getDirectoryName } from '@/lib/utils'
 import { Header } from '@/components/ui/header'
@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { SessionList } from '@/components/session/SessionList'
 import { LinkedServerStateCard } from '@/components/servers/LinkedServerStateCard'
+import { ServersUnavailableCard } from '@/components/servers/ServersUnavailableCard'
 import { RemoteSchedulesButton } from '@/components/schedules/RemoteSchedulesButton'
 import { RemoteMultiRunButton } from '@/components/repo/RemoteMultiRunButton'
 import { RepoMcpDialog } from '@/components/repo/RepoMcpDialog'
@@ -28,7 +29,12 @@ import { ToolSidePanel } from '@/components/navigation/ToolSidePanel'
 
 function RemoteProjectContent({ serverId, directory }: { serverId: string; directory?: string }) {
   const navigate = useNavigate()
-  const { servers, isLoading: serversLoading } = useOpenCodeServers()
+  const {
+    servers,
+    showsInitialLoading: serversLoading,
+    isPaused: serversPaused,
+    refetch: refetchServers,
+  } = useOpenCodeServers()
   const { openTab } = useSettingsDialog()
   const [mcpDialogOpen, setMcpDialogOpen] = useDialogParam('mcp')
   const [skillsDialogOpen, setSkillsDialogOpen] = useDialogParam('skills')
@@ -39,29 +45,24 @@ function RemoteProjectContent({ serverId, directory }: { serverId: string; direc
   const toolPanel = useToolPanel(showRail)
 
   const server = servers.find((candidate) => candidate.id === serverId)
+  const serversUnavailable = serversPaused && servers.length === 0
   const isDisabled = server !== undefined && !server.enabled
   const isReady = server?.enabled === true && Boolean(directory)
   const createSession = useCreateSession(directory)
 
-  const projectsQuery = useQuery({
-    queryKey: serverScopedKey(['opencode', 'projects'], serverId),
-    queryFn: () => listProjects(serverId),
-    enabled: server?.enabled === true,
-    retry: false,
-  })
+  const { projects } = useRemoteProjects(serverId)
 
-  const vcsQuery = useQuery({
-    queryKey: [...serverScopedKey(['opencode', 'vcs', directory ?? ''], serverId), 'info'],
-    queryFn: () => getVcsInfo(directory ?? '', serverId),
-    enabled: isReady,
-    retry: false,
-  })
+  const vcsQuery = useVcsInfo(directory, serverId, { enabled: isReady })
 
   useSSE(directory)
 
-  const project = (projectsQuery.data ?? []).find((entry) => entry.canonical === directory)
+  const project = projects.find((entry) => entry.canonical === directory)
   const branch = vcsQuery.data?.branch.current ?? vcsQuery.data?.branch.default
-  const title = project?.name?.trim() || (directory ? getDirectoryName(directory) : 'Project')
+  const title = project
+    ? remoteProjectName(project)
+    : directory
+      ? getDirectoryName(directory)
+      : 'Project'
 
   const openSettings = () => openTab('servers')
 
@@ -126,7 +127,19 @@ function RemoteProjectContent({ serverId, directory }: { serverId: string; direc
         </Header>
 
         <div className="flex min-h-0 flex-1 flex-col">
-          {!serversLoading && !server ? (
+          {serversLoading && directory ? (
+            <div
+              role="status"
+              aria-label="Loading project"
+              className="flex flex-1 items-center justify-center"
+            >
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : serversUnavailable ? (
+            <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-3 sm:p-4">
+              <ServersUnavailableCard onRetry={refetchServers} />
+            </div>
+          ) : !serversLoading && !server ? (
             <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-3 sm:p-4">
               <LinkedServerStateCard
                 icon={Server}

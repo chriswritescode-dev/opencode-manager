@@ -12,6 +12,7 @@ import {
   createSessionWithPrompt,
   deleteSession,
   findFiles,
+  findRemoteProjectForDirectory,
   forkSession,
   getSession,
   interruptSession,
@@ -20,13 +21,16 @@ import {
   listPendingPermissions,
   listSessionMessages,
   listSessionPage,
+  rankProjectsBySessionActivity,
   readSessionSnapshot,
+  remoteProjectName,
   renameSession,
   replyForm,
   replyPermission,
   runCommand,
   runShell,
   sendPrompt,
+  sortProjectsByUpdatedAt,
   stageRevert,
   switchSessionAgent,
   switchSessionModel,
@@ -751,5 +755,136 @@ describe('OpenCode facade', () => {
 
     expect(lastRequest().url).toBe('http://localhost/api/opencode/api/session/ses_1/form/form_1')
     expect(lastRequest().init.method).toBe('DELETE')
+  })
+})
+
+const project = (
+  id: string,
+  name: string | undefined,
+  canonical: string,
+  time: { created: number; updated: number; active?: number },
+) => ({ id, name, canonical, time, sandboxes: [] })
+
+const session = (id: string, directory: string, updated: number) => ({
+  id,
+  projectID: 'prj',
+  cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  time: { created: updated - 1000, updated },
+  location: { directory },
+})
+
+describe('project helpers', () => {
+  it('orders projects by their update time, most recent first, without mutating the input', () => {
+    const stale = project('p_stale', 'Stale', '/work/stale', { created: 1, updated: 100 })
+    const recent = project('p_recent', 'Recent', '/work/recent', { created: 1, updated: 900 })
+    const middle = project('p_middle', 'Middle', '/work/middle', { created: 1, updated: 700 })
+    const projects = [stale, recent, middle]
+
+    expect(sortProjectsByUpdatedAt(projects).map((entry) => entry.id)).toEqual([
+      'p_recent',
+      'p_middle',
+      'p_stale',
+    ])
+    expect(projects.map((entry) => entry.id)).toEqual(['p_stale', 'p_recent', 'p_middle'])
+  })
+
+  it('labels a project with its newest session time and ignores the project activity time', () => {
+    const projects = [project('p1', 'Alpha', '/work/alpha', { created: 1, updated: 10, active: 900 })]
+
+    const [entry] = rankProjectsBySessionActivity(projects, [
+      session('ses_old', '/work/alpha', 300),
+      session('ses_new', '/work/alpha', 500),
+    ])
+
+    expect(entry.project.id).toBe('p1')
+    expect(entry.activityAt).toBe(500)
+  })
+
+  it('credits a session in a nested directory to the project that owns it', () => {
+    const projects = [project('p1', 'Alpha', '/work/alpha', { created: 1, updated: 10 })]
+
+    const [entry] = rankProjectsBySessionActivity(projects, [
+      session('ses_nested', '/work/alpha/packages/web', 400),
+    ])
+
+    expect(entry.activityAt).toBe(400)
+  })
+
+  it('orders session-backed projects first, then the rest by update time', () => {
+    const projects = [
+      project('p_idle', 'Idle', '/work/idle', { created: 1, updated: 950, active: 999 }),
+      project('p_worked', 'Worked', '/work/worked', { created: 1, updated: 20, active: 999 }),
+      project('p_quiet', 'Quiet', '/work/quiet', { created: 1, updated: 600 }),
+    ]
+
+    const ranked = rankProjectsBySessionActivity(projects, [session('ses_1', '/work/worked', 300)])
+
+    expect(ranked.map((entry) => entry.project.id)).toEqual(['p_worked', 'p_idle', 'p_quiet'])
+    expect(ranked.map((entry) => entry.activityAt)).toEqual([300, 950, 600])
+  })
+
+  it('ignores sessions that belong to no listed project', () => {
+    const projects = [project('p1', 'Alpha', '/work/alpha', { created: 1, updated: 10 })]
+
+    const [entry] = rankProjectsBySessionActivity(projects, [session('ses_1', '/srv/other', 900)])
+
+    expect(entry.activityAt).toBe(10)
+  })
+
+  it('names a project from its trimmed title', () => {
+    expect(remoteProjectName(project('p1', '  Alpha  ', '/work/alpha', { created: 1, updated: 2 }))).toBe('Alpha')
+  })
+
+  it('names a project from its directory when it has no title', () => {
+    expect(remoteProjectName(project('p1', undefined, '/work/beta', { created: 1, updated: 2 }))).toBe('beta')
+    expect(remoteProjectName(project('p1', '   ', '/work/gamma', { created: 1, updated: 2 }))).toBe('gamma')
+  })
+
+  it('finds the project that owns a directory or one nested inside it', () => {
+    const projects = [
+      project('p1', 'Alpha', '/work/alpha', { created: 1, updated: 2 }),
+      project('p2', 'Beta', '/work/beta', { created: 1, updated: 2 }),
+    ]
+
+    expect(findRemoteProjectForDirectory(projects, '/work/beta')?.id).toBe('p2')
+    expect(findRemoteProjectForDirectory(projects, '/work/beta/packages/web')?.id).toBe('p2')
+  })
+
+  it('picks the deepest project when one canonical directory contains another', () => {
+    const projects = [
+      project('p_parent', 'Repo', '/work/repo', { created: 1, updated: 2 }),
+      project('p_child', 'App', '/work/repo/packages/app', { created: 1, updated: 3 }),
+    ]
+
+    expect(findRemoteProjectForDirectory(projects, '/work/repo')?.id).toBe('p_parent')
+    expect(findRemoteProjectForDirectory(projects, '/work/repo/packages/app')?.id).toBe('p_child')
+    expect(findRemoteProjectForDirectory(projects, '/work/repo/packages/app/src')?.id).toBe('p_child')
+  })
+
+  it('credits a session in a nested project to the deepest project', () => {
+    const projects = [
+      project('p_parent', 'Repo', '/work/repo', { created: 1, updated: 20 }),
+      project('p_child', 'App', '/work/repo/packages/app', { created: 1, updated: 10 }),
+    ]
+
+    const ranked = rankProjectsBySessionActivity(projects, [
+      session('ses_nested', '/work/repo/packages/app/src', 400),
+    ])
+
+    expect(ranked.find((entry) => entry.project.id === 'p_child')?.activityAt).toBe(400)
+    expect(ranked.find((entry) => entry.project.id === 'p_parent')?.activityAt).toBe(20)
+  })
+
+  it('returns no project when no canonical directory contains the directory', () => {
+    const projects = [project('p1', 'Alpha', '/work/alpha', { created: 1, updated: 2 })]
+
+    expect(findRemoteProjectForDirectory(projects, '/srv/elsewhere')).toBeUndefined()
+  })
+
+  it('does not match a directory that only shares a prefix with a canonical directory', () => {
+    const projects = [project('p1', 'Alpha', '/work/alpha', { created: 1, updated: 2 })]
+
+    expect(findRemoteProjectForDirectory(projects, '/work/alphabet')).toBeUndefined()
   })
 })

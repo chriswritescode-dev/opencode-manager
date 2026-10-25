@@ -1,38 +1,38 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
 import { Folder, FolderGit2, FolderPlus, GitBranch, Search, Server } from 'lucide-react'
-import { listProjects, type OpenCodeProject } from '@/api/opencode'
+import { remoteProjectName, type OpenCodeProject } from '@/api/opencode'
 import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
+import { useRemoteProjectsByActivity } from '@/hooks/useRemoteProjects'
 import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 import { useProjectActivityState } from '@/hooks/useActiveWork'
-import { serverScopedKey } from '@/lib/serverScope'
 import { getServerProjectPath } from '@/lib/navigation'
-import { formatShortRelativeTime, getDirectoryName } from '@/lib/utils'
+import { formatShortRelativeTime } from '@/lib/utils'
 import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
 import { ActivityStateIndicator } from '@/components/activity/ActivityStateIndicator'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { LinkedServerStateCard } from '@/components/servers/LinkedServerStateCard'
+import { ServersUnavailableCard } from '@/components/servers/ServersUnavailableCard'
 import { OpenDirectoryDialog } from '@/components/servers/OpenDirectoryDialog'
 import { RemoteProjectRowActions } from '@/components/servers/RemoteProjectRowActions'
 import { RepoCardShell } from '@/components/repo/RepoCardShell'
 import { RepoCardSkeleton } from '@/components/repo/RepoCardSkeleton'
 import { RepoSearchInput } from '@/components/repo/RepoSearchInput'
 
-function projectName(project: OpenCodeProject): string {
-  return project.name?.trim() || getDirectoryName(project.canonical)
+interface RemoteProjectCardProps {
+  project: OpenCodeProject
+  serverId: string
+  activityAt: number
 }
 
-function RemoteProjectCard({ project, serverId }: { project: OpenCodeProject; serverId: string }) {
+function RemoteProjectCard({ project, serverId, activityAt }: RemoteProjectCardProps) {
   const navigate = useNavigate()
   const activityState = useProjectActivityState(serverId, project.canonical)
-  const updatedAt = project.time.updated
 
   return (
     <RepoCardShell
-      title={projectName(project)}
-      statusDotClassName="bg-success"
+      title={remoteProjectName(project)}
       activity={<ActivityStateIndicator state={activityState} />}
       actions={<RemoteProjectRowActions serverId={serverId} directory={project.canonical} />}
       meta={
@@ -45,7 +45,7 @@ function RemoteProjectCard({ project, serverId }: { project: OpenCodeProject; se
           <span className="truncate">{project.canonical}</span>
         </span>
       }
-      activityLabel={updatedAt > 0 ? formatShortRelativeTime(new Date(updatedAt)) : undefined}
+      activityLabel={activityAt > 0 ? formatShortRelativeTime(new Date(activityAt)) : undefined}
       isInteractive
       onClick={() => navigate(getServerProjectPath(serverId, project.canonical))}
     />
@@ -87,29 +87,29 @@ function RemoteProjectListLoading() {
 }
 
 function RemoteProjectListContent({ serverId }: { serverId: string }) {
-  const { servers, isLoading: serversLoading } = useOpenCodeServers()
+  const {
+    servers,
+    showsInitialLoading: serversLoading,
+    isPaused: serversPaused,
+    refetch: refetchServers,
+  } = useOpenCodeServers()
   const { openTab } = useSettingsDialog()
   const [openDirectoryOpen, setOpenDirectoryOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
 
   const server = servers.find((candidate) => candidate.id === serverId)
+  const serversUnavailable = serversPaused && servers.length === 0
   const isDisabled = server !== undefined && !server.enabled
 
-  const projectsQuery = useQuery({
-    queryKey: serverScopedKey(['opencode', 'projects'], serverId),
-    queryFn: () => listProjects(serverId),
-    enabled: server?.enabled === true,
-    retry: false,
-  })
-
-  const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
+  const { projects, activityById, showsInitialLoading, showsError, error, refetch } =
+    useRemoteProjectsByActivity(serverId)
 
   const filteredProjects = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
     if (!query) return projects
 
     return projects.filter((project) =>
-      projectName(project).toLowerCase().includes(query) ||
+      remoteProjectName(project).toLowerCase().includes(query) ||
       project.canonical.toLowerCase().includes(query),
     )
   }, [projects, searchQuery])
@@ -118,7 +118,9 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
 
   return (
     <div className="flex h-full flex-col px-0 md:px-4 md:pt-4">
-      {!serversLoading && !server ? (
+      {serversUnavailable ? <ServersUnavailableCard onRetry={refetchServers} /> : null}
+
+      {!serversLoading && !serversUnavailable && !server ? (
         <LinkedServerStateCard
           icon={Server}
           title="Server not found"
@@ -127,6 +129,8 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
           onAction={openSettings}
         />
       ) : null}
+
+      {serversLoading ? <RemoteProjectListLoading /> : null}
 
       {isDisabled ? (
         <LinkedServerStateCard
@@ -138,25 +142,23 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
         />
       ) : null}
 
-      {server && !isDisabled && projectsQuery.isError ? (
+      {server && !isDisabled && showsError ? (
         <Card className="flex flex-col items-center gap-3 p-6 text-center">
           <Server className="h-8 w-8 text-muted-foreground" />
           <div>
             <p className="font-medium">Could not load projects</p>
             <p className="text-sm text-muted-foreground">
-              {projectsQuery.error instanceof Error
-                ? projectsQuery.error.message
-                : 'The server did not respond.'}
+              {error instanceof Error ? error.message : 'The server did not respond.'}
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => void projectsQuery.refetch()}>
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
             Retry
           </Button>
         </Card>
       ) : null}
 
-      {server && !isDisabled && !projectsQuery.isError ? (
-        projectsQuery.isLoading ? (
+      {server && !isDisabled && !showsError ? (
+        showsInitialLoading ? (
           <RemoteProjectListLoading />
         ) : projects.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center p-12 text-center">
@@ -196,6 +198,7 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
                         key={project.id}
                         project={project}
                         serverId={serverId}
+                        activityAt={activityById.get(project.id) ?? 0}
                       />
                     ))}
                   </div>

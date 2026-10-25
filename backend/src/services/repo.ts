@@ -37,6 +37,9 @@ export class RepoInputError extends Error {
   }
 }
 
+const HTTP_AUTH_STATUS_PATTERN = /\b(?:http|status|error):?\s+401\b/
+const HTTP_NOT_FOUND_STATUS_PATTERN = /\b(?:http|status|error):?\s+404\b/
+
 function notFoundOrDeniedMessage(repoUrl: string): string {
   return `Repository not found or access denied: ${repoUrl}. Check the URL and add credentials in Settings > Git Credentials if it is private.`
 }
@@ -52,7 +55,26 @@ function enhanceCloneError(repoUrl: string, originalMessage: string): RepoInputE
     return new RepoInputError(`Repository not reachable: ${repoUrl}. Check the URL and your network connection.`)
   }
 
-  if (message.includes('repository not found') || message.includes('not found') || message.includes('does not exist') || message.includes('404')) {
+  if (
+    message.includes('authentication failed') ||
+    message.includes('could not authenticate') ||
+    message.includes('invalid credentials') ||
+    message.includes('invalid username or password') ||
+    message.includes('could not read username') ||
+    message.includes('could not read password') ||
+    HTTP_AUTH_STATUS_PATTERN.test(message)
+  ) {
+    return isGitHubHttpsUrl(repoUrl)
+      ? new RepoInputError(notFoundOrDeniedMessage(repoUrl))
+      : new RepoInputError(`Authentication failed for ${repoUrl}. Check your credentials in Settings > Git Credentials.`)
+  }
+
+  if (
+    message.includes('repository not found') ||
+    message.includes('not found') ||
+    message.includes('does not exist') ||
+    HTTP_NOT_FOUND_STATUS_PATTERN.test(message)
+  ) {
     return new RepoInputError(notFoundOrDeniedMessage(repoUrl))
   }
 
@@ -60,12 +82,6 @@ function enhanceCloneError(repoUrl: string, originalMessage: string): RepoInputE
     return isSSHUrl(repoUrl)
       ? new RepoInputError(`Access denied to ${repoUrl}. Add your SSH credentials in Settings > Git Credentials and ensure your SSH key has access.`)
       : new RepoInputError(notFoundOrDeniedMessage(repoUrl))
-  }
-
-  if (message.includes('authentication failed') || message.includes('could not authenticate') || message.includes('invalid credentials') || message.includes('could not read username')) {
-    return isGitHubHttpsUrl(repoUrl)
-      ? new RepoInputError(notFoundOrDeniedMessage(repoUrl))
-      : new RepoInputError(`Authentication failed for ${repoUrl}. Check your credentials in Settings > Git Credentials.`)
   }
 
   if (message.includes('not a git repository') || message.includes('fatal:')) {
@@ -252,11 +268,12 @@ async function safeGetCurrentBranch(repoPath: string, env: Record<string, string
   }
 }
 
-async function findGitRepoRoot(targetPath: string, env: Record<string, string>): Promise<string | null> {
+export async function findGitRepoRoot(targetPath: string, env: Record<string, string> = {}): Promise<string | null> {
   try {
     const resolvedPath = normalizeAbsolutePath(targetPath)
     const repoRoot = await executeCommand(['git', '-C', resolvedPath, 'rev-parse', '--show-toplevel'], { env, silent: true })
-    return normalizeAbsolutePath(repoRoot.trim())
+    const trimmed = repoRoot.trim()
+    return trimmed ? normalizeAbsolutePath(trimmed) : null
   } catch {
     return null
   }
@@ -1209,6 +1226,11 @@ export async function resolveRepoProjectId(openCodeClient: OpenCodeClient, direc
   return project.id
 }
 
+/**
+ * Resolves the registered repository a directory belongs to. Beyond the repository's own
+ * location, a directory is only attributed to a repository that shares its Git metadata, so a
+ * separate clone of the same origin, whose project id matches, is not mistaken for it.
+ */
 export async function resolveRepoForDirectory(
   database: Database,
   directory: string,
@@ -1224,13 +1246,22 @@ export async function resolveRepoForDirectory(
   const readyRepos = listRepos(database).filter(
     (candidate) => candidate.cloneStatus === 'ready',
   )
+  const candidates: Repo[] = []
   for (const candidate of readyRepos) {
     const candidateProjectId = await resolveProjectId(candidate.fullPath).catch(
       () => null,
     )
-    if (candidateProjectId === projectId) return candidate
+    if (candidateProjectId === projectId) candidates.push(candidate)
   }
-  return null
+  if (candidates.length === 0) return null
+
+  const mainCheckout = await resolveMainCheckoutPath(directory)
+  if (!mainCheckout) return null
+  const canonicalMainCheckout = canonicalPathSync(path.resolve(mainCheckout))
+
+  return candidates.find(
+    (candidate) => canonicalPathSync(path.resolve(candidate.fullPath)) === canonicalMainCheckout,
+  ) ?? null
 }
 
 export function resolveRepoOrAssistant(database: Database, id: number): Repo | null {

@@ -8,7 +8,6 @@ import { SwipeNavigationProvider, useSwipeNavigation } from '@/contexts/SwipeNav
 import { getServerProjectPath } from '@/lib/navigation'
 import { LocationCatcher } from '@/test/test-utils'
 import { MessageThread } from '@/components/message/MessageThread'
-import { ContextUsageIndicator } from '@/components/session/ContextUsageIndicator'
 import { SessionCostIndicator } from '@/components/session/SessionCostIndicator'
 import { SessionSendErrorBanner } from '@/components/session/SessionSendErrorBanner'
 import { PendingActionsGroup } from '@/components/notifications/PendingActionsGroup'
@@ -134,7 +133,6 @@ vi.mock('@/components/message/MessageThread', () => ({
 vi.mock('@/components/message/PromptInput', () => ({ PromptInput: vi.fn(() => null) }))
 vi.mock('@/components/message/FloatingTTSButton', () => ({ FloatingTTSButton: vi.fn(() => null) }))
 vi.mock('@/components/message/MessageSkeleton', () => ({ MessageSkeleton: vi.fn(() => null) }))
-vi.mock('@/components/session/ContextUsageIndicator', () => ({ ContextUsageIndicator: vi.fn(() => null) }))
 vi.mock('@/components/session/SessionCostIndicator', () => ({ SessionCostIndicator: vi.fn(() => null) }))
 vi.mock('@/components/session/SessionSendErrorBanner', () => ({ SessionSendErrorBanner: vi.fn(() => null) }))
 vi.mock('@/components/session/BackgroundWorkBar', () => ({ BackgroundWorkBar: vi.fn(() => null) }))
@@ -281,20 +279,21 @@ describe('SessionDetail remote server mode', () => {
     expect(mocks.useRepoSiblings).toHaveBeenCalledWith(undefined)
   })
 
-  it('titles the header with the server name and session directory', async () => {
+  it('shows the remote project in the header without the server name', async () => {
     renderRemoteSession()
 
     await waitFor(() => {
-      expect(screen.getByText('Kitchen')).toHaveClass('text-info')
+      expect(screen.getByLabelText('Remote server')).toBeInTheDocument()
     })
-    expect(screen.getByText('Kitchen').parentElement).toHaveTextContent('Kitchen · app')
+    expect(screen.getByText('app')).toBeInTheDocument()
+    expect(screen.queryByText(/Kitchen/)).not.toBeInTheDocument()
   })
 
   it('returns to the project page from the header back button', async () => {
     const { capturedPathname, capturedSearch } = renderRemoteSession()
 
     await waitFor(() => {
-      expect(screen.getByText('Kitchen').parentElement).toHaveTextContent('Kitchen · app')
+      expect(screen.getByLabelText('Remote server')).toBeInTheDocument()
     })
 
     fireEvent.click(screen.getByRole('button', { name: 'Go back' }))
@@ -454,9 +453,6 @@ describe('SessionDetail remote server mode', () => {
       expect(screen.getByTestId('message-thread')).toBeInTheDocument()
     })
 
-    expect(vi.mocked(ContextUsageIndicator).mock.calls.at(-1)?.[0]).toEqual(
-      expect.objectContaining({ isConnected: false, isReconnecting: true }),
-    )
     expect(vi.mocked(SessionSendErrorBanner).mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({ isConnected: false, isReconnecting: true }),
     )
@@ -481,9 +477,6 @@ describe('SessionDetail remote server mode', () => {
       expect(screen.getByTestId('message-thread')).toBeInTheDocument()
     })
 
-    expect(vi.mocked(ContextUsageIndicator).mock.calls.at(-1)?.[0]).toEqual(
-      expect.objectContaining({ isConnected: true, isReconnecting: false }),
-    )
     expect(vi.mocked(SessionSendErrorBanner).mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({ isConnected: true, isReconnecting: false }),
     )
@@ -498,9 +491,32 @@ describe('SessionDetail remote server mode', () => {
       expect(screen.getByTestId('message-thread')).toBeInTheDocument()
     })
 
-    expect(vi.mocked(ContextUsageIndicator).mock.calls.at(-1)?.[0]).toEqual(
+    expect(vi.mocked(SessionSendErrorBanner).mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({ isConnected: false, isReconnecting: true }),
     )
+  })
+
+  it('navigates to the parent session from the header pill', async () => {
+    mocks.useSession.mockReturnValue({
+      data: { ...remoteSession, parentID: 'ses_parent' },
+      isLoading: false,
+      error: undefined,
+    })
+
+    const { capturedPathname } = renderRemoteSession()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Parent session' }))
+
+    expect(capturedPathname.current).toBe('/servers/srv_kitchen/sessions/ses_parent')
+  })
+
+  it('opens the session details sheet from the header title', async () => {
+    renderRemoteSession()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Session details: Remote chat' }))
+
+    expect(await screen.findByRole('dialog')).toHaveAccessibleName('Session details')
+    expect(screen.getByText('/home/me/app')).toBeInTheDocument()
   })
 
   it('navigates child sessions within the linked server route', async () => {
@@ -538,6 +554,7 @@ describe('SessionDetail remote server mode', () => {
           serverId: 'srv_kitchen',
           serverName: 'Kitchen',
           projectDirectory: '/home/me/app',
+          isPending: false,
         },
       }),
     )

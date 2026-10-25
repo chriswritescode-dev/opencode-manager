@@ -3,13 +3,15 @@ import { useLoaderData } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { parseManagerBrowserPairingLink } from '@opencode-manager/shared/schemas'
 import { useAuth } from '@/hooks/useAuth'
 import { useTheme } from '@/hooks/useTheme'
+import { QrCodeScanner } from '@/components/settings/QrCodeScanner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Loader2, Github, KeyRound, Mail, AlertCircle } from 'lucide-react'
+import { Loader2, Github, KeyRound, Mail, AlertCircle, ScanLine } from 'lucide-react'
 import type { AuthConfig } from '@/lib/auth-loaders'
 
 const loginSchema = z.object({
@@ -20,13 +22,15 @@ const loginSchema = z.object({
 type LoginFormData = z.infer<typeof loginSchema>
 
 export function Login() {
-  const { signInWithEmail, signInWithProvider, signInWithPasskey } = useAuth()
+  const { signInWithEmail, signInWithProvider, signInWithPasskey, signInWithPairingCode } = useAuth()
   const { config } = useLoaderData() as { config: AuthConfig }
   const theme = useTheme()
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isPasskeyLoading, setIsPasskeyLoading] = useState(false)
   const [oauthLoading, setOauthLoading] = useState<string | null>(null)
+  const [isScannerOpen, setIsScannerOpen] = useState(false)
+  const [isRedeeming, setIsRedeeming] = useState(false)
 
   const {
     register,
@@ -75,6 +79,28 @@ export function Login() {
     }
   }
 
+  const handleScan = async (text: string) => {
+    setError(null)
+    const link = parseManagerBrowserPairingLink(text)
+    if (!link) {
+      setError('That QR code is not a Manager sign-in code.')
+      return
+    }
+    if (link.origin !== window.location.origin) {
+      setError(`This QR code is for ${link.origin}. Open that address to sign in.`)
+      return
+    }
+    setIsRedeeming(true)
+    try {
+      const result = await signInWithPairingCode(link.code)
+      if (result.error) {
+        setError(result.error)
+      }
+    } finally {
+      setIsRedeeming(false)
+    }
+  }
+
   const hasOAuth = config.enabledProviders.some(p => ['github', 'google', 'discord'].includes(p))
   const hasPasskey = config.enabledProviders.includes('passkey')
   const hasCredentials = config.enabledProviders.includes('credentials')
@@ -97,6 +123,16 @@ export function Login() {
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
+
+          <Button
+            variant="outline"
+            className="w-full border-border hover:bg-accent transition-all duration-200"
+            onClick={() => setIsScannerOpen(true)}
+            disabled={isRedeeming}
+          >
+            <ScanLine className="mr-2 h-4 w-4" />
+            Sign in with QR code
+          </Button>
 
           {hasPasskey && (
             <Button
@@ -239,7 +275,14 @@ export function Login() {
           )}
         </div>
 
-        
+        <QrCodeScanner
+          open={isScannerOpen}
+          onOpenChange={setIsScannerOpen}
+          onResult={handleScan}
+          title="Scan sign-in QR code"
+          description="Scan the Browser / PWA QR code from Settings → Account → Connect a device on a signed-in Manager."
+          fallbackHint="Sign in with your password instead."
+        />
       </div>
     </div>
   )

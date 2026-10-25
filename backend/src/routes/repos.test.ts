@@ -8,6 +8,7 @@ import { createRepo, getRepoById, setRepoSetting } from '../db/queries'
 import { createStubOpenCodeClient } from '../../test/helpers/stub-opencode-client'
 import { createGitService } from '../services/git/GitService'
 import { ProjectConfigService } from '../services/project-config'
+import type { SecretsService } from '../services/secrets'
 import { RepoWorkspaceService } from '../services/repo-workspace'
 import type { GitAuthService } from '../services/git-auth'
 import type { TerminalService } from '../services/terminal'
@@ -68,7 +69,7 @@ function createTestApp(
   } as any
   const projectConfigService = new ProjectConfigService(db, createGitService(stubGitAuthService), stubGitAuthService)
   const repoWorkspaces = new RepoWorkspaceService(db, openCodeClient, stubGitAuthService, projectConfigService, terminalService, scheduleService)
-  app.route('/repos', createRepoRoutes(db, stubGitAuthService, scheduleService, openCodeClient, terminalService, projectConfigService, repoWorkspaces))
+  app.route('/repos', createRepoRoutes(db, stubGitAuthService, scheduleService, openCodeClient, terminalService, projectConfigService, repoWorkspaces, {} as unknown as SecretsService))
   return app
 }
 

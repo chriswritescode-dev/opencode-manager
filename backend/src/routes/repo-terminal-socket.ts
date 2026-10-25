@@ -9,10 +9,12 @@ import type { TerminalService } from '../services/terminal'
 import { createBridgedSocketEvents, isAllowedUpgradeOrigin } from '../utils/websocket-bridge'
 import { parseTerminalCursor } from '../utils/terminal-cursor'
 import { resolveRepoRequestDirectory } from './repo-directory'
+import type { Session } from '../auth'
 
 interface RepoTerminalSocketVariables {
   terminalDirectory: string
   terminalCursor: number | undefined
+  session?: Session['session']
 }
 
 export function createRepoTerminalSocketRoutes(
@@ -54,7 +56,10 @@ export function createRepoTerminalSocketRoutes(
       const cursor = c.get('terminalCursor')
       const ptyID = c.req.param('ptyID') ?? ''
 
-      return createBridgedSocketEvents((peer) => terminalService.connect(directory, ptyID, cursor, peer))
+      return createBridgedSocketEvents(
+        (peer) => terminalService.connect(directory, ptyID, cursor, peer),
+        { sessionId: c.get('session')?.id },
+      )
     }),
   )
 

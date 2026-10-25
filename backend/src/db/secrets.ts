@@ -25,3 +25,7 @@ export function writeEncryptedSecret(db: Database, key: string, value: string): 
 export function deleteSecret(db: Database, key: string): void {
   db.prepare('DELETE FROM app_secrets WHERE key = ?').run(key)
 }
+
+export function hasSecret(db: Database, key: string): boolean {
+  return Boolean(db.prepare('SELECT 1 FROM app_secrets WHERE key = ?').get(key))
+}

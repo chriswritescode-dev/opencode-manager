@@ -20,12 +20,13 @@ const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
   lastSessionListProps: { current: undefined as SessionListCapture | undefined },
   openTab: vi.fn(),
+  refetchServers: vi.fn(),
 }))
 
-vi.mock('@/api/opencode', () => ({
-  listProjects: mocks.listProjects,
-  getVcsInfo: mocks.getVcsInfo,
-}))
+vi.mock('@/api/opencode', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/opencode')>()
+  return { ...actual, listProjects: mocks.listProjects, getVcsInfo: mocks.getVcsInfo }
+})
 
 vi.mock('@/hooks/useOpenCode', () => ({
   useCreateSession: mocks.useCreateSession,
@@ -98,7 +99,12 @@ describe('RemoteProject', () => {
     mocks.listProjects.mockResolvedValue([project])
     mocks.getVcsInfo.mockResolvedValue({ branch: { current: 'main', default: 'main' } })
     mocks.useCreateSession.mockReturnValue({ mutate: mocks.createSession, isPending: false })
-    mocks.useOpenCodeServers.mockReturnValue({ servers: [server], isLoading: false })
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [server],
+      showsInitialLoading: false,
+      isPaused: false,
+      refetch: mocks.refetchServers,
+    })
     mocks.useSettingsDialog.mockReturnValue({ openTab: mocks.openTab })
     mocks.useSSE.mockReturnValue({ isConnected: true, isReconnecting: false })
   })
@@ -175,7 +181,7 @@ describe('RemoteProject', () => {
   it('shows the disabled state without loading projects', async () => {
     mocks.useOpenCodeServers.mockReturnValue({
       servers: [{ ...server, enabled: false }],
-      isLoading: false,
+      showsInitialLoading: false,
     })
 
     renderProject()
@@ -186,17 +192,62 @@ describe('RemoteProject', () => {
   })
 
   it('shows the missing-server state', async () => {
-    mocks.useOpenCodeServers.mockReturnValue({ servers: [], isLoading: false })
+    mocks.useOpenCodeServers.mockReturnValue({ servers: [], showsInitialLoading: false })
 
     renderProject()
 
     expect(await screen.findByText('Server not found')).toBeInTheDocument()
   })
 
+  it('shows a loading state instead of a blank body while the server list restores', () => {
+    mocks.useOpenCodeServers.mockReturnValue({ servers: [], showsInitialLoading: true })
+
+    const { container } = renderProject()
+
+    expect(screen.getByRole('status', { name: 'Loading project' })).toBeInTheDocument()
+    expect(container.querySelectorAll('.animate-spin').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Server not found')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('session-list')).not.toBeInTheDocument()
+    expect(mocks.listProjects).not.toHaveBeenCalled()
+  })
+
+  it('shows an unavailable state instead of a missing server while the server list is paused offline', async () => {
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [],
+      showsInitialLoading: false,
+      isPaused: true,
+      refetch: mocks.refetchServers,
+    })
+
+    renderProject()
+
+    expect(await screen.findByText('Servers unavailable')).toBeInTheDocument()
+    expect(screen.queryByText('Server not found')).not.toBeInTheDocument()
+    expect(screen.queryByRole('status', { name: 'Loading project' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    expect(mocks.refetchServers).toHaveBeenCalled()
+  })
+
+  it('keeps the cached project while a server list refetch is paused offline', async () => {
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [server],
+      showsInitialLoading: false,
+      isPaused: true,
+      refetch: mocks.refetchServers,
+    })
+
+    renderProject()
+
+    expect(screen.getByTestId('session-list')).toHaveTextContent('/home/me/app')
+    expect(screen.queryByText('Servers unavailable')).not.toBeInTheDocument()
+  })
+
   it('opens server settings from the disabled state', async () => {
     mocks.useOpenCodeServers.mockReturnValue({
       servers: [{ ...server, enabled: false }],
-      isLoading: false,
+      showsInitialLoading: false,
     })
 
     renderProject()

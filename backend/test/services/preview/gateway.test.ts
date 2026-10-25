@@ -42,6 +42,8 @@ upstreamApp.get('/manager-cookies', () => {
   return new Response('ok', { status: 200, headers })
 })
 
+upstreamApp.get('/redirect', (c) => c.redirect(c.req.query('to') ?? '/', 302))
+
 upstreamApp.all('/*', async (c) => {
   if (c.req.path === '/r') {
     return c.redirect(`http://localhost:${upstreamPort}/done`, 302)
@@ -309,6 +311,23 @@ describe('Preview Gateway', () => {
 
     expect(res.status).toBe(302)
     expect(res.headers.get('location')).toBe('/done')
+  })
+
+  it('rewrites loopback locations beyond 127.0.0.1 and IPv6 loopback locations to their path', async () => {
+    const store = new PreviewSessionStore()
+    const app = createPreviewGatewayApp(store).app
+    const cookie = await openSession(app, store, upstreamPort)
+
+    for (const host of ['127.0.0.2', '[::1]']) {
+      const target = `http://${host}:${upstreamPort}/wide?x=1`
+      const res = await app.request(
+        `http://localhost/redirect?to=${encodeURIComponent(target)}`,
+        { headers: { cookie }, redirect: 'manual' },
+      )
+
+      expect(res.status).toBe(302)
+      expect(res.headers.get('location')).toBe('/wide?x=1')
+    }
   })
 
   it('returns 502 when the target port is unreachable', async () => {

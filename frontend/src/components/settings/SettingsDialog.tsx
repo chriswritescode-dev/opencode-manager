@@ -9,6 +9,7 @@ import { OpenCodeServerAuthSettings } from '@/components/settings/OpenCodeServer
 import { ManagerTokenSettings } from '@/components/settings/ManagerTokenSettings'
 import { ServerEnvVarsSettings } from '@/components/settings/ServerEnvVarsSettings'
 import { SandboxSettings } from '@/components/settings/SandboxSettings'
+import { GlobalSecretsSettings } from '@/components/secrets/GlobalSecretsSettings'
 import { ServerHealthStatus } from '@/components/settings/ServerHealthStatus'
 import { ProviderSettings } from '@/components/settings/ProviderSettings'
 import { AccountSettings } from '@/components/settings/AccountSettings'
@@ -50,6 +51,7 @@ function OpenCodeSettings({ onOpenVersionDialog }: { onOpenVersionDialog: () => 
           </div>
           <ServerEnvVarsSettings />
           <SandboxSettings />
+          <GlobalSecretsSettings />
         </section>
       </div>
     </RowActionsMenuContext.Provider>
@@ -127,7 +129,7 @@ export function SettingsDialog() {
   }, [isOpen, isDesktop, selectedTab, pushSectionHistory])
 
   const menuItems: Array<{ id: SettingsContentTab; icon: LucideIcon; label: string; description: string }> = [
-    { id: 'account', icon: User, label: 'Account', description: 'Profile, passkeys, and sign out' },
+    { id: 'account', icon: User, label: 'Account', description: 'Profile, passkeys, devices, and sign out' },
     { id: 'general', icon: Settings2, label: 'General Settings', description: 'App preferences and behavior' },
     { id: 'notifications', icon: Bell, label: 'Notifications', description: 'Push notification preferences' },
     { id: 'voice', icon: Volume2, label: 'Voice', description: 'Text-to-speech and speech-to-text settings' },

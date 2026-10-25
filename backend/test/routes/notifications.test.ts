@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { Hono } from 'hono'
+import { Database } from 'bun:sqlite'
 import { createNotificationRoutes } from '../../src/routes/notifications'
-import type { NotificationService } from '../../src/services/notification'
+import { NotificationService } from '../../src/services/notification'
+import type { Session } from '../../src/auth'
+import { ensureAuthSessionTable, insertAuthSession } from '../helpers/auth-sessions'
 
 interface NotificationServiceStub {
   getVapidPublicKey: ReturnType<typeof vi.fn>
@@ -10,6 +14,24 @@ interface NotificationServiceStub {
   removeSubscriptionById: ReturnType<typeof vi.fn>
   isConfigured: ReturnType<typeof vi.fn>
   sendTestNotification: ReturnType<typeof vi.fn>
+}
+
+function sessionScopedApp(service: NotificationService, sessionId: string) {
+  const sessionApp = new Hono<{ Variables: { session?: Session['session'] } }>()
+  sessionApp.use('*', async (c, next) => {
+    c.set('session', { id: sessionId } as Session['session'])
+    await next()
+  })
+  sessionApp.route('/', createNotificationRoutes(service))
+  return sessionApp
+}
+
+function subscriptionBody(endpoint: string, deviceName?: string): string {
+  return JSON.stringify({
+    endpoint,
+    keys: { p256dh: 'p256dh-key', auth: 'auth-key' },
+    ...(deviceName ? { deviceName } : {}),
+  })
 }
 
 describe('Notification Routes', () => {
@@ -82,6 +104,7 @@ describe('Notification Routes', () => {
         'p256dh-key',
         'auth-key',
         'Phone',
+        undefined,
       )
     })
 
@@ -106,7 +129,116 @@ describe('Notification Routes', () => {
         'p256dh-key',
         'auth-key',
         undefined,
+        undefined,
       )
+    })
+
+    it('saves the session of the device that subscribed', async () => {
+      service.saveSubscription.mockReturnValue({ id: 3 })
+
+      const sessionApp = sessionScopedApp(service as unknown as NotificationService, 'ses_phone')
+
+      const res = await sessionApp.fetch(new Request('http://localhost/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          endpoint: 'https://push.example.com/abc',
+          keys: { p256dh: 'p256dh-key', auth: 'auth-key' },
+          deviceName: 'Phone',
+        }),
+      }))
+
+      expect(res.status).toBe(200)
+      expect(service.saveSubscription).toHaveBeenCalledWith(
+        'default',
+        'https://push.example.com/abc',
+        'p256dh-key',
+        'auth-key',
+        'Phone',
+        'ses_phone',
+      )
+    })
+
+    it('returns 401 when the registering session is no longer valid', async () => {
+      service.saveSubscription.mockReturnValue(null)
+
+      const res = await app.fetch(new Request('http://localhost/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          endpoint: 'https://push.example.com/abc',
+          keys: { p256dh: 'p256dh-key', auth: 'auth-key' },
+        }),
+      }))
+
+      expect(res.status).toBe(401)
+      await expect(res.json()).resolves.toEqual({ error: 'Session is no longer valid' })
+    })
+
+    it('updates the stored session id and keeps the device name when the same endpoint subscribes again without one', async () => {
+      const db = new Database(':memory:')
+      ensureAuthSessionTable(db)
+      const service = new NotificationService(db)
+      const endpoint = 'https://push.example.com/phone'
+
+      try {
+        const subscribes: Array<[sessionId: string, deviceName: string | undefined]> = [
+          ['ses_old', 'Phone'],
+          ['ses_new', undefined],
+        ]
+
+        for (const [sessionId, deviceName] of subscribes) {
+          insertAuthSession(db, sessionId)
+          const sessionApp = sessionScopedApp(service, sessionId)
+
+          const res = await sessionApp.fetch(new Request('http://localhost/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: subscriptionBody(endpoint, deviceName),
+          }))
+          expect(res.status).toBe(200)
+        }
+
+        const rows = db
+          .prepare('SELECT session_id, device_name FROM push_subscriptions WHERE endpoint = ?')
+          .all(endpoint)
+        expect(rows).toEqual([{ session_id: 'ses_new', device_name: 'Phone' }])
+      } finally {
+        db.close()
+      }
+    })
+
+    it('keeps the newer session registration when a revoked session saves afterwards', async () => {
+      const db = new Database(':memory:')
+      ensureAuthSessionTable(db)
+      const service = new NotificationService(db)
+      const endpoint = 'https://push.example.com/phone'
+
+      try {
+        insertAuthSession(db, 'ses_new')
+        const newSessionApp = sessionScopedApp(service, 'ses_new')
+        const newSessionRes = await newSessionApp.fetch(new Request('http://localhost/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: subscriptionBody(endpoint),
+        }))
+        expect(newSessionRes.status).toBe(200)
+
+        const staleSessionApp = sessionScopedApp(service, 'ses_old')
+        const staleSessionRes = await staleSessionApp.fetch(new Request('http://localhost/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: subscriptionBody(endpoint),
+        }))
+
+        expect(staleSessionRes.status).toBe(401)
+        const rows = db
+          .prepare('SELECT session_id FROM push_subscriptions WHERE endpoint = ?')
+          .all(endpoint)
+        expect(rows).toEqual([{ session_id: 'ses_new' }])
+      } finally {
+        db.close()
+      }
     })
 
     it('returns 400 for invalid subscription data', async () => {

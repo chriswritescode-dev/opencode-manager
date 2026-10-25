@@ -88,6 +88,14 @@ describe('repo service real git', () => {
     })
   }
 
+  function createTlsCloneGitAuth(): GitAuthService {
+    return createGitAuthService({
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: '/dev/null',
+    })
+  }
+
   describe('initLocalRepo', () => {
     it('initializes a relative repo and marks it ready', async () => {
       const { initLocalRepo } = await import('../../src/services/repo')
@@ -756,7 +764,7 @@ describe('repo service real git', () => {
         const url = `https://127.0.0.1:${port}/404/repo-missing.git`
         process.env.GIT_SSL_NO_VERIFY = 'true'
         try {
-          await expect(cloneRepo(db, gitAuth, url, { directoryName: name })).rejects.toThrow(/Repository not found/)
+          await expect(cloneRepo(db, createTlsCloneGitAuth(), url, { directoryName: name })).rejects.toThrow(/Repository not found/)
         } finally {
           delete process.env.GIT_SSL_NO_VERIFY
         }
@@ -773,7 +781,24 @@ describe('repo service real git', () => {
         const url = `https://user:pass@127.0.0.1:${port}/repo-auth.git`
         process.env.GIT_SSL_NO_VERIFY = 'true'
         try {
-          await expect(cloneRepo(db, gitAuth, url, { directoryName: name })).rejects.toThrow(/Authentication failed/)
+          await expect(cloneRepo(db, createTlsCloneGitAuth(), url, { directoryName: name })).rejects.toThrow(/Authentication failed/)
+        } finally {
+          delete process.env.GIT_SSL_NO_VERIFY
+        }
+      })
+
+      expect(getRepoByLocalPath(db, name)).toBeNull()
+    })
+
+    it('maps an authentication clone failure whose URL contains a 404 sequence', async () => {
+      const { cloneRepo } = await import('../../src/services/repo')
+      const name = uniqueName('clone-auth-404')
+
+      await withTlsServer(401, async (port) => {
+        const url = `https://user:pass@127.0.0.1:${port}/404/repo-auth.git`
+        process.env.GIT_SSL_NO_VERIFY = 'true'
+        try {
+          await expect(cloneRepo(db, createTlsCloneGitAuth(), url, { directoryName: name })).rejects.toThrow(/Authentication failed/)
         } finally {
           delete process.env.GIT_SSL_NO_VERIFY
         }

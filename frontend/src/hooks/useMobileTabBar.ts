@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from 'react'
 import { useUrlParams } from './useUrlParams'
 
-type MobileSheetKey = 'repos' | 'files' | 'notifications' | 'more'
+type MobileSheetKey = 'sessions' | 'files' | 'notifications' | 'more'
 
 interface UseMobileTabBarReturn {
   openSheet: MobileSheetKey | null
@@ -14,7 +14,7 @@ export function useMobileTabBar(): UseMobileTabBarReturn {
 
   const openSheet = useMemo<MobileSheetKey | null>(() => {
     const v = searchParams.get('mobileTab')
-    return (v === 'repos' || v === 'files' || v === 'notifications' || v === 'more') ? v : null
+    return (v === 'sessions' || v === 'files' || v === 'notifications' || v === 'more') ? v : null
   }, [searchParams])
 
   const open = useCallback((key: MobileSheetKey) => {

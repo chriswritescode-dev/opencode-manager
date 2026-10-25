@@ -2,7 +2,7 @@ import { createAuthClient } from 'better-auth/react'
 import { passkeyClient } from '@better-auth/passkey/client'
 import { API_BASE_URL } from '@/config'
 
-const getBaseUrl = () => {
+export const getAuthBaseUrl = (): string => {
   if (typeof window !== 'undefined') {
     return `${window.location.origin}/api/auth`
   }
@@ -10,7 +10,7 @@ const getBaseUrl = () => {
 }
 
 export const authClient = createAuthClient({
-  baseURL: getBaseUrl(),
+  baseURL: getAuthBaseUrl(),
   plugins: [passkeyClient()],
 })
 

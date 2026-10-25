@@ -10,6 +10,9 @@ import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { Loader2, User, KeyRound, LogOut, Plus, Trash2, AlertCircle, CheckCircle, Lock } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { passkey, changePassword } from '@/lib/auth-client'
+import { ConnectDeviceSettings } from './ConnectDeviceSettings'
+import { PairedDevicesSettings } from './PairedDevicesSettings'
+import { RemoteAccessHeadersSettings } from './RemoteAccessHeadersSettings'
 
 interface Passkey {
   id: string
@@ -341,6 +344,12 @@ export function AccountSettings() {
             </CardContent>
           </Card>
         </div>
+      </div>
+
+      <div className="space-y-4 sm:space-y-6">
+        <ConnectDeviceSettings />
+        <PairedDevicesSettings />
+        <RemoteAccessHeadersSettings />
       </div>
 
       <div className="flex flex-col gap-3 rounded-lg border border-border bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-between">

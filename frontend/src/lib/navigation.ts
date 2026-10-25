@@ -65,6 +65,22 @@ export function parseServerSessionRoute(pathname: string): { serverId: string; s
   return { serverId, sessionId };
 }
 
+/**
+ * Reads the session route in view, whether it belongs to the local server or a linked one.
+ *
+ * @param pathname Pathname of the location to read.
+ * @returns The routed session and its server; both are omitted when the location is not a session route.
+ */
+export function parseActivePickerSession(pathname: string): { sessionId?: string; serverId?: string } {
+  const repoRoute = parseRepoRoute(pathname);
+  if (repoRoute.sessionId) {
+    return { sessionId: repoRoute.sessionId, serverId: LOCAL_OPENCODE_SERVER_ID };
+  }
+  const serverSessionRoute = parseServerSessionRoute(pathname);
+  if (!serverSessionRoute) return {};
+  return { sessionId: serverSessionRoute.sessionId, serverId: serverSessionRoute.serverId };
+}
+
 export function isSessionDetailRoute(pathname: string): boolean {
   const normalizedPathname = pathname.replace(/\/+$/, '');
   return /^\/repos\/[^/]+\/sessions\/[^/]+$/.test(normalizedPathname) || parseServerSessionRoute(normalizedPathname) !== null;
