@@ -36,6 +36,7 @@ describe('schedule permission config persistence', () => {
     mcpServers: [],
     branch: null,
     workspaceMode: 'worktree',
+    sandbox: null,
     nextRunAt: Date.now() + 3600000,
     ...overrides,
   })
@@ -107,5 +108,26 @@ describe('schedule permission config persistence', () => {
     expect(updated!.name).toBe('Updated name')
     expect(updated!.prompt).toBe('Updated prompt')
     expect(updated!.permissionConfig).toEqual(config)
+  })
+
+  it('round-trips a sandbox config', () => {
+    const sandbox = { enabled: true, resources: { cpus: 4, memoryMib: 12288 } }
+    const created = createScheduleJob(db, 1, baseInput({ sandbox }))
+
+    expect(created.sandbox).toEqual(sandbox)
+
+    const fetched = getScheduleJobById(db, 1, created.id)
+    expect(fetched).not.toBeNull()
+    expect(fetched!.sandbox).toEqual(sandbox)
+  })
+
+  it('round-trips a null sandbox config', () => {
+    const created = createScheduleJob(db, 1, baseInput({ sandbox: null }))
+
+    expect(created.sandbox).toBeNull()
+
+    const fetched = getScheduleJobById(db, 1, created.id)
+    expect(fetched).not.toBeNull()
+    expect(fetched!.sandbox).toBeNull()
   })
 })

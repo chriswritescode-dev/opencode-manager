@@ -61,6 +61,7 @@ const remoteJob: ScheduleJob = {
   mcpServers: [],
   branch: null,
   workspaceMode: 'in-place',
+  sandbox: null,
   createdAt: 0,
   updatedAt: 0,
   lastRunAt: null,

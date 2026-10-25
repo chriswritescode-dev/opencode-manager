@@ -1,8 +1,9 @@
 import cronstrue from 'cronstrue'
 import { formatDistanceToNow } from 'date-fns'
-import type { CreateScheduleJobRequest, ScheduleJob, ScheduleRun, ScheduleWorkspaceMode, UpdateScheduleJobRequest } from '@opencode-manager/shared/types'
+import type { CreateScheduleJobRequest, ScheduleJob, ScheduleRun, ScheduleSandboxConfig, ScheduleWorkspaceMode, UpdateScheduleJobRequest } from '@opencode-manager/shared/types'
 import type { RadioOption } from '@/components/ui/radio-option-group'
 import { formatDuration } from '@/lib/utils'
+import { formatSandboxResources } from '@/lib/sandboxResources'
 
 export const intervalOptions = [
   { label: '15m', value: 15 },
@@ -66,6 +67,14 @@ export const workspaceModeOptions: Array<RadioOption<ScheduleWorkspaceMode>> = [
 
 export function formatWorkspaceMode(mode: ScheduleWorkspaceMode): string {
   return workspaceModeOptions.find((option) => option.value === mode)?.label ?? mode
+}
+
+export function formatScheduleSandbox(sandbox: ScheduleSandboxConfig | null | undefined): string {
+  if (!sandbox?.enabled) {
+    return 'Off'
+  }
+
+  return sandbox.resources ? `On · ${formatSandboxResources(sandbox.resources)}` : 'On · server defaults'
 }
 
 export function getLocalTimeZone(): string {

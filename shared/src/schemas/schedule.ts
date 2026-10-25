@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { SessionSandboxResourcesSchema } from './session-sandbox'
 
 export const ScheduleRunTriggerSourceSchema = z.enum(['manual', 'schedule'])
 export type ScheduleRunTriggerSource = z.infer<typeof ScheduleRunTriggerSourceSchema>
@@ -128,6 +129,16 @@ export const SchedulePermissionConfigSchema = z.object({
 })
 export type SchedulePermissionConfig = z.infer<typeof SchedulePermissionConfigSchema>
 
+/**
+ * Sandbox settings for a scheduled run's session. `resources` overrides the
+ * default CPU and memory limits; null keeps the server defaults.
+ */
+export const ScheduleSandboxConfigSchema = z.object({
+  enabled: z.boolean(),
+  resources: SessionSandboxResourcesSchema.nullable(),
+})
+export type ScheduleSandboxConfig = z.infer<typeof ScheduleSandboxConfigSchema>
+
 export type SchedulePermissionEffect = 'allow' | 'deny' | 'ask'
 
 /**
@@ -191,6 +202,7 @@ export const ScheduleJobSchema = z.object({
   mcpServers: ScheduleMcpServersSchema,
   branch: z.string().nullable(),
   workspaceMode: ScheduleWorkspaceModeSchema,
+  sandbox: ScheduleSandboxConfigSchema.nullable(),
   createdAt: z.number(),
   updatedAt: z.number(),
   lastRunAt: z.number().nullable(),
@@ -232,6 +244,7 @@ const ScheduleJobBaseRequestSchema = z.object({
   mcpServers: ScheduleMcpServersSchema.optional(),
   branch: z.string().min(1).max(200).nullable().optional(),
   workspaceMode: ScheduleWorkspaceModeSchema.optional(),
+  sandbox: ScheduleSandboxConfigSchema.nullable().optional(),
   directory: z.string().min(1).max(4096).optional(),
 })
 
@@ -264,6 +277,7 @@ export const UpdateScheduleJobRequestSchema = z.object({
   mcpServers: ScheduleMcpServersSchema.optional(),
   branch: z.string().min(1).max(200).nullable().optional(),
   workspaceMode: ScheduleWorkspaceModeSchema.optional(),
+  sandbox: ScheduleSandboxConfigSchema.nullable().optional(),
   directory: z.string().min(1).max(4096).nullable().optional(),
 })
 export type UpdateScheduleJobRequest = z.infer<typeof UpdateScheduleJobRequestSchema>

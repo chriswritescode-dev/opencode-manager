@@ -5,6 +5,7 @@ import type {
   ScheduleMcpServer,
   ScheduleMode,
   SchedulePermissionConfig,
+  ScheduleSandboxConfig,
   ScheduleSkillMetadata,
   ScheduleWorkspaceMode,
   UpdateScheduleJobRequest,
@@ -28,6 +29,7 @@ export interface ScheduleJobPersistenceInput {
   mcpServers: ScheduleMcpServer[]
   branch: string | null
   workspaceMode: ScheduleWorkspaceMode
+  sandbox: ScheduleSandboxConfig | null
   directory?: string | null
   nextRunAt: number | null
 }
@@ -105,6 +107,7 @@ export function buildCreateSchedulePersistenceInput(input: CreateScheduleJobRequ
     skillMetadata: input.skillMetadata,
     branch: input.branch?.trim() || null,
     workspaceMode: input.workspaceMode ?? 'worktree',
+    sandbox: input.sandbox ?? null,
     ...(input.directory !== undefined ? { directory: input.directory?.trim() || null } : {}),
   }
 
@@ -168,6 +171,7 @@ export function buildUpdatedSchedulePersistenceInput(
     mcpServers: input.mcpServers ?? existing.mcpServers,
     branch: input.branch === undefined ? existing.branch : (input.branch?.trim() || null),
     workspaceMode: input.workspaceMode ?? existing.workspaceMode,
+    sandbox: input.sandbox !== undefined ? input.sandbox : existing.sandbox,
     ...(input.directory !== undefined || existing.directory !== undefined
       ? { directory: input.directory === undefined ? (existing.directory ?? null) : (input.directory?.trim() || null) }
       : {}),

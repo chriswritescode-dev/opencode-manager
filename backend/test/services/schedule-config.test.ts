@@ -37,6 +37,7 @@ describe('schedule-config', () => {
       mcpServers: [],
       branch: null,
       workspaceMode: 'worktree',
+      sandbox: null,
       nextRunAt: currentDate + 60 * 60_000,
     })
   })
@@ -78,6 +79,7 @@ describe('schedule-config', () => {
       mcpServers: [],
       branch: null,
       workspaceMode: 'worktree',
+      sandbox: null,
       nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0),
       lastRunAt: Date.UTC(2026, 2, 9, 12, 0, 0),
       createdAt: Date.UTC(2026, 2, 8, 12, 0, 0),
@@ -111,6 +113,7 @@ describe('schedule-config', () => {
       mcpServers: [],
       branch: null,
       workspaceMode: 'worktree',
+      sandbox: null,
       nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0),
       lastRunAt: Date.UTC(2026, 2, 9, 12, 0, 0),
       createdAt: Date.UTC(2026, 2, 8, 12, 0, 0),
@@ -147,6 +150,7 @@ describe('schedule-config', () => {
       mcpServers: [],
       branch: 'feature/foo',
       workspaceMode: 'worktree',
+      sandbox: null,
       nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0),
       lastRunAt: null,
       createdAt: Date.UTC(2026, 2, 8, 12, 0, 0),
@@ -179,6 +183,7 @@ describe('schedule-config', () => {
       mcpServers: [],
       branch: null,
       workspaceMode: 'worktree',
+      sandbox: null,
       nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0),
       lastRunAt: null,
       createdAt: Date.UTC(2026, 2, 8, 12, 0, 0),
@@ -211,6 +216,7 @@ describe('schedule-config', () => {
       mcpServers: [],
       branch: 'feature/foo',
       workspaceMode: 'worktree',
+      sandbox: null,
       nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0),
       lastRunAt: null,
       createdAt: Date.UTC(2026, 2, 8, 12, 0, 0),
@@ -243,6 +249,7 @@ describe('schedule-config', () => {
       mcpServers: [],
       branch: null,
       workspaceMode: 'worktree',
+      sandbox: null,
       nextRunAt: null,
       lastRunAt: null,
       createdAt: Date.UTC(2026, 2, 8, 12, 0, 0),
@@ -288,6 +295,7 @@ describe('schedule-config', () => {
       mcpServers: [],
       branch: null,
       workspaceMode: 'worktree',
+      sandbox: null,
       nextRunAt: null,
       lastRunAt: null,
       createdAt: Date.UTC(2026, 2, 8, 12, 0, 0),
@@ -295,5 +303,84 @@ describe('schedule-config', () => {
     }
 
     expect(computeNextRunAtForJob(job, Date.UTC(2026, 2, 9, 12, 0, 0))).toBeNull()
+  })
+
+  describe('sandbox config', () => {
+    const sandbox = { enabled: true, resources: { cpus: 4, memoryMib: 12288 } }
+
+    const existingJob = (sandboxConfig: ScheduleJob['sandbox']): ScheduleJob => ({
+      id: 14,
+      repoId: 42,
+      name: 'Sandbox job',
+      description: null,
+      enabled: true,
+      scheduleMode: 'interval',
+      intervalMinutes: 60,
+      cronExpression: null,
+      timezone: null,
+      agentSlug: null,
+      prompt: 'Prompt',
+      model: null,
+      skillMetadata: null,
+      permissionConfig: null,
+      mcpServers: [],
+      branch: null,
+      workspaceMode: 'worktree',
+      sandbox: sandboxConfig,
+      nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0),
+      lastRunAt: null,
+      createdAt: Date.UTC(2026, 2, 8, 12, 0, 0),
+      updatedAt: Date.UTC(2026, 2, 9, 12, 0, 0),
+    })
+
+    it('defaults sandbox to null when creating a schedule', () => {
+      const result = buildCreateSchedulePersistenceInput({
+        name: 'Sandbox job',
+        enabled: true,
+        scheduleMode: 'interval',
+        intervalMinutes: 60,
+        prompt: 'Prompt',
+      })
+
+      expect(result.sandbox).toBeNull()
+    })
+
+    it('keeps the provided sandbox when creating a schedule', () => {
+      const result = buildCreateSchedulePersistenceInput({
+        name: 'Sandbox job',
+        enabled: true,
+        scheduleMode: 'interval',
+        intervalMinutes: 60,
+        prompt: 'Prompt',
+        sandbox,
+      })
+
+      expect(result.sandbox).toEqual(sandbox)
+    })
+
+    it('keeps the existing sandbox when omitted from an update', () => {
+      const result = buildUpdatedSchedulePersistenceInput(existingJob(sandbox), {
+        prompt: 'Updated prompt',
+      })
+
+      expect(result.sandbox).toEqual(sandbox)
+    })
+
+    it('replaces the sandbox when provided in an update', () => {
+      const replacement = { enabled: true, resources: null }
+      const result = buildUpdatedSchedulePersistenceInput(existingJob(sandbox), {
+        sandbox: replacement,
+      })
+
+      expect(result.sandbox).toEqual(replacement)
+    })
+
+    it('clears the sandbox when explicitly set to null in an update', () => {
+      const result = buildUpdatedSchedulePersistenceInput(existingJob(sandbox), {
+        sandbox: null,
+      })
+
+      expect(result.sandbox).toBeNull()
+    })
   })
 })

@@ -23,9 +23,12 @@ import {
 import { getRepoDisplayName } from '@/lib/utils'
 import { getPrimaryAgents } from '@/lib/primaryAgents'
 import { ASSISTANT_REPO_ID, ASSISTANT_REPO_NAME } from '@opencode-manager/shared/utils'
-import { DEFAULT_DESTRUCTIVE_BASH_PATTERNS } from '@opencode-manager/shared/schemas'
+import { DEFAULT_DESTRUCTIVE_BASH_PATTERNS, LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { Loader2 } from 'lucide-react'
 import { usePromptTemplates, useDeletePromptTemplate } from '@/hooks/usePromptTemplates'
+import { useSettings } from '@/hooks/useSettings'
+import { useServerHealth } from '@/hooks/useServerHealth'
+import { formatSandboxMemory, parseSandboxResourceInput } from '@/lib/sandboxResources'
 import { PromptTemplateDialog } from './PromptTemplateDialog'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { GeneralTab } from './GeneralTab'
@@ -76,12 +79,29 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   const [allowExternalDirectory, setAllowExternalDirectory] = useState(false)
   const [allowQuestions, setAllowQuestions] = useState(false)
   const [bashDenyPatterns, setBashDenyPatterns] = useState<string[]>([...DEFAULT_DESTRUCTIVE_BASH_PATTERNS])
+  const [sandboxEnabled, setSandboxEnabled] = useState(false)
+  const [sandboxCpus, setSandboxCpus] = useState('')
+  const [sandboxMemoryGib, setSandboxMemoryGib] = useState('')
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState<PromptTemplate | undefined>(undefined)
   const [deletingTemplateId, setDeletingTemplateId] = useState<number | null>(null)
 
   const { data: templates = EMPTY_TEMPLATES } = usePromptTemplates()
   const deleteTemplateMutation = useDeletePromptTemplate()
+  const { preferences } = useSettings()
+  const { data: health } = useServerHealth()
+
+  const showSandbox = !serverTarget || serverTarget.serverId === LOCAL_OPENCODE_SERVER_ID
+  const sandboxPreferences = preferences?.sandbox
+  const sandboxAvailable = health?.sandbox?.available === true
+  const sandboxUnavailableReason = sandboxPreferences?.enabled !== true
+    ? 'Sandboxing is turned off in Settings.'
+    : !sandboxAvailable
+      ? (health === undefined ? 'Checking sandbox availability...' : (health.sandbox?.reason ?? 'Sandboxing is unavailable on this host.'))
+      : null
+  const parsedSandboxResources = parseSandboxResourceInput(sandboxCpus, sandboxMemoryGib)
+  const sandboxCpusPlaceholder = sandboxPreferences?.cpus !== undefined ? String(sandboxPreferences.cpus) : 'Server default'
+  const sandboxMemoryPlaceholder = sandboxPreferences?.memoryMib !== undefined ? formatSandboxMemory(sandboxPreferences.memoryMib) : 'Server default'
 
   const serverTargetId = serverTarget?.serverId
   const serverTargetDirectory = serverTarget?.directory
@@ -178,6 +198,10 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     setAllowExternalDirectory(job?.permissionConfig?.allowExternalDirectory ?? false)
     setAllowQuestions(job?.permissionConfig?.allowQuestions ?? false)
     setBashDenyPatterns(job?.permissionConfig?.bashDenyPatterns ?? [...DEFAULT_DESTRUCTIVE_BASH_PATTERNS])
+    const sandboxResources = job?.sandbox?.enabled ? job.sandbox.resources : null
+    setSandboxEnabled(job?.sandbox?.enabled ?? false)
+    setSandboxCpus(sandboxResources ? String(sandboxResources.cpus) : '')
+    setSandboxMemoryGib(sandboxResources ? formatSandboxMemory(sandboxResources.memoryMib) : '')
   }, [job, open, serverTargetDirectory])
 
   useEffect(() => {
@@ -215,6 +239,12 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     const skillNotesChanged = skillNotes.trim() !== (initialSkillNotesRef.current ?? '')
     const shouldIncludeSkillMetadata = skillSlugsChanged || skillNotesChanged
 
+    const sandbox = !showSandbox || !sandboxEnabled
+      ? null
+      : parsedSandboxResources.kind === 'valid'
+        ? { enabled: true, resources: parsedSandboxResources.resources }
+        : { enabled: true, resources: null }
+
     const baseFields = {
       name: name.trim(),
       description: description.trim() || undefined,
@@ -231,6 +261,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
         allowQuestions,
         bashDenyPatterns: bashDenyPatterns.map((p) => p.trim()).filter(Boolean),
       },
+      sandbox,
       ...(shouldIncludeSkillMetadata ? {
         skillMetadata: skillSlugs.length > 0 || skillNotes.trim()
           ? {
@@ -268,6 +299,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     prompt.trim() ? null : 'prompt',
     isScheduleConfigInvalid ? 'valid timing' : null,
     showRepoSelector && !job && selectedRepoId === undefined ? 'repository' : null,
+    showSandbox && sandboxEnabled && parsedSandboxResources.kind === 'invalid' ? 'valid sandbox resources' : null,
   ].filter((requirement): requirement is string => requirement !== null)
 
   return (
@@ -326,6 +358,19 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
             onAllowQuestionsChange={setAllowQuestions}
             bashDenyPatterns={bashDenyPatterns}
             onBashDenyPatternsChange={setBashDenyPatterns}
+            sandbox={showSandbox ? {
+              enabled: sandboxEnabled,
+              onEnabledChange: setSandboxEnabled,
+              toggleDisabled: sandboxUnavailableReason !== null && !sandboxEnabled,
+              unavailableReason: sandboxUnavailableReason,
+              cpus: sandboxCpus,
+              onCpusChange: setSandboxCpus,
+              memoryGib: sandboxMemoryGib,
+              onMemoryGibChange: setSandboxMemoryGib,
+              cpusPlaceholder: sandboxCpusPlaceholder,
+              memoryPlaceholder: sandboxMemoryPlaceholder,
+              error: sandboxEnabled && parsedSandboxResources.kind === 'invalid' ? parsedSandboxResources.message : null,
+            } : undefined}
           />
 
           <TimingTab

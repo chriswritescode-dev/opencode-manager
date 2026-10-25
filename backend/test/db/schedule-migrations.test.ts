@@ -6,6 +6,7 @@ import migration015 from '../../src/db/migrations/015-schedule-worktree-isolatio
 import migration021 from '../../src/db/migrations/021-drop-schedule-run-workspace-id'
 import migration022 from '../../src/db/migrations/022-schedule-runs-session-index'
 import migration024 from '../../src/db/migrations/024-schedule-runs-viewed-at'
+import migration202610251900 from '../../src/db/migrations/202610251900-schedule-sandbox-config'
 
 describe('schedule migrations', () => {
   it('creates schedule jobs with nullable interval minutes in v7', () => {
@@ -284,6 +285,34 @@ describe('migration 024 - schedule runs viewed at', () => {
     expect(droppedColumns).not.toContain('viewed_at')
     const indexes = (db.prepare('PRAGMA index_list(schedule_runs)').all() as { name: string }[]).map((index) => index.name)
     expect(indexes).not.toContain('idx_schedule_runs_unread')
+
+    db.close()
+  })
+})
+
+describe('migration 202610251900 - schedule sandbox config', () => {
+  it('adds the nullable sandbox_config column and is idempotent', () => {
+    const db = new Database(':memory:')
+    db.run('CREATE TABLE schedule_jobs (id INTEGER PRIMARY KEY, name TEXT)')
+
+    migration202610251900.up(db)
+    migration202610251900.up(db)
+
+    const columns = (db.prepare('PRAGMA table_info(schedule_jobs)').all() as { name: string }[]).map((column) => column.name)
+    expect(columns).toContain('sandbox_config')
+
+    db.close()
+  })
+
+  it('drops the column on rollback', () => {
+    const db = new Database(':memory:')
+    db.run('CREATE TABLE schedule_jobs (id INTEGER PRIMARY KEY, name TEXT)')
+
+    migration202610251900.up(db)
+    migration202610251900.down(db)
+
+    const columns = (db.prepare('PRAGMA table_info(schedule_jobs)').all() as { name: string }[]).map((column) => column.name)
+    expect(columns).not.toContain('sandbox_config')
 
     db.close()
   })

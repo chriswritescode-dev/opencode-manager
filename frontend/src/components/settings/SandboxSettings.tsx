@@ -17,16 +17,18 @@ import {
   SessionSandboxResourcesSchema,
   type SandboxPreferences,
 } from '@opencode-manager/shared/schemas'
+import {
+  SANDBOX_CPUS_MAX,
+  SANDBOX_CPUS_MIN,
+  SANDBOX_MEMORY_GIB_MAX,
+  SANDBOX_MEMORY_GIB_MIN,
+} from '@/lib/sandboxResources'
 
 const cpusSchema = SessionSandboxResourcesSchema.shape.cpus
 const memoryMibSchema = SessionSandboxResourcesSchema.shape.memoryMib
 const idleStopSchema = SandboxPreferencesSchema.shape.idleStopMinutes.unwrap()
 const maxRunningVmsSchema = SandboxPreferencesSchema.shape.maxRunningVms.unwrap()
 
-const SANDBOX_CPUS_MIN = cpusSchema.minValue ?? 1
-const SANDBOX_CPUS_MAX = cpusSchema.maxValue ?? 64
-const SANDBOX_MEMORY_GIB_MIN = (memoryMibSchema.minValue ?? 1024) / 1024
-const SANDBOX_MEMORY_GIB_MAX = (memoryMibSchema.maxValue ?? 1048576) / 1024
 const SANDBOX_IDLE_MINUTES_MIN = idleStopSchema.minValue ?? 1
 const SANDBOX_IDLE_MINUTES_MAX = idleStopSchema.maxValue ?? 1440
 const SANDBOX_MAX_VMS_MIN = maxRunningVmsSchema.minValue ?? 1

@@ -150,6 +150,7 @@ const gitService = createGitService(gitAuthService)
 const projectConfigService = new ProjectConfigService(db, gitService, gitAuthService)
 const secretsService = new SecretsService(db)
 const repoEnvService = new RepoEnvService(db, projectConfigService, secretsService)
+const sandboxRuntimeService = new SandboxRuntimeService(db, repoEnvService)
 let openCodeSupervisor: OpenCodeSupervisor | undefined
 async function ensureOpenCodeConfigFileExists(): Promise<void> {
   await withOpenCodeConfigLock(foldLegacyConfigJsonSource)
@@ -248,7 +249,7 @@ try {
 
   opencodeServerManager.setDatabase(db)
   detectSandboxCapability()
-  void new SandboxRuntimeService(db, repoEnvService).prepareSandboxOnBoot().catch((error) => {
+  void sandboxRuntimeService.prepareSandboxOnBoot().catch((error) => {
     logger.warn('Sandbox preparation failed:', error)
   })
   const openCodeStatus = await openCodeSupervisor.start()
@@ -279,8 +280,16 @@ const resolveServerTerminalService = (serverId: string): TerminalService => {
     includeLocalEnv: false,
   })
 }
+const sessionSettingsService = new SettingsService(db)
+const sessionAncestry = new SessionAncestry((serverId) => opencodeServerRegistry.getClient(serverId))
+const sessionSandboxService = new SessionSandboxService(db, sessionAncestry, sessionSettingsService, {
+  removeSessionSandbox: (rootSessionId) => sandboxRuntimeService.removeSessionSandbox(rootSessionId),
+})
 const scheduleWorktreeManager = new ScheduleWorktreeManager(gitAuthService, db)
-const scheduleService = new ScheduleService(db, openCodeClient, scheduleWorktreeManager, opencodeServerRegistry)
+const scheduleService = new ScheduleService(db, openCodeClient, scheduleWorktreeManager, opencodeServerRegistry, {
+  sessions: sessionSandboxService,
+  runtime: sandboxRuntimeService,
+})
 scheduleService.setWorktreeRemovedHandler(async (directory) => {
   try {
     await terminalService.removeAll(directory)
@@ -292,12 +301,7 @@ const repoWorkspaces = new RepoWorkspaceService(db, openCodeClient, gitAuthServi
 const scheduleRunnerInstance = new ScheduleRunner(scheduleService)
 
 const notificationService = new NotificationService(db, opencodeServerRegistry)
-const sessionSettingsService = new SettingsService(db)
-const sessionAncestry = new SessionAncestry((serverId) => opencodeServerRegistry.getClient(serverId))
 const sessionPermissionModeService = new SessionPermissionModeService(db, opencodeServerRegistry, sessionSettingsService, sessionAncestry)
-const sessionSandboxService = new SessionSandboxService(db, sessionAncestry, sessionSettingsService, {
-  removeSessionSandbox: (rootSessionId) => new SandboxRuntimeService(db).removeSessionSandbox(rootSessionId),
-})
 const sessionGoalService = new SessionGoalService(db, opencodeServerRegistry, sessionSettingsService, {
   onOutcome: (goal) => {
     void notificationService.notifyGoalOutcome(goal).catch((error) => {

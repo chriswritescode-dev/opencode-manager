@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   onEvent: vi.fn(),
   onServerConnected: vi.fn(),
   loggerError: vi.fn(),
+  loggerWarn: vi.fn(),
   updateScheduleRunWorktree: vi.fn(),
   stubWorktreeManager: {
     prepare: vi.fn().mockResolvedValue(null),
@@ -96,7 +97,7 @@ vi.mock('../../src/utils/logger', () => ({
   logger: {
     error: mocks.loggerError,
     info: vi.fn(),
-    warn: vi.fn(),
+    warn: mocks.loggerWarn,
   },
 }))
 
@@ -112,11 +113,38 @@ vi.mock('croner', () => ({
 }))
 
 import { ScheduleRunner, ScheduleService } from '../../src/services/schedules'
+import { SessionSandboxError } from '../../src/services/session-sandbox'
 import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
 import { assistantMessage, createStubScheduleApi, skill } from '../helpers/stub-schedule-api'
 
 function makeService(api: OpenCodeApi): ScheduleService {
   return new ScheduleService({} as never, createStubOpenCodeClient({ api }), mocks.stubWorktreeManager as never)
+}
+
+const SANDBOX_RESOURCES = { cpus: 4, memoryMib: 8192 }
+
+function makeSandboxService(api: OpenCodeApi) {
+  const sessions = {
+    assertSandboxRequestAllowed: vi.fn(),
+    update: vi.fn().mockResolvedValue({}),
+    resolveShellTarget: vi.fn().mockResolvedValue({ rootSessionId: 'ses-run-1', resources: SANDBOX_RESOURCES }),
+  }
+  const runtime = {
+    planShell: vi.fn().mockResolvedValue({ mode: 'sandbox', name: 'ocm-ses-run-1', workdir: repo.fullPath }),
+    removeSessionSandbox: vi.fn().mockResolvedValue(undefined),
+  }
+  const registry = {
+    get: vi.fn(() => ({ id: 'srv_remote', name: 'Remote server', enabled: true })),
+    getClient: vi.fn(() => createStubOpenCodeClient({ api })),
+  }
+  const service = new ScheduleService(
+    {} as never,
+    createStubOpenCodeClient({ api }),
+    mocks.stubWorktreeManager as never,
+    registry as never,
+    { sessions, runtime } as never,
+  )
+  return { service, sessions, runtime }
 }
 
 function sessionIdleEvent(directory: string, sessionID: string) {
@@ -167,6 +195,7 @@ const job: ScheduleJob = {
   mcpServers: [],
   branch: null,
   workspaceMode: 'worktree',
+  sandbox: null,
   nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0),
   lastRunAt: Date.UTC(2026, 2, 9, 12, 0, 0),
   createdAt: Date.UTC(2026, 2, 8, 12, 0, 0),
@@ -1324,6 +1353,211 @@ describe('ScheduleService', () => {
       expect(stub.api.session.create).not.toHaveBeenCalled()
     })
   })
+
+  describe('sandboxed runs', () => {
+    const sandboxJob: ScheduleJob = { ...job, sandbox: { enabled: true, resources: SANDBOX_RESOURCES } }
+
+    function runWithSession(sessionId = 'ses-run-1'): ScheduleRun {
+      return {
+        ...baseRun,
+        sessionId,
+        sessionTitle: 'Scheduled: Weekly engineering summary',
+        logText: 'Run started. Waiting for assistant response...',
+      }
+    }
+
+    it('boots the run sandbox with the job resources before the first prompt', async () => {
+      mocks.getScheduleJobById.mockReturnValue(sandboxJob)
+      const stub = createStubScheduleApi({ messages: [assistantMessage('Done.', { completed: true })] })
+      const { service, sessions, runtime } = makeSandboxService(stub.api)
+      mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession())
+      mocks.getScheduleRunById.mockReturnValue(runWithSession())
+
+      await service.runJob(42, 7, 'manual')
+      await vi.waitFor(() => expect(stub.api.session.prompt).toHaveBeenCalledTimes(1))
+
+      expect(sessions.assertSandboxRequestAllowed).toHaveBeenCalledWith({ sandboxed: true, resources: SANDBOX_RESOURCES })
+      expect(sessions.update).toHaveBeenCalledWith('ses-run-1', { sandboxed: true, resources: SANDBOX_RESOURCES })
+      expect(runtime.planShell).toHaveBeenCalledWith(
+        repo.fullPath,
+        { rootSessionId: 'ses-run-1', resources: SANDBOX_RESOURCES, locationDirectory: repo.fullPath },
+        true,
+      )
+
+      const [metadataOrder] = mocks.updateScheduleRunMetadata.mock.invocationCallOrder
+      const [updateOrder] = sessions.update.mock.invocationCallOrder
+      const [planOrder] = runtime.planShell.mock.invocationCallOrder
+      const [promptOrder] = vi.mocked(stub.api.session.prompt).mock.invocationCallOrder
+      expect(metadataOrder).toBeLessThan(updateOrder ?? 0)
+      expect(updateOrder).toBeLessThan(planOrder ?? 0)
+      expect(planOrder).toBeLessThan(promptOrder ?? 0)
+    })
+
+    it('fails the run without prompting when the sandbox cannot start', async () => {
+      mocks.getScheduleJobById.mockReturnValue(sandboxJob)
+      const stub = createStubScheduleApi()
+      const { service, runtime } = makeSandboxService(stub.api)
+      mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession())
+      mocks.getScheduleRunById.mockReturnValue(runWithSession())
+      runtime.planShell.mockResolvedValue({ mode: 'blocked', reason: '2 sandbox VMs are already running' })
+      mocks.updateScheduleRun.mockReturnValue({
+        ...runWithSession(),
+        status: 'failed',
+        errorText: 'Sandbox could not start: 2 sandbox VMs are already running',
+      })
+
+      await expect(service.runJob(42, 7, 'manual')).rejects.toMatchObject({
+        status: 502,
+        message: 'Sandbox could not start: 2 sandbox VMs are already running',
+      })
+
+      expect(stub.api.session.prompt).not.toHaveBeenCalled()
+      expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+        expect.anything(),
+        42,
+        7,
+        5,
+        expect.objectContaining({
+          status: 'failed',
+          sessionId: 'ses-run-1',
+          errorText: 'Sandbox could not start: 2 sandbox VMs are already running',
+        }),
+      )
+      expect(runtime.removeSessionSandbox).toHaveBeenCalledWith('ses-run-1')
+    })
+
+    it('removes the sandbox after a completed run and survives a removal failure', async () => {
+      mocks.getScheduleJobById.mockReturnValue(sandboxJob)
+      const stub = createStubScheduleApi({ messages: [assistantMessage('Done.', { completed: true })] })
+      const { service, runtime } = makeSandboxService(stub.api)
+      mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession())
+      mocks.getScheduleRunById.mockReturnValue(runWithSession())
+      runtime.removeSessionSandbox.mockRejectedValue(new Error('msb rm failed'))
+
+      await service.runJob(42, 7, 'manual')
+
+      await vi.waitFor(() => {
+        expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+          expect.anything(),
+          42,
+          7,
+          5,
+          expect.objectContaining({ status: 'completed' }),
+        )
+      })
+      await vi.waitFor(() => expect(runtime.removeSessionSandbox).toHaveBeenCalledWith('ses-run-1'))
+      await vi.waitFor(() => expect(mocks.loggerWarn).toHaveBeenCalled())
+      expect(mocks.updateScheduleRun).not.toHaveBeenCalledWith(
+        expect.anything(),
+        42,
+        7,
+        5,
+        expect.objectContaining({ status: 'failed' }),
+      )
+    })
+
+    it('removes the sandbox of a cancelled run', async () => {
+      mocks.getScheduleJobById.mockReturnValue(sandboxJob)
+      const stub = createStubScheduleApi({ messages: [] })
+      const { service, runtime } = makeSandboxService(stub.api)
+      const runningRun = runWithSession('ses-run-3')
+      const cancelledRun: ScheduleRun = {
+        ...runningRun,
+        status: 'cancelled',
+        finishedAt: Date.UTC(2026, 2, 9, 12, 10, 0),
+        errorText: 'Run cancelled by user.',
+      }
+      mocks.getScheduleRunById.mockReturnValue(runningRun)
+      mocks.updateScheduleRun.mockReturnValue(cancelledRun)
+
+      const result = await service.cancelRun(42, 7, 5)
+
+      expect(result).toEqual(cancelledRun)
+      expect(runtime.removeSessionSandbox).toHaveBeenCalledWith('ses-run-3')
+    })
+
+    it('leaves the sandbox dependencies untouched for a job without an enabled sandbox', async () => {
+      for (const sandbox of [null, { enabled: false, resources: SANDBOX_RESOURCES }] as const) {
+        mocks.getScheduleJobById.mockReturnValue({ ...job, sandbox })
+        const stub = createStubScheduleApi({ messages: [assistantMessage('Done.', { completed: true })] })
+        const { service, sessions, runtime } = makeSandboxService(stub.api)
+        mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession())
+        mocks.getScheduleRunById.mockReturnValue(runWithSession())
+
+        await service.runJob(42, 7, 'manual')
+
+        await vi.waitFor(() => {
+          expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+            expect.anything(),
+            42,
+            7,
+            5,
+            expect.objectContaining({ status: 'completed' }),
+          )
+        })
+        expect(sessions.update).not.toHaveBeenCalled()
+        expect(runtime.planShell).not.toHaveBeenCalled()
+        expect(runtime.removeSessionSandbox).not.toHaveBeenCalled()
+        await vi.waitFor(() => {
+          expect(Reflect.get(ScheduleService, 'activeRuns').has(7)).toBe(false)
+        })
+        mocks.updateScheduleRun.mockClear()
+      }
+    })
+
+    it('validates sandbox settings when saving a local schedule', async () => {
+      const stub = createStubScheduleApi()
+      const { service, sessions } = makeSandboxService(stub.api)
+      mocks.buildCreateSchedulePersistenceInput.mockReturnValue({ name: 'Sandboxed job' })
+      mocks.createScheduleJob.mockReturnValue(sandboxJob)
+
+      await service.createJob(42, {
+        name: 'Sandboxed job',
+        enabled: true,
+        scheduleMode: 'interval',
+        intervalMinutes: 60,
+        prompt: 'Audit the project.',
+        sandbox: { enabled: true, resources: SANDBOX_RESOURCES },
+      })
+
+      expect(sessions.assertSandboxRequestAllowed).toHaveBeenCalledWith({ sandboxed: true, resources: SANDBOX_RESOURCES })
+      expect(mocks.createScheduleJob).toHaveBeenCalled()
+    })
+
+    it('rejects enabling the sandbox for a remote server schedule', async () => {
+      const stub = createStubScheduleApi({ agents: ['build'] })
+      const { service } = makeSandboxService(stub.api)
+
+      await expect(service.createServerJob('srv_remote', '/srv/audit', {
+        name: 'Remote audit',
+        enabled: true,
+        scheduleMode: 'interval',
+        intervalMinutes: 60,
+        prompt: 'Audit the project.',
+        sandbox: { enabled: true, resources: null },
+      })).rejects.toMatchObject({
+        status: 400,
+        message: 'Sandboxed schedules run only on the local OpenCode server.',
+      })
+
+      expect(mocks.createScheduleJob).not.toHaveBeenCalled()
+    })
+
+    it('maps a rejected sandbox request to the schedule error status', async () => {
+      const stub = createStubScheduleApi()
+      const { service, sessions } = makeSandboxService(stub.api)
+      sessions.assertSandboxRequestAllowed.mockImplementation(() => {
+        throw new SessionSandboxError('Sandboxing is not enabled for this server', 409)
+      })
+
+      await expect(service.updateJob(42, 7, { sandbox: { enabled: true, resources: null } })).rejects.toMatchObject({
+        status: 409,
+        message: 'Sandboxing is not enabled for this server',
+      })
+
+      expect(mocks.updateScheduleJob).not.toHaveBeenCalled()
+    })
+  })
 })
 
 describe('ScheduleService startup cancellation', () => {
@@ -2261,6 +2495,7 @@ describe('ScheduleRunner', () => {
       mcpServers: [],
       branch: null,
       workspaceMode: 'worktree',
+      sandbox: null,
       nextRunAt: Date.now(),
       lastRunAt: null,
       createdAt: Date.now(),
@@ -2300,6 +2535,7 @@ describe('ScheduleRunner', () => {
       mcpServers: [],
       branch: null,
       workspaceMode: 'worktree',
+      sandbox: null,
       nextRunAt: Date.now(),
       lastRunAt: null,
       createdAt: Date.now(),
@@ -2337,6 +2573,7 @@ describe('ScheduleRunner', () => {
       mcpServers: [],
       branch: null,
       workspaceMode: 'worktree',
+      sandbox: null,
       nextRunAt: Date.now(),
       lastRunAt: null,
       createdAt: Date.now(),
@@ -2373,6 +2610,7 @@ describe('ScheduleRunner', () => {
       mcpServers: [],
       branch: null,
       workspaceMode: 'worktree',
+      sandbox: null,
       nextRunAt: Date.now(),
       lastRunAt: null,
       createdAt: Date.now(),
@@ -2409,6 +2647,7 @@ describe('ScheduleRunner', () => {
       mcpServers: [],
       branch: null,
       workspaceMode: 'worktree',
+      sandbox: null,
       nextRunAt: Date.now(),
       lastRunAt: null,
       createdAt: Date.now(),

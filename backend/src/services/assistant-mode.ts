@@ -401,6 +401,8 @@ Body matches \`CreateScheduleJobRequest\` schema (discriminated union with \`sch
 
 Optional \`workspaceMode\` sets where runs execute: \`worktree\` (default, a fresh worktree removed after each run), \`kept-worktree\` (a fresh worktree kept after each run), or \`shared-worktree\` (one worktree and branch reused by every run). Kept and shared worktrees are listed with \`GET /repos/:repoId/schedules/:jobId/worktrees\`. Removing schedule worktrees is done by the user in the Manager UI.
 
+Optional \`sandbox: { enabled, resources: { cpus, memoryMib } | null }\` runs the scheduled session and its subagents in a dedicated sandbox microVM with Docker available. It works only for schedules on the local OpenCode server, requires server sandboxing to be enabled in settings, and the VM and its Docker volume are removed after each run. The run fails if the VM cannot start.
+
 \`\`\`json
 {
   "action": "request",
