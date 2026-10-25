@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => ({
   loggerError: vi.fn(),
   loggerWarn: vi.fn(),
   updateScheduleRunWorktree: vi.fn(),
+  getSessionSandboxMode: vi.fn(),
   stubWorktreeManager: {
     prepare: vi.fn().mockResolvedValue(null),
     finalize: vi.fn().mockResolvedValue({ commitHash: null }),
@@ -74,6 +75,10 @@ vi.mock('../../src/db/schedules', () => ({
   updateScheduleRun: mocks.updateScheduleRun,
   updateScheduleRunMetadata: mocks.updateScheduleRunMetadata,
   updateScheduleRunWorktree: mocks.updateScheduleRunWorktree,
+}))
+
+vi.mock('../../src/db/session-sandbox-modes', () => ({
+  getSessionSandboxMode: mocks.getSessionSandboxMode,
 }))
 
 vi.mock('../../src/services/schedule-config', () => ({
@@ -122,6 +127,7 @@ function makeService(api: OpenCodeApi): ScheduleService {
 }
 
 const SANDBOX_RESOURCES = { cpus: 4, memoryMib: 8192 }
+const SANDBOX_SESSION_MODE = { sandboxed: true, source: 'user' as const, toggledAt: 0, resources: SANDBOX_RESOURCES }
 
 function makeSandboxService(api: OpenCodeApi) {
   const sessions = {
@@ -234,6 +240,7 @@ describe('ScheduleService', () => {
     mocks.getRunningScheduleRunByJob.mockReturnValue(null)
     mocks.listScheduleJobWorktreeOwners.mockReturnValue([{ id: job.id, repoId: job.repoId, name: job.name }])
     mocks.createScheduleRun.mockReturnValue(baseRun)
+    mocks.getSessionSandboxMode.mockReturnValue(null)
     mocks.resolveOpenCodeModel.mockResolvedValue({ providerID: 'openai', id: 'gpt-5-mini', model: 'openai/gpt-5-mini' })
     mocks.onEvent.mockReturnValue(vi.fn())
     mocks.onServerConnected.mockReturnValue(vi.fn())
@@ -1400,6 +1407,7 @@ describe('ScheduleService', () => {
       mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession())
       mocks.getScheduleRunById.mockReturnValue(runWithSession())
       runtime.planShell.mockResolvedValue({ mode: 'blocked', reason: '2 sandbox VMs are already running' })
+      mocks.getSessionSandboxMode.mockReturnValue(SANDBOX_SESSION_MODE)
       mocks.updateScheduleRun.mockReturnValue({
         ...runWithSession(),
         status: 'failed',
@@ -1433,6 +1441,7 @@ describe('ScheduleService', () => {
       mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession())
       mocks.getScheduleRunById.mockReturnValue(runWithSession())
       runtime.removeSessionSandbox.mockRejectedValue(new Error('msb rm failed'))
+      mocks.getSessionSandboxMode.mockReturnValue(SANDBOX_SESSION_MODE)
 
       await service.runJob(42, 7, 'manual')
 
@@ -1469,11 +1478,34 @@ describe('ScheduleService', () => {
       }
       mocks.getScheduleRunById.mockReturnValue(runningRun)
       mocks.updateScheduleRun.mockReturnValue(cancelledRun)
+      mocks.getSessionSandboxMode.mockReturnValue(SANDBOX_SESSION_MODE)
 
       const result = await service.cancelRun(42, 7, 5)
 
       expect(result).toEqual(cancelledRun)
       expect(runtime.removeSessionSandbox).toHaveBeenCalledWith('ses-run-3')
+    })
+
+    it('removes the sandbox of a cancelled run whose job no longer enables sandboxing', async () => {
+      for (const sandbox of [{ enabled: false, resources: SANDBOX_RESOURCES }, null] as const) {
+        mocks.getScheduleJobById.mockReturnValue({ ...job, sandbox })
+        const stub = createStubScheduleApi({ messages: [] })
+        const { service, runtime } = makeSandboxService(stub.api)
+        const runningRun = runWithSession('ses-run-4')
+        mocks.getScheduleRunById.mockReturnValue(runningRun)
+        mocks.updateScheduleRun.mockReturnValue({
+          ...runningRun,
+          status: 'cancelled',
+          finishedAt: Date.UTC(2026, 2, 9, 12, 10, 0),
+          errorText: 'Run cancelled by user.',
+        })
+        mocks.getSessionSandboxMode.mockReturnValue(SANDBOX_SESSION_MODE)
+
+        await service.cancelRun(42, 7, 5)
+
+        expect(runtime.removeSessionSandbox).toHaveBeenCalledWith('ses-run-4')
+        runtime.removeSessionSandbox.mockClear()
+      }
     })
 
     it('leaves the sandbox dependencies untouched for a job without an enabled sandbox', async () => {
@@ -1557,6 +1589,23 @@ describe('ScheduleService', () => {
 
       expect(mocks.updateScheduleJob).not.toHaveBeenCalled()
     })
+
+    it('updates a sandboxed schedule without revalidating its stored sandbox config', async () => {
+      const stub = createStubScheduleApi()
+      const { service, sessions } = makeSandboxService(stub.api)
+      const disabledJob = { ...sandboxJob, enabled: false }
+      mocks.getScheduleJobById.mockReturnValue(sandboxJob)
+      sessions.assertSandboxRequestAllowed.mockImplementation(() => {
+        throw new SessionSandboxError('Sandboxing is not enabled for this server', 409)
+      })
+      mocks.buildUpdatedSchedulePersistenceInput.mockReturnValue({ enabled: false })
+      mocks.updateScheduleJob.mockReturnValue(disabledJob)
+
+      await expect(service.updateJob(42, 7, { enabled: false })).resolves.toEqual(disabledJob)
+
+      expect(sessions.assertSandboxRequestAllowed).not.toHaveBeenCalled()
+      expect(mocks.updateScheduleJob).toHaveBeenCalled()
+    })
   })
 })
 
@@ -1572,6 +1621,7 @@ describe('ScheduleService startup cancellation', () => {
     mocks.getRunningScheduleRunByJob.mockReturnValue(null)
     mocks.listScheduleJobWorktreeOwners.mockReturnValue([{ id: job.id, repoId: job.repoId, name: job.name }])
     mocks.createScheduleRun.mockReturnValue(baseRun)
+    mocks.getSessionSandboxMode.mockReturnValue(null)
     mocks.resolveOpenCodeModel.mockResolvedValue({ providerID: 'openai', id: 'gpt-5-mini', model: 'openai/gpt-5-mini' })
     mocks.onEvent.mockReturnValue(vi.fn())
     mocks.onServerConnected.mockReturnValue(vi.fn())
@@ -1835,6 +1885,7 @@ describe('ScheduleService monitor cancellation', () => {
     mocks.getRunningScheduleRunByJob.mockReturnValue(null)
     mocks.listScheduleJobWorktreeOwners.mockReturnValue([{ id: job.id, repoId: job.repoId, name: job.name }])
     mocks.createScheduleRun.mockReturnValue(baseRun)
+    mocks.getSessionSandboxMode.mockReturnValue(null)
     mocks.resolveOpenCodeModel.mockResolvedValue({ providerID: 'openai', id: 'gpt-5-mini', model: 'openai/gpt-5-mini' })
     mocks.onEvent.mockReturnValue(vi.fn())
     mocks.onServerConnected.mockReturnValue(vi.fn())

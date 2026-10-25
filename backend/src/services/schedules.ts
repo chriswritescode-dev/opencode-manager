@@ -16,6 +16,7 @@ import {
 import { mcpStatusByName, openCodeLocation } from '@opencode-manager/shared/opencode'
 import { LOCAL_OPENCODE_SERVER_ID, buildSchedulePermissionRuleset } from '@opencode-manager/shared/schemas'
 import { getRepoById } from '../db/queries'
+import { getSessionSandboxMode } from '../db/session-sandbox-modes'
 import type { ScheduleJobWithRepo } from '../db/schedules'
 import {
   cleanupOrphanedSchedules,
@@ -711,7 +712,9 @@ export class ScheduleService {
     const existing = this.loadJobForTarget(target, jobId)
     this.assertInPlaceWorkspace(target, input.workspaceMode)
     const context = this.resolveTargetContext(target, input.directory ?? existing.directory)
-    this.assertSandboxJobSupported(context.serverId, input.sandbox !== undefined ? input.sandbox : existing.sandbox)
+    if (input.sandbox !== undefined) {
+      this.assertSandboxJobSupported(context.serverId, input.sandbox)
+    }
 
     if (input.agentSlug !== undefined) {
       await this.assertAgentAvailable(context.client, context.directory, input.agentSlug?.trim() || null)
@@ -1626,7 +1629,7 @@ export class ScheduleService {
       if (repo && fresh?.worktreePath) {
         await this.finalizeRunWorktree(repo, job, runId, fresh.worktreePath, fresh.runBranch, fresh.triggerSource, repoId, jobId)
       }
-      await this.removeRunSandbox(job, sessionId ?? fresh?.sessionId ?? null)
+      await this.removeRunSandbox(sessionId ?? fresh?.sessionId ?? null)
     } finally {
       ScheduleService.activeTeardowns.delete(key)
     }
@@ -1657,10 +1660,10 @@ export class ScheduleService {
     }
   }
 
-  private async removeRunSandbox(job: ScheduleJob, sessionId: string | null): Promise<void> {
-    if (job.sandbox?.enabled !== true || !sessionId) return
+  private async removeRunSandbox(sessionId: string | null): Promise<void> {
     const runtime = this.sandbox?.runtime
-    if (!runtime) return
+    if (!sessionId || !runtime) return
+    if (getSessionSandboxMode(this.db, sessionId)?.sandboxed !== true) return
     try {
       await runtime.removeSessionSandbox(sessionId)
     } catch (error) {
