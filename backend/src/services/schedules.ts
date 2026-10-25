@@ -8,6 +8,7 @@ import {
   type ScheduleRun,
   type ScheduleRunTriggerSource,
   type ScheduleRunWorktreesMode,
+  type ScheduleSandboxConfig,
   type ScheduleWorkspaceMode,
   type ScheduleWorktree,
   type UpdateScheduleJobRequest,
@@ -15,6 +16,7 @@ import {
 import { mcpStatusByName, openCodeLocation } from '@opencode-manager/shared/opencode'
 import { LOCAL_OPENCODE_SERVER_ID, buildSchedulePermissionRuleset } from '@opencode-manager/shared/schemas'
 import { getRepoById } from '../db/queries'
+import { getSessionSandboxMode } from '../db/session-sandbox-modes'
 import type { ScheduleJobWithRepo } from '../db/schedules'
 import {
   cleanupOrphanedSchedules,
@@ -64,6 +66,8 @@ import { logger } from '../utils/logger'
 import { canonicalPathSync } from '../utils/fs-safe'
 import { buildAssistantRepo } from './assistant-mode'
 import { createScheduleWorktreeDescriber } from './schedule-worktree-paths'
+import { SessionSandboxError, type SessionSandboxService } from './session-sandbox'
+import type { SandboxRuntimeService } from './sandbox/runtime'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 
 class ScheduleServiceError extends Error {
@@ -264,6 +268,11 @@ interface ScheduleTargetContext {
   serverId: string
 }
 
+export interface ScheduleSandboxDependencies {
+  sessions: Pick<SessionSandboxService, 'assertSandboxRequestAllowed' | 'update' | 'resolveShellTarget'>
+  runtime: Pick<SandboxRuntimeService, 'planShell' | 'removeSessionSandbox'>
+}
+
 export class ScheduleService {
   private static activeRuns = new Map<number, ActiveRun>()
   private static pendingCancels = new Map<number, PendingCancel>()
@@ -276,6 +285,7 @@ export class ScheduleService {
     private readonly openCodeClient: OpenCodeClient,
     private readonly worktreeManager: ScheduleWorktreeManager,
     private readonly serverRegistry: OpenCodeServerRegistry | null = null,
+    private readonly sandbox: ScheduleSandboxDependencies | null = null,
   ) {}
 
   setJobChangeHandler(handler: ((job: ScheduleJob | null, jobId: number) => void) | null): void {
@@ -482,6 +492,44 @@ export class ScheduleService {
     }
   }
 
+  private assertSandboxJobSupported(serverId: string, sandbox: ScheduleSandboxConfig | null | undefined): void {
+    if (sandbox?.enabled !== true) return
+
+    if (serverId !== LOCAL_OPENCODE_SERVER_ID) {
+      throw new ScheduleServiceError('Sandboxed schedules run only on the local OpenCode server.', 400)
+    }
+
+    const dependencies = this.sandbox
+    if (!dependencies) {
+      throw new ScheduleServiceError('Sandboxing is not available for schedules.', 409)
+    }
+
+    try {
+      dependencies.sessions.assertSandboxRequestAllowed({ sandboxed: true, resources: sandbox.resources })
+    } catch (error) {
+      if (error instanceof SessionSandboxError) {
+        throw new ScheduleServiceError(error.message, error.status)
+      }
+      throw error
+    }
+  }
+
+  private async startRunSandbox(directory: string, sandbox: ScheduleSandboxConfig, sessionId: string): Promise<void> {
+    const dependencies = this.sandbox
+    if (!dependencies) {
+      throw new ScheduleServiceError('Sandboxing is not available for schedules.', 409)
+    }
+
+    await dependencies.sessions.update(sessionId, { sandboxed: true, resources: sandbox.resources })
+    const target = await dependencies.sessions.resolveShellTarget(sessionId)
+    const plan = await dependencies.runtime.planShell(directory, { ...target, locationDirectory: directory }, true)
+
+    if (plan.mode !== 'sandbox') {
+      const reason = plan.mode === 'blocked' ? plan.reason : 'the shell plan was not sandboxed'
+      throw new ScheduleServiceError(`Sandbox could not start: ${reason}`, 502)
+    }
+  }
+
   listAllEnabledJobs(): ScheduleJob[] {
     return listEnabledScheduleJobs(this.db)
   }
@@ -629,6 +677,7 @@ export class ScheduleService {
   private async createJobForTarget(target: ScheduleJobTarget, input: CreateScheduleJobRequest): Promise<ScheduleJob> {
     this.assertInPlaceWorkspace(target, input.workspaceMode)
     const context = this.resolveTargetContext(target)
+    this.assertSandboxJobSupported(context.serverId, input.sandbox)
     await this.assertAgentAvailable(context.client, context.directory, input.agentSlug?.trim() || null)
     const request = target.kind === 'server'
       ? { ...input, workspaceMode: 'in-place' as const, directory: context.directory, branch: null }
@@ -663,6 +712,9 @@ export class ScheduleService {
     const existing = this.loadJobForTarget(target, jobId)
     this.assertInPlaceWorkspace(target, input.workspaceMode)
     const context = this.resolveTargetContext(target, input.directory ?? existing.directory)
+    if (input.sandbox !== undefined) {
+      this.assertSandboxJobSupported(context.serverId, input.sandbox)
+    }
 
     if (input.agentSlug !== undefined) {
       await this.assertAgentAvailable(context.client, context.directory, input.agentSlug?.trim() || null)
@@ -902,10 +954,12 @@ export class ScheduleService {
     const abort = new AbortController()
     ScheduleService.activeRuns.set(jobId, { runId: run.id, abort })
     let repo: Repo | null = null
+    let sessionId: string | null = null
 
     try {
       const context = this.resolveTargetContext(target, job.directory)
       repo = context.repo
+      this.assertSandboxJobSupported(context.serverId, job.sandbox)
 
       let runDirectory = context.directory
       if (repo) {
@@ -956,6 +1010,8 @@ export class ScheduleService {
         throw new ScheduleServiceError(getErrorMessage(error) || 'Failed to create OpenCode session', 502)
       }
 
+      sessionId = session.id
+
       if (abort.signal.aborted) {
         return this.abandonCancelledStartup(context.client, repoId, jobId, run, job, repo, session.id)
       }
@@ -973,6 +1029,13 @@ export class ScheduleService {
 
       if (!runWithSession) {
         throw new ScheduleServiceError('Failed to attach session to run', 500)
+      }
+
+      if (job.sandbox?.enabled === true) {
+        await this.startRunSandbox(runDirectory, job.sandbox, session.id)
+        if (abort.signal.aborted) {
+          return this.abandonCancelledStartup(context.client, repoId, jobId, run, job, repo, session.id)
+        }
       }
 
       const sessionMonitor = createSessionMonitor(runDirectory, session.id, context.serverId)
@@ -1002,6 +1065,7 @@ export class ScheduleService {
           run,
           job,
           repo,
+          sessionId ?? undefined,
         )
       }
 
@@ -1012,6 +1076,7 @@ export class ScheduleService {
       const failedRun = updateScheduleRun(this.db, repoId, jobId, run.id, {
         status: 'failed',
         finishedAt,
+        sessionId,
         errorText,
         logText: buildRunLog({
           job,
@@ -1030,7 +1095,7 @@ export class ScheduleService {
         logger.error(`Failed to update job state for job ${jobId}:`, updateError)
       }
 
-      await this.teardownWorktree(repoId, jobId, run.id, job, repo)
+      await this.teardownRunResources(repoId, jobId, run.id, job, repo, sessionId)
 
       ScheduleService.releaseActiveRun(jobId, run.id)
 
@@ -1184,7 +1249,7 @@ export class ScheduleService {
       nextRunAt: job.nextRunAt,
     })
 
-    await this.teardownWorktree(repoId, jobId, runId, job, repo)
+    await this.teardownRunResources(repoId, jobId, runId, job, repo, run.sessionId)
     ScheduleService.releaseActiveRun(jobId, runId)
     ScheduleService.resolveCancel(jobId, runId, 'cancelled')
 
@@ -1282,7 +1347,7 @@ export class ScheduleService {
     } finally {
       await ScheduleService.awaitCancelDecision(input.job.id, input.runId)
       input.sessionMonitor.dispose()
-      await this.teardownWorktree(input.repoId, input.job.id, input.runId, input.job, input.repo)
+      await this.teardownRunResources(input.repoId, input.job.id, input.runId, input.job, input.repo, input.sessionId)
       ScheduleService.releaseActiveRun(input.job.id, input.runId)
       ScheduleService.clearCancel(input.job.id, input.runId)
     }
@@ -1412,7 +1477,7 @@ export class ScheduleService {
     } finally {
       await ScheduleService.awaitCancelDecision(input.job.id, input.runId)
       input.sessionMonitor.dispose()
-      await this.teardownWorktree(input.repoId, input.job.id, input.runId, input.job, input.repo)
+      await this.teardownRunResources(input.repoId, input.job.id, input.runId, input.job, input.repo, input.sessionId)
       ScheduleService.releaseActiveRun(input.job.id, input.runId)
       ScheduleService.clearCancel(input.job.id, input.runId)
     }
@@ -1514,7 +1579,7 @@ export class ScheduleService {
       nextRunAt: run.triggerSource === 'manual' ? job.nextRunAt : computeNextRunAtForJob(job, finishedAt),
     })
 
-    await this.teardownWorktree(run.repoId, run.jobId, run.id, job, repo)
+    await this.teardownRunResources(run.repoId, run.jobId, run.id, job, repo, run.sessionId)
     ScheduleService.releaseActiveRun(job.id, run.id)
   }
 
@@ -1543,35 +1608,67 @@ export class ScheduleService {
       await this.interruptCancelledSession(client, sessionId)
     }
     ScheduleService.clearCancel(jobId, run.id)
-    await this.teardownWorktree(repoId, jobId, run.id, job, repo)
+    await this.teardownRunResources(repoId, jobId, run.id, job, repo, sessionId ?? run.sessionId)
     ScheduleService.releaseActiveRun(jobId, run.id)
     return this.loadRun(repoId, jobId, run.id, run)
   }
 
-  private async teardownWorktree(repoId: number | null, jobId: number, runId: number, job: ScheduleJob, repo: Repo | null): Promise<void> {
-    if (!repo) return
+  private async teardownRunResources(
+    repoId: number | null,
+    jobId: number,
+    runId: number,
+    job: ScheduleJob,
+    repo: Repo | null,
+    sessionId?: string | null,
+  ): Promise<void> {
     const key = `${repoId}:${jobId}:${runId}`
     if (ScheduleService.activeTeardowns.has(key)) return
     ScheduleService.activeTeardowns.add(key)
     try {
       const fresh = getScheduleRunById(this.db, repoId, jobId, runId)
-      if (!fresh?.worktreePath) return
-      const worktreePath = fresh.worktreePath
-      const remainingWorktreePath = () => (existsSync(worktreePath) ? worktreePath : null)
-      try {
-        const { commitHash } = await this.worktreeManager.finalize(repo, job, {
-          id: runId,
-          worktreePath,
-          runBranch: fresh.runBranch,
-          triggerSource: fresh.triggerSource,
-        })
-        updateScheduleRunWorktree(this.db, repoId, jobId, runId, { worktreePath: remainingWorktreePath(), commitHash })
-      } catch (error) {
-        logger.error(`Failed to finalize worktree for run ${runId}:`, error)
-        updateScheduleRunWorktree(this.db, repoId, jobId, runId, { worktreePath: remainingWorktreePath() })
+      if (repo && fresh?.worktreePath) {
+        await this.finalizeRunWorktree(repo, job, runId, fresh.worktreePath, fresh.runBranch, fresh.triggerSource, repoId, jobId)
       }
+      await this.removeRunSandbox(sessionId ?? fresh?.sessionId ?? null)
     } finally {
       ScheduleService.activeTeardowns.delete(key)
+    }
+  }
+
+  private async finalizeRunWorktree(
+    repo: Repo,
+    job: ScheduleJob,
+    runId: number,
+    worktreePath: string,
+    runBranch: string | null,
+    triggerSource: ScheduleRunTriggerSource,
+    repoId: number | null,
+    jobId: number,
+  ): Promise<void> {
+    const remainingWorktreePath = () => (existsSync(worktreePath) ? worktreePath : null)
+    try {
+      const { commitHash } = await this.worktreeManager.finalize(repo, job, {
+        id: runId,
+        worktreePath,
+        runBranch,
+        triggerSource,
+      })
+      updateScheduleRunWorktree(this.db, repoId, jobId, runId, { worktreePath: remainingWorktreePath(), commitHash })
+    } catch (error) {
+      logger.error(`Failed to finalize worktree for run ${runId}:`, error)
+      updateScheduleRunWorktree(this.db, repoId, jobId, runId, { worktreePath: remainingWorktreePath() })
+    }
+  }
+
+  private async removeRunSandbox(sessionId: string | null): Promise<void> {
+    const runtime = this.sandbox?.runtime
+    if (!sessionId || !runtime) return
+    const mode = getSessionSandboxMode(this.db, sessionId)
+    if (mode?.sandboxed !== true && mode?.source !== 'user') return
+    try {
+      await runtime.removeSessionSandbox(sessionId)
+    } catch (error) {
+      logger.warn(`Failed to remove the sandbox microVM for scheduled run session ${sessionId}: ${getErrorMessage(error)}`)
     }
   }
 

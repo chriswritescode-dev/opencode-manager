@@ -27,6 +27,7 @@ function createJob(id: number, name: string): ScheduleJobWithRepo {
     mcpServers: [],
     branch: null,
     workspaceMode: 'worktree',
+    sandbox: null,
     createdAt: 1,
     updatedAt: 1,
     lastRunAt: null,

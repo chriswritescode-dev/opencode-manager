@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { SandboxResourceInputs } from '@/components/sandbox/SandboxResourceInputs'
 import { useSetSessionSandbox } from '@/hooks/useSessionSandbox'
 import { FetchError } from '@/api/fetchWrapper'
 import { formatSandboxMemory } from '@/lib/sandboxResources'
@@ -69,36 +68,15 @@ export function SessionSandboxResourcesDialog({
             data volume is kept.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-3">
-          <div className="space-y-1">
-            <Label htmlFor="sessionSandboxCpus">CPUs</Label>
-            <Input
-              id="sessionSandboxCpus"
-              type="number"
-              min={1}
-              max={64}
-              step={1}
-              value={cpus}
-              onChange={(event) => setCpus(event.target.value)}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="sessionSandboxMemory">Memory (GiB)</Label>
-            <Input
-              id="sessionSandboxMemory"
-              type="number"
-              min={1}
-              step={0.5}
-              value={memoryGib}
-              onChange={(event) => setMemoryGib(event.target.value)}
-            />
-          </div>
-          {error ? (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          ) : null}
-        </div>
+        <SandboxResourceInputs
+          idPrefix="sessionSandbox"
+          cpus={cpus}
+          onCpusChange={setCpus}
+          memoryGib={memoryGib}
+          onMemoryGibChange={setMemoryGib}
+          disabled={setSandbox.isPending}
+          error={error}
+        />
         <DialogFooter className="gap-2">
           <Button variant="outline" onClick={() => void submit(null)} disabled={setSandbox.isPending}>
             Use defaults

@@ -7,9 +7,24 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { TabsContent } from '@/components/ui/tabs'
 import { RadioOptionGroup } from '@/components/ui/radio-option-group'
+import { SandboxResourceInputs } from '@/components/sandbox/SandboxResourceInputs'
 import { workspaceModeOptions } from '@/components/schedules/schedule-utils'
 import type { ScheduleWorkspaceMode } from '@opencode-manager/shared/types'
 import { Info } from 'lucide-react'
+
+export type ScheduleSandboxFields = {
+  enabled: boolean
+  onEnabledChange: (value: boolean) => void
+  toggleDisabled: boolean
+  unavailableReason: string | null
+  cpus: string
+  onCpusChange: (value: string) => void
+  memoryGib: string
+  onMemoryGibChange: (value: string) => void
+  cpusPlaceholder: string
+  memoryPlaceholder: string
+  error: string | null
+}
 
 type GeneralTabProps = {
   name: string
@@ -42,6 +57,7 @@ type GeneralTabProps = {
   onAllowQuestionsChange: (value: boolean) => void
   bashDenyPatterns: string[]
   onBashDenyPatternsChange: (value: string[]) => void
+  sandbox?: ScheduleSandboxFields
 }
 
 function InfoHint({ text }: { text: string }) {
@@ -87,6 +103,7 @@ export function GeneralTab({
   onAllowQuestionsChange,
   bashDenyPatterns,
   onBashDenyPatternsChange,
+  sandbox,
 }: GeneralTabProps) {
   return (
     <TabsContent value="basics" className="mt-0 min-h-0 flex-1 overflow-y-auto pt-4 pb-5">
@@ -243,6 +260,43 @@ export function GeneralTab({
             </div>
           </div>
         </div>
+
+        {sandbox && (
+          <div className="space-y-2">
+            <h3 className="text-sm font-medium text-muted-foreground">Sandbox</h3>
+            <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-0.5">
+                  <p id="schedule-sandbox-label" className="text-sm font-medium">Run in sandbox</p>
+                  <p className="text-xs text-muted-foreground">
+                    Each run and its subagents get a dedicated VM with Docker, removed after the run.
+                  </p>
+                  {sandbox.unavailableReason ? (
+                    <p className="text-xs text-destructive">{sandbox.unavailableReason}</p>
+                  ) : null}
+                </div>
+                <Switch
+                  checked={sandbox.enabled}
+                  onCheckedChange={sandbox.onEnabledChange}
+                  disabled={sandbox.toggleDisabled}
+                  aria-labelledby="schedule-sandbox-label"
+                />
+              </div>
+              {sandbox.enabled && (
+                <SandboxResourceInputs
+                  idPrefix="schedule-sandbox"
+                  cpus={sandbox.cpus}
+                  onCpusChange={sandbox.onCpusChange}
+                  memoryGib={sandbox.memoryGib}
+                  onMemoryGibChange={sandbox.onMemoryGibChange}
+                  cpusPlaceholder={sandbox.cpusPlaceholder}
+                  memoryPlaceholder={sandbox.memoryPlaceholder}
+                  error={sandbox.error}
+                />
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </TabsContent>
   )

@@ -117,6 +117,7 @@ describe('schedule database queries', () => {
       mcpServers: [],
       branch: null,
       workspaceMode: 'worktree',
+      sandbox: null,
       nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0),
     })
 
@@ -139,6 +140,7 @@ describe('schedule database queries', () => {
       null,
       null,
       'worktree',
+      null,
       expect.any(Number),
       expect.any(Number),
       null,
@@ -179,6 +181,7 @@ describe('schedule database queries', () => {
       mcpServers: [],
       branch: null,
       workspaceMode: 'worktree',
+      sandbox: null,
       nextRunAt: null,
     })
 
@@ -198,6 +201,7 @@ describe('schedule database queries', () => {
       null,
       null,
       'worktree',
+      null,
       null,
       expect.any(Number),
       null,

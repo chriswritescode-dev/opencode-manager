@@ -159,6 +159,7 @@ export type {
   ScheduleWorktree,
   RemoveScheduleWorktreesRequest,
   SchedulePermissionConfig,
+  ScheduleSandboxConfig,
   ScheduleRunTriggerSource,
   ScheduleRunStatus,
   ScheduleSkillMetadata,

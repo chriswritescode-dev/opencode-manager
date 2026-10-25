@@ -5,6 +5,7 @@ import {
   ScheduleMcpServersSchema,
   SchedulePermissionConfigSchema,
   ScheduleRunSchema,
+  ScheduleSandboxConfigSchema,
   ScheduleSkillMetadataSchema,
   ScheduleWorkspaceModeSchema,
   type ScheduleJob,
@@ -14,6 +15,7 @@ import {
   type ScheduleRun,
   type ScheduleRunStatus,
   type ScheduleRunTriggerSource,
+  type ScheduleSandboxConfig,
   type ScheduleWorkspaceMode,
 } from '@opencode-manager/shared/schemas'
 import { ASSISTANT_REPO_ID, ASSISTANT_REPO_NAME, ASSISTANT_REPO_PATH, getRepoDisplayName } from '@opencode-manager/shared/utils'
@@ -39,6 +41,7 @@ interface ScheduleJobRow {
   mcp_servers: string | null
   branch: string | null
   workspace_mode: ScheduleWorkspaceMode | null
+  sandbox_config: string | null
   created_at: number
   updated_at: number
   last_run_at: number | null
@@ -107,6 +110,19 @@ function parseMcpServers(raw: string | null): ScheduleMcpServer[] {
   }
 }
 
+function parseSandboxConfig(raw: string | null): ScheduleSandboxConfig | null {
+  if (!raw) {
+    return null
+  }
+
+  try {
+    const result = ScheduleSandboxConfigSchema.safeParse(JSON.parse(raw))
+    return result.success ? result.data : null
+  } catch {
+    return null
+  }
+}
+
 function normalizeWorkspaceMode(raw: string | null): ScheduleWorkspaceMode {
   const result = ScheduleWorkspaceModeSchema.safeParse(raw)
   return result.success ? result.data : 'worktree'
@@ -133,6 +149,7 @@ function rowToScheduleJob(row: ScheduleJobRow): ScheduleJob {
     mcpServers: parseMcpServers(row.mcp_servers),
     branch: row.branch,
     workspaceMode: normalizeWorkspaceMode(row.workspace_mode),
+    sandbox: parseSandboxConfig(row.sandbox_config),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastRunAt: row.last_run_at,
@@ -183,6 +200,10 @@ function serializeMcpServers(mcpServers: ScheduleJobPersistenceInput['mcpServers
   return mcpServers.length > 0 ? JSON.stringify(mcpServers) : null
 }
 
+function serializeSandboxConfig(sandbox: ScheduleJobPersistenceInput['sandbox']): string | null {
+  return sandbox ? JSON.stringify(sandbox) : null
+}
+
 export function listScheduleJobsByRepo(db: Database, repoId: number): ScheduleJob[] {
   const stmt = db.prepare('SELECT * FROM schedule_jobs WHERE repo_id IS ? ORDER BY created_at DESC')
   const rows = stmt.all(repoId) as ScheduleJobRow[]
@@ -227,9 +248,10 @@ export function createScheduleJob(
       mcp_servers,
       branch,
       workspace_mode,
+      sandbox_config,
       created_at, updated_at, last_run_at, next_run_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   const result = stmt.run(
@@ -251,6 +273,7 @@ export function createScheduleJob(
     serializeMcpServers(input.mcpServers),
     input.branch,
     input.workspaceMode,
+    serializeSandboxConfig(input.sandbox),
     now,
     now,
     null,
@@ -275,7 +298,7 @@ export function updateScheduleJob(db: Database, repoId: number | null, jobId: nu
   const stmt = db.prepare(`
     UPDATE schedule_jobs
     SET name = ?, description = ?, enabled = ?, schedule_mode = ?, interval_minutes = ?, cron_expression = ?, timezone = ?,
-        agent_slug = ?, prompt = ?, model = ?, skill_metadata = ?, permission_config = ?, mcp_servers = ?, branch = ?, workspace_mode = ?, directory = ?, updated_at = ?, next_run_at = ?
+        agent_slug = ?, prompt = ?, model = ?, skill_metadata = ?, permission_config = ?, mcp_servers = ?, branch = ?, workspace_mode = ?, sandbox_config = ?, directory = ?, updated_at = ?, next_run_at = ?
     WHERE repo_id IS ? AND id = ?
   `)
 
@@ -295,6 +318,7 @@ export function updateScheduleJob(db: Database, repoId: number | null, jobId: nu
     serializeMcpServers(input.mcpServers),
     input.branch,
     input.workspaceMode,
+    serializeSandboxConfig(input.sandbox),
     input.directory ?? null,
     now,
     input.nextRunAt,

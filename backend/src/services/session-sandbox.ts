@@ -109,17 +109,7 @@ export class SessionSandboxService {
       throw new SessionSandboxError('Child sessions inherit sandboxing from their parent session', 400)
     }
 
-    const available = this.sandboxSupported()
-    if (request.sandboxed === true && !available) {
-      throw new SessionSandboxError('Sandboxing is not enabled for this server', 409)
-    }
-
-    if (request.resources != null) {
-      const limitError = sandboxResourceLimitError(request.resources)
-      if (limitError !== null) {
-        throw new SessionSandboxError(limitError, 400)
-      }
-    }
+    this.assertSandboxRequestAllowed(request)
 
     const defaultSandboxed = this.defaultSandboxed()
     this.db.transaction(() => {
@@ -131,11 +121,28 @@ export class SessionSandboxService {
       }
     })()
 
-    if (request.sandboxed === false && available) {
+    if (request.sandboxed === false && this.sandboxSupported()) {
       this.removeSandboxInBackground(sessionId, `session ${sessionId} after its sandbox was turned off`)
     }
 
     return this.getState(sessionId)
+  }
+
+  /**
+   * Validates a sandbox change before it is stored or acted on: enabling sandboxing
+   * requires it to be enabled for the server, and the resources must be within limits.
+   */
+  assertSandboxRequestAllowed(request: SetSessionSandboxRequest): void {
+    if (request.sandboxed === true && !this.sandboxSupported()) {
+      throw new SessionSandboxError('Sandboxing is not enabled for this server', 409)
+    }
+
+    if (request.resources != null) {
+      const limitError = sandboxResourceLimitError(request.resources)
+      if (limitError !== null) {
+        throw new SessionSandboxError(limitError, 400)
+      }
+    }
   }
 
   async resolveShellTarget(sessionId: string): Promise<{ rootSessionId: string; resources: SessionSandboxResources }> {

@@ -41,6 +41,7 @@ import migration202610181400 from './202610181400-secrets'
 import { secretsGlobalScopeIndexMigration } from './202610181410-secrets-global-scope-index'
 import migration202610221800 from './202610221800-session-device-name'
 import migration202610231200 from './202610231200-push-subscription-session-id'
+import migration202610251900 from './202610251900-schedule-sandbox-config'
 
 export const allMigrations: Migration[] = [
   migration001,
@@ -85,4 +86,5 @@ export const allMigrations: Migration[] = [
   secretsGlobalScopeIndexMigration,
   migration202610221800,
   migration202610231200,
+  migration202610251900,
 ]
