@@ -177,8 +177,8 @@ export function ServerSchedulesContent({ target }: ServerSchedulesContentProps) 
                     New Schedule
                   </Button>
                 </ScheduleListToolbar>
-                <div className="min-h-0 flex-1 overflow-auto pt-2">
-                  <div className="min-h-0 overflow-auto rounded-lg border border-border/70">
+                <div className="flex min-h-0 flex-1 flex-col pt-2">
+                  <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border/70">
                     <ScheduleJobsTable
                       jobs={visibleJobs}
                       showRepo={false}

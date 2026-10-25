@@ -288,8 +288,8 @@ export function RepoSchedulesContent({ repoId, embedded }: RepoSchedulesContentP
                     </Button>
                   ) : null}
                 </ScheduleListToolbar>
-                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto pt-2 pb-mobile-tabbar sm:pb-2">
-                <div className="min-h-0 overflow-auto rounded-lg border border-border/70">
+                <div className="flex min-h-0 flex-1 flex-col pt-2 pb-mobile-tabbar sm:pb-2">
+                <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border/70">
                   <ScheduleJobsTable
                     jobs={(jobs ?? []).filter((job) => matchesScheduleJobSearch(job, jobSearch))}
                     showRepo={false}
