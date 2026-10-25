@@ -71,6 +71,19 @@ export function getPermissionLabel(permission: string): string {
   return PERMISSION_LABELS[permission] ?? permission.charAt(0).toUpperCase() + permission.slice(1)
 }
 
+/**
+ * Renders a permission action as a lowercase mid-sentence phrase, preserving acronyms.
+ *
+ * Use inside sentences such as `Allow ${getPermissionPhrase(action)}?` so the human
+ * label reads naturally instead of lowercasing the whole label.
+ */
+export function getPermissionPhrase(action: string): string {
+  return getPermissionLabel(action)
+    .split(' ')
+    .map((word) => (word === word.toUpperCase() ? word : word.toLowerCase()))
+    .join(' ')
+}
+
 interface PermissionLike {
   action?: unknown
   metadata?: unknown
@@ -141,7 +154,7 @@ export function getPermissionAlwaysScope(input: PermissionLike): PermissionAlway
   const save = Array.isArray(input.save) ? input.save.filter((item): item is string => typeof item === 'string') : []
   if (save.length === 0) return null
   if (save.length === 1 && save[0] === '*') {
-    return { summary: `This will always allow ${action} for this project.`, patterns: [] }
+    return { summary: `This will always allow ${getPermissionPhrase(action)} for this project.`, patterns: [] }
   }
   return { summary: 'This will always allow the following patterns for this project.', patterns: save }
 }

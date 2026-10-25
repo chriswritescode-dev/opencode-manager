@@ -34,6 +34,23 @@ describe('PermissionRequestDialog', () => {
     expect(screen.getByText('rm -rf node_modules')).toBeInTheDocument()
   })
 
+  it('phrases the allow question in lowercase while preserving acronyms', () => {
+    const { unmount } = render(
+      <PermissionRequestDialog permission={permission} pendingCount={1} onRespond={vi.fn()} />,
+    )
+    expect(screen.getByText('Allow run command?')).toBeInTheDocument()
+    unmount()
+
+    render(
+      <PermissionRequestDialog
+        permission={{ ...permission, action: 'webfetch', resources: [], metadata: { url: 'https://example.com' } }}
+        pendingCount={1}
+        onRespond={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('Allow fetch URL?')).toBeInTheDocument()
+  })
+
   it('labels multiple shell resources as commands', () => {
     render(
       <PermissionRequestDialog
@@ -69,7 +86,7 @@ describe('PermissionRequestDialog', () => {
       />,
     )
 
-    expect(screen.getByText('This will always allow shell for this project.')).toBeInTheDocument()
+    expect(screen.getByText('This will always allow run command for this project.')).toBeInTheDocument()
   })
 
   it('lists the patterns an always decision approves', () => {
