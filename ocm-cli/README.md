@@ -27,7 +27,8 @@ Attachment works with OpenCode Manager >= 0.19.0. The sync worktree targeting of
 `ocm push` / `ocm pull` and `/ocm-move` worktree moves need ocm 0.4.0+ and
 OpenCode Manager 1.0.0+; an older CLI is told to upgrade, and an older Manager is
 reported as needing an upgrade (push and pull fall back to the main checkout
-instead).
+instead). `ocm link` needs ocm 0.4.1+ and OpenCode Manager 1.1.0+ to pair the
+linked server.
 
 ## Install
 
