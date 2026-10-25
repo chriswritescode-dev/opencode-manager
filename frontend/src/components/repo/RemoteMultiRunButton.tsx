@@ -35,9 +35,15 @@ export function RemoteMultiRunButton({ serverId, directory }: { serverId: string
 
   return (
     <>
-      <Button size="sm" variant="outline" onClick={handleOpen} className="shrink-0">
-        <Layers className="mr-1 h-4 w-4" />
-        Multi-run
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={handleOpen}
+        aria-label="Multi-run"
+        className="h-9 w-9 shrink-0 p-0 @min-[36rem]:w-auto @min-[36rem]:px-3"
+      >
+        <Layers className="h-4 w-4 @min-[36rem]:mr-2" />
+        <span className="hidden @min-[36rem]:inline">Multi-run</span>
       </Button>
       {mounted ? (
         <RemoteMultiRun

@@ -155,12 +155,20 @@ describe('RemoteProject', () => {
     })
     renderProject()
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'New Session' })[0])
+    fireEvent.click(screen.getByRole('button', { name: 'New Session' }))
 
     await waitFor(() => {
       expect(screen.getByTestId('session-route')).toBeInTheDocument()
     })
     expect(mocks.useCreateSession).toHaveBeenCalledWith('/home/me/app')
+  })
+
+  it('exposes the header actions with a single accessible name each', async () => {
+    renderProject()
+
+    expect(await screen.findByRole('button', { name: 'Schedules for /home/me/app' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Multi-run' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'New Session' })).toBeInTheDocument()
   })
 
   it('shows a missing-directory state without rendering the session list', async () => {

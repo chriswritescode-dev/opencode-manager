@@ -75,16 +75,16 @@ function RemoteProjectContent({ serverId, directory }: { serverId: string; direc
   return (
     <div className="flex h-full max-h-full min-w-0">
       <div className="flex h-full max-h-full min-w-0 flex-1 flex-col overflow-hidden bg-gradient-to-br from-background via-background to-background pb-[calc(env(safe-area-inset-bottom)+56px)] sm:pb-0">
-        <Header>
+        <Header className="@container">
           <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
             <Header.BackButton to="/" />
             <Header.Title>{title}</Header.Title>
-            <Badge variant="outline" className="hidden shrink-0 sm:inline-flex">
+            <Badge variant="outline" className="hidden shrink-0 @min-[36rem]:inline-flex">
               <Server className="mr-1 h-3 w-3" />
               {server?.name ?? 'Linked server'}
             </Badge>
             {branch ? (
-              <Badge variant="secondary" className="hidden shrink-0 md:inline-flex">
+              <Badge variant="secondary" className="hidden shrink-0 @min-[44rem]:inline-flex">
                 <GitBranch className="mr-1 h-3 w-3" />
                 {branch}
               </Badge>
@@ -98,28 +98,16 @@ function RemoteProjectContent({ serverId, directory }: { serverId: string; direc
                 <Button
                   onClick={handleCreateSession}
                   disabled={createSession.isPending}
-                  size="sm"
-                  className="hidden bg-primary text-primary-foreground transition-all duration-200 hover:scale-105 hover:bg-primary-hover sm:inline-flex"
-                >
-                  {createSession.isPending ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Plus className="mr-2 h-4 w-4" />
-                  )}
-                  <span>New Session</span>
-                </Button>
-                <Button
-                  onClick={handleCreateSession}
-                  disabled={createSession.isPending}
                   aria-label="New Session"
                   size="sm"
-                  className="h-10 w-10 bg-primary p-0 text-primary-foreground transition-all duration-200 hover:scale-105 hover:bg-primary-hover sm:hidden"
+                  className="h-9 w-9 bg-primary p-0 text-primary-foreground transition-all duration-200 hover:scale-105 hover:bg-primary-hover @min-[36rem]:w-auto @min-[36rem]:px-3"
                 >
                   {createSession.isPending ? (
-                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin @min-[36rem]:mr-2" />
                   ) : (
-                    <Plus className="h-5 w-5" />
+                    <Plus className="h-4 w-4 @min-[36rem]:mr-2" />
                   )}
+                  <span className="hidden @min-[36rem]:inline">New Session</span>
                 </Button>
               </>
             ) : null}

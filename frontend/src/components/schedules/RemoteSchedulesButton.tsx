@@ -32,11 +32,11 @@ export function RemoteSchedulesButton({ serverId, directory }: { serverId: strin
         size="sm"
         variant="outline"
         onClick={() => setOpen(true)}
-        className="shrink-0"
+        className="h-9 w-9 shrink-0 p-0 @min-[36rem]:w-auto @min-[36rem]:px-3"
         aria-label={`Schedules for ${directory}`}
       >
-        <CalendarClock className="mr-1 h-4 w-4" />
-        <span className="hidden sm:inline">Schedules</span>
+        <CalendarClock className="h-4 w-4 @min-[36rem]:mr-2" />
+        <span className="hidden @min-[36rem]:inline">Schedules</span>
       </Button>
       <RemoteSchedulesDialog
         serverId={serverId}
