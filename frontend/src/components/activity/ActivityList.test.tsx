@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import type { Repo, Session } from '@/api/types'
 import type { ActiveWorkItem } from '@/lib/activeWork'
-import { formatShortRelativeTime } from '@/lib/utils'
 import { ActivityList } from './ActivityList'
 
 const mocks = vi.hoisted(() => ({
@@ -72,19 +71,10 @@ function setGroups(groups: {
   })
 }
 
-const renderList = (
-  onNavigate = vi.fn(),
-  path = '/',
-  props: {
-    hideWhenEmpty?: boolean
-    title?: string
-    variant?: 'full' | 'compact'
-    minutes?: number
-  } = {},
-) =>
+const renderList = (onNavigate = vi.fn(), path = '/', minutes = WINDOW_MINUTES) =>
   render(
     <MemoryRouter initialEntries={[path]}>
-      <ActivityList minutes={WINDOW_MINUTES} onNavigate={onNavigate} {...props} />
+      <ActivityList minutes={minutes} onNavigate={onNavigate} />
     </MemoryRouter>,
   )
 
@@ -130,7 +120,7 @@ describe('ActivityList', () => {
   it('renders the empty state with an hour-scale window', () => {
     setGroups({})
 
-    renderList(vi.fn(), '/', { minutes: 1440 })
+    renderList(vi.fn(), '/', 1440)
 
     expect(screen.getByText('No active or recent sessions in the last 24 hours')).toBeInTheDocument()
   })
@@ -218,181 +208,5 @@ describe('ActivityList', () => {
     renderList()
 
     expect(screen.getByText("Couldn't load activity.")).toBeInTheDocument()
-  })
-
-  it('renders nothing when hideWhenEmpty and there are no items', () => {
-    setGroups({})
-
-    const { container } = renderList(vi.fn(), '/', { hideWhenEmpty: true })
-
-    expect(container).toBeEmptyDOMElement()
-  })
-
-  it('renders nothing while loading when hideWhenEmpty', () => {
-    mocks.useActiveWork.mockReturnValue({
-      groups: { needsInput: [], running: [], recent: [] },
-      isLoading: true,
-      isError: false,
-    })
-
-    const { container } = renderList(vi.fn(), '/', { hideWhenEmpty: true })
-
-    expect(container).toBeEmptyDOMElement()
-  })
-
-  it('renders the title only when there are items', () => {
-    setGroups({
-      recent: [createItem({ state: 'recent', session: createSession('c1', 'Recent'), repo: createRepo(3, 'Gamma') })],
-    })
-
-    renderList(vi.fn(), '/', { title: 'Activity' })
-
-    expect(screen.getByRole('heading', { name: 'Activity' })).toBeInTheDocument()
-  })
-
-  it('does not render the title when there are no items', () => {
-    setGroups({})
-
-    renderList(vi.fn(), '/', { title: 'Activity' })
-
-    expect(screen.queryByRole('heading', { name: 'Activity' })).toBeNull()
-  })
-})
-
-describe('ActivityList compact variant', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  it('renders only the section title, without group headings', () => {
-    setGroups({
-      needsInput: [
-        createItem({ state: 'needs-input', session: createSession('n1', 'Needs work'), repo: createRepo(1, 'Alpha') }),
-      ],
-      running: [
-        createItem({ state: 'running', session: createSession('r1', 'Running task'), repo: createRepo(2, 'Beta') }),
-      ],
-      recent: [
-        createItem({ state: 'recent', session: createSession('c1', 'Recent task'), repo: createRepo(3, 'Gamma') }),
-      ],
-    })
-
-    renderList(vi.fn(), '/', { variant: 'compact', title: 'Activity' })
-
-    expect(screen.getAllByRole('heading').map((node) => node.textContent)).toEqual(['Activity'])
-    expect(screen.queryByText('Needs input')).toBeNull()
-    expect(screen.queryByText('Running')).toBeNull()
-    expect(screen.queryByText('Recent')).toBeNull()
-  })
-
-  it('renders one single-line row per item in needs-input, running, recent order', () => {
-    const needs = createItem({
-      state: 'needs-input',
-      session: createSession('n1', 'Needs work'),
-      repo: createRepo(1, 'Alpha'),
-    })
-    const running = createItem({
-      state: 'running',
-      session: createSession('r1', 'Running task'),
-      repo: createRepo(2, 'Beta'),
-    })
-    const recent = createItem({
-      state: 'recent',
-      session: createSession('c1', 'Recent task'),
-      repo: createRepo(3, 'Gamma'),
-    })
-    setGroups({ needsInput: [needs], running: [running], recent: [recent] })
-
-    renderList(vi.fn(), '/', { variant: 'compact' })
-
-    const rows = screen.getAllByRole('button')
-    expect(rows).toHaveLength(3)
-    expect(rows[0]).toHaveTextContent('Needs work')
-    expect(rows[1]).toHaveTextContent('Running task')
-    expect(rows[2]).toHaveTextContent('Recent task')
-
-    expect(rows[0]).toHaveAccessibleName(/Needs work/)
-    expect(rows[0]).toHaveAccessibleName(/Alpha/)
-    expect(rows[0]).toHaveTextContent(formatShortRelativeTime(new Date(needs.session.time.updated)))
-    expect(rows[0]).not.toHaveTextContent('feature/x')
-  })
-
-  it('caps the compact list at five items, keeping needs-input and running over recent', () => {
-    setGroups({
-      needsInput: [1, 2].map((n): ActiveWorkItem =>
-        createItem({
-          state: 'needs-input',
-          session: createSession(`n${n}`, `Needs work ${n}`),
-          repo: createRepo(n, `Repo ${n}`),
-        }),
-      ),
-      running: [1, 2, 3].map((n): ActiveWorkItem =>
-        createItem({
-          state: 'running',
-          session: createSession(`r${n}`, `Running task ${n}`),
-          repo: createRepo(10 + n, `Repo ${10 + n}`),
-        }),
-      ),
-      recent: [1, 2, 3].map((n): ActiveWorkItem =>
-        createItem({
-          state: 'recent',
-          session: createSession(`c${n}`, `Recent task ${n}`),
-          repo: createRepo(20 + n, `Repo ${20 + n}`),
-        }),
-      ),
-    })
-
-    renderList(vi.fn(), '/', { variant: 'compact' })
-
-    const rows = screen.getAllByRole('button')
-    expect(rows).toHaveLength(5)
-    expect(rows[0]).toHaveTextContent('Needs work 1')
-    expect(rows[4]).toHaveTextContent('Running task 3')
-    expect(screen.queryByText('Recent task 1')).toBeNull()
-  })
-
-  it('fills the remaining compact slots with recent items', () => {
-    setGroups({
-      running: [
-        createItem({ state: 'running', session: createSession('r1', 'Running task'), repo: createRepo(1, 'Alpha') }),
-      ],
-      recent: [1, 2, 3, 4, 5].map((n): ActiveWorkItem =>
-        createItem({
-          state: 'recent',
-          session: createSession(`c${n}`, `Recent task ${n}`),
-          repo: createRepo(10 + n, `Repo ${10 + n}`),
-        }),
-      ),
-    })
-
-    renderList(vi.fn(), '/', { variant: 'compact' })
-
-    const rows = screen.getAllByRole('button')
-    expect(rows).toHaveLength(5)
-    expect(rows[0]).toHaveTextContent('Running task')
-    expect(rows[4]).toHaveTextContent('Recent task 4')
-    expect(screen.queryByText('Recent task 5')).toBeNull()
-  })
-
-  it('marks the currently open session with aria-current', () => {
-    setGroups({
-      recent: [
-        createItem({ state: 'recent', session: createSession('open', 'Open session'), repo: createRepo(7, 'Gamma') }),
-        createItem({ state: 'recent', session: createSession('other', 'Other session'), repo: createRepo(7, 'Gamma') }),
-      ],
-    })
-
-    renderList(vi.fn(), '/repos/7/sessions/open', { variant: 'compact' })
-
-    expect(screen.getByRole('button', { name: /Open session/ })).toHaveAttribute('aria-current', 'true')
-    expect(screen.getByRole('button', { name: /Other session/ })).not.toHaveAttribute('aria-current')
-  })
-
-  it('renders nothing when hideWhenEmpty and there are no items', () => {
-    setGroups({})
-
-    const { container } = renderList(vi.fn(), '/', { hideWhenEmpty: true, variant: 'compact' })
-
-    expect(container).toBeEmptyDOMElement()
   })
 })

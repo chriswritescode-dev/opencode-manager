@@ -12,20 +12,14 @@ import {
 } from '@/lib/activeWork'
 
 const UNTITLED_SESSION_TITLE = 'Untitled Session'
-const COMPACT_MAX_ITEMS = 5
 
 const FULL_ICON_CLASS = 'h-4 w-4'
-const COMPACT_ICON_CLASS = 'h-3.5 w-3.5'
 
 interface ActivityListProps {
   /** Activity window in minutes. */
   minutes: number
   /** Called when a row is chosen; the caller owns navigation so each surface can apply its own history and close rules. */
   onNavigate: (item: ActiveWorkItem) => void
-  hideWhenEmpty?: boolean
-  title?: string
-  /** `compact` renders one flat, single-line list capped at {@link COMPACT_MAX_ITEMS}; `full` renders grouped rows. */
-  variant?: 'full' | 'compact'
 }
 
 function isCurrentItem(
@@ -51,10 +45,9 @@ function activityItemLine(item: ActiveWorkItem): string {
   return branch ? `${getRepoDisplayName(item.repo)} · ${branch}` : getRepoDisplayName(item.repo)
 }
 
-function activityRowClass(isCurrent: boolean, compact: boolean) {
+function activityRowClass(isCurrent: boolean) {
   return cn(
-    'flex w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-    compact ? 'py-1' : 'py-1.5',
+    'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
     isCurrent && 'bg-accent',
   )
 }
@@ -87,7 +80,7 @@ function ActivityRow({ item, isCurrent, onSelect }: ActivityRowProps) {
       type="button"
       onClick={() => onSelect(item)}
       aria-current={isCurrent ? 'true' : undefined}
-      className={activityRowClass(isCurrent, false)}
+      className={activityRowClass(isCurrent)}
     >
       <span className="flex w-5 shrink-0 items-center justify-center">
         <ActivityStateIcon item={item} iconClassName={FULL_ICON_CLASS} />
@@ -97,30 +90,6 @@ function ActivityRow({ item, isCurrent, onSelect }: ActivityRowProps) {
           {item.session.title || UNTITLED_SESSION_TITLE}
         </span>
         <span className="block truncate text-xs text-muted-foreground">{activityItemLine(item)}</span>
-      </span>
-      <span className="shrink-0 text-xs text-muted-foreground">
-        {formatShortRelativeTime(new Date(item.updatedAt))}
-      </span>
-    </button>
-  )
-}
-
-function CompactActivityRow({ item, isCurrent, onSelect }: ActivityRowProps) {
-  return (
-    <button
-      type="button"
-      onClick={() => onSelect(item)}
-      aria-current={isCurrent ? 'true' : undefined}
-      className={activityRowClass(isCurrent, true)}
-    >
-      <span className="flex w-4 shrink-0 items-center justify-center">
-        <ActivityStateIcon item={item} iconClassName={COMPACT_ICON_CLASS} />
-      </span>
-      <span className="min-w-0 flex-1 truncate text-foreground">
-        {item.session.title || UNTITLED_SESSION_TITLE}
-      </span>
-      <span className="max-w-[35%] truncate text-xs text-muted-foreground">
-        {activityItemLabel(item)}
       </span>
       <span className="shrink-0 text-xs text-muted-foreground">
         {formatShortRelativeTime(new Date(item.updatedAt))}
@@ -163,13 +132,7 @@ function ActivityGroup({
   )
 }
 
-export function ActivityList({
-  minutes,
-  onNavigate,
-  hideWhenEmpty = false,
-  title,
-  variant = 'full',
-}: ActivityListProps) {
+export function ActivityList({ minutes, onNavigate }: ActivityListProps) {
   const location = useLocation()
   const { groups, isLoading, isError } = useActiveWork(minutes * MS_PER_MINUTE)
 
@@ -178,12 +141,10 @@ export function ActivityList({
   const currentSessionID = route.sessionId ?? serverRoute?.sessionId ?? null
 
   if (isLoading) {
-    if (hideWhenEmpty) return null
     return <p className="p-4 text-sm text-muted-foreground">Loading activity...</p>
   }
 
   if (isError) {
-    if (hideWhenEmpty) return null
     return <p className="p-4 text-sm text-destructive">Couldn&apos;t load activity.</p>
   }
 
@@ -191,57 +152,24 @@ export function ActivityList({
     groups.needsInput.length === 0 && groups.running.length === 0 && groups.recent.length === 0
 
   if (isEmpty) {
-    if (hideWhenEmpty) return null
     return (
       <p className="p-4 text-sm text-muted-foreground">{formatActivityEmptyMessage(minutes)}</p>
     )
   }
 
-  const isCompact = variant === 'compact'
-  const compactItems = [...groups.needsInput, ...groups.running, ...groups.recent].slice(
-    0,
-    COMPACT_MAX_ITEMS,
-  )
-
   return (
-    <section
-      aria-label={title}
-      className={cn('flex flex-col', isCompact ? 'pb-1' : 'pb-2', title && 'border-b border-border')}
-    >
-      {title && (
-        <h2
-          className={cn(
-            'px-4 text-xs font-medium uppercase tracking-wider text-muted-foreground',
-            isCompact ? 'pt-2 pb-0.5' : 'pt-3 pb-1',
-          )}
-        >
-          {title}
-        </h2>
-      )}
-      {isCompact ? (
-        compactItems.map((item) => (
-          <CompactActivityRow
-            key={item.key}
-            item={item}
-            isCurrent={isCurrentItem(item, currentSessionID, route.repoId, serverRoute?.serverId ?? null)}
-            onSelect={onNavigate}
-          />
-        ))
-      ) : (
-        <>
-          {ACTIVE_WORK_GROUPS.map((group) => (
-            <ActivityGroup
-              key={group.key}
-              heading={group.heading}
-              items={groups[group.key]}
-              currentSessionID={currentSessionID}
-              currentRepoId={route.repoId}
-              currentServerId={serverRoute?.serverId ?? null}
-              onSelect={onNavigate}
-            />
-          ))}
-        </>
-      )}
+    <section className="flex flex-col pb-2">
+      {ACTIVE_WORK_GROUPS.map((group) => (
+        <ActivityGroup
+          key={group.key}
+          heading={group.heading}
+          items={groups[group.key]}
+          currentSessionID={currentSessionID}
+          currentRepoId={route.repoId}
+          currentServerId={serverRoute?.serverId ?? null}
+          onSelect={onNavigate}
+        />
+      ))}
     </section>
   )
 }

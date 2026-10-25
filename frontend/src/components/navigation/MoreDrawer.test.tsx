@@ -367,47 +367,19 @@ describe('MoreDrawer', () => {
     expect(screen.queryByRole('button', { name: 'Assistant' })).not.toBeInTheDocument()
   })
 
-  it('shows the Activity section above the menu when there are items', () => {
+  it('shows no Activity section even when there are activity items', () => {
     mockAuth()
     mockServerHealth()
     setActivityGroups({ recent: [createActiveWorkItem()] })
-    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1', routePath: '/repos/:id/sessions/:sessionId' })
-
-    const heading = screen.getByRole('heading', { name: 'Activity' })
-    const firstMenuRow = screen.getByText('Files')
-    expect(screen.getByText('Session s1')).toBeInTheDocument()
-    expect(heading.compareDocumentPosition(firstMenuRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-  })
-
-  it('hides the Activity section when there are no items', () => {
-    mockAuth()
-    mockServerHealth()
-    setActivityGroups({})
     renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1', routePath: '/repos/:id/sessions/:sessionId' })
 
     expect(screen.queryByRole('heading', { name: 'Activity' })).not.toBeInTheDocument()
     expect(screen.queryByText('Session s1')).not.toBeInTheDocument()
   })
 
-  it('navigates to the activity item without a close that would replace the new route', () => {
-    const navigateMock = vi.fn()
-    vi.mocked(useNavigate).mockReturnValue(navigateMock)
-    mockAuth()
-    mockServerHealth()
-    setActivityGroups({ recent: [createActiveWorkItem()] })
-    const handleClose = vi.fn()
-    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1', routePath: '/repos/:id/sessions/:sessionId', onClose: handleClose })
-
-    fireEvent.click(screen.getByRole('button', { name: /Session s1/ }))
-
-    expect(navigateMock).toHaveBeenCalledWith('/repos/1/sessions/s1')
-    expect(handleClose).not.toHaveBeenCalled()
-  })
-
   it('offers only the remote-capable project items on a linked-server route', () => {
     mockAuth()
     mockServerHealth()
-    setActivityGroups({ recent: [createActiveWorkItem()] })
     renderMoreDrawer({
       initialEntry: '/servers/srv_kitchen/sessions/ses_remote',
       routePath: '/servers/:serverId/sessions/:sessionId',
@@ -419,7 +391,6 @@ describe('MoreDrawer', () => {
     expect(screen.getByText('Settings')).toBeInTheDocument()
     expect(screen.getByText('Logout')).toBeInTheDocument()
     expect(screen.getByText('Terminal')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Activity' })).toBeInTheDocument()
     expect(screen.getByText('Sessions')).toBeInTheDocument()
     expect(screen.queryByText('Files')).not.toBeInTheDocument()
     expect(screen.getByText('Source Control')).toBeInTheDocument()
