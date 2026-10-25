@@ -539,21 +539,19 @@ describe('SessionDetail remote server mode', () => {
   })
 
   it('deletes the active remote session from the tool panel', async () => {
-    const { capturedPathname, capturedSearch } = renderRemoteSession()
+    renderRemoteSession()
 
     await waitFor(() => {
       expect(screen.getByTestId('message-thread')).toBeInTheDocument()
     })
 
     const panelProps = mocks.ToolSidePanel.mock.calls.at(-1)?.[0] as
-      | { onDeleteActiveSession?: () => void }
+      | { deleteActiveSessionPath?: string }
       | undefined
-    act(() => {
-      panelProps?.onDeleteActiveSession?.()
-    })
 
-    expect(capturedPathname.current).toBe('/servers/srv_kitchen/projects')
-    expect(capturedSearch.current).toBe('?directory=%2Fhome%2Fme%2Fapp')
+    expect(panelProps?.deleteActiveSessionPath).toBe(
+      '/servers/srv_kitchen/projects?directory=%2Fhome%2Fme%2Fapp',
+    )
   })
 
   it('shows a loader until the session directory is available', async () => {

@@ -20,8 +20,8 @@ export interface SessionPickerNavigationOptions {
    */
   mode: 'push' | 'replace' | 'panel'
   onClose: () => void
-  /** Replaces the default delete behaviour of returning to the current repo's session list. */
-  onDeleteActiveSession?: () => void
+  /** Where to go after the open session is deleted, instead of the current repo's session list. */
+  deleteActiveSessionPath?: string
 }
 
 export interface SessionPickerNavigation {
@@ -39,13 +39,13 @@ export interface SessionPickerNavigation {
  * where the picker stays open. An assistant session keeps `?assistant=1` when the chosen session
  * belongs to the current repo.
  *
- * @param options Navigation mode, the picker's close callback, and an optional delete override.
+ * @param options Navigation mode, the picker's close callback, and an optional delete destination.
  * @returns Handlers for selecting sessions and repos and for following a prepared path.
  */
 export function useSessionPickerNavigation({
   mode,
   onClose,
-  onDeleteActiveSession: deleteActiveSessionOverride,
+  deleteActiveSessionPath,
 }: SessionPickerNavigationOptions): SessionPickerNavigation {
   const navigate = useNavigate()
   const { pathname, search } = useLocation()
@@ -95,9 +95,8 @@ export function useSessionPickerNavigation({
   )
 
   const onDeleteActiveSession = useCallback(() => {
-    if (deleteActiveSessionOverride) {
-      if (!isPanelMode) onClose()
-      deleteActiveSessionOverride()
+    if (deleteActiveSessionPath) {
+      open(deleteActiveSessionPath)
       return
     }
     if (currentRepoId === null) {
@@ -107,7 +106,7 @@ export function useSessionPickerNavigation({
     open(getSessionListPath(currentRepoId, isAssistantSession, repoTab))
   }, [
     currentRepoId,
-    deleteActiveSessionOverride,
+    deleteActiveSessionPath,
     isAssistantSession,
     isPanelMode,
     onClose,

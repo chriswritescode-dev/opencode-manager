@@ -161,23 +161,23 @@ describe('useSessionPickerNavigation', () => {
       expect(onClose).not.toHaveBeenCalled()
     })
 
-    it('calls only the delete override when one is supplied', () => {
-      const onDeleteActiveSession = vi.fn()
+    it('opens the delete destination with the panel param and keeps the picker open', () => {
       const { result, onClose, location } = renderPickerNavigation(
         ['/servers/srv_kitchen/sessions/a?panel=sessions'],
-        { mode: 'panel', onDeleteActiveSession },
+        { mode: 'panel', deleteActiveSessionPath: '/servers/srv_kitchen/projects?directory=%2Fapp' },
       )
 
       act(() => {
         result.current.onDeleteActiveSession()
       })
 
-      expect(onDeleteActiveSession).toHaveBeenCalledTimes(1)
-      expect(location()).toBe('/servers/srv_kitchen/sessions/a?panel=sessions POP')
+      expect(location()).toBe(
+        '/servers/srv_kitchen/projects?directory=%2Fapp&panel=sessions PUSH',
+      )
       expect(onClose).not.toHaveBeenCalled()
     })
 
-    it('does nothing when deleting without an override outside a repo route', () => {
+    it('does nothing when deleting without a destination outside a repo route', () => {
       const { result, onClose, location } = renderPickerNavigation(
         ['/servers/srv_kitchen/sessions/a?panel=sessions'],
         { mode: 'panel' },
@@ -248,6 +248,20 @@ describe('useSessionPickerNavigation', () => {
       })
 
       expect(location()).toBe('/repos/1/sessions/b REPLACE')
+      expect(onClose).not.toHaveBeenCalled()
+    })
+
+    it('replaces the entry with the delete destination without closing or going back', () => {
+      const { result, onClose, location } = renderPickerNavigation(
+        ['/servers/srv_kitchen/sessions/a?panel=sessions'],
+        { mode: 'replace', deleteActiveSessionPath: '/servers/srv_kitchen/projects?directory=%2Fapp' },
+      )
+
+      act(() => {
+        result.current.onDeleteActiveSession()
+      })
+
+      expect(location()).toBe('/servers/srv_kitchen/projects?directory=%2Fapp REPLACE')
       expect(onClose).not.toHaveBeenCalled()
     })
   })

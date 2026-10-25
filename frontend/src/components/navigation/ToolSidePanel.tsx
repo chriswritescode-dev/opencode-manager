@@ -165,18 +165,18 @@ function useFloatingPanelDismiss(
 interface SessionsPanelBodyProps {
   docked: boolean
   onClose: () => void
-  onDeleteActiveSession?: () => void
+  deleteActiveSessionPath?: string
 }
 
 /**
  * Session picker shown in the tool panel. While docked, choosing a session keeps the panel open on
  * the destination; as an overlay sheet the choice replaces the entry behind it and closes the panel.
  */
-function SessionsPanelBody({ docked, onClose, onDeleteActiveSession }: SessionsPanelBodyProps) {
+function SessionsPanelBody({ docked, onClose, deleteActiveSessionPath }: SessionsPanelBodyProps) {
   const navigation = useSessionPickerNavigation({
     mode: docked ? 'panel' : 'replace',
     onClose,
-    onDeleteActiveSession,
+    deleteActiveSessionPath,
   })
 
   return (
@@ -220,10 +220,10 @@ interface ToolSidePanelProps {
   walkthroughModel?: ModelRef | null
   walkthroughOnOpenSession?: (id: string) => void
   /**
-   * Replaces the session picker's default behaviour after the open session is deleted; the session
-   * page passes its close handler on linked-server routes.
+   * Path the session picker opens after the open session is deleted; the session page passes the
+   * remote project path on linked-server routes.
    */
-  onDeleteActiveSession?: () => void
+  deleteActiveSessionPath?: string
 }
 
 interface RailButtonProps {
@@ -289,7 +289,7 @@ export function ToolSidePanel({
   walkthroughSourceRequest,
   walkthroughModel,
   walkthroughOnOpenSession,
-  onDeleteActiveSession,
+  deleteActiveSessionPath,
 }: ToolSidePanelProps) {
   const { activeTool, toggleTool, closePanel } = panel
   const location = useLocation()
@@ -359,7 +359,7 @@ export function ToolSidePanel({
     if (tool === 'mcp') return repoDirectory ? <RepoMcpContent open directory={repoDirectory} /> : null
     if (tool === 'walkthrough') return sessionId ? <ChangesWalkthroughView /> : null
     if (tool === 'sessions') {
-      return <SessionsPanelBody docked={docked} onClose={closePanel} onDeleteActiveSession={onDeleteActiveSession} />
+      return <SessionsPanelBody docked={docked} onClose={closePanel} deleteActiveSessionPath={deleteActiveSessionPath} />
     }
     if (tool === 'terminal') {
       return terminalWorkspaceTarget

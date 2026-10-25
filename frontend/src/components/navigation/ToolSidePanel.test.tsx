@@ -95,10 +95,10 @@ function LocationProbe() {
 
 function Harness({
   docked,
-  onDeleteActiveSession,
+  deleteActiveSessionPath,
 }: {
   docked: boolean
-  onDeleteActiveSession?: () => void
+  deleteActiveSessionPath?: string
 }) {
   const panel = useToolPanel(docked)
   return (
@@ -115,7 +115,7 @@ function Harness({
           selectedFilePath="src/a.ts"
           repoDirectory="/repo"
           onSkillLoaded={() => {}}
-          onDeleteActiveSession={onDeleteActiveSession}
+          deleteActiveSessionPath={deleteActiveSessionPath}
         />
       ) : null}
       <LocationProbe />
@@ -123,10 +123,10 @@ function Harness({
   )
 }
 
-function renderAt(search: string, docked = true, onDeleteActiveSession?: () => void) {
+function renderAt(search: string, docked = true, deleteActiveSessionPath?: string) {
   return render(
     <MemoryRouter initialEntries={[`/repos/1/sessions/ses_1${search}`]}>
-      <Harness docked={docked} onDeleteActiveSession={onDeleteActiveSession} />
+      <Harness docked={docked} deleteActiveSessionPath={deleteActiveSessionPath} />
     </MemoryRouter>,
   )
 }
@@ -621,14 +621,15 @@ describe('ToolSidePanel', () => {
     }
   })
 
-  it('forwards the delete override to the session picker', async () => {
-    const onDeleteActiveSession = vi.fn()
-    renderAt('?panel=sessions', true, onDeleteActiveSession)
+  it('forwards the delete destination to the session picker', async () => {
+    renderAt('?panel=sessions', true, '/servers/srv_kitchen/projects?directory=%2Fapp')
 
     await screen.findByText('route-session-picker')
 
     expect(sessionPickerMocks.useSessionPickerNavigation).toHaveBeenLastCalledWith(
-      expect.objectContaining({ onDeleteActiveSession }),
+      expect.objectContaining({
+        deleteActiveSessionPath: '/servers/srv_kitchen/projects?directory=%2Fapp',
+      }),
     )
   })
 

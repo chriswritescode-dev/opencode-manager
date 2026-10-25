@@ -1025,7 +1025,7 @@ export function SessionDetail() {
           walkthroughSourceRequest={walkthroughSourceRequest}
           walkthroughModel={modelRef}
           walkthroughOnOpenSession={handleChildSessionClick}
-          onDeleteActiveSession={isRemoteServer ? handleCloseSession : undefined}
+          deleteActiveSessionPath={isRemoteServer ? remoteProjectBackPath : undefined}
         />
       )}
       </div>
