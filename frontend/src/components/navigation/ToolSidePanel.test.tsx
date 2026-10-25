@@ -3,22 +3,44 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
-import type { Repo, Session } from '@/api/types'
-import type { ActiveWorkItem } from '@/lib/activeWork'
 import { stubMatchMedia } from '@/test/test-utils'
 import { ToolSidePanel } from './ToolSidePanel'
 import { useToolPanel } from '@/hooks/useToolPanel'
+import type { SessionPickerNavigation, SessionPickerNavigationOptions } from '@/hooks/useSessionPickerNavigation'
+import { useUIState } from '@/stores/uiStateStore'
 
-const activityMocks = vi.hoisted(() => ({
-  useActiveWork: vi.fn(),
+const activeWorkMocks = vi.hoisted(() => ({
   useActiveWorkCounts: vi.fn(),
-  useActivityWindowMinutes: vi.fn(),
 }))
 
 vi.mock('@/hooks/useActiveWork', () => ({
-  useActiveWork: activityMocks.useActiveWork,
-  useActiveWorkCounts: activityMocks.useActiveWorkCounts,
-  useActivityWindowMinutes: activityMocks.useActivityWindowMinutes,
+  useActiveWorkCounts: activeWorkMocks.useActiveWorkCounts,
+}))
+
+const sessionPickerMocks = vi.hoisted(() => ({
+  useSessionPickerNavigation: vi.fn(),
+}))
+
+vi.mock('@/hooks/useSessionPickerNavigation', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/useSessionPickerNavigation')>()
+  return {
+    ...actual,
+    useSessionPickerNavigation: (options: SessionPickerNavigationOptions) => {
+      sessionPickerMocks.useSessionPickerNavigation(options)
+      return actual.useSessionPickerNavigation(options)
+    },
+  }
+})
+
+vi.mock('@/components/session/RouteSessionPicker', () => ({
+  RouteSessionPicker: ({ navigation }: { navigation: SessionPickerNavigation }) => (
+    <div>
+      route-session-picker
+      <button type="button" onClick={() => navigation.onNavigate('/repos/2/sessions/other')}>
+        open other session
+      </button>
+    </div>
+  ),
 }))
 
 vi.mock('@/components/file-browser/FileBrowser', () => ({
@@ -71,7 +93,13 @@ function LocationProbe() {
   )
 }
 
-function Harness({ docked }: { docked: boolean }) {
+function Harness({
+  docked,
+  onDeleteActiveSession,
+}: {
+  docked: boolean
+  onDeleteActiveSession?: () => void
+}) {
   const panel = useToolPanel(docked)
   return (
     <>
@@ -87,6 +115,7 @@ function Harness({ docked }: { docked: boolean }) {
           selectedFilePath="src/a.ts"
           repoDirectory="/repo"
           onSkillLoaded={() => {}}
+          onDeleteActiveSession={onDeleteActiveSession}
         />
       ) : null}
       <LocationProbe />
@@ -94,10 +123,10 @@ function Harness({ docked }: { docked: boolean }) {
   )
 }
 
-function renderAt(search: string, docked = true) {
+function renderAt(search: string, docked = true, onDeleteActiveSession?: () => void) {
   return render(
     <MemoryRouter initialEntries={[`/repos/1/sessions/ses_1${search}`]}>
-      <Harness docked={docked} />
+      <Harness docked={docked} onDeleteActiveSession={onDeleteActiveSession} />
     </MemoryRouter>,
   )
 }
@@ -112,55 +141,6 @@ function stubNarrowPage(): () => void {
     ({ width: 560, height: 800, top: 0, left: 0, right: 560, bottom: 800, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
   document.body.append(main)
   return () => main.remove()
-}
-
-const WINDOW_MINUTES = 30
-const NOW = Date.now()
-
-function createSession(id: string, title: string, updated = NOW - 60_000): Session {
-  return {
-    id,
-    projectID: 'proj-1',
-    title,
-    time: { created: updated - 10000, updated },
-    location: { directory: `/repos/${id}` },
-    cost: 0,
-    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-  }
-}
-
-function createRepo(id: number, name: string): Repo {
-  return {
-    id,
-    name,
-    fullPath: `/repos/${id}`,
-    localPath: `/repos/${id}`,
-    defaultBranch: 'main',
-    currentBranch: 'feature/x',
-    cloneStatus: 'ready',
-    clonedAt: 0,
-  }
-}
-
-function createActivityItem(id: string, title: string, repoId: number, repoName: string): ActiveWorkItem {
-  const session = createSession(id, title)
-  const repo = createRepo(repoId, repoName)
-  return {
-    key: `${repoId}:${id}`,
-    session,
-    repo,
-    state: 'recent',
-    updatedAt: session.time.updated,
-    path: `/repos/${repoId}/sessions/${id}`,
-  }
-}
-
-function setActivityGroups(items: ActiveWorkItem[] = []) {
-  activityMocks.useActiveWork.mockReturnValue({
-    groups: { needsInput: [], running: [], recent: items },
-    isLoading: false,
-    isError: false,
-  })
 }
 
 function HomeHarness() {
@@ -209,9 +189,8 @@ function RepoHarness() {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  activityMocks.useActiveWorkCounts.mockReturnValue({ needsInput: 0, running: 0 })
-  activityMocks.useActivityWindowMinutes.mockReturnValue(WINDOW_MINUTES)
-  setActivityGroups()
+  activeWorkMocks.useActiveWorkCounts.mockReturnValue({ needsInput: 0, running: 0 })
+  useUIState.setState({ isToolRailMounted: false })
 })
 
 afterEach(() => {
@@ -536,12 +515,12 @@ describe('ToolSidePanel', () => {
     expect(screen.getByLabelText('prompt')).toHaveFocus()
   })
 
-  it('lists the Activity tool first in the rail', () => {
+  it('lists the Sessions tool first in the rail', () => {
     renderAt('')
 
     const rail = screen.getByRole('navigation', { name: 'Tools' })
     const buttons = within(rail).getAllByRole('button')
-    expect(buttons[0]).toHaveAccessibleName('Activity')
+    expect(buttons[0]).toHaveAccessibleName('Sessions')
   })
 
   it('shows only the remote-capable tools on a linked-server route', async () => {
@@ -557,7 +536,7 @@ describe('ToolSidePanel', () => {
       within(rail)
         .getAllByRole('button')
         .map((button) => button.getAttribute('aria-label') ?? button.textContent?.trim()),
-    ).toEqual(['Activity', 'MCP', 'Skills', 'Source Control', 'Terminal'])
+    ).toEqual(['Sessions', 'MCP', 'Skills', 'Source Control', 'Terminal'])
 
     await user.click(screen.getByRole('button', { name: 'MCP' }))
     expect(await screen.findByText('mcp-tool')).toBeInTheDocument()
@@ -594,55 +573,81 @@ describe('ToolSidePanel', () => {
     expect(search().get('panel')).toBe('skills')
   })
 
-  it('opens the Activity panel with rows and the window label when clicked', async () => {
+  it('opens the Sessions panel with the session picker when clicked', async () => {
     const user = userEvent.setup()
-    setActivityGroups([createActivityItem('other', 'Other Session', 2, 'Beta')])
     renderAt('')
 
-    await user.click(screen.getByRole('button', { name: 'Activity' }))
+    await user.click(screen.getByRole('button', { name: 'Sessions' }))
 
-    expect(await screen.findByText('Other Session')).toBeInTheDocument()
-    expect(search().get('panel')).toBe('activity')
-    expect(screen.getByRole('complementary', { name: 'Activity' })).toHaveClass('w-80')
-    expect(screen.getByText('Last 30 minutes')).toBeInTheDocument()
+    const panel = await screen.findByRole('complementary', { name: 'Sessions' })
+    expect(within(panel).getByText('route-session-picker')).toBeInTheDocument()
+    expect(within(panel).getByRole('heading', { name: 'Sessions' })).toBeInTheDocument()
+    expect(search().get('panel')).toBe('sessions')
   })
 
-  it('keeps the Activity panel open when a row navigates to a session', async () => {
+  it('keeps the docked Sessions panel open when a session is chosen', async () => {
     const user = userEvent.setup()
-    setActivityGroups([createActivityItem('other', 'Other Session', 2, 'Beta')])
-    renderAt('')
+    renderAt('?panel=sessions')
 
-    await user.click(screen.getByRole('button', { name: 'Activity' }))
-    await user.click(await screen.findByRole('button', { name: /Other Session/ }))
+    await user.click(await screen.findByRole('button', { name: 'open other session' }))
 
     await waitFor(() => expect(screen.getByTestId('pathname').textContent).toBe('/repos/2/sessions/other'))
-    expect(search().get('panel')).toBe('activity')
+    expect(search().get('panel')).toBe('sessions')
   })
 
-  it('keeps a worktree session tab when navigating from the Activity panel', async () => {
-    const user = userEvent.setup()
-    setActivityGroups([
-      {
-        ...createActivityItem('wt', 'Worktree Session', 2, 'Beta'),
-        path: '/repos/2/sessions/wt?repoTab=workspaces',
-      },
-    ])
-    renderAt('')
+  it('builds the docked picker navigation in panel mode', async () => {
+    renderAt('?panel=sessions')
 
-    await user.click(screen.getByRole('button', { name: 'Activity' }))
-    await user.click(await screen.findByRole('button', { name: /Worktree Session/ }))
+    await screen.findByText('route-session-picker')
 
-    await waitFor(() => expect(screen.getByTestId('pathname').textContent).toBe('/repos/2/sessions/wt'))
-    expect(search().get('repoTab')).toBe('workspaces')
-    expect(search().get('panel')).toBe('activity')
+    expect(sessionPickerMocks.useSessionPickerNavigation).toHaveBeenLastCalledWith(
+      expect.objectContaining({ mode: 'panel', onClose: expect.any(Function) }),
+    )
   })
 
-  it('shows an Activity count pill and extends the accessible name', () => {
-    activityMocks.useActiveWorkCounts.mockReturnValue({ needsInput: 1, running: 2 })
+  it('builds the floating picker navigation in replace mode', async () => {
+    const removePage = stubNarrowPage()
+
+    try {
+      renderAt('?panel=sessions')
+
+      const panel = await screen.findByRole('dialog', { name: 'Sessions' })
+      expect(within(panel).getByText('route-session-picker')).toBeInTheDocument()
+      expect(sessionPickerMocks.useSessionPickerNavigation).toHaveBeenLastCalledWith(
+        expect.objectContaining({ mode: 'replace', onClose: expect.any(Function) }),
+      )
+    } finally {
+      removePage()
+    }
+  })
+
+  it('forwards the delete override to the session picker', async () => {
+    const onDeleteActiveSession = vi.fn()
+    renderAt('?panel=sessions', true, onDeleteActiveSession)
+
+    await screen.findByText('route-session-picker')
+
+    expect(sessionPickerMocks.useSessionPickerNavigation).toHaveBeenLastCalledWith(
+      expect.objectContaining({ onDeleteActiveSession }),
+    )
+  })
+
+  it('shows a Sessions count pill and extends the accessible name', () => {
+    activeWorkMocks.useActiveWorkCounts.mockReturnValue({ needsInput: 1, running: 2 })
     renderAt('')
 
-    const button = screen.getByRole('button', { name: 'Activity, 1 needs input, 2 running' })
+    const button = screen.getByRole('button', { name: 'Sessions, 1 needs input, 2 running' })
     const pill = within(button).getByText('3')
     expect(pill.className).toContain('bg-warning')
+  })
+
+  it('marks the tool rail as mounted only while it renders', () => {
+    const { unmount } = renderAt('')
+
+    expect(useUIState.getState().isToolRailMounted).toBe(true)
+
+    unmount()
+
+    expect(useUIState.getState().isToolRailMounted).toBe(false)
   })
 })

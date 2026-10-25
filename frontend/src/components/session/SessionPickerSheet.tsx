@@ -1,9 +1,7 @@
 import { useState } from 'react'
 import { BottomSheet } from '@/components/ui/bottom-sheet'
-import { LinkedServersNav } from '@/components/navigation/LinkedServersNav'
 import { AddRepoDialog } from '@/components/repo/AddRepoDialog'
-import { SessionPickerPanel } from '@/components/session/SessionPickerDialog'
-import { useSessionPickerRouteScope } from '@/hooks/useSessionPickerRouteScope'
+import { RouteSessionPicker } from '@/components/session/RouteSessionPicker'
 import { useSessionPickerLocationPrefetch } from '@/hooks/useSessionPickerLocationPrefetch'
 import { useSessionPickerNavigation } from '@/hooks/useSessionPickerNavigation'
 
@@ -14,18 +12,12 @@ interface SessionPickerSheetProps {
 
 export function SessionPickerSheet({ isOpen, onClose }: SessionPickerSheetProps) {
   const [addRepoOpen, setAddRepoOpen] = useState(false)
-  const { currentRepo, activeSessionID, remote } = useSessionPickerRouteScope(isOpen)
   const pickerNavigation = useSessionPickerNavigation({ mode: 'replace', onClose })
   useSessionPickerLocationPrefetch()
 
   const panel = isOpen ? (
-    <SessionPickerPanel
-      open={isOpen}
-      currentRepo={currentRepo}
-      activeSessionID={activeSessionID}
-      {...pickerNavigation}
-      remote={remote}
-      searchTrailing={<LinkedServersNav variant="header" />}
+    <RouteSessionPicker
+      navigation={pickerNavigation}
       onAddRepo={() => {
         onClose()
         setAddRepoOpen(true)

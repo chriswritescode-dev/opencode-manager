@@ -45,7 +45,6 @@ const mocks = vi.hoisted(() => ({
   ChangesWalkthroughSheet: vi.fn(() => null),
   ToolSidePanel: vi.fn(() => null),
   SessionGoalBar: vi.fn(() => null),
-  SessionPickerDialog: vi.fn(() => null),
   SessionMoreButton: vi.fn(() => null),
 }))
 
@@ -137,7 +136,6 @@ vi.mock('@/components/session/BackgroundWorkBar', () => ({ BackgroundWorkBar: vi
 vi.mock('@/components/session/SessionGoalBar', () => ({ SessionGoalBar: mocks.SessionGoalBar }))
 vi.mock('@/components/session/FormPrompt', () => ({ FormPrompt: vi.fn(() => null) }))
 vi.mock('@/components/session/MinimizedFormIndicator', () => ({ MinimizedFormIndicator: vi.fn(() => null) }))
-vi.mock('@/components/session/SessionPickerDialog', () => ({ SessionPickerDialog: mocks.SessionPickerDialog }))
 vi.mock('@/components/session/ChangesWalkthroughSheet', () => ({
   ChangesWalkthroughSheet: mocks.ChangesWalkthroughSheet,
 }))
@@ -523,31 +521,8 @@ describe('SessionDetail remote server mode', () => {
     expect(capturedPathname.current).toBe('/servers/srv_kitchen/sessions/ses_child')
   })
 
-  it('renders the session picker scoped to the linked server', async () => {
-    renderRemoteSession()
-
-    await waitFor(() => {
-      expect(screen.getByTestId('message-thread')).toBeInTheDocument()
-    })
-
-    const pickerProps = mocks.SessionPickerDialog.mock.calls.at(-1)?.[0]
-    expect(pickerProps).toEqual(
-      expect.objectContaining({
-        open: false,
-        currentRepo: undefined,
-        activeSessionID: 'ses_remote',
-        remote: {
-          serverId: 'srv_kitchen',
-          serverName: 'Kitchen',
-          projectDirectory: '/home/me/app',
-          isPending: false,
-        },
-      }),
-    )
-  })
-
-  it('opens the session picker from the sessions shortcut on a remote route', async () => {
-    renderRemoteSession()
+  it('opens the sessions panel from the sessions shortcut on a remote route', async () => {
+    const { capturedSearch } = renderRemoteSession()
 
     await waitFor(() => {
       expect(screen.getByTestId('message-thread')).toBeInTheDocument()
@@ -559,25 +534,26 @@ describe('SessionDetail remote server mode', () => {
     })
 
     await waitFor(() => {
-      expect(mocks.SessionPickerDialog.mock.calls.at(-1)?.[0]).toEqual(
-        expect.objectContaining({ open: true, remote: expect.objectContaining({ serverId: 'srv_kitchen' }) }),
-      )
+      expect(capturedSearch.current).toBe('?panel=sessions')
     })
   })
 
-  it('navigates to a session chosen from the remote picker', async () => {
-    const { capturedPathname } = renderRemoteSession()
+  it('deletes the active remote session from the tool panel', async () => {
+    const { capturedPathname, capturedSearch } = renderRemoteSession()
 
     await waitFor(() => {
       expect(screen.getByTestId('message-thread')).toBeInTheDocument()
     })
 
-    const pickerProps = mocks.SessionPickerDialog.mock.calls.at(-1)?.[0]
+    const panelProps = mocks.ToolSidePanel.mock.calls.at(-1)?.[0] as
+      | { onDeleteActiveSession?: () => void }
+      | undefined
     act(() => {
-      pickerProps?.onSelectRemoteSession?.({ ...remoteSession, id: 'ses_other' }, 'srv_kitchen')
+      panelProps?.onDeleteActiveSession?.()
     })
 
-    expect(capturedPathname.current).toBe('/servers/srv_kitchen/sessions/ses_other')
+    expect(capturedPathname.current).toBe('/servers/srv_kitchen/projects')
+    expect(capturedSearch.current).toBe('?directory=%2Fhome%2Fme%2Fapp')
   })
 
   it('shows a loader until the session directory is available', async () => {

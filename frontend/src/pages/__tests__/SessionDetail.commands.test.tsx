@@ -209,10 +209,6 @@ vi.mock('@/hooks/useSessionGoals', () => ({
 vi.mock('@/components/session/SideQuestionDialog', () => ({ SideQuestionDialog: vi.fn(() => null) }))
 vi.mock('@/components/session/ChangesWalkthroughSheet', () => ({ ChangesWalkthroughSheet: vi.fn(() => null) }))
 vi.mock('@/components/navigation/ToolSidePanel', () => ({ ToolSidePanel: vi.fn(() => null) }))
-vi.mock('@/hooks/useToolPanel', () => ({
-  useToolPanel: vi.fn(() => ({ activeTool: null, toggleTool: vi.fn(), closePanel: vi.fn() })),
-}))
-vi.mock('@/components/session/SessionPickerDialog', () => ({ SessionPickerDialog: vi.fn(() => null) }))
 vi.mock('@/components/file-browser/FileBrowserSheet', () => ({ FileBrowserSheet: vi.fn(() => null) }))
 vi.mock('@/components/repo/RepoMcpDialog', () => ({ RepoMcpDialog: vi.fn(() => null) }))
 vi.mock('@/components/repo/RepoActionsDialog', () => ({ RepoActionsDialog: vi.fn(() => null) }))
@@ -477,35 +473,31 @@ describe('SessionDetail command actions', () => {
     })
   })
 
-  it('opens the sessions picker dialog from the sessions command on desktop', async () => {
-    const { SessionPickerDialog } = await import('@/components/session/SessionPickerDialog')
+  it('opens the sessions panel from the sessions command on desktop', async () => {
+    const captured = { search: { current: '' }, pathname: { current: '' } }
 
-    renderSessionDetail()
+    renderSessionDetail(captured)
     const showSessions = await commandHandler('showSessions')
 
-    act(() => {
-      showSessions()
+    await act(async () => {
+      await showSessions()
     })
 
-    const props = vi.mocked(SessionPickerDialog).mock.calls.at(-1)?.[0] as Record<string, unknown>
-    expect(props).toMatchObject({ open: true })
+    await waitFor(() => expect(captured.search.current).toBe('?panel=sessions'))
   })
 
-  it('opens the mobile sessions sheet instead of the dialog from the sessions command', async () => {
-    const { SessionPickerDialog } = await import('@/components/session/SessionPickerDialog')
+  it('opens the mobile sessions sheet instead of the panel from the sessions command', async () => {
     mocks.useMobile.mockReturnValue(true)
     const captured = { search: { current: '' }, pathname: { current: '' } }
 
     renderSessionDetail(captured)
     const showSessions = await commandHandler('showSessions')
 
-    act(() => {
-      showSessions()
+    await act(async () => {
+      await showSessions()
     })
 
     await waitFor(() => expect(captured.search.current).toBe('?mobileTab=sessions'))
-    const props = vi.mocked(SessionPickerDialog).mock.calls.at(-1)?.[0] as Record<string, unknown>
-    expect(props).toMatchObject({ open: false })
   })
 
   it('shows the error toast when the transcript fetch fails', async () => {

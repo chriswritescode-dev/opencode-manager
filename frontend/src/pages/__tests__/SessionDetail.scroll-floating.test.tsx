@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   interruptMutate: vi.fn(),
   PromptInput: vi.fn(),
   uiState: { isEditingMessage: false },
+  setToolRailMounted: vi.fn(),
 }))
 
 vi.mock('@/config', () => ({
@@ -107,7 +108,11 @@ vi.mock('@/hooks/useAutoPlayLastResponse', () => ({
 vi.mock('@/stores/uiStateStore', () => ({
   useUIState: vi.fn((selector?: (state: Record<string, unknown>) => unknown) =>
     typeof selector === 'function'
-      ? selector({ isEditingMessage: mocks.uiState.isEditingMessage })
+      ? selector({
+          isEditingMessage: mocks.uiState.isEditingMessage,
+          isToolRailMounted: false,
+          setToolRailMounted: mocks.setToolRailMounted,
+        })
       : false
   ),
 }))
@@ -164,10 +169,6 @@ vi.mock('@/hooks/useSessionGoals', () => ({
   useResumeSessionGoal: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
   useCancelSessionGoal: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
 }))
-vi.mock('@/components/session/SessionPickerDialog', () => ({
-  SessionPickerDialog: vi.fn(() => null),
-}))
-
 vi.mock('@/components/file-browser/FileBrowserSheet', () => ({
   FileBrowserSheet: vi.fn(() => null),
 }))

@@ -8,6 +8,8 @@ import { useUrlParams } from '@/hooks/useUrlParams'
 import { useOpenNavItem } from '@/hooks/useOpenNavItem'
 import { useSessionPickerRouteScope } from '@/hooks/useSessionPickerRouteScope'
 import { useSessionPickerNavigation } from '@/hooks/useSessionPickerNavigation'
+import { useToolPanelToggle } from '@/hooks/useToolPanel'
+import { useUIState } from '@/stores/uiStateStore'
 import { buildNavModel, type MoreDrawerItem, type NavPrimaryCta } from '@/components/navigation/moreDrawerItems'
 import { SessionPickerDialog } from '@/components/session/SessionPickerDialog'
 import { DesktopSessionTree } from '@/components/navigation/DesktopSessionTree'
@@ -48,6 +50,8 @@ export function DesktopSidebar() {
   const [sidebarWidth, setSidebarWidth] = useSidebarWidth()
   const [sessionsOpen, setSessionsOpen] = useState(false)
   const { isAuthenticated, isLoading, logout } = useAuth()
+  const isToolRailMounted = useUIState((state) => state.isToolRailMounted)
+  const togglePanelTool = useToolPanelToggle()
 
   const isDesktop = useDesktop()
 
@@ -72,7 +76,8 @@ export function DesktopSidebar() {
         p.delete('mobileTab')
       }, 'push')
     } else if (item.key === 'sessions') {
-      setSessionsOpen(true)
+      if (isToolRailMounted) togglePanelTool('sessions')
+      else setSessionsOpen(true)
     }
   }
 

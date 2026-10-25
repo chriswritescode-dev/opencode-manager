@@ -140,10 +140,6 @@ vi.mock('@/hooks/useSessionGoals', () => ({
 vi.mock('@/hooks/useSessionPermissionMode', () => ({
   useSessionPermissionMode: vi.fn(() => ({ data: undefined })),
 }))
-vi.mock('@/components/session/SessionPickerDialog', () => ({
-  SessionPickerDialog: vi.fn(() => null),
-}))
-
 vi.mock('@/components/session/PermissionModeToggle', () => ({
   PermissionModeToggle: vi.fn(() => null),
 }))

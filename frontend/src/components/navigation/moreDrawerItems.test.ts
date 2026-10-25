@@ -168,18 +168,18 @@ describe('buildMoreItems', () => {
 })
 
 describe('buildToolItems', () => {
-  it('leads every route with the Activity tool', () => {
+  it('leads every route with the Sessions tool', () => {
     for (const path of ['/', '/repos/42', '/repos/42/sessions/abc', '/assistant', '/schedules']) {
       const [first] = buildToolItems(path)
-      expect(first.key).toBe('activity')
-      expect(first.label).toBe('Activity')
-      expect(first.panelTool).toBe('activity')
+      expect(first.key).toBe('sessions')
+      expect(first.label).toBe('Sessions')
+      expect(first.panelTool).toBe('sessions')
     }
   })
 
   it('returns the session route items without home and account entries', () => {
     expect(buildToolItems('/repos/42/sessions/abc').map((item) => item.key)).toEqual([
-      'activity',
+      'sessions',
       'files',
       'mcp',
       'skills',
@@ -195,7 +195,7 @@ describe('buildToolItems', () => {
 
   it('returns the linked-server session tools for the tool rail', () => {
     expect(buildToolItems('/servers/srv_kitchen/sessions/abc').map((item) => item.key)).toEqual([
-      'activity',
+      'sessions',
       'mcp',
       'skills',
       'source-control',
@@ -205,7 +205,7 @@ describe('buildToolItems', () => {
 
   it('returns the linked-server project tools for the tool rail', () => {
     expect(buildToolItems('/servers/srv_kitchen/projects').map((item) => item.key)).toEqual([
-      'activity',
+      'sessions',
       'mcp',
       'skills',
       'source-control',
@@ -214,7 +214,7 @@ describe('buildToolItems', () => {
   })
 
   it('returns the home route tools', () => {
-    expect(buildToolItems('/').map((item) => item.key)).toEqual(['activity', 'all-schedules', 'files'])
+    expect(buildToolItems('/').map((item) => item.key)).toEqual(['sessions', 'all-schedules', 'files'])
   })
 
   it.each(['/repos/42', '/assistant'])('opens schedules in the panel on %s', (path) => {
@@ -227,8 +227,8 @@ describe('buildToolItems', () => {
     expect(secrets?.panelTool).toBeUndefined()
   })
 
-  it.each(['/schedules', '/repos/42/schedules'])('returns only the Activity tool on %s', (path) => {
-    expect(buildToolItems(path).map((item) => item.key)).toEqual(['activity'])
+  it.each(['/schedules', '/repos/42/schedules'])('returns only the Sessions tool on %s', (path) => {
+    expect(buildToolItems(path).map((item) => item.key)).toEqual(['sessions'])
   })
 })
 

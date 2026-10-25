@@ -14,10 +14,11 @@ import {
 
 export interface SessionPickerNavigationOptions {
   /**
-   * `replace` rewrites the entry the mobile sheet was opened from so Back returns to the page behind
-   * it; `push` adds an entry and closes the picker.
+   * `replace` rewrites the entry the picker was opened from so Back returns to the page behind it;
+   * `push` adds an entry and closes the picker; `panel` adds an entry, carries the current `panel`
+   * search param onto the destination path and leaves the picker open.
    */
-  mode: 'push' | 'replace'
+  mode: 'push' | 'replace' | 'panel'
   onClose: () => void
   /** Replaces the default delete behaviour of returning to the current repo's session list. */
   onDeleteActiveSession?: () => void
@@ -32,10 +33,11 @@ export interface SessionPickerNavigation {
 }
 
 /**
- * Builds the session picker handlers shared by the mobile sheet, the desktop dialog and the session
- * page picker. The route in view comes from the location: choosing the session already open on the
- * same server only closes the picker, and an assistant session keeps `?assistant=1` when the chosen
- * session belongs to the current repo.
+ * Builds the session picker handlers shared by the mobile sheet, the desktop dialog, the desktop
+ * tool panel and the session page picker. The route in view comes from the location: choosing the
+ * session already open on the same server only closes the picker, and does nothing in `panel` mode
+ * where the picker stays open. An assistant session keeps `?assistant=1` when the chosen session
+ * belongs to the current repo.
  *
  * @param options Navigation mode, the picker's close callback, and an optional delete override.
  * @returns Handlers for selecting sessions and repos and for following a prepared path.
@@ -52,19 +54,23 @@ export function useSessionPickerNavigation({
   const searchParams = new URLSearchParams(search)
   const isAssistantSession = searchParams.get('assistant') === '1'
   const repoTab = searchParams.get('repoTab') ?? undefined
+  const panelId = searchParams.get('panel')
+  const isPanelMode = mode === 'panel'
 
   const open = useCallback(
     (path: string) => {
-      navigate(path, { replace: mode === 'replace' })
+      navigate(isPanelMode && panelId ? withQueryParam(path, 'panel', panelId) : path, {
+        replace: mode === 'replace',
+      })
       if (mode === 'push') onClose()
     },
-    [mode, navigate, onClose],
+    [isPanelMode, mode, navigate, onClose, panelId],
   )
 
   const onSelectSession = useCallback(
     (session: Session, repo: Repo) => {
       if (session.id === activeSessionID && activeServerId === LOCAL_OPENCODE_SERVER_ID) {
-        onClose()
+        if (!isPanelMode) onClose()
         return
       }
       const sessionPath = getSessionPath(repo.id, session.id)
@@ -74,32 +80,40 @@ export function useSessionPickerNavigation({
           : sessionPath,
       )
     },
-    [activeServerId, activeSessionID, currentRepoId, isAssistantSession, onClose, open],
+    [activeServerId, activeSessionID, currentRepoId, isAssistantSession, isPanelMode, onClose, open],
   )
 
   const onSelectRemoteSession = useCallback(
     (session: Session, serverId: string) => {
       if (session.id === activeSessionID && serverId === activeServerId) {
-        onClose()
+        if (!isPanelMode) onClose()
         return
       }
       open(getServerSessionPath(serverId, session.id))
     },
-    [activeServerId, activeSessionID, onClose, open],
+    [activeServerId, activeSessionID, isPanelMode, onClose, open],
   )
 
   const onDeleteActiveSession = useCallback(() => {
     if (deleteActiveSessionOverride) {
-      onClose()
+      if (!isPanelMode) onClose()
       deleteActiveSessionOverride()
       return
     }
     if (currentRepoId === null) {
-      onClose()
+      if (!isPanelMode) onClose()
       return
     }
     open(getSessionListPath(currentRepoId, isAssistantSession, repoTab))
-  }, [currentRepoId, deleteActiveSessionOverride, isAssistantSession, onClose, open, repoTab])
+  }, [
+    currentRepoId,
+    deleteActiveSessionOverride,
+    isAssistantSession,
+    isPanelMode,
+    onClose,
+    open,
+    repoTab,
+  ])
 
   const onSelectRepo = useCallback(
     (repo: Repo) => {
