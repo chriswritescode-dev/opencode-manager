@@ -29,7 +29,13 @@
 
 <p align="center">
     <a href="https://opencodemanager.app">
-        <img src=".github/readme-hero.webp" alt="The same OpenCode Manager session on a laptop and a phone" width="900" />
+        <img src=".github/readme-hero.webp" alt="OpenCode Manager on mobile: permission request, project switcher, source control, and schedules" width="900" />
+    </a>
+</p>
+
+<p align="center">
+    <a href="https://opencodemanager.app">
+        <img src=".github/readme-desktop.webp" alt="OpenCode Manager on desktop: a session with the live Preview panel" width="900" />
     </a>
 </p>
 
