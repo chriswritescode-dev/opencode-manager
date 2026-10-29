@@ -85,9 +85,10 @@ vi.mock('@/components/ui/delete-dialog', () => ({
   }) => (open ? <button onClick={onConfirm}>Confirm delete</button> : null),
 }))
 
-function providerFixture(id: string, name: string, modelCount: number): Provider {
+function providerFixture(id: string, name: string, modelCount: number, integrationID?: string): Provider {
   return {
     id,
+    integrationID,
     name,
     models: Array.from({ length: modelCount }, (_, index) => ({
       id: `model-${index}`,
@@ -319,6 +320,26 @@ describe('ProviderSettings', () => {
 
     await user.click(screen.getByRole('button', { name: 'Add Key' }))
     expect(screen.getByTestId('api-key-dialog')).toHaveTextContent('OpenRouter')
+  })
+
+  it('uses integration IDs for provider entries when catalog IDs differ', async () => {
+    vi.mocked(getProviders).mockResolvedValue({
+      providers: [providerFixture('catalog-anthropic', 'Anthropic Catalog', 2, 'anthropic')],
+      models: [],
+    })
+    vi.mocked(oauthApi.getIntegrations).mockResolvedValue([
+      integrationFixture('anthropic', 'Anthropic Integration', [oauthMethod], true),
+    ])
+    const user = userEvent.setup()
+    renderSettings()
+
+    await screen.findByText('Anthropic Integration')
+    expect(screen.getByText('2 models')).toBeInTheDocument()
+    expect(screen.getByText('Connected')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Reconnect' }))
+    expect(screen.getByTestId('oauth-authorize-dialog')).toHaveTextContent('anthropic')
+    expect(screen.queryByText('catalog-anthropic')).not.toBeInTheDocument()
   })
 
   it('lists OAuth integrations that are not in the active catalog', async () => {
