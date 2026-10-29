@@ -302,10 +302,10 @@ export function ProviderSettings() {
                         size="sm"
                         variant={keyConnected ? 'outline' : 'secondary'}
                         onClick={() => keyConnected ? handleEditApiKey(provider) : handleAddApiKey(provider)}
-                        aria-label={`${keyConnected ? 'Edit API key for' : 'Add API key for'} ${provider.name || provider.id}`}
+                        aria-label={`Add API key for ${provider.name || provider.id}`}
                       >
                         <Key className="h-4 w-4 mr-1" />
-                        {keyConnected ? 'Edit Key' : 'Add Key'}
+                        Add API key
                       </Button>
                     )}
                     {isConnected && (
