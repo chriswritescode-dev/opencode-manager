@@ -394,7 +394,7 @@ describe('ProviderSettings', () => {
     expect(screen.getByTestId('api-key-dialog')).toHaveAttribute('data-mode', 'add')
   })
 
-  it('uses key-specific connection state for mixed-method integration actions', async () => {
+  it('labels an existing API key action as Add API key without changing its handling', async () => {
     vi.mocked(getProviders).mockResolvedValue({
       providers: [providerFixture('anthropic', 'Anthropic', 2)],
       models: [],
@@ -408,7 +408,10 @@ describe('ProviderSettings', () => {
     await screen.findByText('Anthropic')
     const row = screen.getByText('Anthropic').closest('.py-3') as HTMLElement
 
-    await user.click(within(row).getByRole('button', { name: 'Edit API key for Anthropic' }))
+    const addKeyButton = within(row).getByRole('button', { name: 'Add API key for Anthropic' })
+    expect(addKeyButton).toHaveTextContent('Add API key')
+
+    await user.click(addKeyButton)
     expect(screen.getByTestId('api-key-dialog')).toHaveAttribute('data-mode', 'edit')
   })
 
