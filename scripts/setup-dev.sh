@@ -70,6 +70,7 @@ echo "✅ Dependencies installed"
 if [ ! -f ".env" ]; then
   echo "📝 Creating environment file..."
   cp .env.example .env
+  printf '\nPASSKEY_ORIGIN=http://localhost:5173\n' >> .env
   echo "✅ Environment file created from .env.example"
 else
   echo "✅ Environment file exists"

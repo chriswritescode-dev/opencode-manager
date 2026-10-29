@@ -41,6 +41,16 @@ function untrustedOriginMessage(origin: string): string {
   return `This address (${origin}) is not a trusted Manager address. Set MANAGER_PUBLIC_URL to it or add it to AUTH_TRUSTED_ORIGINS, then restart the Manager to pair a device.`
 }
 
+function loopbackOriginMessage(publicOrigin: string | null): string {
+  if (publicOrigin === null) return LOOPBACK_ORIGIN_MESSAGE
+  return `MANAGER_PUBLIC_URL (${publicOrigin}) is a localhost address, which other devices cannot reach. Set it to the Manager's public or LAN address, then restart the Manager to pair a device.`
+}
+
+function insecureOriginMessage(publicOrigin: string | null): string {
+  if (publicOrigin === null) return INSECURE_ORIGIN_MESSAGE
+  return `MANAGER_PUBLIC_URL (${publicOrigin}) uses plain HTTP on a public address. Set it to an HTTPS address or a private network address, then restart the Manager to pair a device.`
+}
+
 function unavailable(
   reason: DevicePairingUnavailableReason,
   message: string,
@@ -69,11 +79,11 @@ export function resolveDevicePairingAvailability(
 
   const isLoopback = isLoopbackHost(originUrl.hostname)
   if (isLoopback && !options.isDevelopment) {
-    return unavailable('loopback', LOOPBACK_ORIGIN_MESSAGE)
+    return unavailable('loopback', loopbackOriginMessage(options.publicOrigin))
   }
 
   if (isPublicPlainHttpUrl(originUrl)) {
-    return unavailable('insecure-origin', INSECURE_ORIGIN_MESSAGE)
+    return unavailable('insecure-origin', insecureOriginMessage(options.publicOrigin))
   }
 
   return { available: true, reason: null, message: null, originUrl }

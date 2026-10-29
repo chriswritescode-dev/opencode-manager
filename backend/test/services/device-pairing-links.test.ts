@@ -3,10 +3,14 @@ import { resolveAppLinkPolicy, resolveDevicePairingAvailability } from '../../sr
 
 const TRUSTED_ORIGINS = [
   'https://m.example.com',
+  'http://192.168.1.5:5003',
   'http://192.168.1.20:5003',
   'http://203.0.113.5:5003',
   'http://localhost:5173',
 ]
+
+const publicOriginMessage = (publicOrigin: string, detail: string) =>
+  `MANAGER_PUBLIC_URL (${publicOrigin}) ${detail}`
 
 const production = { trustedOrigins: TRUSTED_ORIGINS, isDevelopment: false, publicOrigin: null }
 const development = { trustedOrigins: TRUSTED_ORIGINS, isDevelopment: true, publicOrigin: null }
@@ -104,6 +108,22 @@ describe('resolveDevicePairingAvailability', () => {
     })
   })
 
+  it('blames MANAGER_PUBLIC_URL when the configured public origin is localhost', () => {
+    expect(
+      resolveDevicePairingAvailability('http://192.168.1.5:5003', {
+        ...production,
+        publicOrigin: 'http://localhost:5003',
+      }),
+    ).toEqual({
+      available: false,
+      reason: 'loopback',
+      message: publicOriginMessage(
+        'http://localhost:5003',
+        "is a localhost address, which other devices cannot reach. Set it to the Manager's public or LAN address, then restart the Manager to pair a device.",
+      ),
+    })
+  })
+
   it('rejects a public plain http public origin', () => {
     expect(
       resolveDevicePairingAvailability('http://localhost:5173', {
@@ -113,8 +133,10 @@ describe('resolveDevicePairingAvailability', () => {
     ).toEqual({
       available: false,
       reason: 'insecure-origin',
-      message:
-        'Pairing needs HTTPS on a public address. Serve the Manager over HTTPS, or open it at a private network address.',
+      message: publicOriginMessage(
+        'http://203.0.113.5:5003',
+        'uses plain HTTP on a public address. Set it to an HTTPS address or a private network address, then restart the Manager to pair a device.',
+      ),
     })
   })
 })
