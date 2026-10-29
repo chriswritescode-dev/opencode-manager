@@ -441,6 +441,24 @@ describe('ProviderSettings', () => {
     expect(screen.getByRole('button', { name: /Available Providers/ })).toHaveTextContent('0')
   })
 
+  it('includes connected integration-only providers without key or OAuth methods', async () => {
+    vi.mocked(getProviders).mockResolvedValue({ providers: [], models: [] })
+    vi.mocked(oauthApi.getIntegrations).mockResolvedValue([
+      integrationFixture('connected-command', 'Connected Command', [commandMethod], true),
+    ])
+    const user = userEvent.setup()
+    renderSettings()
+
+    await screen.findByText('No OAuth-capable providers available.')
+    expect(screen.getByRole('button', { name: /Connected/ })).toHaveTextContent('1')
+
+    await user.click(screen.getByRole('button', { name: /Connected/ }))
+    const connectedCard = screen.getByText('Connected Command').closest('.bg-card') as HTMLElement
+    expect(connectedCard).toBeInTheDocument()
+    expect(within(connectedCard).getByRole('button', { name: 'Remove credentials for Connected Command' })).toBeInTheDocument()
+    expect(within(connectedCard).queryByRole('button', { name: 'Edit API key for Connected Command' })).not.toBeInTheDocument()
+  })
+
   it('keeps connected non-key providers visible without exposing API-key edit actions', async () => {
     vi.mocked(getProviders).mockResolvedValue({
       providers: [
