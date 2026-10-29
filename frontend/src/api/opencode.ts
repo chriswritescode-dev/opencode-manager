@@ -1,4 +1,4 @@
-import { openCodeLocation, parseOpenCodeModelRef } from '@opencode-manager/shared/opencode'
+import { openCodeLocation, parseOpenCodeModelRef, readSessionGoal } from '@opencode-manager/shared/opencode'
 import { MANAGER_PROMPT_CLIENT_METADATA_KEY } from '@opencode-manager/shared/schemas'
 import { isMobileViewport } from '@/hooks/useMobile'
 import { getDirectoryName } from '@/lib/utils'
@@ -11,6 +11,7 @@ import type {
   ModelRef,
   OpenCodeApi,
   PermissionRequest,
+  SessionGoalRead,
   SessionInboxCompaction,
   SessionInboxUser,
   SessionInfo,
@@ -229,6 +230,22 @@ export async function listProjects(serverId?: string): Promise<OpenCodeProject[]
 
 export async function getSession(sessionID: string, serverId?: string): Promise<SessionInfo> {
   return callOpenCode((api) => api.session.get({ sessionID }), serverId)
+}
+
+/**
+ * Reads a session goal through the OpenCode goal RPC.
+ *
+ * @param sessionID The session whose goal is read.
+ * @param directory Directory of the session's project, once it is known.
+ * @param serverId Server that owns the session, when it is not the local one.
+ * @returns The goal, or an unsupported result when the server has no goal RPC.
+ */
+export async function getSessionGoal(
+  sessionID: string,
+  directory: string | undefined,
+  serverId?: string,
+): Promise<SessionGoalRead> {
+  return callOpenCode((api) => readSessionGoal(api, { sessionID, directory }), serverId)
 }
 
 export async function createSession(input: CreateSessionInput, serverId?: string): Promise<SessionInfo> {

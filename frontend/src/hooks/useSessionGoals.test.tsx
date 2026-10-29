@@ -1,43 +1,47 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useSessionGoal } from './useSessionGoals'
-import { getLatestSessionGoal } from '@/api/sessionGoals'
+import type { GoalState, SessionGoalRead } from '@opencode-manager/shared/opencode'
 import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
-import type { SessionGoal, SessionGoalStatus } from '@opencode-manager/shared/schemas'
+import { showToast } from '@/lib/toast'
+import { applySessionGoalEvent, useSessionGoal, useSessionGoalCommand } from './useSessionGoals'
 
-vi.mock('@/api/sessionGoals', () => ({
-  getLatestSessionGoal: vi.fn(),
-  startSessionGoal: vi.fn(),
-  pauseSessionGoal: vi.fn(),
-  resumeSessionGoal: vi.fn(),
-  cancelSessionGoal: vi.fn(),
+const mocks = vi.hoisted(() => ({
+  getSessionGoal: vi.fn(),
+  runCommand: vi.fn(),
+  syncSelection: vi.fn(),
+}))
+
+vi.mock('@/api/opencode', () => ({
+  getSessionGoal: mocks.getSessionGoal,
+  runCommand: mocks.runCommand,
+}))
+
+vi.mock('@/hooks/useOpenCode', () => ({
+  useSyncSessionSelection: () => mocks.syncSelection,
 }))
 
 vi.mock('@/lib/toast', () => ({
   showToast: { error: vi.fn() },
 }))
 
-const baseGoal: SessionGoal = {
-  id: 1,
-  sessionId: 'ses_1',
-  serverId: 'local',
-  directory: '/repo',
+const goal: GoalState = {
+  id: 'goal_1',
   objective: 'Ship the feature',
   status: 'active',
-  stopReason: null,
-  turnState: 'running',
-  continuationCount: 0,
-  maxContinuations: 20,
-  tokenBudget: null,
-  tokensUsed: 0,
-  consecutiveBlocked: 0,
-  lastVerdict: null,
-  lastReason: null,
-  createdAt: 1,
+  rounds: 2,
+  maxRounds: 50,
+  boot: 'boot_1',
   updatedAt: 1,
-  finishedAt: null,
+}
+
+const updatedGoal: GoalState = { ...goal, rounds: 3 }
+
+const supportedGoal: SessionGoalRead = { supported: true, goal }
+
+function createQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } })
 }
 
 function createWrapper(queryClient: QueryClient, serverId?: string) {
@@ -51,36 +55,190 @@ function createWrapper(queryClient: QueryClient, serverId?: string) {
 describe('useSessionGoal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.getSessionGoal.mockResolvedValue(supportedGoal)
   })
 
-  it('polls only while the goal is active', async () => {
-    vi.mocked(getLatestSessionGoal).mockResolvedValue(baseGoal)
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    renderHook(() => useSessionGoal('ses_1'), { wrapper: createWrapper(queryClient) })
+  it('reads the goal from the local server', async () => {
+    const queryClient = createQueryClient()
+    const { result } = renderHook(() => useSessionGoal('ses_1', '/repo'), { wrapper: createWrapper(queryClient) })
 
-    await waitFor(() => expect(getLatestSessionGoal).toHaveBeenCalled())
+    await waitFor(() => expect(result.current.data).toEqual(supportedGoal))
 
-    const query = queryClient.getQueryCache().find({ queryKey: ['session-goal', 'ses_1'] })
-    const refetchInterval = query?.options.refetchInterval as
-      | ((query: { state: { data?: { status: SessionGoalStatus } } }) => number | false)
-      | undefined
-
-    expect(refetchInterval).toBeTypeOf('function')
-    expect(refetchInterval!({ state: { data: { status: 'active' } } })).toBe(3000)
-    expect(refetchInterval!({ state: { data: { status: 'paused' } } })).toBe(false)
-    expect(refetchInterval!({ state: { data: { status: 'completed' } } })).toBe(false)
-    expect(refetchInterval!({ state: { data: { status: 'blocked' } } })).toBe(false)
-    expect(refetchInterval!({ state: { data: { status: 'stopped' } } })).toBe(false)
-    expect(refetchInterval!({ state: {} })).toBe(false)
+    expect(mocks.getSessionGoal).toHaveBeenCalledWith('ses_1', '/repo', 'local')
   })
 
-  it('reads the goal for the current server and scopes its cache key', async () => {
-    vi.mocked(getLatestSessionGoal).mockResolvedValue({ ...baseGoal, serverId: 'srv_remote' })
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    renderHook(() => useSessionGoal('ses_1'), { wrapper: createWrapper(queryClient, 'srv_remote') })
+  it('reads the goal from the current remote server and scopes its cache key', async () => {
+    const queryClient = createQueryClient()
+    const { result } = renderHook(() => useSessionGoal('ses_1', '/repo'), {
+      wrapper: createWrapper(queryClient, 'srv_remote'),
+    })
 
-    await waitFor(() => expect(getLatestSessionGoal).toHaveBeenCalledWith('ses_1', 'srv_remote'))
+    await waitFor(() => expect(result.current.data).toEqual(supportedGoal))
 
+    expect(mocks.getSessionGoal).toHaveBeenCalledWith('ses_1', '/repo', 'srv_remote')
     expect(queryClient.getQueryCache().find({ queryKey: ['session-goal', 'ses_1', 'srv_remote'] })).toBeDefined()
+  })
+
+  it('does not poll for goal updates', async () => {
+    vi.useFakeTimers()
+    try {
+      const queryClient = createQueryClient()
+      renderHook(() => useSessionGoal('ses_1', '/repo'), { wrapper: createWrapper(queryClient) })
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000)
+      })
+
+      expect(mocks.getSessionGoal).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('applySessionGoalEvent', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.getSessionGoal.mockResolvedValue(supportedGoal)
+  })
+
+  it('updates the cached goal without refetching', async () => {
+    const queryClient = createQueryClient()
+    const { result } = renderHook(() => useSessionGoal('ses_1', '/repo'), { wrapper: createWrapper(queryClient) })
+
+    await waitFor(() => expect(result.current.data).toEqual(supportedGoal))
+
+    let applied = false
+    await act(async () => {
+      applied = applySessionGoalEvent(
+        queryClient,
+        { type: 'rpc.opencode.goal.changed', data: { sessionID: 'ses_1', goal: updatedGoal } },
+        'local',
+      )
+    })
+
+    expect(applied).toBe(true)
+    await waitFor(() => expect(result.current.data).toEqual({ supported: true, goal: updatedGoal }))
+    expect(mocks.getSessionGoal).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores unrelated events and leaves the cached goal unchanged', async () => {
+    const queryClient = createQueryClient()
+    const { result } = renderHook(() => useSessionGoal('ses_1', '/repo'), { wrapper: createWrapper(queryClient) })
+
+    await waitFor(() => expect(result.current.data).toEqual(supportedGoal))
+
+    let applied = true
+    await act(async () => {
+      applied = applySessionGoalEvent(queryClient, { type: 'session.idle', data: { sessionID: 'ses_1' } }, 'local')
+    })
+
+    expect(applied).toBe(false)
+    expect(result.current.data).toEqual(supportedGoal)
+    expect(mocks.getSessionGoal).toHaveBeenCalledTimes(1)
+  })
+
+  it('writes the change under the event server scoped key', async () => {
+    const queryClient = createQueryClient()
+
+    await act(async () => {
+      applySessionGoalEvent(
+        queryClient,
+        { type: 'rpc.opencode.goal.changed', data: { sessionID: 'ses_1', goal: updatedGoal } },
+        'srv_remote',
+      )
+    })
+
+    expect(queryClient.getQueryData(['session-goal', 'ses_1', 'srv_remote'])).toEqual({
+      supported: true,
+      goal: updatedGoal,
+    })
+    expect(queryClient.getQueryData(['session-goal', 'ses_1'])).toBeUndefined()
+  })
+
+  it('keeps the event goal when an in-flight read resolves afterwards', async () => {
+    const queryClient = createQueryClient()
+    let resolveRead: (value: SessionGoalRead) => void = () => {}
+    mocks.getSessionGoal.mockImplementation(
+      () => new Promise<SessionGoalRead>((resolve) => {
+        resolveRead = resolve
+      }),
+    )
+
+    const { result } = renderHook(() => useSessionGoal('ses_1', '/repo'), { wrapper: createWrapper(queryClient) })
+
+    await waitFor(() => expect(mocks.getSessionGoal).toHaveBeenCalledTimes(1))
+
+    act(() => {
+      applySessionGoalEvent(
+        queryClient,
+        { type: 'rpc.opencode.goal.changed', data: { sessionID: 'ses_1', goal: updatedGoal } },
+        'local',
+      )
+    })
+
+    await waitFor(() => expect(result.current.data).toEqual({ supported: true, goal: updatedGoal }))
+
+    await act(async () => {
+      resolveRead(supportedGoal)
+      await Promise.resolve()
+    })
+
+    expect(result.current.data).toEqual({ supported: true, goal: updatedGoal })
+  })
+})
+
+describe('useSessionGoalCommand', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.runCommand.mockResolvedValue(undefined)
+    mocks.syncSelection.mockResolvedValue(undefined)
+  })
+
+  it('runs the goal command on the session', async () => {
+    const { result } = renderHook(() => useSessionGoalCommand('/repo'), {
+      wrapper: createWrapper(createQueryClient()),
+    })
+
+    await act(async () => {
+      await result.current.mutateAsync({ sessionID: 'ses_1', text: 'Ship it' })
+    })
+
+    expect(mocks.runCommand).toHaveBeenCalledWith({ sessionID: 'ses_1', name: 'goal', text: 'Ship it' }, 'local')
+  })
+
+  it('syncs the session selection before running the goal command', async () => {
+    const calls: string[] = []
+    mocks.syncSelection.mockImplementation(async () => {
+      calls.push('syncSelection')
+    })
+    mocks.runCommand.mockImplementation(async () => {
+      calls.push('runCommand')
+    })
+    const model = { providerID: 'anthropic', modelID: 'claude-sonnet-4' }
+    const { result } = renderHook(() => useSessionGoalCommand('/repo'), {
+      wrapper: createWrapper(createQueryClient()),
+    })
+
+    await act(async () => {
+      await result.current.mutateAsync({ sessionID: 'ses_1', text: 'Ship it', model, agent: 'build' })
+    })
+
+    expect(mocks.syncSelection).toHaveBeenCalledWith({ sessionID: 'ses_1', model, agent: 'build' })
+    expect(calls).toEqual(['syncSelection', 'runCommand'])
+    expect(mocks.runCommand).toHaveBeenCalledWith({ sessionID: 'ses_1', name: 'goal', text: 'Ship it' }, 'local')
+  })
+
+  it('reports the command failure message', async () => {
+    mocks.runCommand.mockRejectedValueOnce(new Error('goal command failed'))
+    const { result } = renderHook(() => useSessionGoalCommand('/repo'), {
+      wrapper: createWrapper(createQueryClient()),
+    })
+
+    await act(async () => {
+      await result.current.mutateAsync({ sessionID: 'ses_1', text: 'Ship it' }).catch(() => undefined)
+    })
+
+    await waitFor(() => expect(showToast.error).toHaveBeenCalledWith('goal command failed'))
   })
 })

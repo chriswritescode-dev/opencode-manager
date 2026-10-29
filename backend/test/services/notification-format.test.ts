@@ -5,51 +5,23 @@ import {
   getPermissionDetail,
   getPermissionAlwaysScope,
   getFormText,
-  getGoalOutcomeTitle,
-  getGoalStopReasonLabel,
-  getGoalTurnLabel,
-  getGoalTokenLabel,
+  getGoalStatusTitle,
+  getGoalRoundsLabel,
 } from '@opencode-manager/shared/notifications'
 import { buildEventNotificationPayload, buildNotificationUrl } from '../../src/services/notification'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 
 const ctx = { repoName: 'oc-manager', repoId: 1, sessionId: 'ses_1', directory: '/abs/repo', url: '/repos/1/sessions/ses_1' }
 
-describe('goal notification labels', () => {
-  it('maps goal stop reasons to human labels', () => {
-    expect(getGoalStopReasonLabel('cancelled')).toBe('Cancelled')
-    expect(getGoalStopReasonLabel('user_paused')).toBe('Paused by user')
-    expect(getGoalStopReasonLabel('continuation_limit')).toBe('Continuation limit reached')
-    expect(getGoalStopReasonLabel('turn_error')).toBe('Turn failed')
-    expect(getGoalStopReasonLabel('interrupted')).toBe('Interrupted')
-    expect(getGoalStopReasonLabel('audit_failed')).toBe('Audit failed')
-    expect(getGoalStopReasonLabel('session_deleted')).toBe('Session deleted')
+describe('OpenCode goal labels', () => {
+  it('titles each OpenCode goal status', () => {
+    expect(getGoalStatusTitle('active')).toBe('Goal active')
+    expect(getGoalStatusTitle('paused')).toBe('Goal paused')
+    expect(getGoalStatusTitle('complete')).toBe('Goal completed')
   })
 
-  it('derives the notification title from the status', () => {
-    expect(getGoalOutcomeTitle('active')).toBe('Goal active')
-    expect(getGoalOutcomeTitle('paused')).toBe('Goal paused')
-    expect(getGoalOutcomeTitle('completed')).toBe('Goal completed')
-    expect(getGoalOutcomeTitle('blocked')).toBe('Goal blocked')
-    expect(getGoalOutcomeTitle('stopped')).toBe('Goal stopped')
-  })
-
-  it('resolves a stop reason label', () => {
-    expect(getGoalStopReasonLabel('token_budget')).toBe('Token budget reached')
-  })
-})
-
-describe('goal progress labels', () => {
-  it('formats the turn counter', () => {
-    expect(getGoalTurnLabel({ continuationCount: 2, maxContinuations: 20 })).toBe('Turn 2/20')
-  })
-
-  it('formats the token usage with locale separators', () => {
-    expect(getGoalTokenLabel({ tokensUsed: 250, tokenBudget: 1000 })).toBe('250/1,000 tokens')
-  })
-
-  it('returns null when there is no token budget', () => {
-    expect(getGoalTokenLabel({ tokensUsed: 250, tokenBudget: null })).toBeNull()
+  it('formats the round counter', () => {
+    expect(getGoalRoundsLabel({ rounds: 3, maxRounds: 50 })).toBe('Round 3/50')
   })
 })
 

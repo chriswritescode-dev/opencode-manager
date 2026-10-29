@@ -1,29 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { ManagerApi, ManagerApiError, isManagerRouteMissing, MANAGER_FEATURE_MISSING } from '../src/manager-api.js'
-import type { MultiRun, SessionGoal } from '@opencode-manager/shared/schemas'
+import type { MultiRun } from '@opencode-manager/shared/schemas'
 
 const BASE_URL = 'http://localhost:5003'
-
-const goal: SessionGoal = {
-  id: 7,
-  sessionId: 'ses_1',
-  serverId: 'local',
-  directory: '/repo',
-  objective: 'fix the flaky test',
-  status: 'active',
-  stopReason: null,
-  turnState: 'waiting',
-  continuationCount: 0,
-  maxContinuations: 10,
-  tokenBudget: null,
-  tokensUsed: 0,
-  consecutiveBlocked: 0,
-  lastVerdict: null,
-  lastReason: null,
-  createdAt: 1,
-  updatedAt: 2,
-  finishedAt: null,
-}
 
 const run: MultiRun = {
   id: 3,
@@ -55,76 +34,6 @@ function stubFetch(response: unknown) {
 
 afterEach(() => {
   vi.unstubAllGlobals()
-})
-
-describe('ManagerApi session goals', () => {
-  const api = new ManagerApi(BASE_URL, 'tok')
-
-  it('reads the latest goal for a session', async () => {
-    const fetchMock = stubFetch(okResponse({ goal }))
-
-    await expect(api.getLatestSessionGoal('ses_1')).resolves.toEqual(goal)
-    expect(fetchMock).toHaveBeenCalledWith(`${BASE_URL}/api/internal/session-goals?sessionId=ses_1`, {
-      headers: { Authorization: 'Bearer tok' },
-    })
-  })
-
-  it('returns null when the session has no goal', async () => {
-    stubFetch(okResponse({ goal: null }))
-
-    await expect(api.getLatestSessionGoal('ses_1')).resolves.toBeNull()
-  })
-
-  it('starts a goal', async () => {
-    const fetchMock = stubFetch(okResponse({ goal }))
-    const input = { sessionId: 'ses_1', directory: '/repo', objective: 'fix it' }
-
-    await expect(api.startSessionGoal(input)).resolves.toEqual(goal)
-    expect(fetchMock).toHaveBeenCalledWith(`${BASE_URL}/api/internal/session-goals`, {
-      method: 'POST',
-      headers: { Authorization: 'Bearer tok', 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    })
-  })
-
-  it('pauses, resumes, and cancels a goal through the action route', async () => {
-    const fetchMock = stubFetch(okResponse({ goal }))
-
-    await expect(api.pauseSessionGoal(7)).resolves.toEqual(goal)
-    await expect(api.resumeSessionGoal(7)).resolves.toEqual(goal)
-    await expect(api.cancelSessionGoal(7)).resolves.toEqual(goal)
-
-    expect(fetchMock).toHaveBeenNthCalledWith(1, `${BASE_URL}/api/internal/session-goals/7/pause`, {
-      method: 'POST',
-      headers: { Authorization: 'Bearer tok' },
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(2, `${BASE_URL}/api/internal/session-goals/7/resume`, {
-      method: 'POST',
-      headers: { Authorization: 'Bearer tok' },
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, `${BASE_URL}/api/internal/session-goals/7/cancel`, {
-      method: 'POST',
-      headers: { Authorization: 'Bearer tok' },
-    })
-  })
-
-  it('forwards the abort signal to fetch', async () => {
-    const fetchMock = stubFetch(okResponse({ goal }))
-    const controller = new AbortController()
-
-    await api.getLatestSessionGoal('ses_1', controller.signal)
-
-    expect(fetchMock).toHaveBeenCalledWith(`${BASE_URL}/api/internal/session-goals?sessionId=ses_1`, {
-      headers: { Authorization: 'Bearer tok' },
-      signal: controller.signal,
-    })
-  })
-
-  it('rejects a goal response that fails schema validation', async () => {
-    stubFetch(okResponse({ goal: { ...goal, status: 'bogus' } }))
-
-    await expect(api.getLatestSessionGoal('ses_1')).rejects.toThrow()
-  })
 })
 
 describe('ManagerApi multi-runs', () => {
@@ -264,21 +173,6 @@ describe('ManagerApi feature support', () => {
     expect((error as ManagerApiError).code).toBeNull()
     expect(isManagerRouteMissing(error)).toBe(false)
   })
-
-  it('forwards the caller abort signal to the token probe', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(errorResponse(401, JSON.stringify({ error: 'Unauthorized' })))
-      .mockResolvedValueOnce(okResponse({ workspaces: [] }))
-    vi.stubGlobal('fetch', fetchMock)
-    const controller = new AbortController()
-
-    await api.getLatestSessionGoal('ses_1', controller.signal).catch(() => undefined)
-
-    expect(fetchMock).toHaveBeenNthCalledWith(2, `${BASE_URL}/api/internal/opencode-workspaces`, {
-      headers: { Authorization: 'Bearer tok' },
-      signal: controller.signal,
-    })
-  })
 })
 
 describe('ManagerApi mirror routes', () => {
@@ -301,7 +195,7 @@ describe('ManagerApi mirror routes', () => {
     })
   })
 
-  it('keeps the goal and multi-run feature message unchanged', async () => {
+  it('keeps the multi-run feature message unchanged', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(errorResponse(401, JSON.stringify({ error: 'Unauthorized' })))
       .mockResolvedValueOnce(okResponse({ workspaces: [] }))
@@ -310,7 +204,7 @@ describe('ManagerApi mirror routes', () => {
     const error = await api.listMultiRuns(1).catch((err) => err)
 
     expect((error as ManagerApiError).code).toBe(MANAGER_FEATURE_MISSING)
-    expect((error as ManagerApiError).message).toContain('too old for ocm goals and multi-runs')
+    expect((error as ManagerApiError).message).toContain('too old for ocm multi-runs')
   })
 
   it('sends the directory query on mirrorHead and mirrorContains', async () => {

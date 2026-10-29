@@ -8,7 +8,8 @@ import { NotificationService, type NotificationServerRegistry } from '../../src/
 import { SettingsService } from '../../src/services/settings'
 import { sseAggregator, type SSEEvent } from '../../src/services/sse-aggregator'
 import type { PushNotificationPayload } from '@opencode-manager/shared/types'
-import type { SessionGoal } from '@opencode-manager/shared/schemas'
+import type { GoalState } from '@opencode-manager/shared/opencode'
+import type { SessionGoalOutcome } from '../../src/services/goal-outcomes'
 
 const DIRECTORY = '/abs/repo'
 const USER_ID = 'user-1'
@@ -195,39 +196,36 @@ describe('NotificationService goal outcomes', () => {
     vi.restoreAllMocks()
   })
 
-  const completedGoal: SessionGoal = {
-    id: 1,
-    sessionId: 'ses_goal',
-    serverId: 'local',
-    directory: DIRECTORY,
+  const completedGoal: GoalState = {
+    id: 'goal_1',
     objective: 'Ship the feature',
-    status: 'completed',
-    stopReason: null,
-    turnState: 'running',
-    continuationCount: 1,
-    maxContinuations: 5,
-    tokenBudget: null,
-    tokensUsed: 0,
-    consecutiveBlocked: 0,
-    lastVerdict: 'done',
-    lastReason: 'Objective achieved',
-    createdAt: 1,
-    updatedAt: 2,
-    finishedAt: 3,
+    status: 'complete',
+    reason: 'Objective achieved',
+    rounds: 1,
+    maxRounds: 5,
+    boot: 'boot-1',
+    updatedAt: 3,
+  }
+
+  const goalOutcome: SessionGoalOutcome = {
+    serverId: 'local',
+    sessionId: 'ses_goal',
+    directory: DIRECTORY,
+    goal: completedGoal,
   }
 
   it('notifies a goal outcome when the preference is unset', async () => {
     const service = createService()
     const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
 
-    await service.notifyGoalOutcome(completedGoal)
+    await service.notifyGoalOutcome(goalOutcome)
 
     expect(send).toHaveBeenCalledTimes(1)
     const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
     expect(payload.title).toBe('Goal completed')
     expect(payload.body).toContain('Ship the feature')
     expect(payload.body).toContain('Objective achieved')
-    expect(payload.tag).toBe('session-goal-1')
+    expect(payload.tag).toBe('session-goal-goal_1')
     expect(payload.data?.eventType).toBe('session.goal.outcome')
     expect(payload.data?.sessionId).toBe('ses_goal')
     expect(payload.data?.url).toBe('/repos/1/sessions/ses_goal')
@@ -240,10 +238,10 @@ describe('NotificationService goal outcomes', () => {
     const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
 
     await service.notifyGoalOutcome({
-      ...completedGoal,
-      sessionId: 'ses_remote',
       serverId: 'srv_kitchen',
+      sessionId: 'ses_remote',
       directory: '/home/me/app',
+      goal: completedGoal,
     })
 
     expect(send).toHaveBeenCalledTimes(1)
@@ -254,41 +252,22 @@ describe('NotificationService goal outcomes', () => {
     expect(payload.data?.url).toBe('/servers/srv_kitchen/sessions/ses_remote')
   })
 
-  it('reports the stop reason instead of a stale verdict reason', async () => {
+  it('titles a paused goal from its reason', async () => {
     const service = createService()
     const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
 
     await service.notifyGoalOutcome({
-      ...completedGoal,
-      id: 2,
-      status: 'stopped',
-      stopReason: 'token_budget',
-      lastVerdict: 'continue',
-      lastReason: 'Keep working on the tests',
-    })
-
-    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
-    expect(payload.title).toBe('Goal stopped')
-    expect(payload.body).toContain('Token budget reached')
-    expect(payload.body).not.toContain('Keep working on the tests')
-  })
-
-  it('states the pause cause when a paused goal has no verdict reason', async () => {
-    const service = createService()
-    const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
-
-    await service.notifyGoalOutcome({
-      ...completedGoal,
-      id: 3,
-      status: 'paused',
-      stopReason: 'audit_failed',
-      lastVerdict: null,
-      lastReason: null,
+      ...goalOutcome,
+      goal: {
+        ...completedGoal,
+        status: 'paused',
+        reason: 'The server restarted while the goal was active',
+      },
     })
 
     const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
     expect(payload.title).toBe('Goal paused')
-    expect(payload.body).toContain('Audit failed')
+    expect(payload.body).toContain('The server restarted while the goal was active')
   })
 
   it('keeps the reason visible for a long objective within the body limit', async () => {
@@ -296,17 +275,32 @@ describe('NotificationService goal outcomes', () => {
     const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
 
     await service.notifyGoalOutcome({
-      ...completedGoal,
-      id: 4,
-      objective: 'Ship the entire feature '.repeat(20),
-      status: 'stopped',
-      stopReason: 'continuation_limit',
+      ...goalOutcome,
+      goal: {
+        ...completedGoal,
+        objective: 'Ship the entire feature '.repeat(20),
+        reason: 'Objective achieved',
+      },
     })
 
     const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
     expect(payload.body.length).toBeLessThanOrEqual(140)
-    expect(payload.body).toContain('Continuation limit reached')
+    expect(payload.body).toContain('Objective achieved')
     expect(payload.body).toContain('…')
+  })
+
+  it('omits the reason when the goal has none', async () => {
+    const service = createService()
+    const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
+
+    await service.notifyGoalOutcome({
+      ...goalOutcome,
+      goal: { ...completedGoal, reason: undefined },
+    })
+
+    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    expect(payload.body).toContain('Ship the feature')
+    expect(payload.body).not.toContain(' — ')
   })
 
   it('respects a disabled goalOutcome preference', async () => {
@@ -323,49 +317,7 @@ describe('NotificationService goal outcomes', () => {
     )
     const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
 
-    await service.notifyGoalOutcome(completedGoal)
-
-    expect(send).not.toHaveBeenCalled()
-  })
-
-  it('does not notify when the goal stopped because its turn failed', async () => {
-    const service = createService()
-    const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
-
-    await service.notifyGoalOutcome({
-      ...completedGoal,
-      id: 11,
-      status: 'stopped',
-      stopReason: 'turn_error',
-    })
-
-    expect(send).not.toHaveBeenCalled()
-  })
-
-  it('does not notify when the user cancelled the goal', async () => {
-    const service = createService()
-    const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
-
-    await service.notifyGoalOutcome({
-      ...completedGoal,
-      id: 12,
-      status: 'stopped',
-      stopReason: 'cancelled',
-    })
-
-    expect(send).not.toHaveBeenCalled()
-  })
-
-  it('does not notify when the user paused the goal', async () => {
-    const service = createService()
-    const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
-
-    await service.notifyGoalOutcome({
-      ...completedGoal,
-      id: 13,
-      status: 'paused',
-      stopReason: 'user_paused',
-    })
+    await service.notifyGoalOutcome(goalOutcome)
 
     expect(send).not.toHaveBeenCalled()
   })
@@ -375,27 +327,20 @@ describe('NotificationService goal outcomes', () => {
     const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
     vi.spyOn(sseAggregator, 'isSessionBeingViewed').mockReturnValue(true)
 
-    await service.notifyGoalOutcome(completedGoal)
+    await service.notifyGoalOutcome(goalOutcome)
 
     expect(send).not.toHaveBeenCalled()
   })
 
-  it('notifies the remaining goal outcomes', async () => {
+  it('notifies a complete goal whose rounds reached the maximum', async () => {
     const service = createService()
     const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
-    const outcomes: Array<Pick<SessionGoal, 'status' | 'stopReason'>> = [
-      { status: 'blocked', stopReason: null },
-      { status: 'stopped', stopReason: 'continuation_limit' },
-      { status: 'stopped', stopReason: 'token_budget' },
-      { status: 'stopped', stopReason: 'interrupted' },
-      { status: 'paused', stopReason: 'audit_failed' },
-      { status: 'stopped', stopReason: 'session_deleted' },
-    ]
 
-    for (const [index, outcome] of outcomes.entries()) {
-      await service.notifyGoalOutcome({ ...completedGoal, id: 100 + index, ...outcome })
-    }
+    await service.notifyGoalOutcome({
+      ...goalOutcome,
+      goal: { ...completedGoal, rounds: 5, maxRounds: 5 },
+    })
 
-    expect(send).toHaveBeenCalledTimes(outcomes.length)
+    expect(send).toHaveBeenCalledTimes(1)
   })
 })

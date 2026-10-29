@@ -131,46 +131,46 @@ describe('resolveOpenCodeInstallTarget', () => {
 describe('installOpenCodeVersion', () => {
   it('downloads, verifies and installs the requested version', async () => {
     const homeDirectory = join(workDirectory, 'home')
-    const archivePath = createArchive(workDirectory, '2.1.2')
+    const archivePath = createArchive(workDirectory, '2.2.1')
     const { calls, fetchFn } = createFetch(archivePath)
 
-    const installedPath = await installOpenCodeVersion('2.1.2', { fetch: fetchFn, homeDirectory, target: linuxTarget })
+    const installedPath = await installOpenCodeVersion('2.2.1', { fetch: fetchFn, homeDirectory, target: linuxTarget })
 
     expect(installedPath).toBe(resolveOpenCodeBinaryPath(homeDirectory))
-    expect(calls).toEqual(['https://opencode.ai/files/bin/2.1.2/opencode-linux-x64.tar.gz'])
+    expect(calls).toEqual(['https://opencode.ai/files/bin/2.2.1/opencode-linux-x64.tar.gz'])
     expect(statSync(installedPath).mode & 0o777).toBe(0o755)
-    expect(readFileSync(installedPath, 'utf-8')).toContain('2.1.2')
+    expect(readFileSync(installedPath, 'utf-8')).toContain('2.2.1')
   })
 
   it('requests the musl asset for a musl linux target', async () => {
     const homeDirectory = join(workDirectory, 'home')
-    const archivePath = createArchive(workDirectory, '2.1.2')
+    const archivePath = createArchive(workDirectory, '2.2.1')
     const { calls, fetchFn } = createFetch(archivePath)
 
-    await installOpenCodeVersion('2.1.2', {
+    await installOpenCodeVersion('2.2.1', {
       fetch: fetchFn,
       homeDirectory,
       target: { platform: 'linux', arch: 'arm64', musl: true },
     })
 
-    expect(calls).toEqual(['https://opencode.ai/files/bin/2.1.2/opencode-linux-arm64-musl.tar.gz'])
+    expect(calls).toEqual(['https://opencode.ai/files/bin/2.2.1/opencode-linux-arm64-musl.tar.gz'])
   })
 
   it('extracts the darwin zip asset and installs it', async () => {
     const homeDirectory = join(workDirectory, 'home')
-    const archivePath = createDarwinArchive(workDirectory, '2.1.2')
+    const archivePath = createDarwinArchive(workDirectory, '2.2.1')
     const { calls, fetchFn } = createFetch(archivePath)
 
-    const installedPath = await installOpenCodeVersion('2.1.2', {
+    const installedPath = await installOpenCodeVersion('2.2.1', {
       fetch: fetchFn,
       homeDirectory,
       target: { platform: 'darwin', arch: 'arm64', musl: false },
     })
 
-    expect(calls).toEqual(['https://opencode.ai/files/bin/2.1.2/opencode-darwin-arm64.zip'])
+    expect(calls).toEqual(['https://opencode.ai/files/bin/2.2.1/opencode-darwin-arm64.zip'])
     expect(installedPath).toBe(resolveOpenCodeBinaryPath(homeDirectory))
     expect(statSync(installedPath).mode & 0o777).toBe(0o755)
-    expect(readFileSync(installedPath, 'utf-8')).toContain('2.1.2')
+    expect(readFileSync(installedPath, 'utf-8')).toContain('2.2.1')
   })
 
   it('rejects an OpenCode 1.x version before downloading anything', async () => {
@@ -178,18 +178,18 @@ describe('installOpenCodeVersion', () => {
     const { calls, fetchFn } = createFetch(null)
 
     await expect(installOpenCodeVersion('1.18.32', { fetch: fetchFn, homeDirectory, target: linuxTarget }))
-      .rejects.toThrow('OpenCode 1.18.32 is not supported; OpenCode Manager requires OpenCode >=2.1.2 <3.0.0')
+      .rejects.toThrow('OpenCode 1.18.32 is not supported; OpenCode Manager requires OpenCode >=2.2.1 <3.0.0')
     expect(calls).toEqual([])
   })
 
-  it.each(['2.1.1', '3.0.0', '2.1.2-beta.1', '2.1.2; rm -rf /'])(
+  it.each(['2.2.0', '3.0.0', '2.2.1-beta.1', '2.2.1; rm -rf /'])(
     'rejects %s outside the supported stable range before downloading anything',
     async (version) => {
       const homeDirectory = join(workDirectory, 'home')
       const { calls, fetchFn } = createFetch(null)
 
       await expect(installOpenCodeVersion(version, { fetch: fetchFn, homeDirectory, target: linuxTarget }))
-        .rejects.toThrow(/requires OpenCode >=2\.1\.2 <3\.0\.0/)
+        .rejects.toThrow(/requires OpenCode >=2\.2\.1 <3\.0\.0/)
       expect(calls).toEqual([])
     },
   )
@@ -198,18 +198,18 @@ describe('installOpenCodeVersion', () => {
     const homeDirectory = join(workDirectory, 'home')
     const { fetchFn } = createFetch(null, 404)
 
-    await expect(installOpenCodeVersion('2.1.2', { fetch: fetchFn, homeDirectory, target: linuxTarget }))
+    await expect(installOpenCodeVersion('2.2.1', { fetch: fetchFn, homeDirectory, target: linuxTarget }))
       .rejects.toThrow(/404/)
     expect(() => statSync(resolveOpenCodeBinaryPath(homeDirectory))).toThrow()
   })
 
   it('fails and leaves no binary behind when the archive reports a different version', async () => {
     const homeDirectory = join(workDirectory, 'home')
-    const archivePath = createArchive(workDirectory, '2.1.3')
+    const archivePath = createArchive(workDirectory, '2.2.2')
     const { fetchFn } = createFetch(archivePath)
 
-    await expect(installOpenCodeVersion('2.1.2', { fetch: fetchFn, homeDirectory, target: linuxTarget }))
-      .rejects.toThrow(/2\.1\.2/)
+    await expect(installOpenCodeVersion('2.2.1', { fetch: fetchFn, homeDirectory, target: linuxTarget }))
+      .rejects.toThrow(/2\.2\.1/)
     expect(() => statSync(resolveOpenCodeBinaryPath(homeDirectory))).toThrow()
   })
 
@@ -218,21 +218,21 @@ describe('installOpenCodeVersion', () => {
     mkdirSync(join(homeDirectory, '.opencode', 'bin'), { recursive: true })
     writeFileSync(resolveOpenCodeBinaryPath(homeDirectory), '#!/bin/sh\necho "opencode v2.1.1"\n')
 
-    const archivePath = createArchive(workDirectory, '2.1.2')
+    const archivePath = createArchive(workDirectory, '2.2.1')
     const { fetchFn } = createFetch(archivePath)
 
-    await installOpenCodeVersion('2.1.2', { fetch: fetchFn, homeDirectory, target: linuxTarget })
+    await installOpenCodeVersion('2.2.1', { fetch: fetchFn, homeDirectory, target: linuxTarget })
 
-    expect(readFileSync(resolveOpenCodeBinaryPath(homeDirectory), 'utf-8')).toContain('2.1.2')
+    expect(readFileSync(resolveOpenCodeBinaryPath(homeDirectory), 'utf-8')).toContain('2.2.1')
   })
 
   it('cleans up its staging directory after a successful install', async () => {
     const homeDirectory = join(workDirectory, 'home')
-    const archivePath = createArchive(workDirectory, '2.1.2')
+    const archivePath = createArchive(workDirectory, '2.2.1')
     const { fetchFn } = createFetch(archivePath)
 
     const before = countStagingDirectories()
-    await installOpenCodeVersion('2.1.2', { fetch: fetchFn, homeDirectory, target: linuxTarget })
+    await installOpenCodeVersion('2.2.1', { fetch: fetchFn, homeDirectory, target: linuxTarget })
 
     expect(countStagingDirectories()).toBe(before)
   })
@@ -244,15 +244,15 @@ describe('listOpenCodeVersions', () => {
       '1.18.32': {},
       '2.0.14': {},
       '2.1.1': {},
-      '2.1.2': {},
-      '2.1.3': {},
-      '2.1.2-beta.1': {},
+      '2.2.1': {},
+      '2.2.2': {},
+      '2.2.1-beta.1': {},
       '3.0.0': {},
       'not-a-version': {},
     },
     time: {
-      '2.1.2': '2026-02-01T00:00:00.000Z',
-      '2.1.3': '2026-03-01T00:00:00.000Z',
+      '2.2.1': '2026-02-01T00:00:00.000Z',
+      '2.2.2': '2026-03-01T00:00:00.000Z',
     },
   }
 
@@ -262,20 +262,20 @@ describe('listOpenCodeVersions', () => {
     const versions = await listOpenCodeVersions({ fetch: fetchFn })
 
     expect(versions).toEqual([
-      { version: '2.1.3', publishedAt: '2026-03-01T00:00:00.000Z' },
-      { version: '2.1.2', publishedAt: '2026-02-01T00:00:00.000Z' },
+      { version: '2.2.2', publishedAt: '2026-03-01T00:00:00.000Z' },
+      { version: '2.2.1', publishedAt: '2026-02-01T00:00:00.000Z' },
     ])
     expect(calls).toEqual(['https://registry.npmjs.org/@opencode/cli'])
   })
 
   it('reports a null publishedAt when the registry has no timestamp for a version', async () => {
     const { fetchFn } = createRegistryFetch({
-      versions: { '2.1.5': {} },
+      versions: { '2.2.5': {} },
       time: {},
     })
 
     await expect(listOpenCodeVersions({ fetch: fetchFn })).resolves.toEqual([
-      { version: '2.1.5', publishedAt: null },
+      { version: '2.2.5', publishedAt: null },
     ])
   })
 
@@ -293,14 +293,14 @@ describe('listOpenCodeVersions', () => {
 
   it('refreshes the list once the five minute cache expires', async () => {
     const stale = createRegistryFetch(registryPayload)
-    const fresh = createRegistryFetch({ versions: { '2.1.7': {} }, time: {} })
+    const fresh = createRegistryFetch({ versions: { '2.2.7': {} }, time: {} })
     let now = 1_000_000
 
     await listOpenCodeVersions({ fetch: stale.fetchFn, now: () => now })
     now += 5 * 60 * 1000
     const refreshed = await listOpenCodeVersions({ fetch: fresh.fetchFn, now: () => now })
 
-    expect(refreshed).toEqual([{ version: '2.1.7', publishedAt: null }])
+    expect(refreshed).toEqual([{ version: '2.2.7', publishedAt: null }])
     expect(stale.calls).toHaveLength(1)
     expect(fresh.calls).toHaveLength(1)
   })
@@ -331,7 +331,7 @@ describe('OpenCodeInstallError swap signalling', () => {
     const homeDirectory = join(workDirectory, 'home')
     const { fetchFn } = createFetch(null, 404)
 
-    const promise = installOpenCodeVersion('2.1.2', { fetch: fetchFn, homeDirectory, target: linuxTarget })
+    const promise = installOpenCodeVersion('2.2.1', { fetch: fetchFn, homeDirectory, target: linuxTarget })
 
     await expect(promise).rejects.toBeInstanceOf(OpenCodeInstallError)
     await expect(promise).rejects.toMatchObject({ swapStarted: false })
@@ -341,10 +341,10 @@ describe('OpenCodeInstallError swap signalling', () => {
   it('marks a failure while replacing the binary as having started the binary swap', async () => {
     const homeDirectory = join(workDirectory, 'home')
     mkdirSync(resolveOpenCodeBinaryPath(homeDirectory), { recursive: true })
-    const archivePath = createArchive(workDirectory, '2.1.2')
+    const archivePath = createArchive(workDirectory, '2.2.1')
     const { fetchFn } = createFetch(archivePath)
 
-    const promise = installOpenCodeVersion('2.1.2', { fetch: fetchFn, homeDirectory, target: linuxTarget })
+    const promise = installOpenCodeVersion('2.2.1', { fetch: fetchFn, homeDirectory, target: linuxTarget })
 
     await expect(promise).rejects.toBeInstanceOf(OpenCodeInstallError)
     await expect(promise).rejects.toMatchObject({ swapStarted: true })

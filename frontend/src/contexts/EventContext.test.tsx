@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { useState, type ReactNode } from 'react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FormInfo, PermissionRequest } from '@opencode-manager/shared/opencode'
+import type { FormInfo, PermissionRequest, GoalState } from '@opencode-manager/shared/opencode'
 import { FetchError } from '@opencode-manager/shared'
 import { showToast } from '@/lib/toast'
 import { useSessionStatus, hasBackgroundActivity } from '@/stores/sessionStatusStore'
@@ -1246,6 +1246,44 @@ describe('EventProvider permissions and forms', () => {
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'config'] })
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode-config'] })
     })
+  })
+
+  it('applies a goal change event to the session goal cache', async () => {
+    const initialGoal: GoalState = {
+      id: 'goal-1',
+      objective: 'Ship the goal bar',
+      status: 'active',
+      rounds: 0,
+      maxRounds: 10,
+      boot: 'boot-1',
+      updatedAt: 1000,
+    }
+    const updatedGoal: GoalState = { ...initialGoal, rounds: 1, updatedAt: 2000 }
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData(['session-goal', 'session-1'], { supported: true, goal: initialGoal })
+
+    render(<Harness />, { wrapper: createWrapper(queryClient) })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({
+        type: 'rpc.opencode.goal.changed',
+        data: { sessionID: 'session-1', goal: updatedGoal },
+        directory: '/repo',
+      })
+    })
+
+    expect(queryClient.getQueryData(['session-goal', 'session-1'])).toEqual({ supported: true, goal: updatedGoal })
+
+    act(() => {
+      onEvent({ type: 'session.idle', data: { sessionID: 'other' }, directory: '/repo' })
+    })
+
+    expect(queryClient.getQueryData(['session-goal', 'session-1'])).toEqual({ supported: true, goal: updatedGoal })
   })
 
   it('invalidates the sibling caches when a branch changes outside a repo row', async () => {

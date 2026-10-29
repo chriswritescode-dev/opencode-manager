@@ -12,11 +12,10 @@ type InternalTestAppOverrides = Partial<{
   permissionModes: CreateInternalRoutesParams[5]
   repoWorkspaces: CreateInternalRoutesParams[6]
   gitAuthService: CreateInternalRoutesParams[7]
-  sessionGoals: CreateInternalRoutesParams[8]
-  multiRuns: CreateInternalRoutesParams[9]
-  changeWalkthroughService: CreateInternalRoutesParams[10]
-  sessionSandbox: CreateInternalRoutesParams[11]
-  repoEnvService: CreateInternalRoutesParams[12]
+  multiRuns: CreateInternalRoutesParams[8]
+  changeWalkthroughService: CreateInternalRoutesParams[9]
+  sessionSandbox: CreateInternalRoutesParams[10]
+  repoEnvService: CreateInternalRoutesParams[11]
 }>
 
 export function createInternalTestApp(
@@ -32,10 +31,9 @@ export function createInternalTestApp(
     overrides.permissionModes ?? ({} as CreateInternalRoutesParams[5]),
     overrides.repoWorkspaces ?? ({} as CreateInternalRoutesParams[6]),
     overrides.gitAuthService ?? ({} as CreateInternalRoutesParams[7]),
-    overrides.sessionGoals ?? ({} as CreateInternalRoutesParams[8]),
-    overrides.multiRuns ?? ({} as CreateInternalRoutesParams[9]),
-    overrides.changeWalkthroughService ?? ({} as CreateInternalRoutesParams[10]),
-    overrides.sessionSandbox ?? ({} as CreateInternalRoutesParams[11]),
+    overrides.multiRuns ?? ({} as CreateInternalRoutesParams[8]),
+    overrides.changeWalkthroughService ?? ({} as CreateInternalRoutesParams[9]),
+    overrides.sessionSandbox ?? ({} as CreateInternalRoutesParams[10]),
     overrides.repoEnvService ?? createStubRepoEnvService(),
   )
 }

@@ -220,7 +220,7 @@ export function NotificationSettings() {
                         Goal outcomes
                       </Label>
                       <p className="text-sm text-muted-foreground">
-                        When a session goal completes, blocks or stops
+                        When a session goal completes or pauses on its own
                       </p>
                     </div>
                     <Switch

@@ -1,36 +1,5 @@
-import type { SessionGoal, SessionGoalStatus, SessionGoalStopReason } from '../schemas/session-goals'
+import type { GoalState, GoalStatus } from '../opencode/goal'
 import type { MultiRunEntryStatus } from '../schemas/multi-runs'
-
-const GOAL_OUTCOME_TITLES: Record<SessionGoalStatus, string> = {
-  active: 'Goal active',
-  paused: 'Goal paused',
-  completed: 'Goal completed',
-  blocked: 'Goal blocked',
-  stopped: 'Goal stopped',
-}
-
-const GOAL_STOP_REASON_LABELS: Record<SessionGoalStopReason, string> = {
-  cancelled: 'Cancelled',
-  user_paused: 'Paused by user',
-  continuation_limit: 'Continuation limit reached',
-  token_budget: 'Token budget reached',
-  turn_error: 'Turn failed',
-  interrupted: 'Interrupted',
-  audit_failed: 'Audit failed',
-  session_deleted: 'Session deleted',
-}
-
-export function getGoalOutcomeTitle(status: SessionGoalStatus): string {
-  return GOAL_OUTCOME_TITLES[status]
-}
-
-export function getGoalStopReasonLabel(stopReason: SessionGoalStopReason): string {
-  return GOAL_STOP_REASON_LABELS[stopReason]
-}
-
-export function getGoalOutcomeReason(goal: Pick<SessionGoal, 'stopReason' | 'lastReason'>): string | null {
-  return goal.stopReason ? getGoalStopReasonLabel(goal.stopReason) : goal.lastReason
-}
 
 const MULTI_RUN_ENTRY_STATUS_LABELS: Record<MultiRunEntryStatus, string> = {
   starting: 'Starting',
@@ -43,13 +12,20 @@ export function getMultiRunEntryStatusLabel(status: MultiRunEntryStatus): string
   return MULTI_RUN_ENTRY_STATUS_LABELS[status]
 }
 
-export function getGoalTurnLabel(goal: Pick<SessionGoal, 'continuationCount' | 'maxContinuations'>): string {
-  return `Turn ${goal.continuationCount}/${goal.maxContinuations}`
+const GOAL_STATUS_TITLES: Record<GoalStatus, string> = {
+  active: 'Goal active',
+  paused: 'Goal paused',
+  complete: 'Goal completed',
 }
 
-export function getGoalTokenLabel(goal: Pick<SessionGoal, 'tokensUsed' | 'tokenBudget'>): string | null {
-  if (goal.tokenBudget === null) return null
-  return `${goal.tokensUsed.toLocaleString()}/${goal.tokenBudget.toLocaleString()} tokens`
+/** Titles a notification for the current state of an OpenCode goal. */
+export function getGoalStatusTitle(status: GoalStatus): string {
+  return GOAL_STATUS_TITLES[status]
+}
+
+/** Labels the continuation progress of an OpenCode goal. */
+export function getGoalRoundsLabel(goal: Pick<GoalState, 'rounds' | 'maxRounds'>): string {
+  return `Round ${goal.rounds}/${goal.maxRounds}`
 }
 
 const PERMISSION_LABELS: Record<string, string> = {

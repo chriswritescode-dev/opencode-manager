@@ -374,7 +374,7 @@ describe('SessionDetail remote server mode', () => {
 
     expect(mocks.SessionGoalBar).toHaveBeenCalled()
     expect(mocks.SessionGoalBar.mock.calls.at(-1)?.[0]).toEqual(
-      expect.objectContaining({ sessionID: 'ses_remote' }),
+      expect.objectContaining({ sessionID: 'ses_remote', directory: '/home/me/app' }),
     )
   })
 
