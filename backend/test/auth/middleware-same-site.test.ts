@@ -162,12 +162,18 @@ describe('createAuthMiddleware same-site guard', () => {
 
 describe('getTrustedOrigins', () => {
   const originalTrustedOrigins = process.env.AUTH_TRUSTED_ORIGINS
+  const originalManagerPublicUrl = process.env.MANAGER_PUBLIC_URL
 
   afterEach(() => {
     if (originalTrustedOrigins === undefined) {
       delete process.env.AUTH_TRUSTED_ORIGINS
     } else {
       process.env.AUTH_TRUSTED_ORIGINS = originalTrustedOrigins
+    }
+    if (originalManagerPublicUrl === undefined) {
+      delete process.env.MANAGER_PUBLIC_URL
+    } else {
+      process.env.MANAGER_PUBLIC_URL = originalManagerPublicUrl
     }
     vi.resetModules()
   })
@@ -178,6 +184,7 @@ describe('getTrustedOrigins', () => {
     } else {
       process.env.AUTH_TRUSTED_ORIGINS = value
     }
+    delete process.env.MANAGER_PUBLIC_URL
     vi.resetModules()
     const { getTrustedOrigins } = await import('@opencode-manager/shared/config/env')
     return getTrustedOrigins()

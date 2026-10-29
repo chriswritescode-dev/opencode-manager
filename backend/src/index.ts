@@ -99,6 +99,7 @@ import {
   getAgentsMdPath,
   getDatabasePath,
   getTrustedOrigins,
+  getManagerPublicUrlError,
   ENV
 } from '@opencode-manager/shared/config/env'
 import { LOCAL_OPENCODE_SERVER_ID, NotificationEventType } from '@opencode-manager/shared/schemas'
@@ -211,6 +212,12 @@ async function ensureDefaultAgentsMdExists(): Promise<void> {
 }
 
 try {
+  const managerPublicUrlError = getManagerPublicUrlError()
+  if (managerPublicUrlError) {
+    logger.error(managerPublicUrlError)
+    process.exit(1)
+  }
+
   if (ENV.SERVER.NODE_ENV === 'production' && !ENV.AUTH.SECRET) {
     logger.error('AUTH_SECRET is required in production mode')
     logger.error('Generate one with: openssl rand -base64 32')

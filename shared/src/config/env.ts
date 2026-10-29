@@ -3,6 +3,7 @@ import os from 'os'
 import { randomBytes } from 'crypto'
 import { DEFAULTS } from './defaults'
 import { ASSISTANT_REPO_PATH, ASSISTANT_OPENCODE_DIR_NAME } from '../utils/repo'
+import { parseHttpUrl } from '../utils/url'
 
 try {
   const { config } = await import('dotenv')
@@ -52,9 +53,40 @@ const generateDefaultSecret = (): string => {
   return randomBytes(32).toString('base64').slice(0, 32)
 }
 
+/**
+ * Validates a public manager base URL, accepting only an absolute http(s) origin
+ * with no credentials, path, query, or fragment.
+ */
+export function parseManagerPublicUrl(value: string | undefined): { origin: string | null; error: string | null } {
+  const trimmed = value?.trim() ?? ''
+  if (trimmed.length === 0) return { origin: null, error: null }
+
+  const url = parseHttpUrl(trimmed)
+  const rejection = `MANAGER_PUBLIC_URL must be an absolute http(s) address without a path, for example https://manager.example.com (got "${trimmed}")`
+  if (
+    url === null ||
+    url.username !== '' ||
+    url.password !== '' ||
+    url.pathname !== '/' ||
+    url.search !== '' ||
+    url.hash !== ''
+  ) {
+    return { origin: null, error: rejection }
+  }
+
+  return { origin: url.origin, error: null }
+}
+
+const getEnvNonEmptyString = (key: string, defaultValue: string): string => {
+  const value = process.env[key]
+  return value === undefined || value === '' ? defaultValue : value
+}
+
 const defaultHealthWatchEnabled = getEnvString('NODE_ENV', 'development') === 'test'
   ? false
   : DEFAULTS.OPENCODE.HEALTH_WATCH_ENABLED
+
+const managerPublicOrigin = parseManagerPublicUrl(process.env.MANAGER_PUBLIC_URL).origin
 
 export const ENV = {
   SERVER: {
@@ -62,6 +94,7 @@ export const ENV = {
     HOST: getEnvString('HOST', DEFAULTS.SERVER.HOST),
     CORS_ORIGIN: getEnvString('CORS_ORIGIN', DEFAULTS.SERVER.CORS_ORIGIN),
     NODE_ENV: getEnvString('NODE_ENV', 'development'),
+    PUBLIC_URL: process.env.MANAGER_PUBLIC_URL ?? '',
   },
 
   OPENCODE: {
@@ -138,9 +171,9 @@ export const ENV = {
     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
     DISCORD_CLIENT_ID: process.env.DISCORD_CLIENT_ID,
     DISCORD_CLIENT_SECRET: process.env.DISCORD_CLIENT_SECRET,
-    PASSKEY_RP_ID: getEnvString('PASSKEY_RP_ID', 'localhost'),
+    PASSKEY_RP_ID: getEnvNonEmptyString('PASSKEY_RP_ID', managerPublicOrigin ? new URL(managerPublicOrigin).hostname : 'localhost'),
     PASSKEY_RP_NAME: getEnvString('PASSKEY_RP_NAME', 'OpenCode Manager'),
-    PASSKEY_ORIGIN: getEnvString('PASSKEY_ORIGIN', 'http://localhost:5003'),
+    PASSKEY_ORIGIN: getEnvNonEmptyString('PASSKEY_ORIGIN', managerPublicOrigin ?? 'http://localhost:5003'),
   },
 
 } as const
@@ -170,11 +203,20 @@ export const getOpenCodeConfigFilePath = () => path.join(ENV.WORKSPACE.BASE_PATH
 export const getAgentsMdPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR, 'AGENTS.md')
 export const getDatabasePath = () => ENV.DATABASE.PATH
 
-export const getTrustedOrigins = (): string[] =>
-  ENV.AUTH.TRUSTED_ORIGINS
+/** Returns the validated public manager origin, or null when MANAGER_PUBLIC_URL is unset or invalid. */
+export const getManagerPublicOrigin = (): string | null => parseManagerPublicUrl(ENV.SERVER.PUBLIC_URL).origin
+
+/** Returns the MANAGER_PUBLIC_URL validation error, or null when it is unset or valid. */
+export const getManagerPublicUrlError = (): string | null => parseManagerPublicUrl(ENV.SERVER.PUBLIC_URL).error
+
+export const getTrustedOrigins = (): string[] => {
+  const configured = ENV.AUTH.TRUSTED_ORIGINS
     .split(',')
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0)
+  const publicOrigin = getManagerPublicOrigin()
+  return publicOrigin === null ? configured : [...new Set([publicOrigin, ...configured])]
+}
 
 /** Reports whether a request Origin is one of the configured trusted origins. */
 export const isTrustedOrigin = (
