@@ -1193,6 +1193,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           break
         case 'config.updated':
           invalidateQueryKeysDebounced(queryClient, [['opencode', 'config'], ['opencode-config']])
+          invalidateProviderCachesDebounced(queryClient)
           break
         case 'ssh.host-key-request':
           setSSHHostKeyRequest(event.properties)
@@ -1233,6 +1234,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         void syncRunningShells(collectTrackedDirectories())
         invalidateChildSessionCaches(queryClient)
         invalidateQueryKeysDebounced(queryClient, LOCATION_CATALOG_QUERY_KEYS)
+        invalidateProviderCachesDebounced(queryClient)
         startStatusPoll()
       } else {
         streamConnectedRef.current = false
@@ -1259,6 +1261,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       void syncRunningShells(directories)
       invalidateChildSessionCaches(queryClient)
       invalidateQueryKeysDebounced(queryClient, LOCATION_CATALOG_QUERY_KEYS)
+      invalidateProviderCachesDebounced(queryClient)
     }
 
     const initialDirectories = [...new Set((reposRef.current ?? []).map(r => r.fullPath))]
