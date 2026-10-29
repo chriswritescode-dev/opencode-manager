@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import type { MiddlewareHandler } from 'hono'
-import { ENV, getTrustedOrigins } from '@opencode-manager/shared/config/env'
+import { ENV, getManagerPublicOrigin, getTrustedOrigins } from '@opencode-manager/shared/config/env'
 import { CreateDevicePairingLinksRequestSchema } from '@opencode-manager/shared/schemas'
 import {
   buildDevicePairingLinks,
@@ -29,6 +29,7 @@ interface DevicePairingRouteDeps {
   readAllowPrivateNetworkHttp(): boolean
   resolveTrustedOrigins?: () => string[]
   isDevelopment?: () => boolean
+  resolvePublicOrigin?: () => string | null
 }
 
 /** Creates the routes that mint device pairing links for the Manager origin. */
@@ -36,6 +37,7 @@ export function createDevicePairingRoutes(deps: DevicePairingRouteDeps) {
   const app = new Hono()
   const resolveTrustedOrigins = deps.resolveTrustedOrigins ?? getTrustedOrigins
   const isDevelopment = deps.isDevelopment ?? (() => ENV.SERVER.NODE_ENV === 'development')
+  const resolvePublicOrigin = deps.resolvePublicOrigin ?? getManagerPublicOrigin
 
   app.use('/links', noStore)
   app.use('/availability', noStore)
@@ -50,6 +52,7 @@ export function createDevicePairingRoutes(deps: DevicePairingRouteDeps) {
     const { available, reason, message } = resolveDevicePairingAvailability(origin, {
       trustedOrigins: resolveTrustedOrigins(),
       isDevelopment: isDevelopment(),
+      publicOrigin: resolvePublicOrigin(),
     })
 
     return c.json({ available, reason, message })
@@ -62,6 +65,7 @@ export function createDevicePairingRoutes(deps: DevicePairingRouteDeps) {
     const availability = resolveDevicePairingAvailability(c.req.header('origin'), {
       trustedOrigins: resolveTrustedOrigins(),
       isDevelopment: isDevelopment(),
+      publicOrigin: resolvePublicOrigin(),
     })
     if (!availability.available) {
       return c.json({ error: availability.message, code: availability.reason }, 400)

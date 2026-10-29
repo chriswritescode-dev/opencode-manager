@@ -16,7 +16,7 @@ import {
 } from '@opencode-manager/shared/utils'
 
 const MISSING_ORIGIN_MESSAGE =
-  'The request had no Origin header. Open the Manager at an address listed in AUTH_TRUSTED_ORIGINS to pair a device.'
+  'The request had no Origin header. Open the Manager at MANAGER_PUBLIC_URL or an address listed in AUTH_TRUSTED_ORIGINS to pair a device.'
 const LOOPBACK_ORIGIN_MESSAGE =
   'This page is open on localhost, which other devices cannot reach. Open the Manager at its public or LAN address to pair a device.'
 const INSECURE_ORIGIN_MESSAGE =
@@ -34,10 +34,11 @@ type DevicePairingAvailabilityResult =
 type DevicePairingAvailabilityOptions = {
   trustedOrigins: string[]
   isDevelopment: boolean
+  publicOrigin: string | null
 }
 
 function untrustedOriginMessage(origin: string): string {
-  return `This address (${origin}) is not in AUTH_TRUSTED_ORIGINS. Add it and restart the Manager to pair a device.`
+  return `This address (${origin}) is not a trusted Manager address. Set MANAGER_PUBLIC_URL to it or add it to AUTH_TRUSTED_ORIGINS, then restart the Manager to pair a device.`
 }
 
 function unavailable(
@@ -62,8 +63,9 @@ export function resolveDevicePairingAvailability(
     return unavailable('untrusted-origin', untrustedOriginMessage(origin))
   }
 
-  const originUrl = parseHttpUrl(origin)
-  if (!originUrl) return unavailable('untrusted-origin', untrustedOriginMessage(origin))
+  const linkOrigin = options.publicOrigin ?? origin
+  const originUrl = parseHttpUrl(linkOrigin)
+  if (!originUrl) return unavailable('untrusted-origin', untrustedOriginMessage(linkOrigin))
 
   const isLoopback = isLoopbackHost(originUrl.hostname)
   if (isLoopback && !options.isDevelopment) {

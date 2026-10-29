@@ -8,8 +8,8 @@ const TRUSTED_ORIGINS = [
   'http://localhost:5173',
 ]
 
-const production = { trustedOrigins: TRUSTED_ORIGINS, isDevelopment: false }
-const development = { trustedOrigins: TRUSTED_ORIGINS, isDevelopment: true }
+const production = { trustedOrigins: TRUSTED_ORIGINS, isDevelopment: false, publicOrigin: null }
+const development = { trustedOrigins: TRUSTED_ORIGINS, isDevelopment: true, publicOrigin: null }
 
 describe('resolveDevicePairingAvailability', () => {
   it('allows a trusted https origin', () => {
@@ -26,7 +26,7 @@ describe('resolveDevicePairingAvailability', () => {
       available: false,
       reason: 'untrusted-origin',
       message:
-        'The request had no Origin header. Open the Manager at an address listed in AUTH_TRUSTED_ORIGINS to pair a device.',
+        'The request had no Origin header. Open the Manager at MANAGER_PUBLIC_URL or an address listed in AUTH_TRUSTED_ORIGINS to pair a device.',
     })
   })
 
@@ -35,7 +35,7 @@ describe('resolveDevicePairingAvailability', () => {
       available: false,
       reason: 'untrusted-origin',
       message:
-        'This address (null) is not in AUTH_TRUSTED_ORIGINS. Add it and restart the Manager to pair a device.',
+        'This address (null) is not a trusted Manager address. Set MANAGER_PUBLIC_URL to it or add it to AUTH_TRUSTED_ORIGINS, then restart the Manager to pair a device.',
     })
   })
 
@@ -66,13 +66,55 @@ describe('resolveDevicePairingAvailability', () => {
   })
 
   it('rejects a trusted origin that is not an http url', () => {
-    const options = { trustedOrigins: ['ocm://link'], isDevelopment: false }
+    const options = { trustedOrigins: ['ocm://link'], isDevelopment: false, publicOrigin: null }
 
     expect(resolveDevicePairingAvailability('ocm://link', options)).toEqual({
       available: false,
       reason: 'untrusted-origin',
       message:
-        'This address (ocm://link) is not in AUTH_TRUSTED_ORIGINS. Add it and restart the Manager to pair a device.',
+        'This address (ocm://link) is not a trusted Manager address. Set MANAGER_PUBLIC_URL to it or add it to AUTH_TRUSTED_ORIGINS, then restart the Manager to pair a device.',
+    })
+  })
+
+  it('uses the configured public origin for the link', () => {
+    expect(
+      resolveDevicePairingAvailability('http://localhost:5173', {
+        ...production,
+        publicOrigin: 'https://m.example.com',
+      }),
+    ).toEqual({
+      available: true,
+      reason: null,
+      message: null,
+      originUrl: new URL('https://m.example.com'),
+    })
+  })
+
+  it('rejects an untrusted page origin even with a public origin configured', () => {
+    expect(
+      resolveDevicePairingAvailability('https://evil.example', {
+        ...production,
+        publicOrigin: 'https://m.example.com',
+      }),
+    ).toEqual({
+      available: false,
+      reason: 'untrusted-origin',
+      message:
+        'This address (https://evil.example) is not a trusted Manager address. Set MANAGER_PUBLIC_URL to it or add it to AUTH_TRUSTED_ORIGINS, then restart the Manager to pair a device.',
+    })
+  })
+
+  it('rejects a public plain http public origin', () => {
+    expect(
+      resolveDevicePairingAvailability('http://localhost:5173', {
+        ...production,
+        publicOrigin: 'http://203.0.113.5:5003',
+      }),
+    ).toEqual({
+      available: false,
+      reason: 'insecure-origin',
+      message:
+        'Pairing needs HTTPS on a public address. Serve the Manager over HTTPS, or open it at a private network address.',
     })
   })
 })

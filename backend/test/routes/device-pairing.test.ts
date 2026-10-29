@@ -40,9 +40,9 @@ const TRUSTED_ORIGINS = [
 ]
 
 const MISSING_ORIGIN_ERROR =
-  'The request had no Origin header. Open the Manager at an address listed in AUTH_TRUSTED_ORIGINS to pair a device.'
+  'The request had no Origin header. Open the Manager at MANAGER_PUBLIC_URL or an address listed in AUTH_TRUSTED_ORIGINS to pair a device.'
 const untrustedOriginError = (origin: string) =>
-  `This address (${origin}) is not in AUTH_TRUSTED_ORIGINS. Add it and restart the Manager to pair a device.`
+  `This address (${origin}) is not a trusted Manager address. Set MANAGER_PUBLIC_URL to it or add it to AUTH_TRUSTED_ORIGINS, then restart the Manager to pair a device.`
 const LOOPBACK_ORIGIN_ERROR =
   'This page is open on localhost, which other devices cannot reach. Open the Manager at its public or LAN address to pair a device.'
 const INSECURE_ORIGIN_ERROR =
@@ -73,11 +73,13 @@ describe('device pairing link routes', () => {
   let mintPairingCode: ReturnType<typeof createMintPairingCode>
   let allowPrivateNetwork: boolean
   let development: boolean
+  let publicOrigin: string | null
   let app: Hono
 
   beforeEach(() => {
     allowPrivateNetwork = false
     development = false
+    publicOrigin = null
     db = createTestDb()
     remoteAccessHeaders = new RemoteAccessHeadersService(db)
     remoteAccessHeaders.replace({ headers: CLOUDFLARE_HEADERS })
@@ -91,6 +93,7 @@ describe('device pairing link routes', () => {
         readAllowPrivateNetworkHttp: () => allowPrivateNetwork,
         resolveTrustedOrigins: () => TRUSTED_ORIGINS,
         isDevelopment: () => development,
+        resolvePublicOrigin: () => publicOrigin,
       }),
     )
   })
@@ -181,6 +184,30 @@ describe('device pairing link routes', () => {
     const forwardedHeaders = mintPairingCode.mock.calls[0]?.[0]
     expect(forwardedHeaders).toBeInstanceOf(Headers)
     expect(forwardedHeaders?.get('cookie')).toBe(COOKIE_HEADER)
+  })
+
+  it('builds links on the public address from a trusted localhost page', async () => {
+    publicOrigin = 'https://m.example.com'
+    development = false
+
+    const res = await postLinks('http://localhost:5173')
+
+    expect(res.status).toBe(200)
+    const body = await readLinksBody(res)
+
+    expect(parseManagerAppLink(body.appLink ?? '')).toMatchObject({
+      kind: 'manager',
+      name: 'm.example.com',
+      baseUrl: 'https://m.example.com',
+      code: CODE,
+      headers: CLOUDFLARE_HEADERS,
+    })
+    expect(body.appLink).toContain('url=https%3A%2F%2Fm.example.com')
+    expect(body.browserLink).toBe(buildManagerBrowserPairingLink('https://m.example.com', CODE))
+    expect(body.browserLink.startsWith('https://m.example.com/pair#c=')).toBe(true)
+    expect(body.appLinkBlockedReason).toBeNull()
+    expect(body.warnings).toEqual([])
+    expect(mintPairingCode).toHaveBeenCalledTimes(1)
   })
 
   it('uses the supplied device name in the app link', async () => {
@@ -293,6 +320,21 @@ describe('device pairing link routes', () => {
 
       expect(res.status).toBe(200)
       expect(res.headers.get('Cache-Control')).toBe('no-store')
+      await expect(readAvailabilityBody(res)).resolves.toEqual({
+        available: true,
+        reason: null,
+        message: null,
+      })
+      expect(mintPairingCode).not.toHaveBeenCalled()
+    })
+
+    it('reports a trusted localhost page available when a public origin is configured', async () => {
+      publicOrigin = 'https://m.example.com'
+      development = false
+
+      const res = await getAvailability('http://localhost:5173')
+
+      expect(res.status).toBe(200)
       await expect(readAvailabilityBody(res)).resolves.toEqual({
         available: true,
         reason: null,
