@@ -1178,7 +1178,7 @@ describe('EventProvider permissions and forms', () => {
     })
   })
 
-  it('invalidates the location catalog caches on an upstream resync', async () => {
+  it('invalidates the location catalog and provider integration caches on an upstream resync', async () => {
     const queryClient = createTestQueryClient()
     const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
 
@@ -1199,10 +1199,11 @@ describe('EventProvider permissions and forms', () => {
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'agents'] })
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'skills'] })
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'providers'] })
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['provider-integrations'] })
     })
   })
 
-  it('invalidates the location catalog caches when the browser stream reconnects', async () => {
+  it('invalidates the location catalog and provider integration caches when the browser stream reconnects', async () => {
     const queryClient = createTestQueryClient()
     const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
 
@@ -1224,10 +1225,11 @@ describe('EventProvider permissions and forms', () => {
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'agents'] })
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'skills'] })
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'providers'] })
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['provider-integrations'] })
     })
   })
 
-  it('invalidates both config caches on config.updated', async () => {
+  it('invalidates config and provider integration caches on config.updated', async () => {
     const queryClient = createTestQueryClient()
     const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
 
@@ -1246,6 +1248,7 @@ describe('EventProvider permissions and forms', () => {
     await waitFor(() => {
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'config'] })
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode-config'] })
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['provider-integrations'] })
     })
   })
 
