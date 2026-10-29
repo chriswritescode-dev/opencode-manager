@@ -76,7 +76,11 @@ function buildProviderEntries(
   }
 
   const integrationOnly = (integrations ?? [])
-    .filter((integration) => !seen.has(integration.id) && supportsSettingsAuthentication(integration.methods))
+    .filter(
+      (integration) =>
+        !seen.has(integration.id) &&
+        (supportsSettingsAuthentication(integration.methods) || hasCredentialConnection(integration)),
+    )
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((integration): ProviderEntry => ({
       id: integration.id,
