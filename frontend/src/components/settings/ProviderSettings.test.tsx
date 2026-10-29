@@ -441,10 +441,11 @@ describe('ProviderSettings', () => {
     expect(screen.getByRole('button', { name: /Available Providers/ })).toHaveTextContent('0')
   })
 
-  it('does not offer API-key actions for catalog providers without a key method', async () => {
+  it('keeps connected non-key providers visible without exposing API-key edit actions', async () => {
     vi.mocked(getProviders).mockResolvedValue({
       providers: [
         providerFixture('command-only', 'Command Only', 1),
+        providerFixture('command-connected', 'Connected Command Only', 1),
         providerFixture('env-only', 'Environment Only', 1),
         providerFixture('empty-methods', 'No Auth Methods', 1),
       ],
@@ -452,14 +453,21 @@ describe('ProviderSettings', () => {
     })
     vi.mocked(oauthApi.getIntegrations).mockResolvedValue([
       integrationFixture('command-only', 'Command Only', [commandMethod]),
+      integrationFixture('command-connected', 'Connected Command Only', [commandMethod], true),
       integrationFixture('env-only', 'Environment Only', [envMethod]),
       integrationFixture('empty-methods', 'No Auth Methods', []),
     ])
+    const user = userEvent.setup()
     renderSettings()
 
     expect(await screen.findByRole('button', { name: /Available Providers/ })).toHaveTextContent('0')
     expect(screen.getByText('No available providers.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Add Key' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /Connected/ }))
+    const connectedCard = screen.getByText('Connected Command Only').closest('.bg-card') as HTMLElement
+    expect(within(connectedCard).getByRole('button', { name: 'Remove credentials for Connected Command Only' })).toBeInTheDocument()
+    expect(within(connectedCard).queryByRole('button', { name: 'Edit API key for Connected Command Only' })).not.toBeInTheDocument()
   })
 
   it('shows an integration-list error instead of guessing connection status', async () => {
