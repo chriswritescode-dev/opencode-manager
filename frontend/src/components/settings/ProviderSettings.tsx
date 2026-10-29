@@ -32,6 +32,10 @@ function supportsOAuthMethods(methods: IntegrationMethod[]): boolean {
   return methods.some((method) => method.type === 'oauth')
 }
 
+function supportsSettingsAuthentication(methods: IntegrationMethod[]): boolean {
+  return methods.some((method) => method.type === 'oauth' || method.type === 'key')
+}
+
 function buildProviderEntries(
   providers: Provider[] | undefined,
   integrations: IntegrationInfo[] | undefined,
@@ -53,7 +57,7 @@ function buildProviderEntries(
   }
 
   const integrationOnly = (integrations ?? [])
-    .filter((integration) => !seen.has(integration.id) && integration.methods.length > 0)
+    .filter((integration) => !seen.has(integration.id) && supportsSettingsAuthentication(integration.methods))
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((integration): ProviderEntry => ({
       id: integration.id,
@@ -84,11 +88,15 @@ export function ProviderSettings() {
 
   const providers = providersData?.providers
 
-  const { data: integrations, isLoading: integrationsLoading } = useProviderIntegrations()
+  const {
+    data: integrations,
+    isLoading: integrationsLoading,
+    isError: integrationsError,
+  } = useProviderIntegrations()
 
   const providerEntries = useMemo(
-    () => buildProviderEntries(providers, integrations),
-    [providers, integrations],
+    () => integrationsError ? [] : buildProviderEntries(providers, integrations),
+    [providers, integrations, integrationsError],
   )
 
   const deleteCredentialMutation = useMutation({
@@ -188,6 +196,17 @@ export function ProviderSettings() {
       setApiKeyProvider(null)
     }
   }, [])
+
+  if (integrationsError) {
+    return (
+      <div role="alert" className="rounded-md border border-destructive/50 bg-card p-4">
+        <p className="text-sm font-medium text-foreground">Unable to load provider integrations.</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Provider connection status and available authentication methods could not be verified. Reload the settings page to try again.
+        </p>
+      </div>
+    )
+  }
 
   if (providersLoading || integrationsLoading) {
     return (
