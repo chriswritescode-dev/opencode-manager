@@ -106,19 +106,27 @@ const apiKeyProviderWithoutKey = providerFixture('together', 'Together AI', 4)
 
 const oauthMethod: IntegrationMethod = { id: 'oauth', type: 'oauth', label: 'OAuth' }
 const keyMethod: IntegrationMethod = { type: 'key', label: 'API key' }
+const commandMethod: IntegrationMethod = {
+  id: 'command',
+  type: 'command',
+  label: 'Command',
+  command: ['example-command'],
+}
+const envMethod: IntegrationMethod = { type: 'env', names: ['ENV_ONLY_API_KEY'] }
 
 function integrationFixture(
   id: string,
   name: string,
   methods: IntegrationMethod[],
   connected = false,
+  connectionMethod: 'key' | 'oauth' = 'key',
 ): IntegrationInfo {
   return {
     id,
     name,
     methods,
     connections: connected
-      ? [{ type: 'credential', id: `cred_${id}`, label: name, method: 'key' }]
+      ? [{ type: 'credential', id: `cred_${id}`, label: name, method: connectionMethod }]
       : [],
   }
 }
@@ -342,6 +350,68 @@ describe('ProviderSettings', () => {
     expect(screen.queryByText('catalog-anthropic')).not.toBeInTheDocument()
   })
 
+  it('groups catalog providers that share an integration and combines their models', async () => {
+    vi.mocked(getProviders).mockResolvedValue({
+      providers: [
+        providerFixture('catalog-one', 'Catalog One', 2, 'shared-integration'),
+        providerFixture('catalog-two', 'Catalog Two', 3, 'shared-integration'),
+      ],
+      models: [],
+    })
+    vi.mocked(oauthApi.getIntegrations).mockResolvedValue([
+      integrationFixture('shared-integration', 'Shared Integration', [oauthMethod]),
+    ])
+    const user = userEvent.setup()
+    renderSettings()
+
+    await screen.findByText('Shared Integration')
+
+    expect(screen.getAllByText('Shared Integration')).toHaveLength(1)
+    expect(screen.getByText('5 models')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+    expect(screen.getByTestId('oauth-authorize-dialog')).toHaveTextContent('shared-integration')
+  })
+
+  it('offers an API-key action for mixed-method integrations even when connected with OAuth', async () => {
+    vi.mocked(getProviders).mockResolvedValue({
+      providers: [providerFixture('anthropic', 'Anthropic', 2)],
+      models: [],
+    })
+    vi.mocked(oauthApi.getIntegrations).mockResolvedValue([
+      integrationFixture('anthropic', 'Anthropic', [oauthMethod, keyMethod], true, 'oauth'),
+    ])
+    const user = userEvent.setup()
+    renderSettings()
+
+    await screen.findByText('Anthropic')
+    const row = screen.getByText('Anthropic').closest('.py-3') as HTMLElement
+
+    expect(within(row).getByRole('button', { name: 'Reconnect' })).toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: 'Add API key for Anthropic' })).toBeInTheDocument()
+
+    await user.click(within(row).getByRole('button', { name: 'Add API key for Anthropic' }))
+    expect(screen.getByTestId('api-key-dialog')).toHaveAttribute('data-mode', 'add')
+  })
+
+  it('uses key-specific connection state for mixed-method integration actions', async () => {
+    vi.mocked(getProviders).mockResolvedValue({
+      providers: [providerFixture('anthropic', 'Anthropic', 2)],
+      models: [],
+    })
+    vi.mocked(oauthApi.getIntegrations).mockResolvedValue([
+      integrationFixture('anthropic', 'Anthropic', [oauthMethod, keyMethod], true, 'key'),
+    ])
+    const user = userEvent.setup()
+    renderSettings()
+
+    await screen.findByText('Anthropic')
+    const row = screen.getByText('Anthropic').closest('.py-3') as HTMLElement
+
+    await user.click(within(row).getByRole('button', { name: 'Edit API key for Anthropic' }))
+    expect(screen.getByTestId('api-key-dialog')).toHaveAttribute('data-mode', 'edit')
+  })
+
   it('lists OAuth integrations that are not in the active catalog', async () => {
     vi.mocked(getProviders).mockResolvedValue({ providers: [], models: [] })
     vi.mocked(oauthApi.getIntegrations).mockResolvedValue([
@@ -356,12 +426,8 @@ describe('ProviderSettings', () => {
   it('does not list integration-only entries without OAuth or API-key methods', async () => {
     vi.mocked(getProviders).mockResolvedValue({ providers: [], models: [] })
     vi.mocked(oauthApi.getIntegrations).mockResolvedValue([
-      integrationFixture('command-only', 'Command Only', [
-        { type: 'command', label: 'Command' } as IntegrationMethod,
-      ]),
-      integrationFixture('env-only', 'Environment Only', [
-        { type: 'env', label: 'Environment' } as IntegrationMethod,
-      ]),
+      integrationFixture('command-only', 'Command Only', [commandMethod]),
+      integrationFixture('env-only', 'Environment Only', [envMethod]),
     ])
     renderSettings()
 
