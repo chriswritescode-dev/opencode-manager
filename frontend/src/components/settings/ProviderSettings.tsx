@@ -22,10 +22,17 @@ interface ProviderEntry {
   models: Provider['models']
   methods: IntegrationMethod[]
   connected: boolean
+  keyConnected: boolean
 }
 
 function hasCredentialConnection(integration: IntegrationInfo): boolean {
   return integration.connections.some((connection) => connection.type === 'credential')
+}
+
+function hasKeyConnection(integration: IntegrationInfo): boolean {
+  return integration.connections.some(
+    (connection) => connection.type === 'credential' && connection.method === 'key',
+  )
 }
 
 function supportsOAuthMethods(methods: IntegrationMethod[]): boolean {
@@ -42,19 +49,30 @@ function buildProviderEntries(
 ): ProviderEntry[] {
   const integrationsByID = new Map((integrations ?? []).map((integration) => [integration.id, integration]))
   const seen = new Set<string>()
+  const entriesByID = new Map<string, ProviderEntry>()
   const entries: ProviderEntry[] = []
 
   for (const provider of providers ?? []) {
     const integrationID = provider.integrationID ?? provider.id
     const integration = integrationsByID.get(integrationID)
     seen.add(integrationID)
-    entries.push({
+
+    const existingEntry = entriesByID.get(integrationID)
+    if (existingEntry) {
+      existingEntry.models.push(...provider.models)
+      continue
+    }
+
+    const entry: ProviderEntry = {
       id: integrationID,
       name: integration?.name || provider.name || provider.id,
-      models: provider.models,
+      models: [...provider.models],
       methods: integration?.methods ?? [],
       connected: integration ? hasCredentialConnection(integration) : false,
-    })
+      keyConnected: integration ? hasKeyConnection(integration) : false,
+    }
+    entriesByID.set(integrationID, entry)
+    entries.push(entry)
   }
 
   const integrationOnly = (integrations ?? [])
@@ -66,6 +84,7 @@ function buildProviderEntries(
       models: [],
       methods: integration.methods,
       connected: hasCredentialConnection(integration),
+      keyConnected: hasKeyConnection(integration),
     }))
 
   return [...entries, ...integrationOnly]
@@ -239,7 +258,8 @@ export function ProviderSettings() {
         ) : (
           <div className="divide-y divide-border">
             {oauthProviders.map((provider) => {
-              const hasKey = provider.connected
+              const isConnected = provider.connected
+              const keyConnected = provider.keyConnected
               const modelCount = provider.models.length
 
               return (
@@ -255,7 +275,7 @@ export function ProviderSettings() {
                     )}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    {hasKey ? (
+                    {isConnected ? (
                       <Badge variant="default" className="bg-success text-success-foreground hover:bg-success/90 shrink-0">
                         <Check className="h-3 w-3 mr-1" />
                         Connected
@@ -268,16 +288,27 @@ export function ProviderSettings() {
                     )}
                     <Button
                       size="sm"
-                      variant={hasKey ? 'outline' : 'default'}
+                      variant={isConnected ? 'outline' : 'default'}
                       onClick={() => {
                         setSelectedProvider(provider.id)
                         setOauthDialogOpen(true)
                       }}
                     >
                       <Shield className="h-4 w-4 mr-1" />
-                      {hasKey ? 'Reconnect' : 'Connect'}
+                      {isConnected ? 'Reconnect' : 'Connect'}
                     </Button>
-                    {hasKey && (
+                    {provider.methods.some((method) => method.type === 'key') && (
+                      <Button
+                        size="sm"
+                        variant={keyConnected ? 'outline' : 'secondary'}
+                        onClick={() => keyConnected ? handleEditApiKey(provider) : handleAddApiKey(provider)}
+                        aria-label={`${keyConnected ? 'Edit API key for' : 'Add API key for'} ${provider.name || provider.id}`}
+                      >
+                        <Key className="h-4 w-4 mr-1" />
+                        {keyConnected ? 'Edit Key' : 'Add Key'}
+                      </Button>
+                    )}
+                    {isConnected && (
                       <Button
                         size="sm"
                         variant="destructive"
