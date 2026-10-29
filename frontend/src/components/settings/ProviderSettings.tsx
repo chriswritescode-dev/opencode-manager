@@ -45,10 +45,11 @@ function buildProviderEntries(
   const entries: ProviderEntry[] = []
 
   for (const provider of providers ?? []) {
-    const integration = integrationsByID.get(provider.id)
-    seen.add(provider.id)
+    const integrationID = provider.integrationID ?? provider.id
+    const integration = integrationsByID.get(integrationID)
+    seen.add(integrationID)
     entries.push({
-      id: provider.id,
+      id: integrationID,
       name: integration?.name || provider.name || provider.id,
       models: provider.models,
       methods: integration?.methods ?? [],
