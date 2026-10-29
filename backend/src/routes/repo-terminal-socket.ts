@@ -2,11 +2,11 @@ import { Hono } from 'hono'
 import type { MiddlewareHandler } from 'hono'
 import type { Database } from 'bun:sqlite'
 import type { UpgradeWebSocket } from 'hono/ws'
-import { getTrustedOrigins } from '@opencode-manager/shared/config/env'
+import { getTrustedOrigins, isTrustedOrigin } from '@opencode-manager/shared/config/env'
 import type { GitAuthService } from '../services/git-auth'
 import type { OpenCodeClient } from '../services/opencode/client'
 import type { TerminalService } from '../services/terminal'
-import { createBridgedSocketEvents, isAllowedUpgradeOrigin } from '../utils/websocket-bridge'
+import { createBridgedSocketEvents } from '../utils/websocket-bridge'
 import { parseTerminalCursor } from '../utils/terminal-cursor'
 import { resolveRepoRequestDirectory } from './repo-directory'
 import type { Session } from '../auth'
@@ -29,7 +29,7 @@ export function createRepoTerminalSocketRoutes(
   const deps = { database, gitAuthService, openCodeClient }
 
   const validate: MiddlewareHandler<{ Variables: RepoTerminalSocketVariables }> = async (c, next) => {
-    if (!isAllowedUpgradeOrigin(c.req.header('origin'), trustedOrigins)) {
+    if (!isTrustedOrigin(c.req.header('origin'), {}, trustedOrigins)) {
       return c.json({ error: 'Origin not allowed' }, 403)
     }
 

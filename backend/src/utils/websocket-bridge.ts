@@ -57,15 +57,6 @@ export function toWebSocketPeer(ws: WSContext): WebSocketPeer {
   }
 }
 
-export function isAllowedUpgradeOrigin(
-  origin: string | undefined,
-  trustedOrigins: readonly string[],
-): boolean {
-  if (origin === undefined) return true
-  if (origin === 'null') return false
-  return trustedOrigins.includes(origin)
-}
-
 function truncateCloseReason(message: string): string {
   const bytes = Buffer.from(message, 'utf8')
   if (bytes.length <= MAX_CLOSE_REASON_BYTES) return message

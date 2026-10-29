@@ -13,13 +13,12 @@ import {
   withDefaultOpenCodeDirectory,
 } from '../services/opencode/upstream'
 import { getRepoById } from '../db/queries'
-import { getTrustedOrigins, getWorkspacePath } from '@opencode-manager/shared/config/env'
+import { getTrustedOrigins, getWorkspacePath, isTrustedOrigin } from '@opencode-manager/shared/config/env'
 import { isPathWithinRoot } from '../utils/fs-safe'
 import { buildProxyResponseHeaders, filterProxyHeaders } from '../utils/proxy-headers'
 import {
   connectUpstreamWebSocket,
   createBridgedSocketEvents,
-  isAllowedUpgradeOrigin,
   type PendingUpstream,
 } from '../utils/websocket-bridge'
 
@@ -128,7 +127,7 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
       return c.json({ error: 'OpenCode lifecycle initialization is incomplete; refusing to proxy to an unmanaged server' }, 503)
     }
 
-    if (!isAllowedUpgradeOrigin(c.req.header('origin'), getTrustedOrigins())) {
+    if (!isTrustedOrigin(c.req.header('origin'), {}, getTrustedOrigins())) {
       return c.json({ error: 'Origin not allowed' }, 403)
     }
 

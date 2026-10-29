@@ -1,5 +1,5 @@
 import { createMiddleware } from 'hono/factory'
-import { getTrustedOrigins } from '@opencode-manager/shared/config/env'
+import { getTrustedOrigins, isTrustedOrigin } from '@opencode-manager/shared/config/env'
 import type { AuthInstance, Session } from './index'
 import { logger } from '../utils/logger'
 
@@ -23,7 +23,7 @@ export function createAuthMiddleware(
       UNSAFE_METHODS.has(c.req.method) &&
       fetchSite !== undefined &&
       UNTRUSTED_FETCH_SITES.has(fetchSite) &&
-      (!origin || !resolveTrustedOrigins().includes(origin))
+      !isTrustedOrigin(origin, { requireOrigin: true }, resolveTrustedOrigins())
     ) {
       logger.warn(`Rejected cross-site request - Path: ${c.req.path}, Method: ${c.req.method}, Origin: ${origin ?? 'none'}`)
       return c.json({ error: 'Cross-site request rejected' }, 403)

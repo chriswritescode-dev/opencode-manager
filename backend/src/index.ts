@@ -100,6 +100,7 @@ import {
   getDatabasePath,
   getTrustedOrigins,
   getManagerPublicUrlError,
+  isTrustedOrigin,
   ENV
 } from '@opencode-manager/shared/config/env'
 import { LOCAL_OPENCODE_SERVER_ID, NotificationEventType } from '@opencode-manager/shared/schemas'
@@ -124,9 +125,7 @@ app.use('/*', cors({
       return origin
     }
     const trustedOrigins = getTrustedOrigins()
-    if (!origin) return trustedOrigins[0]
-    if (trustedOrigins.includes(origin)) return origin
-    return trustedOrigins[0]
+    return origin && isTrustedOrigin(origin, {}, trustedOrigins) ? origin : trustedOrigins[0]
   },
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'CF-Access-Client-Id', 'CF-Access-Client-Secret'],

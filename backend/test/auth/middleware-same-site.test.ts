@@ -148,6 +148,19 @@ describe('createAuthMiddleware same-site guard', () => {
     expect(getSession).not.toHaveBeenCalled()
   })
 
+  it('rejects an unsafe same-site request with a null origin even when null is listed as trusted', async () => {
+    const app = createApp(getSession, ['null', TRUSTED_ORIGIN])
+
+    const res = await app.request('/', {
+      method: 'POST',
+      headers: { 'sec-fetch-site': 'same-site', origin: 'null', cookie: 'opencode.session=valid' },
+    })
+
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ error: 'Cross-site request rejected' })
+    expect(getSession).not.toHaveBeenCalled()
+  })
+
   it('does not log cookie names or values during the auth check', async () => {
     const app = createApp(getSession)
 

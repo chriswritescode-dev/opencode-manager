@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import type { Context, MiddlewareHandler } from 'hono'
 import type { UpgradeWebSocket } from 'hono/ws'
-import { getTrustedOrigins } from '@opencode-manager/shared/config/env'
+import { getTrustedOrigins, isTrustedOrigin } from '@opencode-manager/shared/config/env'
 import {
   CreateTerminalRequestSchema,
   LOCAL_OPENCODE_SERVER_ID,
@@ -10,7 +10,7 @@ import {
 import { OpenCodeServerError } from '../services/opencode-server-registry'
 import { TerminalNotFoundError, type TerminalService } from '../services/terminal'
 import { parseTerminalCursor } from '../utils/terminal-cursor'
-import { createBridgedSocketEvents, isAllowedUpgradeOrigin } from '../utils/websocket-bridge'
+import { createBridgedSocketEvents } from '../utils/websocket-bridge'
 import { handleOpenCodeError, handleServiceError, parseJsonBody } from '../utils/route-helpers'
 import type { Session } from '../auth'
 
@@ -147,7 +147,7 @@ export function createOpenCodeServerTerminalSocketRoutes(
   const app = new Hono<{ Variables: ServerTerminalSocketVariables }>()
 
   const validate: MiddlewareHandler<{ Variables: ServerTerminalSocketVariables }> = async (c, next) => {
-    if (!isAllowedUpgradeOrigin(c.req.header('origin'), trustedOrigins)) {
+    if (!isTrustedOrigin(c.req.header('origin'), {}, trustedOrigins)) {
       return c.json({ error: 'Origin not allowed' }, 403)
     }
 

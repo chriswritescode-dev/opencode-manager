@@ -5,7 +5,6 @@ import {
   connectUpstreamWebSocket,
   createBridgedSocketEvents,
   forwardPeerMessage,
-  isAllowedUpgradeOrigin,
   toWebSocketPeer,
   MAX_PEER_BUFFERED_BYTES,
   MAX_UPSTREAM_BUFFERED_BYTES,
@@ -601,15 +600,6 @@ describe('toWebSocketPeer', () => {
     expect(ws.sent).toEqual(['data', new Uint8Array([1])])
     expect(ws.closeCalls).toEqual([{ code: 1000, reason: 'done' }])
     expect(peer.bufferedAmount()).toBe(42)
-  })
-})
-
-describe('isAllowedUpgradeOrigin', () => {
-  it('allows a missing origin, rejects null and otherwise checks the list', () => {
-    expect(isAllowedUpgradeOrigin(undefined, ['http://localhost:5003'])).toBe(true)
-    expect(isAllowedUpgradeOrigin('null', ['http://localhost:5003'])).toBe(false)
-    expect(isAllowedUpgradeOrigin('http://localhost:5003', ['http://localhost:5003'])).toBe(true)
-    expect(isAllowedUpgradeOrigin('http://localhost:5004', ['http://localhost:5003'])).toBe(false)
   })
 })
 
