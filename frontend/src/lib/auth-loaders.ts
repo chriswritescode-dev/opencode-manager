@@ -7,6 +7,7 @@ export interface AuthConfig {
   registrationEnabled: boolean
   isFirstUser: boolean
   adminConfigured: boolean
+  originTrusted?: boolean
 }
 
 const DEFAULT_REDIRECT_TARGET = '/'

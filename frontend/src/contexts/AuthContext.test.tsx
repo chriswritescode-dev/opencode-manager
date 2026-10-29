@@ -269,6 +269,14 @@ describe('AuthProvider session restore', () => {
     }))
   })
 
+  it('asks the config endpoint about the current origin', async () => {
+    renderAuth('/login')
+
+    await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+      `/api/auth-info/config?origin=${encodeURIComponent(window.location.origin)}`,
+    ))
+  })
+
   it('stores the validated user for the next cold start', async () => {
     mocks.useSession.mockReturnValue({
       data: { user: STORED_USER },

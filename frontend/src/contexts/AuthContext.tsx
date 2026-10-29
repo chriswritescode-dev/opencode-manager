@@ -5,7 +5,7 @@ import { useSession, signIn, signUp, signOut, authClient } from '@/lib/auth-clie
 import { redeemDevicePairingCode } from '@/api/devicePairing'
 import { FetchError } from '@/api/fetchWrapper'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { getLoginRedirectTarget } from '@/lib/auth-loaders'
+import { getLoginRedirectTarget, type AuthConfig } from '@/lib/auth-loaders'
 import {
   STORED_AUTH_USER_KEY,
   clearStoredAuthUser,
@@ -16,13 +16,6 @@ import {
 
 const RATE_LIMITED_MESSAGE = 'Too many attempts. Wait a minute and try again.'
 const SIGN_IN_FAILED_MESSAGE = 'Sign-in failed'
-
-interface AuthConfig {
-  enabledProviders: string[]
-  registrationEnabled: boolean
-  isFirstUser: boolean
-  adminConfigured: boolean
-}
 
 interface AuthContextValue {
   user: StoredAuthUser | null
@@ -69,7 +62,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   useEffect(() => {
     const fetchConfig = async () => {
       try {
-        const response = await fetch('/api/auth-info/config')
+        const response = await fetch(`/api/auth-info/config?origin=${encodeURIComponent(window.location.origin)}`)
         if (response.ok) {
           const data = await response.json()
           setConfig(data)

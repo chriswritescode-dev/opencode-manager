@@ -2,7 +2,8 @@ import { Hono } from 'hono'
 import type { Database } from 'bun:sqlite'
 import { isAdminConfigured, type AuthInstance } from '../auth'
 import { applyClientIpHeaders, resolveSocketIp } from '../auth/client-ip'
-import { ENV } from '@opencode-manager/shared/config/env'
+import { ENV, getTrustedOrigins, isTrustedOrigin } from '@opencode-manager/shared/config/env'
+import { parseHttpUrl } from '@opencode-manager/shared/utils'
 import { logger } from '../utils/logger'
 import { deletePushSubscriptionsForSessions } from '../db/push-subscriptions'
 
@@ -85,13 +86,18 @@ export function createAuthInfoRoutes(auth: AuthInstance) {
 
     const userCount = await (await auth.$context).adapter.count({ model: 'user' })
     const adminConfigured = isAdminConfigured()
-    
-    return c.json({
+    const origin = parseHttpUrl(c.req.query('origin') ?? '')?.origin ?? null
+
+    const config = {
       enabledProviders,
       registrationEnabled: !adminConfigured,
       isFirstUser: userCount === 0,
       adminConfigured,
-    })
+    }
+
+    return c.json(origin === null
+      ? config
+      : { ...config, originTrusted: isTrustedOrigin(origin, { requireOrigin: true }, getTrustedOrigins()) })
   })
 
   app.get('/me', async (c) => {

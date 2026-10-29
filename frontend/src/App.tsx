@@ -19,6 +19,7 @@ import { AssistantRedirect } from './pages/AssistantRedirect'
 import { SettingsDialog } from './components/settings/SettingsDialog'
 import { VersionNotifier } from './components/VersionNotifier'
 import { PwaUpdatePrompt } from '@/components/PwaUpdatePrompt'
+import { UntrustedOriginBanner } from '@/components/UntrustedOriginBanner'
 import { MobileTabBar } from '@/components/navigation/MobileTabBar'
 import { MobileSheetHost } from '@/components/navigation/MobileSheetHost'
 import { RouteErrorBoundary } from '@/components/ui/route-error-boundary'
@@ -183,7 +184,12 @@ function RootLayout() {
         <ThemeProvider>
           <TTSProvider>
             <ThemedToaster />
-            <Outlet />
+            <div className="flex h-dvh min-h-0 w-full flex-col">
+              <UntrustedOriginBanner />
+              <div className="flex min-h-0 flex-1 flex-col">
+                <Outlet />
+              </div>
+            </div>
           </TTSProvider>
         </ThemeProvider>
       </QueryCachePersistenceProvider>
@@ -266,7 +272,7 @@ export function AppShell() {
           <GlobalShortcuts />
           <SidebarServerRouteSync />
           <PushSubscriptionSessionSync />
-          <div className="flex h-dvh w-full min-w-0 flex-col">
+          <div className="flex h-full w-full min-w-0 min-h-0 flex-col">
             <PwaUpdatePrompt />
             <div ref={rootRef} className="flex flex-1 min-h-0 w-full min-w-0">
               <DesktopSidebar />

@@ -28,13 +28,26 @@ const { ENV } = vi.hoisted(() => ({
   },
 }))
 
-vi.mock('@opencode-manager/shared/config/env', () => ({
-  ENV,
-  getTrustedOrigins: () => ENV.AUTH.TRUSTED_ORIGINS
+vi.mock('@opencode-manager/shared/config/env', () => {
+  const readTrustedOrigins = () => ENV.AUTH.TRUSTED_ORIGINS
     .split(',')
     .map((origin: string) => origin.trim())
-    .filter((origin: string) => origin.length > 0),
-}))
+    .filter((origin: string) => origin.length > 0)
+
+  return {
+    ENV,
+    getTrustedOrigins: readTrustedOrigins,
+    isTrustedOrigin: (
+      origin: string | undefined,
+      options: { requireOrigin?: boolean } = {},
+      trustedOrigins: readonly string[] = readTrustedOrigins(),
+    ) => {
+      if (!origin) return !(options.requireOrigin ?? false)
+      if (origin === 'null') return false
+      return trustedOrigins.includes(origin)
+    },
+  }
+})
 
 vi.mock('../../src/utils/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -450,6 +463,27 @@ describe('createAuthInfoRoutes /config', () => {
 
     expect(json.registrationEnabled).toBe(false)
     expect(json.adminConfigured).toBe(true)
+  })
+
+  it('reports a trusted origin', async () => {
+    const res = await app.fetch(new Request('http://localhost/config?origin=http%3A%2F%2Flocalhost%3A5173'))
+    const json = await res.json() as { originTrusted: boolean }
+
+    expect(json.originTrusted).toBe(true)
+  })
+
+  it('reports an untrusted origin', async () => {
+    const res = await app.fetch(new Request('http://localhost/config?origin=http%3A%2F%2Fevil.example'))
+    const json = await res.json() as { originTrusted: boolean }
+
+    expect(json.originTrusted).toBe(false)
+  })
+
+  it('omits the trust flag without an origin query', async () => {
+    const res = await app.fetch(new Request('http://localhost/config'))
+    const json = await res.json() as Record<string, unknown>
+
+    expect(json).not.toHaveProperty('originTrusted')
   })
 
   it('reports that it is not the first user once a user exists', async () => {
