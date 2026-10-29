@@ -166,7 +166,11 @@ export function ProviderSettings() {
   }, [providerEntries])
 
   const apiKeyProviders = useMemo(() => {
-    const nonOAuthProviders = providerEntries.filter((provider) => !supportsOAuthMethods(provider.methods))
+    const nonOAuthProviders = providerEntries.filter(
+      (provider) =>
+        !supportsOAuthMethods(provider.methods) &&
+        provider.methods.some((method) => method.type === 'key'),
+    )
     return {
       connected: nonOAuthProviders.filter((provider) => provider.connected),
       available: nonOAuthProviders.filter((provider) => !provider.connected),
