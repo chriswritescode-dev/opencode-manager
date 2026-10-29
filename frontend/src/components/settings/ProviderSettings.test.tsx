@@ -331,4 +331,32 @@ describe('ProviderSettings', () => {
     await screen.findByText('GitHub Copilot')
     expect(screen.getByRole('button', { name: 'Connect' })).toBeInTheDocument()
   })
+
+  it('does not list integration-only entries without OAuth or API-key methods', async () => {
+    vi.mocked(getProviders).mockResolvedValue({ providers: [], models: [] })
+    vi.mocked(oauthApi.getIntegrations).mockResolvedValue([
+      integrationFixture('command-only', 'Command Only', [
+        { type: 'command', label: 'Command' } as IntegrationMethod,
+      ]),
+      integrationFixture('env-only', 'Environment Only', [
+        { type: 'env', label: 'Environment' } as IntegrationMethod,
+      ]),
+    ])
+    renderSettings()
+
+    await screen.findByText('No OAuth-capable providers available.')
+
+    expect(screen.queryByText('Command Only')).not.toBeInTheDocument()
+    expect(screen.queryByText('Environment Only')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Available Providers/ })).toHaveTextContent('0')
+  })
+
+  it('shows an integration-list error instead of guessing connection status', async () => {
+    vi.mocked(oauthApi.getIntegrations).mockRejectedValue(new Error('Server unavailable'))
+    renderSettings()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load provider integrations.')
+    expect(screen.queryByText('Anthropic')).not.toBeInTheDocument()
+    expect(screen.queryByText('No OAuth-capable providers available.')).not.toBeInTheDocument()
+  })
 })
