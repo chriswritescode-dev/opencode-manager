@@ -7,14 +7,64 @@ import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { Loader2, Check, X, Shield, ChevronDown, ChevronRight, Key, Search, Pencil, Trash2 } from 'lucide-react'
 import { providerCredentialsApi } from '@/api/providers'
 import type { Provider } from '@/api/providers'
-import { type OAuthAuthorizeResponse } from '@/api/oauth'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { type IntegrationInfo, type IntegrationMethod, type OAuthAuthorizeResponse } from '@/api/oauth'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { OAuthAuthorizeDialog } from './OAuthAuthorizeDialog'
 import { OAuthCallbackDialog } from './OAuthCallbackDialog'
 import { ApiKeyDialog } from '@/components/model/ApiKeyDialog'
 import { invalidateProviderCaches } from '@/lib/queryInvalidation'
 import { useProviders } from '@/hooks/useProviders'
-import { useProviderAuthMethods } from '@/hooks/useProviderAuthMethods'
+import { useProviderIntegrations } from '@/hooks/useProviderIntegrations'
+
+interface ProviderEntry {
+  id: string
+  name: string
+  models: Provider['models']
+  methods: IntegrationMethod[]
+  connected: boolean
+}
+
+function hasCredentialConnection(integration: IntegrationInfo): boolean {
+  return integration.connections.some((connection) => connection.type === 'credential')
+}
+
+function supportsOAuthMethods(methods: IntegrationMethod[]): boolean {
+  return methods.some((method) => method.type === 'oauth')
+}
+
+function buildProviderEntries(
+  providers: Provider[] | undefined,
+  integrations: IntegrationInfo[] | undefined,
+): ProviderEntry[] {
+  const integrationsByID = new Map((integrations ?? []).map((integration) => [integration.id, integration]))
+  const seen = new Set<string>()
+  const entries: ProviderEntry[] = []
+
+  for (const provider of providers ?? []) {
+    const integration = integrationsByID.get(provider.id)
+    seen.add(provider.id)
+    entries.push({
+      id: provider.id,
+      name: integration?.name || provider.name || provider.id,
+      models: provider.models,
+      methods: integration?.methods ?? [],
+      connected: integration ? hasCredentialConnection(integration) : false,
+    })
+  }
+
+  const integrationOnly = (integrations ?? [])
+    .filter((integration) => !seen.has(integration.id) && integration.methods.length > 0)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((integration): ProviderEntry => ({
+      id: integration.id,
+      name: integration.name || integration.id,
+      models: [],
+      methods: integration.methods,
+      connected: hasCredentialConnection(integration),
+    }))
+
+  return [...entries, ...integrationOnly]
+}
 
 export function ProviderSettings() {
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null)
@@ -34,12 +84,12 @@ export function ProviderSettings() {
 
   const providers = providersData?.providers
 
-  const { data: credentialsList, isLoading: credentialsLoading } = useQuery({
-    queryKey: ['provider-credentials'],
-    queryFn: () => providerCredentialsApi.list(),
-  })
+  const { data: integrations, isLoading: integrationsLoading } = useProviderIntegrations()
 
-  const { data: authMethods } = useProviderAuthMethods()
+  const providerEntries = useMemo(
+    () => buildProviderEntries(providers, integrations),
+    [providers, integrations],
+  )
 
   const deleteCredentialMutation = useMutation({
     mutationFn: (providerId: string) => providerCredentialsApi.delete(providerId),
@@ -81,32 +131,19 @@ export function ProviderSettings() {
     setSelectedProvider(null)
   }
 
-  const supportsOAuth = useCallback((providerId: string) => {
-    const methods = authMethods?.[providerId] || []
-    return methods.some(method => method.type === 'oauth')
-  }, [authMethods])
-
-  const hasCredentials = useCallback((providerId: string) => {
-    return credentialsList?.includes(providerId) || false
-  }, [credentialsList])
-
   const oauthProviders = useMemo(() => {
-    if (!providers || !authMethods) return []
-    const oauth = providers.filter(provider => supportsOAuth(provider.id))
-    return oauth.slice().sort((a, b) => {
-      const aConnected = hasCredentials(a.id) ? 1 : 0
-      const bConnected = hasCredentials(b.id) ? 1 : 0
-      return bConnected - aConnected
-    })
-  }, [providers, authMethods, supportsOAuth, hasCredentials])
+    return providerEntries
+      .filter((provider) => supportsOAuthMethods(provider.methods))
+      .sort((a, b) => Number(b.connected) - Number(a.connected))
+  }, [providerEntries])
 
   const apiKeyProviders = useMemo(() => {
-    if (!providers || !authMethods) return { connected: [], available: [] }
-    const nonOAuthProviders = providers.filter(provider => !supportsOAuth(provider.id))
-    const connected = nonOAuthProviders.filter(provider => hasCredentials(provider.id))
-    const available = nonOAuthProviders.filter(provider => !hasCredentials(provider.id))
-    return { connected, available }
-  }, [providers, authMethods, supportsOAuth, hasCredentials])
+    const nonOAuthProviders = providerEntries.filter((provider) => !supportsOAuthMethods(provider.methods))
+    return {
+      connected: nonOAuthProviders.filter((provider) => provider.connected),
+      available: nonOAuthProviders.filter((provider) => !provider.connected),
+    }
+  }, [providerEntries])
 
   const filteredAvailableProviders = useMemo(() => {
     if (!availableSearch.trim()) return apiKeyProviders.available
@@ -119,8 +156,13 @@ export function ProviderSettings() {
 
   const selectedProviderName = useMemo(() => {
     if (!selectedProvider) return ''
-    return providers?.find(p => p.id === selectedProvider)?.name || selectedProvider
-  }, [selectedProvider, providers])
+    return providerEntries.find((provider) => provider.id === selectedProvider)?.name || selectedProvider
+  }, [selectedProvider, providerEntries])
+
+  const selectedProviderMethods = useMemo(() => {
+    if (!selectedProvider) return []
+    return providerEntries.find((provider) => provider.id === selectedProvider)?.methods ?? []
+  }, [selectedProvider, providerEntries])
 
   const handleAddApiKey = useCallback((provider: Provider) => {
     setApiKeyProvider(provider)
@@ -147,7 +189,7 @@ export function ProviderSettings() {
     }
   }, [])
 
-  if (providersLoading || credentialsLoading) {
+  if (providersLoading || integrationsLoading) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -177,7 +219,7 @@ export function ProviderSettings() {
         ) : (
           <div className="divide-y divide-border">
             {oauthProviders.map((provider) => {
-              const hasKey = hasCredentials(provider.id)
+              const hasKey = provider.connected
               const modelCount = provider.models.length
 
               return (
@@ -236,7 +278,7 @@ export function ProviderSettings() {
           <OAuthAuthorizeDialog
             providerId={selectedProvider}
             providerName={selectedProviderName}
-            methods={authMethods?.[selectedProvider] || []}
+            methods={selectedProviderMethods}
             open={oauthDialogOpen}
             onOpenChange={handleOAuthDialogClose}
             onSuccess={handleOAuthAuthorize}

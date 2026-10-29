@@ -1116,6 +1116,7 @@ describe('EventProvider permissions and forms', () => {
       for (const queryKey of [
         ['provider-credentials'],
         ['provider-auth-methods'],
+        ['provider-integrations'],
         ['opencode', 'providers'],
       ]) {
         expect(invalidateQueries).toHaveBeenCalledWith({ queryKey })
@@ -1149,7 +1150,7 @@ describe('EventProvider permissions and forms', () => {
     await waitFor(() => {
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'providers'] })
     })
-    expect(invalidateQueries).toHaveBeenCalledTimes(3)
+    expect(invalidateQueries).toHaveBeenCalledTimes(4)
   })
 
   it.each<[string, string[]]>([

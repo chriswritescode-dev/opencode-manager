@@ -6,7 +6,7 @@ import { ProviderSettings } from './ProviderSettings'
 import { getProviders, providerCredentialsApi } from '@/api/providers'
 import { oauthApi } from '@/api/oauth'
 import type { Provider } from '@/api/providers'
-import type { OAuthAuthorizeResponse } from '@/api/oauth'
+import type { IntegrationInfo, IntegrationMethod, OAuthAuthorizeResponse } from '@/api/oauth'
 import type { ReactNode } from 'react'
 
 vi.mock('@/api/providers', () => ({
@@ -22,6 +22,7 @@ vi.mock('@/api/providers', () => ({
 vi.mock('@/api/oauth', () => ({
   oauthApi: {
     getAuthMethods: vi.fn(),
+    getIntegrations: vi.fn(),
     authorize: vi.fn(),
     callback: vi.fn(),
   },
@@ -102,6 +103,25 @@ const oauthProviderWithoutKey = providerFixture('google', 'Google', 3)
 const apiKeyProviderWithKey = providerFixture('openai', 'OpenAI', 1)
 const apiKeyProviderWithoutKey = providerFixture('together', 'Together AI', 4)
 
+const oauthMethod: IntegrationMethod = { id: 'oauth', type: 'oauth', label: 'OAuth' }
+const keyMethod: IntegrationMethod = { type: 'key', label: 'API key' }
+
+function integrationFixture(
+  id: string,
+  name: string,
+  methods: IntegrationMethod[],
+  connected = false,
+): IntegrationInfo {
+  return {
+    id,
+    name,
+    methods,
+    connections: connected
+      ? [{ type: 'credential', id: `cred_${id}`, label: name, method: 'key' }]
+      : [],
+  }
+}
+
 function mockProviderData() {
   vi.mocked(getProviders).mockResolvedValue({
     providers: [
@@ -112,11 +132,12 @@ function mockProviderData() {
     ],
     models: [],
   })
-  vi.mocked(providerCredentialsApi.list).mockResolvedValue(['anthropic', 'openai'])
-  vi.mocked(oauthApi.getAuthMethods).mockResolvedValue({
-    anthropic: [{ id: 'oauth', type: 'oauth', label: 'OAuth' }],
-    google: [{ id: 'oauth', type: 'oauth', label: 'OAuth' }],
-  })
+  vi.mocked(oauthApi.getIntegrations).mockResolvedValue([
+    integrationFixture('anthropic', 'Anthropic', [oauthMethod], true),
+    integrationFixture('google', 'Google', [oauthMethod]),
+    integrationFixture('openai', 'OpenAI', [keyMethod], true),
+    integrationFixture('together', 'Together AI', [keyMethod]),
+  ])
 }
 
 function renderSettings() {
@@ -270,11 +291,44 @@ describe('ProviderSettings', () => {
   })
 
   it('shows the empty state when no OAuth-capable providers exist', async () => {
-    vi.mocked(oauthApi.getAuthMethods).mockResolvedValue({})
+    vi.mocked(getProviders).mockResolvedValue({ providers: [], models: [] })
+    vi.mocked(oauthApi.getIntegrations).mockResolvedValue([
+      integrationFixture('openai', 'OpenAI', [keyMethod]),
+      integrationFixture('together', 'Together AI', [keyMethod]),
+    ])
     renderSettings()
 
     await screen.findByText('No OAuth-capable providers available.')
 
     expect(screen.queryByText('Anthropic')).not.toBeInTheDocument()
+  })
+
+  it('lists an unconfigured provider when the active catalog has no providers', async () => {
+    vi.mocked(getProviders).mockResolvedValue({ providers: [], models: [] })
+    vi.mocked(oauthApi.getIntegrations).mockResolvedValue([
+      integrationFixture('openrouter', 'OpenRouter', [keyMethod]),
+    ])
+    const user = userEvent.setup()
+    renderSettings()
+
+    await screen.findByText('OpenRouter')
+    expect(screen.getByRole('button', { name: /Available Providers/ })).toHaveTextContent('1')
+
+    await user.type(screen.getByPlaceholderText('Search providers...'), 'openrouter')
+    expect(screen.getByText('OpenRouter')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Add Key' }))
+    expect(screen.getByTestId('api-key-dialog')).toHaveTextContent('OpenRouter')
+  })
+
+  it('lists OAuth integrations that are not in the active catalog', async () => {
+    vi.mocked(getProviders).mockResolvedValue({ providers: [], models: [] })
+    vi.mocked(oauthApi.getIntegrations).mockResolvedValue([
+      integrationFixture('github-copilot', 'GitHub Copilot', [oauthMethod]),
+    ])
+    renderSettings()
+
+    await screen.findByText('GitHub Copilot')
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeInTheDocument()
   })
 })
