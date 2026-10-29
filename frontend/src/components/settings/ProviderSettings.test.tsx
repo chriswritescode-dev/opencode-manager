@@ -441,6 +441,27 @@ describe('ProviderSettings', () => {
     expect(screen.getByRole('button', { name: /Available Providers/ })).toHaveTextContent('0')
   })
 
+  it('does not offer API-key actions for catalog providers without a key method', async () => {
+    vi.mocked(getProviders).mockResolvedValue({
+      providers: [
+        providerFixture('command-only', 'Command Only', 1),
+        providerFixture('env-only', 'Environment Only', 1),
+        providerFixture('empty-methods', 'No Auth Methods', 1),
+      ],
+      models: [],
+    })
+    vi.mocked(oauthApi.getIntegrations).mockResolvedValue([
+      integrationFixture('command-only', 'Command Only', [commandMethod]),
+      integrationFixture('env-only', 'Environment Only', [envMethod]),
+      integrationFixture('empty-methods', 'No Auth Methods', []),
+    ])
+    renderSettings()
+
+    expect(await screen.findByRole('button', { name: /Available Providers/ })).toHaveTextContent('0')
+    expect(screen.getByText('No available providers.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add Key' })).not.toBeInTheDocument()
+  })
+
   it('shows an integration-list error instead of guessing connection status', async () => {
     vi.mocked(oauthApi.getIntegrations).mockRejectedValue(new Error('Server unavailable'))
     renderSettings()
