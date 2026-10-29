@@ -169,7 +169,7 @@ export function ProviderSettings() {
     const nonOAuthProviders = providerEntries.filter(
       (provider) =>
         !supportsOAuthMethods(provider.methods) &&
-        provider.methods.some((method) => method.type === 'key'),
+        (provider.connected || provider.methods.some((method) => method.type === 'key')),
     )
     return {
       connected: nonOAuthProviders.filter((provider) => provider.connected),
@@ -405,15 +405,17 @@ export function ProviderSettings() {
                               <Check className="h-3 w-3 mr-1" />
                               Connected
                             </Badge>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleEditApiKey(provider)}
-                              aria-label={`Edit API key for ${provider.name || provider.id}`}
-                              className="h-8 w-8 p-0"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
+                            {provider.methods.some((method) => method.type === 'key') && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleEditApiKey(provider)}
+                                aria-label={`Edit API key for ${provider.name || provider.id}`}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
                             <Button
                               size="sm"
                               variant="ghost"
