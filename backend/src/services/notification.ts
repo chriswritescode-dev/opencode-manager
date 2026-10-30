@@ -11,14 +11,12 @@ import {
   DEFAULT_NOTIFICATION_PREFERENCES,
   LOCAL_OPENCODE_SERVER_ID,
   type OpenCodeServer,
-  type SessionGoal,
 } from "@opencode-manager/shared/schemas";
 import {
   getPermissionLabel,
   getPermissionDetail,
   getFormText,
-  getGoalOutcomeTitle,
-  getGoalOutcomeReason,
+  getGoalStatusTitle,
 } from "@opencode-manager/shared/notifications";
 import { SettingsService } from "./settings";
 import { sseAggregator, type SSEEvent } from "./sse-aggregator";
@@ -30,6 +28,7 @@ import type { Repo } from "../types/repo";
 import { buildServerSessionPath, buildSessionPath } from "@opencode-manager/shared/utils";
 import { sessionIDFromEvent } from "@opencode-manager/shared/opencode";
 import { resolveRepoForDirectory } from "./repo";
+import type { SessionGoalOutcome } from "./goal-outcomes";
 
 export interface NotificationServerRegistry {
   get(serverId: string): Pick<OpenCodeServer, "name" | "enabled"> | null;
@@ -91,19 +90,23 @@ function truncateWithEllipsis(text: string, maxLength: number): string {
   return `${text.slice(0, maxLength - 1)}…`;
 }
 
-function buildGoalOutcomeBody(goal: SessionGoal, repoName: string | undefined): string {
-  const reason = getGoalOutcomeReason(goal)?.trim() || undefined;
+function buildGoalOutcomeBody(
+  objective: string,
+  reason: string | undefined,
+  repoName: string | undefined
+): string {
+  const trimmedReason = reason?.trim() || undefined;
   const prefix = repoName ? `${repoName} · ` : "";
   const separator = " — ";
 
   const reasonBudget = Math.max(0, MAX_BODY_LENGTH - prefix.length - separator.length);
-  const boundedReason = reason ? truncateWithEllipsis(reason, reasonBudget) : "";
+  const boundedReason = trimmedReason ? truncateWithEllipsis(trimmedReason, reasonBudget) : "";
   const suffix = boundedReason ? `${separator}${boundedReason}` : "";
 
   const objectiveBudget = Math.max(0, MAX_BODY_LENGTH - prefix.length - suffix.length);
-  const objective = truncateWithEllipsis(goal.objective, objectiveBudget);
+  const boundedObjective = truncateWithEllipsis(objective, objectiveBudget);
 
-  return truncateWithEllipsis(`${prefix}${objective}${suffix}`, MAX_BODY_LENGTH);
+  return truncateWithEllipsis(`${prefix}${boundedObjective}${suffix}`, MAX_BODY_LENGTH);
 }
 
 function resolveEventSessionId(event: SSEEvent): string | undefined {
@@ -435,36 +438,35 @@ export class NotificationService {
     );
   }
 
-  async notifyGoalOutcome(goal: SessionGoal): Promise<void> {
-    if (goal.stopReason === "turn_error") return;
-    if (goal.stopReason === "cancelled" || goal.stopReason === "user_paused") return;
-    if (sseAggregator.isSessionBeingViewed(goal.sessionId, goal.serverId)) return;
+  async notifyGoalOutcome(outcome: SessionGoalOutcome): Promise<void> {
+    if (sseAggregator.isSessionBeingViewed(outcome.sessionId, outcome.serverId)) return;
 
-    const isRemote = goal.serverId !== LOCAL_OPENCODE_SERVER_ID;
-    const repo = !isRemote && goal.directory
-      ? await resolveRepoForDirectory(this.db, goal.directory)
+    const { goal } = outcome;
+    const isRemote = outcome.serverId !== LOCAL_OPENCODE_SERVER_ID;
+    const repo = !isRemote && outcome.directory
+      ? await resolveRepoForDirectory(this.db, outcome.directory)
       : null;
-    const server = isRemote ? this.serverRegistry?.get(goal.serverId) ?? null : null;
+    const server = isRemote ? this.serverRegistry?.get(outcome.serverId) ?? null : null;
     const repoName = repo ? getRepoName(repo) : undefined;
     const displayName = repoName ?? server?.name;
 
     const payload: PushNotificationPayload = {
-      title: getGoalOutcomeTitle(goal.status),
-      body: buildGoalOutcomeBody(goal, displayName),
+      title: getGoalStatusTitle(goal.status),
+      body: buildGoalOutcomeBody(goal.objective, goal.reason, displayName),
       tag: `session-goal-${goal.id}`,
       timestamp: Date.now(),
       renotify: true,
       data: {
         eventType: "session.goal.outcome",
-        sessionId: goal.sessionId,
-        directory: goal.directory,
+        sessionId: outcome.sessionId,
+        directory: outcome.directory ?? undefined,
         repoId: repo?.id,
         repoName,
-        serverId: goal.serverId,
+        serverId: outcome.serverId,
         serverName: server?.name,
         url: isRemote
-          ? buildServerSessionPath(goal.serverId, goal.sessionId)
-          : buildNotificationUrl(repo, goal.sessionId),
+          ? buildServerSessionPath(outcome.serverId, outcome.sessionId)
+          : buildNotificationUrl(repo, outcome.sessionId),
       },
     };
 

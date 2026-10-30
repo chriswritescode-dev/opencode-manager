@@ -201,10 +201,7 @@ vi.mock('@/components/session/BackgroundWorkBar', () => ({ BackgroundWorkBar: vi
 vi.mock('@/components/session/SessionGoalBar', () => ({ SessionGoalBar: vi.fn(() => null) }))
 vi.mock('@/hooks/useSessionGoals', () => ({
   useSessionGoal: vi.fn(() => ({ data: undefined })),
-  useStartSessionGoal: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
-  usePauseSessionGoal: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
-  useResumeSessionGoal: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
-  useCancelSessionGoal: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useSessionGoalCommand: vi.fn(() => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false })),
 }))
 vi.mock('@/components/session/SideQuestionDialog', () => ({ SideQuestionDialog: vi.fn(() => null) }))
 vi.mock('@/components/session/ChangesWalkthroughSheet', () => ({ ChangesWalkthroughSheet: vi.fn(() => null) }))

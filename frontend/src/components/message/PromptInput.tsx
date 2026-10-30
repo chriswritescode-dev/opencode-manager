@@ -33,16 +33,14 @@ import { PermissionModeToggle } from '@/components/session/PermissionModeToggle'
 import { SessionSandboxMenu } from '@/components/session/SessionSandboxMenu'
 import { ComposerModelPill } from './ComposerModelPill'
 import { ComposerToolsMenu } from './ComposerToolsMenu'
-import { useSessionGoal, useStartSessionGoal } from '@/hooks/useSessionGoals'
-import { useSessionPermissionMode } from '@/hooks/useSessionPermissionMode'
-import { detectMentionTrigger, parsePromptToInput, getFilename, getDirectory, type MentionItem } from '@/lib/promptParser'
+import { useSessionGoal, useSessionGoalCommand } from '@/hooks/useSessionGoals'
+import { detectMentionTrigger, parsePromptToInput, getFilename, getDirectory, type MentionItem, type ParsedPromptInput } from '@/lib/promptParser'
 import { matchText, rankByMatch, type MatchRange } from '@/lib/fuzzyMatch'
 import { getNextPrimaryAgentId } from '@/lib/primaryAgents'
 import { getNextFavoriteModel } from '@/lib/favoriteModels'
 import { randomId } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
-import { findModelInfo, isSameModelSelection } from '@opencode-manager/shared/opencode'
-import { isOpenSessionGoal } from '@opencode-manager/shared/schemas'
+import { findModelInfo, isGoalOpen, isSameModelSelection } from '@opencode-manager/shared/opencode'
 import { useProviders } from '@/hooks/useProviders'
 
 
@@ -255,11 +253,10 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const setStoredAgent = useSessionAgentStore((s) => s.setAgent)
   const sendPrompt = useSendPrompt(directory)
   const sendShell = useSendShell(directory)
-  const startGoal = useStartSessionGoal()
-  const isPromptSubmitPending = sendPrompt.isPending || sendShell.isPending || startGoal.isPending
+  const goalCommand = useSessionGoalCommand(directory)
+  const isPromptSubmitPending = sendPrompt.isPending || sendShell.isPending || goalCommand.isPending
   const interruptSession = useInterruptSession()
-  const { data: sessionGoal } = useSessionGoal(sessionID)
-  const { data: permissionMode } = useSessionPermissionMode(sessionID)
+  const { data: goalRead } = useSessionGoal(sessionID, directory)
   const { searchCommands, findCommand, recentNames } = useCommands({ directory })
   const recordCommand = useRecentCommandsStore((state) => state.recordCommand)
   const isExactCommandPrompt = (value: string) => {
@@ -371,10 +368,17 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
   const addUserBashCommand = useUserBash((s) => s.addUserBashCommand)
 
-  const startArmedGoal = async (objective: string): Promise<boolean> => {
-    if (!directory || !objective.trim()) return true
+  const startArmedGoal = async (parsed: ParsedPromptInput): Promise<boolean> => {
     try {
-      await startGoal.mutateAsync({ sessionId: sessionID, directory, objective })
+      await goalCommand.mutateAsync({
+        sessionID,
+        text: parsed.text,
+        files: parsed.files,
+        agents: parsed.agents,
+        skills: parsed.skills,
+        model: modelRef ?? undefined,
+        agent: currentMode,
+      })
     } catch {
       return false
     }
@@ -384,16 +388,23 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
   const handleSubmit = async () => {
     if (!isModelReady) return
+    if (isGoalArmed && prompt.trim().length === 0) {
+      showToast.error('Enter an objective for the goal')
+      return
+    }
     if (!prompt.trim() && imageAttachments.length === 0) return
-    if (startGoal.isPending) return
+    if (goalCommand.isPending) return
 
     if (isStreamingResponse) {
       onScrollToBottom()
       const parsed = parsePromptToInput(prompt, attachedFiles, agentNames, skillIds, imageAttachments)
       const submitted: ComposerDraft = { prompt, isBashMode, attachedFiles, imageAttachments }
       if (isGoalArmed && !isBashMode && !isExactCommandPrompt(prompt)) {
-        const goalStarted = await startArmedGoal(parsed.text)
+        const goalStarted = await startArmedGoal(parsed)
         if (!goalStarted) return
+        setStoredAgent(sessionID, currentMode)
+        completeSubmittedDraft(submitted)
+        return
       }
       void runAfterSend(
         sendPrompt.mutateAsync({
@@ -465,8 +476,11 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     const submitted: ComposerDraft = { prompt, isBashMode, attachedFiles, imageAttachments }
 
     if (isGoalArmed) {
-      const goalStarted = await startArmedGoal(parsed.text)
+      const goalStarted = await startArmedGoal(parsed)
       if (!goalStarted) return
+      setStoredAgent(sessionID, currentMode)
+      completeSubmittedDraft(submitted)
+      return
     }
 
     pendingConfirmClearRef.current = {
@@ -1102,18 +1116,16 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   const composerModeStyle = composerMode ? COMPOSER_MODE_STYLES[composerMode] : null
   const isTakeoverOpen = isMobile && isSuggestionListOpen
   const showStopButton = isSessionActive
-  const hasOpenGoal = isOpenSessionGoal(sessionGoal)
-  const lockedReason = permissionMode?.lockedReason ?? null
-  const goalButtonLabel = lockedReason === 'schedule'
-    ? 'Scheduled runs cannot run goals'
-    : lockedReason === 'child'
-      ? 'Goals can only be started on top-level sessions'
-      : hasOpenGoal
-        ? 'A goal is already active for this session'
-        : isGoalArmed
-          ? 'Goal mode armed: the next message becomes the objective'
-          : 'Goal mode: the next message becomes the objective'
-  const isGoalModeDisabled = lockedReason !== null || hasOpenGoal || isBashMode || startGoal.isPending
+  const goalUnsupported = goalRead?.supported === false
+  const hasOpenGoal = goalRead?.supported === true && isGoalOpen(goalRead.goal)
+  const goalButtonLabel = goalUnsupported
+    ? "This server's OpenCode has no goals"
+    : hasOpenGoal
+      ? 'A goal is already active for this session'
+      : isGoalArmed
+        ? 'Goal mode armed: the next message becomes the objective'
+        : 'Goal mode: the next message becomes the objective'
+  const isGoalModeDisabled = goalUnsupported || hasOpenGoal || isBashMode || goalCommand.isPending
   const toggleGoalArmed = () => setIsGoalArmed((value) => !value)
 
   const sendVoiceTurn = useCallback(

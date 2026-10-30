@@ -74,7 +74,7 @@ vi.mock('../src/manager-api.js', () => ({
   isManagerRouteMissing: vi.fn(() => false),
 }))
 
-const noFeatures = { remote: undefined, goals: undefined, dialogs: { goal: vi.fn(), multiRunLaunch: vi.fn(), multiRuns: vi.fn() } }
+const noFeatures = { remote: undefined, dialogs: { multiRunLaunch: vi.fn(), multiRuns: vi.fn() } }
 
 const matched = { repoId: 1, name: 'repo', projectId: 'proj_1', branch: 'main' }
 const repos = [
@@ -212,17 +212,16 @@ describe('setupOcm', () => {
     expect(factory().mode).toBe('global')
   })
 
-  it('exposes the goal slash command', async () => {
+  it('registers no goal command', async () => {
     const fake = createFakeContext()
 
     await setupOcm(fake.context, vi.fn(), noFeatures)
     renderAppSlot(fake)
 
     const factory = fake.layer.mock.calls[0]![0] as () => {
-      commands: { id: string; slash?: { name: string; arguments?: true } }[]
+      commands: { id: string }[]
     }
-    const goal = factory().commands.find((entry) => entry.id === 'ocm.goal')
-    expect(goal?.slash).toEqual({ name: 'ocm-goal', arguments: true })
+    expect(factory().commands.map((entry) => entry.id)).toEqual(['ocm.session.move', 'ocm.switch', 'ocm.multirun'])
   })
 
   it('exposes the multi-run slash command', async () => {

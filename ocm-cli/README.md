@@ -10,10 +10,11 @@ to the local working tree.
 
 | ocm | OpenCode Manager | Local OpenCode |
 |---|---|---|
+| 0.5.x | >= 0.19.0 | >= 2.2.0, < 3 |
 | 0.4.x | >= 0.19.0 | >= 2.0.15, < 3 |
 | 0.3.x | >= 0.19.0 | >= 2.0.15, < 3 |
 
-ocm 0.4.x and 0.3.x attach through the repo-scoped Manager proxy
+ocm 0.5.x, 0.4.x and 0.3.x attach through the repo-scoped Manager proxy
 (`/api/opencode-proxy/repos/:repoId`), load the plugin from the OpenCode 2
 `cli.json` `plugins` list, and move sessions with OpenCode 2 session
 export/import. Older Managers lack that route; `ocm` then fails with
@@ -22,6 +23,17 @@ Use ocm 0.2.x with OpenCode Manager < 0.19.0 and OpenCode 1.x, installed pinned
 (`pnpm add -g @opencode-manager/ocm-cli@0.2`) with the OpenCode 1.x plugin entry pinned to
 `@opencode-manager/ocm-cli@0.2`. ocm is published together with each OpenCode Manager
 release.
+
+From ocm 0.5.0, the TUI plugin is built against `@opencode/plugin` 2.2.x and
+OpenTUI 0.7, so it requires a local OpenCode >= 2.2.0: OpenCode 2.2.0 refuses
+plugins built for OpenTUI 0.6, and older OpenCode builds may refuse the OpenTUI
+0.7 peers. Stay on ocm 0.4.x with a local OpenCode older than 2.2.0.
+
+ocm 0.5.0 removes `/ocm-goal`; session goals use OpenCode's built-in `/goal`
+command, and OpenCode Manager no longer serves `/api/internal/session-goals`.
+Running `/ocm-goal` from ocm 0.4.x against such a Manager reports that the
+Manager is too old for ocm goals; the Manager is not too old. Upgrade ocm to
+0.5.0 and use `/goal` instead.
 
 Attachment works with OpenCode Manager >= 0.19.0. The sync worktree targeting of
 `ocm push` / `ocm pull` and `/ocm-move` worktree moves need ocm 0.4.0+ and
@@ -259,25 +271,9 @@ reattaches; switching to a repo also remembers it as the last repo. The current
 session stays where it is (use `/ocm-move` to push your local state and bring a
 local session along).
 
-The plugin also registers two Manager-backed commands, both of which need an
-attached Manager repo through `ocm`:
+The plugin also registers one Manager-backed command, which needs an attached
+Manager repo through `ocm`:
 
-- `/ocm-goal [objective]` starts a Manager-driven goal on the current top-level
-  session and sends the objective as the next message (queued if the session
-  is busy). With no objective, a dialog asks for it, plus optional max turns
-  (1-200) and token budget (a positive whole number); blank uses the Manager
-  defaults. `tab` moves between fields and `ctrl+s` starts the goal. The
-  objective is sent as plain text with the session's current agent and model:
-  the plugin cannot read the composer's selection, so send a message first if
-  you switched agent or model, and `@file` mentions are not attached. If the
-  objective cannot be sent, the goal is cancelled. Scheduled runs and subagent
-  sessions are rejected by the Manager. While a goal is open, a one-line status
-  above the composer shows `<status> · Turn n/max`, token usage when the goal
-  has a token budget, and the first line of the objective. The TUI keeps
-  following the goal after you leave the session, and a toast reports the
-  outcome with an option to open the session. Running `/ocm-goal` while a goal
-  is open shows its live status with `p` to pause or resume and `x` (twice) to
-  cancel.
 - `/ocm-multirun [prompt]` opens a launch dialog: prompt, name (defaults to the
   prompt's first line), a filterable model checklist (up to 5, `enter`
   toggles), isolated workspaces or the shared repo directory, and, for isolated
@@ -294,17 +290,18 @@ attached Manager repo through `ocm`:
   optional instructions; `ctrl+s` fuses and `ctrl+b` goes back. A fusion always
   runs in a new isolated workspace.
 
-Both commands need an OpenCode Manager release that exposes
-`/api/internal/session-goals` and `/api/internal/multi-runs`. An older Manager
-rejects these routes with `401 Unauthorized` even for a valid token, or with a
-non-JSON `404`; on a `401` the TUI checks the token against another Manager
-route and then reports that the Manager must be upgraded instead of asking you
-to log in again.
+Session goals use OpenCode's built-in `/goal` command instead.
+
+`/ocm-multirun` needs an OpenCode Manager release that exposes
+`/api/internal/multi-runs`. An older Manager rejects this route with
+`401 Unauthorized` even for a valid token, or with a non-JSON `404`; on a `401`
+the TUI checks the token against another Manager route and then reports that the
+Manager must be upgraded instead of asking you to log in again.
 
 The attached `opencode` process carries `OCM_REMOTE_MANAGER_URL`,
 `OCM_REMOTE_REPO_NAME`, and `OCM_REMOTE_REPO_ID`. They drive the indicator and
-tell `/ocm`, `/ocm-goal`, and `/ocm-multirun` which Manager and repo they act
-on; `/ocm-multirun` requires `OCM_REMOTE_REPO_ID`. These commands authenticate
+tell `/ocm` and `/ocm-multirun` which Manager and repo they act on;
+`/ocm-multirun` requires `OCM_REMOTE_REPO_ID`. These commands authenticate
 with the stored token (or `OCM_TOKEN`) for that Manager URL, not with
 `OPENCODE_PASSWORD`.
 
@@ -323,7 +320,7 @@ global installs); the plugin surface is TUI-only.
 ## Requirements
 
 - macOS or Linux (Windows is unsupported)
-- OpenCode >= 2.0.15 (same major, 2.x) available on `PATH`
+- OpenCode >= 2.2.0 (same major, 2.x) available on `PATH` for the TUI plugin
 - Node available on `PATH` (runs the `ocm` binary)
 - OpenCode Manager >= 0.19.0
 - `git` and `tar` (with gzip support, i.e. the `-z` flag) available on `PATH`
