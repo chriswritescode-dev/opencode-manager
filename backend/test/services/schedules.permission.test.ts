@@ -114,6 +114,7 @@ const baseJob: ScheduleJob = {
   name: 'Weekly engineering summary',
   description: 'Summarize repo health and recent changes.',
   enabled: true,
+  showInInbox: true,
   scheduleMode: 'interval',
   intervalMinutes: 60,
   cronExpression: null,

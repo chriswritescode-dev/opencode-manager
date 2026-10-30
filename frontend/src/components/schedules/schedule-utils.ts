@@ -77,6 +77,13 @@ export function formatScheduleSandbox(sandbox: ScheduleSandboxConfig | null | un
   return sandbox.resources ? `On · ${formatSandboxResources(sandbox.resources)}` : 'On · server defaults'
 }
 
+/**
+ * Describes which schedule runs are announced in the Reports inbox.
+ */
+export function formatScheduleInbox(showInInbox: boolean): string {
+  return showInInbox ? 'Every run' : 'Failures only'
+}
+
 export function getLocalTimeZone(): string {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'

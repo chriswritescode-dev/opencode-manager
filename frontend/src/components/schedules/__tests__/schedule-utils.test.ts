@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatRunDuration, matchesScheduleJobSearch } from '@/components/schedules/schedule-utils'
+import { formatRunDuration, formatScheduleInbox, matchesScheduleJobSearch } from '@/components/schedules/schedule-utils'
 import type { ScheduleJob } from '@opencode-manager/shared/types'
 
 describe('formatRunDuration', () => {
@@ -11,6 +11,13 @@ describe('formatRunDuration', () => {
 
   it('measures running runs against now', () => {
     expect(formatRunDuration({ startedAt: 1_000, finishedAt: null }, 31_000)).toBe('30s')
+  })
+})
+
+describe('formatScheduleInbox', () => {
+  it('labels every run versus failures only', () => {
+    expect(formatScheduleInbox(true)).toBe('Every run')
+    expect(formatScheduleInbox(false)).toBe('Failures only')
   })
 })
 

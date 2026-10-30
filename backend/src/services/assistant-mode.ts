@@ -403,6 +403,8 @@ Optional \`workspaceMode\` sets where runs execute: \`worktree\` (default, a fre
 
 Optional \`sandbox: { enabled, resources: { cpus, memoryMib } | null }\` runs the scheduled session and its subagents in a dedicated sandbox microVM with Docker available. It works only for schedules on the local OpenCode server, requires server sandboxing to be enabled in settings, and the VM and its Docker volume are removed after each run. The run fails if the VM cannot start.
 
+Optional \`showInInbox\` (default \`true\`). When \`false\`, successful runs are stored as already viewed and send no completion push; failed runs still appear in the Reports inbox, and a session execution failure still sends the error push. \`PATCH\` accepts it too, and a change applies to runs that finish afterwards.
+
 \`\`\`json
 {
   "action": "request",
