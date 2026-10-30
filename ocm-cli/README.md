@@ -10,10 +10,11 @@ to the local working tree.
 
 | ocm | OpenCode Manager | Local OpenCode |
 |---|---|---|
+| 0.5.x | >= 0.19.0 | >= 2.2.0, < 3 |
 | 0.4.x | >= 0.19.0 | >= 2.0.15, < 3 |
 | 0.3.x | >= 0.19.0 | >= 2.0.15, < 3 |
 
-ocm 0.4.x and 0.3.x attach through the repo-scoped Manager proxy
+ocm 0.5.x, 0.4.x and 0.3.x attach through the repo-scoped Manager proxy
 (`/api/opencode-proxy/repos/:repoId`), load the plugin from the OpenCode 2
 `cli.json` `plugins` list, and move sessions with OpenCode 2 session
 export/import. Older Managers lack that route; `ocm` then fails with
@@ -23,10 +24,16 @@ Use ocm 0.2.x with OpenCode Manager < 0.19.0 and OpenCode 1.x, installed pinned
 `@opencode-manager/ocm-cli@0.2`. ocm is published together with each OpenCode Manager
 release.
 
-From the release after 0.4.1, the TUI plugin is built against `@opencode/plugin`
-2.2.x and OpenTUI 0.7, so it requires a local OpenCode >= 2.2.0: OpenCode 2.2.0
-refuses plugins built for OpenTUI 0.6, and older OpenCode builds may refuse the
-OpenTUI 0.7 peers.
+From ocm 0.5.0, the TUI plugin is built against `@opencode/plugin` 2.2.x and
+OpenTUI 0.7, so it requires a local OpenCode >= 2.2.0: OpenCode 2.2.0 refuses
+plugins built for OpenTUI 0.6, and older OpenCode builds may refuse the OpenTUI
+0.7 peers. Stay on ocm 0.4.x with a local OpenCode older than 2.2.0.
+
+ocm 0.5.0 removes `/ocm-goal`; session goals use OpenCode's built-in `/goal`
+command, and OpenCode Manager no longer serves `/api/internal/session-goals`.
+Running `/ocm-goal` from ocm 0.4.x against such a Manager reports that the
+Manager is too old for ocm goals; the Manager is not too old. Upgrade ocm to
+0.5.0 and use `/goal` instead.
 
 Attachment works with OpenCode Manager >= 0.19.0. The sync worktree targeting of
 `ocm push` / `ocm pull` and `/ocm-move` worktree moves need ocm 0.4.0+ and
