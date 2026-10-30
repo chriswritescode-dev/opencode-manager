@@ -17,6 +17,7 @@ export interface ScheduleJobPersistenceInput {
   name: string
   description: string | null
   enabled: boolean
+  showInInbox: boolean
   scheduleMode: ScheduleMode
   intervalMinutes: number | null
   cronExpression: string | null
@@ -101,6 +102,7 @@ export function buildCreateSchedulePersistenceInput(input: CreateScheduleJobRequ
     name: input.name.trim(),
     description: input.description?.trim() || null,
     enabled: input.enabled !== false,
+    showInInbox: input.showInInbox !== false,
     agentSlug: input.agentSlug?.trim() || null,
     prompt: input.prompt.trim(),
     model: input.model?.trim() || null,
@@ -159,6 +161,7 @@ export function buildUpdatedSchedulePersistenceInput(
     name: input.name?.trim() || existing.name,
     description: input.description === undefined ? existing.description : (input.description?.trim() || null),
     enabled,
+    showInInbox: input.showInInbox ?? existing.showInInbox,
     scheduleMode: scheduleConfig.scheduleMode,
     intervalMinutes: scheduleConfig.intervalMinutes,
     cronExpression: scheduleConfig.cronExpression,

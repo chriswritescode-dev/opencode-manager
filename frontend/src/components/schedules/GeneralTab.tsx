@@ -39,6 +39,8 @@ type GeneralTabProps = {
   modelDirectory?: string
   enabled: boolean
   onEnabledChange: (value: boolean) => void
+  showInInbox: boolean
+  onShowInInboxChange: (value: boolean) => void
   branch: string
   onBranchChange: (value: string) => void
   branchRepoId: number | undefined
@@ -85,6 +87,8 @@ export function GeneralTab({
   modelDirectory,
   enabled,
   onEnabledChange,
+  showInInbox,
+  onShowInInboxChange,
   branch,
   onBranchChange,
   branchRepoId,
@@ -179,6 +183,16 @@ export function GeneralTab({
               <InfoHint text="Auto-run this job on its schedule while still allowing manual runs from the dashboard." />
             </div>
             <Switch checked={enabled} onCheckedChange={onEnabledChange} aria-labelledby="schedule-enabled-label" />
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-border bg-card p-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <p id="schedule-show-in-inbox-label" className="text-sm font-medium">Show runs in inbox</p>
+              <InfoHint text="When off, successful runs stay in this schedule's run history but skip the Reports inbox, its unread badge and push notifications. Failed runs are still announced." />
+            </div>
+            <Switch checked={showInInbox} onCheckedChange={onShowInInboxChange} aria-labelledby="schedule-show-in-inbox-label" />
           </div>
         </div>
 

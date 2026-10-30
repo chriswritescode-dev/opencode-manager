@@ -190,6 +190,12 @@ export const ScheduleJobSchema = z.object({
   name: z.string(),
   description: z.string().nullable(),
   enabled: z.boolean(),
+  /**
+   * Whether finished runs of this schedule appear in the inbox. `false` stores successful
+   * runs as already viewed and skips their completion push, while failed runs are still
+   * announced.
+   */
+  showInInbox: z.boolean(),
   scheduleMode: ScheduleModeSchema,
   intervalMinutes: z.number().int().min(5).max(10080).nullable(),
   cronExpression: z.string().nullable(),
@@ -236,6 +242,12 @@ const ScheduleJobBaseRequestSchema = z.object({
   name: z.string().min(1).max(120),
   description: z.string().max(500).optional(),
   enabled: z.boolean().default(true),
+  /**
+   * Whether finished runs of this schedule appear in the inbox. `false` stores successful
+   * runs as already viewed and skips their completion push, while failed runs are still
+   * announced.
+   */
+  showInInbox: z.boolean().default(true),
   agentSlug: z.string().min(1).max(100).optional(),
   prompt: z.string().min(1).max(20000),
   model: z.string().min(1).max(200).optional(),
@@ -265,6 +277,12 @@ export const UpdateScheduleJobRequestSchema = z.object({
   name: z.string().min(1).max(120).optional(),
   description: z.string().max(500).nullable().optional(),
   enabled: z.boolean().optional(),
+  /**
+   * Whether finished runs of this schedule appear in the inbox. `false` stores successful
+   * runs as already viewed and skips their completion push, while failed runs are still
+   * announced.
+   */
+  showInInbox: z.boolean().optional(),
   scheduleMode: ScheduleModeSchema.optional(),
   intervalMinutes: z.number().int().min(5).max(10080).nullable().optional(),
   cronExpression: z.string().min(1).max(200).nullable().optional(),

@@ -24,6 +24,7 @@ describe('schedule permission config persistence', () => {
     name: 'Permission test job',
     description: null,
     enabled: true,
+    showInInbox: true,
     scheduleMode: 'interval',
     intervalMinutes: 60,
     cronExpression: null,

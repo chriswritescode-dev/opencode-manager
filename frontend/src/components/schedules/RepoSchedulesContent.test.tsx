@@ -15,6 +15,7 @@ function createJob(id: number, name: string): ScheduleJobWithRepo {
     name,
     description: null,
     enabled: true,
+    showInInbox: true,
     scheduleMode: 'interval',
     intervalMinutes: 60,
     cronExpression: null,

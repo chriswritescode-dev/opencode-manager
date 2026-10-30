@@ -49,6 +49,7 @@ const remoteJob: ScheduleJob = {
   name: 'Nightly audit',
   description: null,
   enabled: true,
+  showInInbox: true,
   scheduleMode: 'interval',
   intervalMinutes: 60,
   cronExpression: null,

@@ -21,7 +21,7 @@ import {
 import { SettingsService } from "./settings";
 import { sseAggregator, type SSEEvent } from "./sse-aggregator";
 import { getRepoName } from "../db/queries";
-import { getScheduleRunBySessionId } from "../db/schedules";
+import { getScheduleRunBySessionId, isQuietScheduleRunSession } from "../db/schedules";
 import { ensurePushSubscriptionsTable } from "../db/push-subscriptions";
 import { isAuthSessionActive } from "../db/auth-sessions";
 import type { Repo } from "../types/repo";
@@ -371,6 +371,14 @@ export class NotificationService {
 
     for (const suppressor of this.eventSuppressors) {
       if (await suppressor(event, sessionId, serverId)) return;
+    }
+
+    if (
+      event.type === NotificationEventType.SESSION_IDLE &&
+      sessionId &&
+      isQuietScheduleRunSession(this.db, sessionId, serverId)
+    ) {
+      return;
     }
 
     if (serverId !== LOCAL_OPENCODE_SERVER_ID) {

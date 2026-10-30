@@ -83,6 +83,7 @@ function getJob(overrides?: Partial<ScheduleJob>): ScheduleJob {
     name: 'Nightly health check',
     description: null,
     enabled: true,
+    showInInbox: true,
     scheduleMode: 'interval',
     intervalMinutes: 60,
     cronExpression: null,

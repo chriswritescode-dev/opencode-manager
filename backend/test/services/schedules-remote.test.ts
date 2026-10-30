@@ -77,6 +77,7 @@ function createService(db: Database, localClient: ReturnType<typeof createStubOp
 const baseRequest = {
   name: 'Nightly audit',
   enabled: true,
+  showInInbox: true,
   scheduleMode: 'interval' as const,
   intervalMinutes: 60,
   prompt: 'Audit the project.',

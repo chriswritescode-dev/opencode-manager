@@ -3,13 +3,15 @@ import { Database } from 'bun:sqlite'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import { createRepo } from '../../src/db/queries'
-import { createScheduleRun, updateScheduleRunMetadata } from '../../src/db/schedules'
+import { createScheduleJob, createScheduleRun, updateScheduleRunMetadata } from '../../src/db/schedules'
+import { buildCreateSchedulePersistenceInput } from '../../src/services/schedule-config'
 import { NotificationService, type NotificationServerRegistry } from '../../src/services/notification'
 import { SettingsService } from '../../src/services/settings'
 import { sseAggregator, type SSEEvent } from '../../src/services/sse-aggregator'
 import type { PushNotificationPayload } from '@opencode-manager/shared/types'
 import type { GoalState } from '@opencode-manager/shared/opencode'
 import type { SessionGoalOutcome } from '../../src/services/goal-outcomes'
+import { CreateScheduleJobRequestSchema, type ScheduleJob } from '@opencode-manager/shared/schemas'
 
 const DIRECTORY = '/abs/repo'
 const USER_ID = 'user-1'
@@ -75,6 +77,32 @@ function createService(
     USER_ID,
   )
   return service
+}
+
+function createScheduledJob(db: Database, showInInbox: boolean, serverId?: string): ScheduleJob {
+  const request = CreateScheduleJobRequestSchema.parse({
+    name: 'Nightly audit',
+    scheduleMode: 'interval',
+    intervalMinutes: 60,
+    prompt: 'Summarize the repository.',
+    showInInbox,
+  })
+  return createScheduleJob(db, 1, buildCreateSchedulePersistenceInput(request), serverId)
+}
+
+function linkRunSession(db: Database, job: ScheduleJob, sessionId: string, serverId?: string) {
+  const now = Date.now()
+  const run = createScheduleRun(db, {
+    jobId: job.id,
+    repoId: job.repoId,
+    serverId,
+    triggerSource: 'schedule',
+    status: 'running',
+    startedAt: now,
+    createdAt: now,
+  })
+  updateScheduleRunMetadata(db, job.repoId, job.id, run.id, { sessionId })
+  return run
 }
 
 describe('NotificationService.handleSSEEvent session routing', () => {
@@ -184,6 +212,126 @@ describe('NotificationService.handleSSEEvent session routing', () => {
     await service.handleSSEEvent(DIRECTORY, permissionAskedEvent('ses_perm'))
 
     expect(send).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('NotificationService quiet schedule announcements', () => {
+  const REMOTE_SERVER_ID = 'srv_kitchen'
+
+  function idleEvent(sessionID: string): SSEEvent {
+    return {
+      id: 'evt_idle_quiet_1',
+      created: 1700000000000,
+      type: 'session.idle',
+      location: { directory: DIRECTORY },
+      data: { sessionID },
+    } as SSEEvent
+  }
+
+  function failedEvent(sessionID: string): SSEEvent {
+    return {
+      id: 'evt_failed_quiet_1',
+      created: 1700000000000,
+      type: 'session.execution.failed',
+      location: { directory: DIRECTORY },
+      data: { sessionID, error: { type: 'provider', message: 'boom' } },
+    } as SSEEvent
+  }
+
+  function remoteRegistry(): NotificationServerRegistry {
+    return {
+      get: (serverId) => (serverId === REMOTE_SERVER_ID ? { name: 'Kitchen', enabled: true } : null),
+    }
+  }
+
+  beforeEach(() => {
+    sseAggregator.shutdown()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('skips the completion push for a quiet schedule run', async () => {
+    const db = new Database(':memory:')
+    const service = createService(db)
+    const job = createScheduledJob(db, false)
+    linkRunSession(db, job, 'ses_quiet')
+    const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
+
+    await service.handleSSEEvent(DIRECTORY, idleEvent('ses_quiet'))
+
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('still pushes a failure for a quiet schedule run', async () => {
+    const db = new Database(':memory:')
+    const service = createService(db)
+    const job = createScheduledJob(db, false)
+    linkRunSession(db, job, 'ses_quiet')
+    const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
+
+    await service.handleSSEEvent(DIRECTORY, failedEvent('ses_quiet'))
+
+    expect(send).toHaveBeenCalledTimes(1)
+    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    expect(payload.title).toBe('Error')
+    expect(payload.tag).toBe('session.execution.failed-ses_quiet')
+  })
+
+  it('pushes the run report for an announcing schedule run', async () => {
+    const db = new Database(':memory:')
+    const service = createService(db)
+    const job = createScheduledJob(db, true)
+    const run = linkRunSession(db, job, 'ses_loud')
+    const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
+
+    await service.handleSSEEvent(DIRECTORY, idleEvent('ses_loud'))
+
+    expect(send).toHaveBeenCalledTimes(1)
+    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    expect(payload.title).toBe('Session complete')
+    expect(payload.data?.url).toBe(`/schedules?scheduleTab=runs&runId=${run.id}`)
+  })
+
+  it('skips the completion push for a quiet remote schedule run', async () => {
+    const db = new Database(':memory:')
+    const service = createService(db, remoteRegistry())
+    const job = createScheduledJob(db, false, REMOTE_SERVER_ID)
+    linkRunSession(db, job, 'ses_remote_quiet', REMOTE_SERVER_ID)
+    const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
+
+    await service.handleSSEEvent(DIRECTORY, idleEvent('ses_remote_quiet'), REMOTE_SERVER_ID)
+
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('pushes the completion of an announcing remote schedule run', async () => {
+    const db = new Database(':memory:')
+    const service = createService(db, remoteRegistry())
+    const job = createScheduledJob(db, true, REMOTE_SERVER_ID)
+    linkRunSession(db, job, 'ses_remote_loud', REMOTE_SERVER_ID)
+    const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
+
+    await service.handleSSEEvent(DIRECTORY, idleEvent('ses_remote_loud'), REMOTE_SERVER_ID)
+
+    expect(send).toHaveBeenCalledTimes(1)
+    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    expect(payload.data?.serverId).toBe(REMOTE_SERVER_ID)
+  })
+
+  it('still pushes a permission prompt for a quiet schedule run', async () => {
+    const db = new Database(':memory:')
+    const service = createService(db)
+    const job = createScheduledJob(db, false)
+    linkRunSession(db, job, 'ses_quiet')
+    const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
+
+    await service.handleSSEEvent(DIRECTORY, permissionAskedEvent('ses_quiet'))
+
+    expect(send).toHaveBeenCalledTimes(1)
+    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    expect(payload.data?.url).toBe('/repos/1/sessions/ses_quiet')
   })
 })
 

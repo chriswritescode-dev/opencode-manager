@@ -29,6 +29,7 @@ interface ScheduleJobRow {
   name: string
   description: string | null
   enabled: number
+  show_in_inbox: number
   schedule_mode: ScheduleMode | null
   interval_minutes: number | null
   cron_expression: string | null
@@ -137,6 +138,7 @@ function rowToScheduleJob(row: ScheduleJobRow): ScheduleJob {
     name: row.name,
     description: row.description,
     enabled: Boolean(row.enabled),
+    showInInbox: row.show_in_inbox !== 0,
     scheduleMode: row.schedule_mode ?? 'interval',
     intervalMinutes: row.interval_minutes,
     cronExpression: row.cron_expression,
@@ -243,7 +245,7 @@ export function createScheduleJob(
   const now = Date.now()
   const stmt = db.prepare(`
     INSERT INTO schedule_jobs (
-      repo_id, server_id, directory, name, description, enabled, schedule_mode, interval_minutes, cron_expression, timezone, agent_slug, prompt, model, skill_metadata,
+      repo_id, server_id, directory, name, description, enabled, show_in_inbox, schedule_mode, interval_minutes, cron_expression, timezone, agent_slug, prompt, model, skill_metadata,
       permission_config,
       mcp_servers,
       branch,
@@ -251,7 +253,7 @@ export function createScheduleJob(
       sandbox_config,
       created_at, updated_at, last_run_at, next_run_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   const result = stmt.run(
@@ -261,6 +263,7 @@ export function createScheduleJob(
     input.name,
     input.description ?? null,
     input.enabled ? 1 : 0,
+    input.showInInbox ? 1 : 0,
     input.scheduleMode,
     input.intervalMinutes,
     input.cronExpression,
@@ -297,7 +300,7 @@ export function updateScheduleJob(db: Database, repoId: number | null, jobId: nu
 
   const stmt = db.prepare(`
     UPDATE schedule_jobs
-    SET name = ?, description = ?, enabled = ?, schedule_mode = ?, interval_minutes = ?, cron_expression = ?, timezone = ?,
+    SET name = ?, description = ?, enabled = ?, show_in_inbox = ?, schedule_mode = ?, interval_minutes = ?, cron_expression = ?, timezone = ?,
         agent_slug = ?, prompt = ?, model = ?, skill_metadata = ?, permission_config = ?, mcp_servers = ?, branch = ?, workspace_mode = ?, sandbox_config = ?, directory = ?, updated_at = ?, next_run_at = ?
     WHERE repo_id IS ? AND id = ?
   `)
@@ -306,6 +309,7 @@ export function updateScheduleJob(db: Database, repoId: number | null, jobId: nu
     input.name,
     input.description,
     input.enabled ? 1 : 0,
+    input.showInInbox ? 1 : 0,
     input.scheduleMode,
     input.intervalMinutes,
     input.cronExpression,
@@ -449,6 +453,12 @@ export function createScheduleRun(
   return run
 }
 
+/**
+ * Finishes a schedule run and stores its session output. A completed run of a
+ * job that does not announce itself in the inbox is marked viewed at the same
+ * timestamp, so quiet schedules never surface as unread; failed and cancelled
+ * runs stay unread, and the job's setting at finish time decides the outcome.
+ */
 export function updateScheduleRun(
   db: Database,
   repoId: number | null,
@@ -466,11 +476,20 @@ export function updateScheduleRun(
 ): ScheduleRun | null {
   const stmt = db.prepare(`
     UPDATE schedule_runs
-    SET status = ?, finished_at = ?, session_id = ?, session_title = ?, log_text = ?, response_text = ?, error_text = ?
+    SET status = ?, finished_at = ?,
+        viewed_at = CASE
+          WHEN ? = 'completed' AND EXISTS (
+            SELECT 1 FROM schedule_jobs sj WHERE sj.id = schedule_runs.job_id AND sj.show_in_inbox = 0
+          ) THEN ?
+          ELSE viewed_at
+        END,
+        session_id = ?, session_title = ?, log_text = ?, response_text = ?, error_text = ?
     WHERE repo_id IS ? AND job_id = ? AND id = ?
   `)
 
   stmt.run(
+    input.status,
+    input.finishedAt,
     input.status,
     input.finishedAt,
     input.sessionId ?? null,
@@ -568,6 +587,28 @@ export function getScheduleRunBySessionId(
   const stmt = db.prepare('SELECT * FROM schedule_runs WHERE server_id = ? AND session_id = ? ORDER BY started_at DESC LIMIT 1')
   const row = stmt.get(serverId, sessionId) as ScheduleRunRow | undefined
   return row ? rowToScheduleRun(row) : null
+}
+
+/**
+ * Reports whether the latest run for a session belongs to a job that stays out
+ * of the inbox. Sessions without a run, and sessions of announcing jobs, are
+ * not quiet.
+ */
+export function isQuietScheduleRunSession(
+  db: Database,
+  sessionId: string,
+  serverId: string = LOCAL_OPENCODE_SERVER_ID,
+): boolean {
+  const stmt = db.prepare(`
+    SELECT sj.show_in_inbox
+    FROM schedule_runs sr
+    JOIN schedule_jobs sj ON sj.id = sr.job_id
+    WHERE sr.server_id = ? AND sr.session_id = ?
+    ORDER BY sr.started_at DESC
+    LIMIT 1
+  `)
+  const row = stmt.get(serverId, sessionId) as { show_in_inbox: number } | undefined
+  return row?.show_in_inbox === 0
 }
 
 export function getRunningScheduleRunByJob(db: Database, repoId: number | null, jobId: number): ScheduleRun | null {
