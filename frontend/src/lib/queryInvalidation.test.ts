@@ -132,6 +132,7 @@ describe('invalidateProviderCaches', () => {
 
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['provider-credentials'] })
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['provider-auth-methods'] })
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['provider-integrations'] })
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'providers'] })
     expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['providers'] })
     expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['providers-for-execution-model'] })
@@ -156,7 +157,7 @@ describe('invalidateProviderCachesDebounced', () => {
 
     vi.advanceTimersByTime(200)
 
-    expect(invalidateQueries).toHaveBeenCalledTimes(3)
+    expect(invalidateQueries).toHaveBeenCalledTimes(4)
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'providers'] })
   })
 })

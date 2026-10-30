@@ -32,6 +32,7 @@ export interface Model {
 
 export interface Provider {
   id: string;
+  integrationID?: string;
   name: string;
   models: Model[];
 }
@@ -83,6 +84,7 @@ export async function getProviders(directory?: string, serverId?: string): Promi
 
       return {
         id: provider.id,
+        integrationID: provider.integrationID,
         name: provider.name,
         models,
       };

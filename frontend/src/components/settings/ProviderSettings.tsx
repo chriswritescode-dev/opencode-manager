@@ -7,14 +7,92 @@ import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { Loader2, Check, X, Shield, ChevronDown, ChevronRight, Key, Search, Pencil, Trash2 } from 'lucide-react'
 import { providerCredentialsApi } from '@/api/providers'
 import type { Provider } from '@/api/providers'
-import { type OAuthAuthorizeResponse } from '@/api/oauth'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { type IntegrationInfo, type IntegrationMethod, type OAuthAuthorizeResponse } from '@/api/oauth'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { OAuthAuthorizeDialog } from './OAuthAuthorizeDialog'
 import { OAuthCallbackDialog } from './OAuthCallbackDialog'
 import { ApiKeyDialog } from '@/components/model/ApiKeyDialog'
 import { invalidateProviderCaches } from '@/lib/queryInvalidation'
 import { useProviders } from '@/hooks/useProviders'
-import { useProviderAuthMethods } from '@/hooks/useProviderAuthMethods'
+import { useProviderIntegrations } from '@/hooks/useProviderIntegrations'
+
+interface ProviderEntry {
+  id: string
+  name: string
+  models: Provider['models']
+  methods: IntegrationMethod[]
+  connected: boolean
+  keyConnected: boolean
+}
+
+function hasCredentialConnection(integration: IntegrationInfo): boolean {
+  return integration.connections.some((connection) => connection.type === 'credential')
+}
+
+function hasKeyConnection(integration: IntegrationInfo): boolean {
+  return integration.connections.some(
+    (connection) => connection.type === 'credential' && connection.method === 'key',
+  )
+}
+
+function supportsOAuthMethods(methods: IntegrationMethod[]): boolean {
+  return methods.some((method) => method.type === 'oauth')
+}
+
+function supportsSettingsAuthentication(methods: IntegrationMethod[]): boolean {
+  return methods.some((method) => method.type === 'oauth' || method.type === 'key')
+}
+
+function buildProviderEntries(
+  providers: Provider[] | undefined,
+  integrations: IntegrationInfo[] | undefined,
+): ProviderEntry[] {
+  const integrationsByID = new Map((integrations ?? []).map((integration) => [integration.id, integration]))
+  const seen = new Set<string>()
+  const entriesByID = new Map<string, ProviderEntry>()
+  const entries: ProviderEntry[] = []
+
+  for (const provider of providers ?? []) {
+    const integrationID = provider.integrationID ?? provider.id
+    const integration = integrationsByID.get(integrationID)
+    seen.add(integrationID)
+
+    const existingEntry = entriesByID.get(integrationID)
+    if (existingEntry) {
+      existingEntry.models.push(...provider.models)
+      continue
+    }
+
+    const entry: ProviderEntry = {
+      id: integrationID,
+      name: integration?.name || provider.name || provider.id,
+      models: [...provider.models],
+      methods: integration?.methods ?? [],
+      connected: integration ? hasCredentialConnection(integration) : false,
+      keyConnected: integration ? hasKeyConnection(integration) : false,
+    }
+    entriesByID.set(integrationID, entry)
+    entries.push(entry)
+  }
+
+  const integrationOnly = (integrations ?? [])
+    .filter(
+      (integration) =>
+        !seen.has(integration.id) &&
+        (supportsSettingsAuthentication(integration.methods) || hasCredentialConnection(integration)),
+    )
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((integration): ProviderEntry => ({
+      id: integration.id,
+      name: integration.name || integration.id,
+      models: [],
+      methods: integration.methods,
+      connected: hasCredentialConnection(integration),
+      keyConnected: hasKeyConnection(integration),
+    }))
+
+  return [...entries, ...integrationOnly]
+}
 
 export function ProviderSettings() {
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null)
@@ -34,12 +112,16 @@ export function ProviderSettings() {
 
   const providers = providersData?.providers
 
-  const { data: credentialsList, isLoading: credentialsLoading } = useQuery({
-    queryKey: ['provider-credentials'],
-    queryFn: () => providerCredentialsApi.list(),
-  })
+  const {
+    data: integrations,
+    isLoading: integrationsLoading,
+    isError: integrationsError,
+  } = useProviderIntegrations()
 
-  const { data: authMethods } = useProviderAuthMethods()
+  const providerEntries = useMemo(
+    () => integrationsError ? [] : buildProviderEntries(providers, integrations),
+    [providers, integrations, integrationsError],
+  )
 
   const deleteCredentialMutation = useMutation({
     mutationFn: (providerId: string) => providerCredentialsApi.delete(providerId),
@@ -81,32 +163,23 @@ export function ProviderSettings() {
     setSelectedProvider(null)
   }
 
-  const supportsOAuth = useCallback((providerId: string) => {
-    const methods = authMethods?.[providerId] || []
-    return methods.some(method => method.type === 'oauth')
-  }, [authMethods])
-
-  const hasCredentials = useCallback((providerId: string) => {
-    return credentialsList?.includes(providerId) || false
-  }, [credentialsList])
-
   const oauthProviders = useMemo(() => {
-    if (!providers || !authMethods) return []
-    const oauth = providers.filter(provider => supportsOAuth(provider.id))
-    return oauth.slice().sort((a, b) => {
-      const aConnected = hasCredentials(a.id) ? 1 : 0
-      const bConnected = hasCredentials(b.id) ? 1 : 0
-      return bConnected - aConnected
-    })
-  }, [providers, authMethods, supportsOAuth, hasCredentials])
+    return providerEntries
+      .filter((provider) => supportsOAuthMethods(provider.methods))
+      .sort((a, b) => Number(b.connected) - Number(a.connected))
+  }, [providerEntries])
 
   const apiKeyProviders = useMemo(() => {
-    if (!providers || !authMethods) return { connected: [], available: [] }
-    const nonOAuthProviders = providers.filter(provider => !supportsOAuth(provider.id))
-    const connected = nonOAuthProviders.filter(provider => hasCredentials(provider.id))
-    const available = nonOAuthProviders.filter(provider => !hasCredentials(provider.id))
-    return { connected, available }
-  }, [providers, authMethods, supportsOAuth, hasCredentials])
+    const nonOAuthProviders = providerEntries.filter(
+      (provider) =>
+        !supportsOAuthMethods(provider.methods) &&
+        (provider.connected || provider.methods.some((method) => method.type === 'key')),
+    )
+    return {
+      connected: nonOAuthProviders.filter((provider) => provider.connected),
+      available: nonOAuthProviders.filter((provider) => !provider.connected),
+    }
+  }, [providerEntries])
 
   const filteredAvailableProviders = useMemo(() => {
     if (!availableSearch.trim()) return apiKeyProviders.available
@@ -119,8 +192,13 @@ export function ProviderSettings() {
 
   const selectedProviderName = useMemo(() => {
     if (!selectedProvider) return ''
-    return providers?.find(p => p.id === selectedProvider)?.name || selectedProvider
-  }, [selectedProvider, providers])
+    return providerEntries.find((provider) => provider.id === selectedProvider)?.name || selectedProvider
+  }, [selectedProvider, providerEntries])
+
+  const selectedProviderMethods = useMemo(() => {
+    if (!selectedProvider) return []
+    return providerEntries.find((provider) => provider.id === selectedProvider)?.methods ?? []
+  }, [selectedProvider, providerEntries])
 
   const handleAddApiKey = useCallback((provider: Provider) => {
     setApiKeyProvider(provider)
@@ -147,7 +225,18 @@ export function ProviderSettings() {
     }
   }, [])
 
-  if (providersLoading || credentialsLoading) {
+  if (integrationsError) {
+    return (
+      <div role="alert" className="rounded-md border border-destructive/50 bg-card p-4">
+        <p className="text-sm font-medium text-foreground">Unable to load provider integrations.</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Provider connection status and available authentication methods could not be verified. Reload the settings page to try again.
+        </p>
+      </div>
+    )
+  }
+
+  if (providersLoading || integrationsLoading) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -177,7 +266,8 @@ export function ProviderSettings() {
         ) : (
           <div className="divide-y divide-border">
             {oauthProviders.map((provider) => {
-              const hasKey = hasCredentials(provider.id)
+              const isConnected = provider.connected
+              const keyConnected = provider.keyConnected
               const modelCount = provider.models.length
 
               return (
@@ -193,7 +283,7 @@ export function ProviderSettings() {
                     )}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    {hasKey ? (
+                    {isConnected ? (
                       <Badge variant="default" className="bg-success text-success-foreground hover:bg-success/90 shrink-0">
                         <Check className="h-3 w-3 mr-1" />
                         Connected
@@ -206,16 +296,27 @@ export function ProviderSettings() {
                     )}
                     <Button
                       size="sm"
-                      variant={hasKey ? 'outline' : 'default'}
+                      variant={isConnected ? 'outline' : 'default'}
                       onClick={() => {
                         setSelectedProvider(provider.id)
                         setOauthDialogOpen(true)
                       }}
                     >
                       <Shield className="h-4 w-4 mr-1" />
-                      {hasKey ? 'Reconnect' : 'Connect'}
+                      {isConnected ? 'Reconnect' : 'Connect'}
                     </Button>
-                    {hasKey && (
+                    {provider.methods.some((method) => method.type === 'key') && (
+                      <Button
+                        size="sm"
+                        variant={keyConnected ? 'outline' : 'secondary'}
+                        onClick={() => keyConnected ? handleEditApiKey(provider) : handleAddApiKey(provider)}
+                        aria-label={`Add API key for ${provider.name || provider.id}`}
+                      >
+                        <Key className="h-4 w-4 mr-1" />
+                        Add API key
+                      </Button>
+                    )}
+                    {isConnected && (
                       <Button
                         size="sm"
                         variant="destructive"
@@ -236,7 +337,7 @@ export function ProviderSettings() {
           <OAuthAuthorizeDialog
             providerId={selectedProvider}
             providerName={selectedProviderName}
-            methods={authMethods?.[selectedProvider] || []}
+            methods={selectedProviderMethods}
             open={oauthDialogOpen}
             onOpenChange={handleOAuthDialogClose}
             onSuccess={handleOAuthAuthorize}
@@ -308,15 +409,17 @@ export function ProviderSettings() {
                               <Check className="h-3 w-3 mr-1" />
                               Connected
                             </Badge>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleEditApiKey(provider)}
-                              aria-label={`Edit API key for ${provider.name || provider.id}`}
-                              className="h-8 w-8 p-0"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
+                            {provider.methods.some((method) => method.type === 'key') && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleEditApiKey(provider)}
+                                aria-label={`Edit API key for ${provider.name || provider.id}`}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
                             <Button
                               size="sm"
                               variant="ghost"

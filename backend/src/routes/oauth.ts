@@ -23,6 +23,15 @@ export function createOAuthRoutes(openCodeClient: OpenCodeClient) {
     }
   })
 
+  app.get('/integrations', async (c) => {
+    try {
+      const integrations = await openCodeClient.api.integration.list()
+      return c.json({ integrations: integrations.data })
+    } catch (error) {
+      return handleOpenCodeError(c, error, 'Failed to list provider integrations')
+    }
+  })
+
   app.post('/:id/oauth/authorize', async (c) => {
     try {
       const body = await c.req.json()

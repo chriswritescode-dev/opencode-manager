@@ -126,6 +126,41 @@ describe('oauth routes /auth-methods', () => {
   })
 })
 
+describe('oauth routes /integrations', () => {
+  it('returns every integration with its methods and connections', async () => {
+    const client = createStubOpenCodeClient()
+    const integrations = [
+      integrationFixture({
+        id: 'openrouter',
+        name: 'OpenRouter',
+        methods: [{ type: 'key' }],
+      }),
+      integrationFixture({
+        id: 'anthropic',
+        name: 'Anthropic',
+        methods: [{ type: 'key' }, { type: 'env', names: ['ANTHROPIC_API_KEY'] }],
+        connections: [{ type: 'credential', id: 'cred_1', label: 'Anthropic', method: 'key' }],
+      }),
+    ]
+    vi.mocked(client.api.integration.list).mockResolvedValueOnce({ location: LOCATION, data: integrations })
+
+    const res = await createOAuthApp(client).request('/oauth/integrations')
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ integrations })
+  })
+
+  it('returns 502 when the upstream is unreachable', async () => {
+    const client = createStubOpenCodeClient()
+    vi.mocked(client.api.integration.list).mockRejectedValueOnce(new ClientError('UnexpectedStatus'))
+
+    const res = await createOAuthApp(client).request('/oauth/integrations')
+
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: 'Failed to list provider integrations', code: 'ClientError' })
+  })
+})
+
 describe('oauth routes /:id/oauth/authorize', () => {
   it('starts the V2 attempt with the method and answer and returns it', async () => {
     const client = createStubOpenCodeClient()
