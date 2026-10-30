@@ -95,7 +95,7 @@ vi.mock('./ComposerToolsMenu', () => ({
 vi.mock('./PromptSuggestions', () => ({ PromptSuggestions: () => null }))
 vi.mock('@/hooks/useSessionGoals', () => ({
   useSessionGoal: () => ({ data: undefined }),
-  useStartSessionGoal: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useSessionGoalCommand: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
 }))
 vi.mock('@/hooks/useSessionPermissionMode', () => ({ useSessionPermissionMode: () => ({ data: undefined }) }))
 

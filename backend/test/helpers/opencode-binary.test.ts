@@ -16,7 +16,7 @@ vi.mock('child_process', () => ({
   spawn: childProcessMock.spawn,
 }))
 
-const SUPPORTED_VERSION = '2.1.2'
+const SUPPORTED_VERSION = '2.2.1'
 const OPENCODE_BIN_FIXTURE = '/fixture/opencode-2'
 const PATH_CANDIDATE = 'opencode'
 const ABSOLUTE_CANDIDATES = ['/usr/local/bin/opencode', '/opt/opencode/bin/opencode']

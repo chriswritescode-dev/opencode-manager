@@ -51,6 +51,19 @@ export { ClientError, isIntegrationNotFoundError, isMcpServerNotFoundError, isSe
 
 export { assistantText, sessionIDFromEvent, toolContentText } from './content'
 
+export {
+  GOAL_CHANGED_EVENT_TYPE,
+  GOAL_COMMAND_NAME,
+  GOAL_RPC_ID,
+  GOAL_USER_PAUSE_REASONS,
+  goalChangeFromEvent,
+  isGoalOpen,
+  isGoalOutcome,
+  readSessionGoal,
+} from './goal'
+
+export type { GoalState, GoalStatus, SessionGoalRead } from './goal'
+
 export { configModelRef, formatOpenCodeModelRef, parseOpenCodeModelRef, selectConfiguredModelRef } from './modelRef'
 
 export {

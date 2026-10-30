@@ -2,58 +2,34 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SessionGoalBar } from './SessionGoalBar'
-import {
-  useCancelSessionGoal,
-  usePauseSessionGoal,
-  useResumeSessionGoal,
-  useSessionGoal,
-} from '@/hooks/useSessionGoals'
-import type { SessionGoal } from '@opencode-manager/shared/schemas'
+import { useSessionGoal, useSessionGoalCommand } from '@/hooks/useSessionGoals'
+import type { GoalState, SessionGoalRead } from '@opencode-manager/shared/opencode'
 
 vi.mock('@/hooks/useSessionGoals')
 
-const baseGoal: SessionGoal = {
-  id: 1,
-  sessionId: 'ses_1',
-  serverId: 'local',
-  directory: '/repo',
+const baseGoal: GoalState = {
+  id: 'goal_1',
   objective: 'Ship the feature',
   status: 'active',
-  stopReason: null,
-  turnState: 'running',
-  continuationCount: 2,
-  maxContinuations: 20,
-  tokenBudget: null,
-  tokensUsed: 0,
-  consecutiveBlocked: 0,
-  lastVerdict: null,
-  lastReason: null,
-  createdAt: 1,
+  rounds: 3,
+  maxRounds: 50,
+  boot: 'boot_1',
   updatedAt: 1,
-  finishedAt: null,
 }
 
-function mockGoals(
-  goal: SessionGoal | null,
-  overrides: {
-    pause?: ReturnType<typeof vi.fn>
-    resume?: ReturnType<typeof vi.fn>
-    cancel?: ReturnType<typeof vi.fn>
-  } = {},
+function mockGoal(
+  read: SessionGoalRead,
+  overrides: { mutate?: ReturnType<typeof vi.fn>; isPending?: boolean } = {},
 ) {
-  vi.mocked(useSessionGoal).mockReturnValue({ data: goal } as ReturnType<typeof useSessionGoal>)
-  vi.mocked(usePauseSessionGoal).mockReturnValue({
-    mutate: overrides.pause ?? vi.fn(),
-    isPending: false,
-  } as unknown as ReturnType<typeof usePauseSessionGoal>)
-  vi.mocked(useResumeSessionGoal).mockReturnValue({
-    mutate: overrides.resume ?? vi.fn(),
-    isPending: false,
-  } as unknown as ReturnType<typeof useResumeSessionGoal>)
-  vi.mocked(useCancelSessionGoal).mockReturnValue({
-    mutate: overrides.cancel ?? vi.fn(),
-    isPending: false,
-  } as unknown as ReturnType<typeof useCancelSessionGoal>)
+  vi.mocked(useSessionGoal).mockReturnValue({ data: read } as ReturnType<typeof useSessionGoal>)
+  vi.mocked(useSessionGoalCommand).mockReturnValue({
+    mutate: overrides.mutate ?? vi.fn(),
+    isPending: overrides.isPending ?? false,
+  } as unknown as ReturnType<typeof useSessionGoalCommand>)
+}
+
+function renderBar() {
+  return render(<SessionGoalBar sessionID="ses_1" directory="/repo" />)
 }
 
 describe('SessionGoalBar', () => {
@@ -61,85 +37,68 @@ describe('SessionGoalBar', () => {
     vi.clearAllMocks()
   })
 
-  it('renders nothing when there is no goal', () => {
-    mockGoals(null)
-    const { container } = render(<SessionGoalBar sessionID="ses_1" />)
+  it('renders nothing when the active goal is empty', () => {
+    mockGoal({ supported: true, goal: null })
+    const { container } = renderBar()
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('shows the turn counter and pauses the active goal', async () => {
+  it('renders nothing when the server does not support goals', () => {
+    mockGoal({ supported: false })
+    const { container } = renderBar()
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('shows the active goal and pauses it', async () => {
     const user = userEvent.setup()
-    const pause = vi.fn()
-    mockGoals({ ...baseGoal }, { pause })
-    render(<SessionGoalBar sessionID="ses_1" />)
+    const mutate = vi.fn()
+    mockGoal({ supported: true, goal: { ...baseGoal } }, { mutate })
+    renderBar()
 
     expect(screen.getByText('Goal active')).toBeInTheDocument()
-    expect(screen.getByText('Turn 2/20')).toBeInTheDocument()
+    expect(screen.getByText('Round 3/50')).toBeInTheDocument()
     expect(screen.getByText('Ship the feature')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Pause' }))
+    expect(mutate).toHaveBeenCalledWith({ sessionID: 'ses_1', text: 'pause' })
 
-    expect(pause).toHaveBeenCalledWith(1)
+    await user.click(screen.getByRole('button', { name: 'Clear' }))
+    expect(mutate).toHaveBeenCalledWith({ sessionID: 'ses_1', text: 'clear' })
   })
 
-  it('shows token usage when a budget is set', () => {
-    mockGoals({ ...baseGoal, tokenBudget: 1000, tokensUsed: 250 })
-    render(<SessionGoalBar sessionID="ses_1" />)
-
-    expect(screen.getByText('250/1,000 tokens')).toBeInTheDocument()
-  })
-
-  it('resumes a paused goal', async () => {
+  it('resumes a paused goal and shows the pause reason', async () => {
     const user = userEvent.setup()
-    const resume = vi.fn()
-    mockGoals({ ...baseGoal, status: 'paused' }, { resume })
-    render(<SessionGoalBar sessionID="ses_1" />)
+    const mutate = vi.fn()
+    mockGoal({ supported: true, goal: { ...baseGoal, status: 'paused', reason: 'Paused by the user' } }, { mutate })
+    renderBar()
 
     expect(screen.getByText('Goal paused')).toBeInTheDocument()
+    expect(screen.getByText('Paused by the user')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Resume' }))
-
-    expect(resume).toHaveBeenCalledWith(1)
+    expect(mutate).toHaveBeenCalledWith({ sessionID: 'ses_1', text: 'resume' })
   })
 
-  it('shows a terminal summary and can be dismissed', async () => {
+  it('shows a completed goal with its reason and clears it', async () => {
     const user = userEvent.setup()
-    mockGoals({ ...baseGoal, status: 'completed', stopReason: 'continuation_limit' })
-    render(<SessionGoalBar sessionID="ses_1" />)
+    const mutate = vi.fn()
+    mockGoal({ supported: true, goal: { ...baseGoal, status: 'complete', reason: 'Objective met' } }, { mutate })
+    renderBar()
 
     expect(screen.getByText('Goal completed')).toBeInTheDocument()
-    expect(screen.getByText('Continuation limit reached')).toBeInTheDocument()
+    expect(screen.getByText('Objective met')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Dismiss' }))
-
-    expect(screen.queryByText('Goal completed')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Clear' }))
+    expect(mutate).toHaveBeenCalledWith({ sessionID: 'ses_1', text: 'clear' })
   })
 
-  it('shows the shared stop-reason wording for a user-paused goal', () => {
-    mockGoals({ ...baseGoal, status: 'stopped', stopReason: 'user_paused' })
-    render(<SessionGoalBar sessionID="ses_1" />)
+  it('disables the goal buttons while the command is pending', () => {
+    mockGoal({ supported: true, goal: { ...baseGoal } }, { isPending: true })
+    renderBar()
 
-    expect(screen.getByText('Goal stopped')).toBeInTheDocument()
-    expect(screen.getByText('Paused by user')).toBeInTheDocument()
-  })
-
-  it('shows the shared stop-reason wording for an audit failure', () => {
-    mockGoals({ ...baseGoal, status: 'blocked', stopReason: 'audit_failed' })
-    render(<SessionGoalBar sessionID="ses_1" />)
-
-    expect(screen.getByText('Goal blocked')).toBeInTheDocument()
-    expect(screen.getByText('Audit failed')).toBeInTheDocument()
-  })
-
-  it('cancels the goal through the cancel API', async () => {
-    const user = userEvent.setup()
-    const cancel = vi.fn()
-    mockGoals({ ...baseGoal }, { cancel })
-    render(<SessionGoalBar sessionID="ses_1" />)
-
-    await user.click(screen.getByRole('button', { name: 'Cancel' }))
-
-    expect(cancel).toHaveBeenCalledWith(1)
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Clear' })).toBeDisabled()
   })
 })

@@ -2,37 +2,28 @@ import { useState } from 'react'
 import { ChevronDown, ChevronUp, Target } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import {
-  useCancelSessionGoal,
-  usePauseSessionGoal,
-  useResumeSessionGoal,
-  useSessionGoal,
-} from '@/hooks/useSessionGoals'
-import { getGoalOutcomeTitle, getGoalTokenLabel, getGoalTurnLabel, getGoalOutcomeReason } from '@opencode-manager/shared/notifications'
-import { isTerminalSessionGoal, type SessionGoalStatus } from '@opencode-manager/shared/schemas'
+import { useSessionGoal, useSessionGoalCommand } from '@/hooks/useSessionGoals'
+import { getGoalRoundsLabel, getGoalStatusTitle } from '@opencode-manager/shared/notifications'
+import type { GoalStatus } from '@opencode-manager/shared/opencode'
 
-const STATUS_CHIP_CLASSES: Record<SessionGoalStatus, string> = {
+const STATUS_CHIP_CLASSES: Record<GoalStatus, string> = {
   active: 'bg-highlight text-highlight-foreground border-highlight',
   paused: 'bg-warning/15 text-warning border-warning/40',
-  completed: 'bg-success/15 text-success border-success/40',
-  blocked: 'bg-destructive/15 text-destructive border-destructive/40',
-  stopped: 'bg-muted text-muted-foreground border-border',
+  complete: 'bg-success/15 text-success border-success/40',
 }
 
-export function SessionGoalBar({ sessionID }: { sessionID: string }) {
-  const { data: goal } = useSessionGoal(sessionID)
-  const pauseGoal = usePauseSessionGoal()
-  const resumeGoal = useResumeSessionGoal()
-  const cancelGoal = useCancelSessionGoal()
+const GOAL_BUTTON_CLASSES = 'h-6 px-2 text-xs'
+
+/** Renders the session's OpenCode goal with pause, resume and clear controls. */
+export function SessionGoalBar({ sessionID, directory }: { sessionID: string; directory: string | undefined }) {
+  const { data } = useSessionGoal(sessionID, directory)
+  const goalCommand = useSessionGoalCommand(directory)
   const [expanded, setExpanded] = useState(false)
-  const [dismissedGoalId, setDismissedGoalId] = useState<number | null>(null)
 
-  if (!goal) return null
-  const terminal = isTerminalSessionGoal(goal)
-  if (terminal && dismissedGoalId === goal.id) return null
+  if (!data || !data.supported || data.goal === null) return null
 
-  const reason = getGoalOutcomeReason(goal)
-  const tokenLabel = getGoalTokenLabel(goal)
+  const goal = data.goal
+  const open = goal.status !== 'complete'
 
   return (
     <div className="mb-1 flex flex-col gap-1 rounded-lg border border-border bg-card px-2 py-1.5 text-xs">
@@ -42,74 +33,49 @@ export function SessionGoalBar({ sessionID }: { sessionID: string }) {
           className={`gap-1 px-2 py-0.5 font-medium ${STATUS_CHIP_CLASSES[goal.status]}`}
         >
           <Target className="h-3 w-3" />
-          {getGoalOutcomeTitle(goal.status)}
+          {getGoalStatusTitle(goal.status)}
         </Badge>
 
-        {!terminal && (
-          <span className="text-muted-foreground">
-            {getGoalTurnLabel(goal)}
-          </span>
+        {goal.status === 'active' && (
+          <span className="text-muted-foreground">{getGoalRoundsLabel(goal)}</span>
         )}
 
-        {!terminal && tokenLabel !== null && (
-          <span className="text-muted-foreground">
-            {tokenLabel}
-          </span>
-        )}
-
-        {terminal ? (
-          <>
-            {reason && (
-              <span className="min-w-0 flex-1 truncate text-muted-foreground" title={reason}>
-                {reason}
-              </span>
-            )}
+        <div className="ml-auto flex items-center gap-1">
+          {goal.status === 'active' && (
             <Button
               variant="ghost"
               size="sm"
-              className="ml-auto h-6 px-2 text-xs"
-              onClick={() => setDismissedGoalId(goal.id)}
+              className={GOAL_BUTTON_CLASSES}
+              disabled={goalCommand.isPending}
+              onClick={() => goalCommand.mutate({ sessionID, text: 'pause' })}
             >
-              Dismiss
+              Pause
             </Button>
-          </>
-        ) : (
-          <div className="ml-auto flex items-center gap-1">
-            {goal.status === 'paused' ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 px-2 text-xs"
-                disabled={resumeGoal.isPending}
-                onClick={() => resumeGoal.mutate(goal.id)}
-              >
-                Resume
-              </Button>
-            ) : (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 px-2 text-xs"
-                disabled={pauseGoal.isPending}
-                onClick={() => pauseGoal.mutate(goal.id)}
-              >
-                Pause
-              </Button>
-            )}
+          )}
+          {goal.status === 'paused' && (
             <Button
               variant="ghost"
               size="sm"
-              className="h-6 px-2 text-xs text-destructive hover:text-destructive"
-              disabled={cancelGoal.isPending}
-              onClick={() => cancelGoal.mutate(goal.id)}
+              className={GOAL_BUTTON_CLASSES}
+              disabled={goalCommand.isPending}
+              onClick={() => goalCommand.mutate({ sessionID, text: 'resume' })}
             >
-              Cancel
+              Resume
             </Button>
-          </div>
-        )}
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`${GOAL_BUTTON_CLASSES} text-destructive hover:text-destructive`}
+            disabled={goalCommand.isPending}
+            onClick={() => goalCommand.mutate({ sessionID, text: 'clear' })}
+          >
+            Clear
+          </Button>
+        </div>
       </div>
 
-      {!terminal && (
+      {open && (
         <div className="flex items-start gap-1">
           <p className={`min-w-0 flex-1 text-muted-foreground ${expanded ? 'whitespace-pre-wrap break-words' : 'truncate'}`}>
             {goal.objective}
@@ -126,9 +92,9 @@ export function SessionGoalBar({ sessionID }: { sessionID: string }) {
         </div>
       )}
 
-      {!terminal && goal.lastReason && (
-        <p className="truncate text-muted-foreground" title={goal.lastReason}>
-          {goal.lastReason}
+      {goal.reason && (
+        <p className="truncate text-muted-foreground" title={goal.reason}>
+          {goal.reason}
         </p>
       )}
     </div>

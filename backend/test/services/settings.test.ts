@@ -79,4 +79,26 @@ describe('SettingsService', () => {
     expect(updated.preferences.mode).toBe('plan')
     expect(updated.preferences.gitIdentity).toEqual({ name: 'Root', email: 'not an email' })
   })
+
+  it('drops stored goal settings that are no longer part of the schema', () => {
+    db.prepare(
+      `INSERT INTO user_preferences (user_id, preferences, updated_at)
+       VALUES (?, ?, ?)`
+    ).run(
+      'default',
+      JSON.stringify({
+        sessionDefaults: {
+          permissionMode: 'ask',
+          goalMaxContinuations: 20,
+          goalTokenBudget: 1000,
+          goalAuditorModel: 'x/y',
+        },
+      }),
+      Date.now()
+    )
+
+    const settings = settingsService.getSettings()
+
+    expect(settings.preferences.sessionDefaults).toEqual({ permissionMode: 'ask' })
+  })
 })

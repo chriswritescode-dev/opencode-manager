@@ -14,25 +14,20 @@ import { setPendingWarp, runPendingWarp } from './warp.js'
 import { pushPhaseProgress, importProgress } from './move-progress.js'
 import { warmRepoProxy } from './repo-proxy.js'
 import type { MoveProgress } from './move-progress.js'
-import { GOAL_COMMAND, runGoalCommand } from './tui-goal.js'
-import type { GoalDialogProps } from './tui-goal.js'
 import { MULTI_RUN_COMMAND, runMultiRunCommand } from './tui-multi-run.js'
 import type { MultiRunLaunchDialogProps, MultiRunsDialogProps } from './tui-multi-run.js'
 import { runOcmSwitch } from './tui-ocm.js'
-import type { GoalStore } from './goal-store.js'
 import type { RemoteContext } from './remote-context.js'
 
 export type MoveProgressSetter = (progress: MoveProgress | null) => void
 
 export type OcmDialogs = {
-  goal: (props: GoalDialogProps) => void
   multiRunLaunch: (props: MultiRunLaunchDialogProps) => void
   multiRuns: (props: MultiRunsDialogProps) => void
 }
 
 export type OcmFeatures = {
   remote: RemoteContext | undefined
-  goals: GoalStore | undefined
   dialogs: OcmDialogs
 }
 
@@ -61,16 +56,6 @@ export async function setupOcm(context: Context, setMoveProgress: MoveProgressSe
             palette: true,
             slash: { name: 'ocm' },
             run: () => runOcmSwitch(context, { remote: features.remote }),
-          },
-          {
-            id: 'ocm.goal',
-            title: 'Goal',
-            description: 'Start, pause, resume, or cancel a Manager goal for this session',
-            group: 'OpenCode Manager',
-            palette: true,
-            slash: { name: GOAL_COMMAND, arguments: true },
-            run: (input) =>
-              runGoalCommand(context, { remote: features.remote, store: features.goals, showDialog: features.dialogs.goal }, input),
           },
           {
             id: 'ocm.multirun',

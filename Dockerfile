@@ -63,7 +63,7 @@ FROM base AS runner
 # an arm64 host builds the amd64 platform; 0.12.7 is the newest verified-good
 # release, so re-verify a bump there before moving it.
 ARG UV_VERSION=0.12.7
-ARG OPENCODE_VERSION=2.1.2
+ARG OPENCODE_VERSION=2.2.1
 ARG MICROSANDBOX_VERSION=0.7.2
 ARG PLAYWRIGHT_VERSION=1.63.0
 # Bump TOOLS_CACHEBUST (e.g. via --build-arg) to force a fresh uv/opencode

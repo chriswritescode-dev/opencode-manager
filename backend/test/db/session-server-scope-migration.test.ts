@@ -3,12 +3,74 @@ import { Database } from 'bun:sqlite'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import migration from '../../src/db/migrations/202610181300-session-server-scope'
-import { getSessionGoalById, insertSessionGoal } from '../../src/db/session-goals'
 import { getSessionPermissionMode, setSessionPermissionMode } from '../../src/db/session-permission-modes'
+
+interface InsertSessionGoalRowInput {
+  sessionId: string
+  serverId?: string
+  directory: string
+  objective: string
+  maxContinuations: number
+  tokenBudget: number | null
+  tokensAtStart: number
+}
+
+const INSERT_SESSION_GOAL_ROW_SQL = `
+  INSERT INTO session_goals(
+    session_id, server_id, directory, objective, status, stop_reason, turn_state,
+    continuation_count, max_continuations, token_budget, tokens_at_start, tokens_used,
+    consecutive_blocked, last_verdict, last_reason, created_at, updated_at, finished_at
+  ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+`
+
+function insertSessionGoalRow(db: Database, input: InsertSessionGoalRowInput): number {
+  const now = Date.now()
+  const result = db.prepare(INSERT_SESSION_GOAL_ROW_SQL).run(
+    input.sessionId,
+    input.serverId ?? 'local',
+    input.directory,
+    input.objective,
+    'active',
+    null,
+    'waiting',
+    0,
+    input.maxContinuations,
+    input.tokenBudget,
+    input.tokensAtStart,
+    0,
+    0,
+    null,
+    null,
+    now,
+    now,
+    null,
+  )
+  return Number(result.lastInsertRowid)
+}
+
+function tryInsertSessionGoalRow(db: Database, input: InsertSessionGoalRowInput): number | null {
+  try {
+    return insertSessionGoalRow(db, input)
+  } catch (error) {
+    if (/UNIQUE constraint failed/i.test((error as Error).message)) {
+      return null
+    }
+    throw error
+  }
+}
+
+function sessionGoalServerIdRow(db: Database, id: number): { serverId: string } | undefined {
+  return db.prepare('SELECT server_id AS serverId FROM session_goals WHERE id = ?').get(id) as
+    | { serverId: string }
+    | undefined
+}
 
 function createTestDb(): Database {
   const db = new Database(':memory:')
-  migrate(db, allMigrations)
+  migrate(
+    db,
+    allMigrations.filter((entry) => entry.id !== '202610291200-drop-session-goals'),
+  )
   return db
 }
 
@@ -97,9 +159,9 @@ describe('202610181300 session server scope migration', () => {
   })
 
   it('scopes the open goal index by server', () => {
-    const local = insertSessionGoal(db, GOAL_INPUT)
-    const remote = insertSessionGoal(db, { ...GOAL_INPUT, serverId: 'srv_remote' })
-    const duplicateRemote = insertSessionGoal(db, { ...GOAL_INPUT, serverId: 'srv_remote' })
+    const local = insertSessionGoalRow(db, GOAL_INPUT)
+    const remote = insertSessionGoalRow(db, { ...GOAL_INPUT, serverId: 'srv_remote' })
+    const duplicateRemote = tryInsertSessionGoalRow(db, { ...GOAL_INPUT, serverId: 'srv_remote' })
 
     expect(local).not.toBeNull()
     expect(remote).not.toBeNull()
@@ -144,8 +206,8 @@ describe('202610181300 session server scope migration', () => {
   })
 
   it('removes remote rows and restores session-scoped keys when rolled back', () => {
-    insertSessionGoal(db, GOAL_INPUT)
-    insertSessionGoal(db, { ...GOAL_INPUT, serverId: 'srv_x' })
+    insertSessionGoalRow(db, GOAL_INPUT)
+    insertSessionGoalRow(db, { ...GOAL_INPUT, serverId: 'srv_x' })
     setSessionPermissionMode(db, 'ses_shared', 'auto')
     setSessionPermissionMode(db, 'ses_shared', 'ask', 'srv_x')
 
@@ -186,7 +248,7 @@ describe('202610181300 session server scope migration', () => {
     expect(getSessionPermissionMode(legacyDb, 'ses_root')).toBe('auto')
     expect(getSessionPermissionMode(legacyDb, 'ses_root', 'srv_x')).toBe('ask')
     expect(countRows(legacyDb, 'session_permission_modes')).toBe(2)
-    expect(getSessionGoalById(legacyDb, legacyGoalId)).toMatchObject({ serverId: 'local' })
+    expect(sessionGoalServerIdRow(legacyDb, legacyGoalId)).toMatchObject({ serverId: 'local' })
 
     legacyDb.close()
   })

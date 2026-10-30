@@ -41,7 +41,6 @@ import { createPromptTemplateRoutes } from './routes/prompt-templates'
 import { createSessionPinRoutes } from './routes/session-pins'
 import { createSessionPermissionModeRoutes } from './routes/session-permission-modes'
 import { createSessionSandboxRoutes } from './routes/session-sandbox'
-import { createSessionGoalRoutes } from './routes/session-goals'
 import { createMultiRunRoutes } from './routes/multi-runs'
 import { createChangeWalkthroughRoutes } from './routes/change-walkthroughs'
 import { getChangeWalkthroughByWalkthroughSession } from './db/change-walkthroughs'
@@ -67,7 +66,7 @@ import { RemoteAccessHeadersService } from './services/remote-access-headers'
 import { SessionPermissionModeService } from './services/session-permission-modes'
 import { SessionSandboxService } from './services/session-sandbox'
 import { SessionAncestry } from './services/session-ancestry'
-import { SessionGoalService } from './services/session-goals'
+import { GoalOutcomeTracker } from './services/goal-outcomes'
 import { MultiRunService } from './services/multi-runs'
 import { ChangeWalkthroughService } from './services/change-walkthroughs'
 import { opencodeServerManager } from './services/opencode-single-server'
@@ -302,16 +301,7 @@ const scheduleRunnerInstance = new ScheduleRunner(scheduleService)
 
 const notificationService = new NotificationService(db, opencodeServerRegistry)
 const sessionPermissionModeService = new SessionPermissionModeService(db, opencodeServerRegistry, sessionSettingsService, sessionAncestry)
-const sessionGoalService = new SessionGoalService(db, opencodeServerRegistry, sessionSettingsService, {
-  onOutcome: (goal) => {
-    void notificationService.notifyGoalOutcome(goal).catch((error) => {
-      logger.error('Goal outcome notification error:', error)
-    })
-  },
-  resolveSessionLock: async (sessionId, serverId) =>
-    (await sessionPermissionModeService.getEffectiveMode(sessionId, serverId)).lockedReason,
-})
-sessionGoalService.loadOpenGoals()
+const goalOutcomes = new GoalOutcomeTracker()
 
 const multiRunService = new MultiRunService(db, openCodeClient, repoWorkspaces, sessionPermissionModeService, (serverId) => opencodeServerRegistry.getClient(serverId))
 const changeWalkthroughService = new ChangeWalkthroughService(db, openCodeClient, sessionSettingsService, gitAuthService, gitService)
@@ -331,9 +321,12 @@ sseAggregator.onServerEvent((serverId, directory, event) => {
   sessionPermissionModeService.handleEvent(directory, event, serverId).catch((err) => {
     logger.error('Session permission mode event handling error:', err)
   })
-  sessionGoalService.handleEvent(directory, event, serverId).catch((err) => {
-    logger.error('Session goal event handling error:', err)
-  })
+  const outcome = goalOutcomes.observe(serverId, directory, event)
+  if (outcome) {
+    void notificationService.notifyGoalOutcome(outcome).catch((error) => {
+      logger.error('Goal outcome notification error:', error)
+    })
+  }
 })
 
 notificationService.addEventSuppressor((event, sessionId, serverId) =>
@@ -378,10 +371,6 @@ sseAggregator.start()
 const remoteServerEvents = new RemoteServerEventHub(opencodeServerRegistry, sseAggregator)
 remoteServerEvents.start()
 
-void sessionGoalService.recoverOpenGoals().catch((error) => {
-  logger.error('Session goal recovery error:', error)
-})
-
 sseAggregator.setScheduledSessionsResolver(
   () => scheduleService.getActiveRunSessions(),
 )
@@ -397,7 +386,7 @@ app.route('/api/auth-info', createAuthInfoRoutes(auth))
 app.route('/api/health', createHealthRoutes(db, openCodeSupervisor))
 
 app.route('/api/mcp-oauth-proxy', createMcpOauthProxyRoutes(openCodeClient, requireAuth))
-app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, openCodeClient, sessionPermissionModeService, repoWorkspaces, gitAuthService, sessionGoalService, multiRunService, changeWalkthroughService, sessionSandboxService, repoEnvService))
+app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, openCodeClient, sessionPermissionModeService, repoWorkspaces, gitAuthService, multiRunService, changeWalkthroughService, sessionSandboxService, repoEnvService))
 app.route('/api/opencode-proxy', createOpenCodeProxyRoutes(db, settingsService, upgradeWebSocket))
 
 const protectedApi = new Hono()
@@ -431,7 +420,6 @@ protectedApi.route('/opencode-servers', createOpenCodeServerTerminalRoutes(resol
 protectedApi.route('/opencode-servers', createOpenCodeServerRoutes(opencodeServerRegistry, () => remoteServerEvents.getStatuses()))
 protectedApi.route('/session-permission-modes', createSessionPermissionModeRoutes(sessionPermissionModeService))
 protectedApi.route('/session-sandbox', createSessionSandboxRoutes(sessionSandboxService))
-protectedApi.route('/session-goals', createSessionGoalRoutes(sessionGoalService))
 protectedApi.route('/multi-runs', createMultiRunRoutes(multiRunService))
 protectedApi.route('/change-walkthroughs', createChangeWalkthroughRoutes(changeWalkthroughService))
 protectedApi.route('/schedules', createScheduleRoutes(scheduleService))

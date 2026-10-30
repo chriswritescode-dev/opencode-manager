@@ -4,14 +4,11 @@ import {
   MirrorCheckoutsResponseSchema,
   MirrorWorktreeCreateResponseSchema,
   MultiRunSchema,
-  SessionGoalSchema,
   type FuseMultiRunRequest,
   type LaunchMultiRunRequest,
   type MirrorCheckoutsResponse,
   type MirrorWorktreeCreateResponse,
   type MultiRun,
-  type SessionGoal,
-  type StartSessionGoalRequest,
 } from '@opencode-manager/shared/schemas'
 
 export interface MirrorBeginOpts {
@@ -78,7 +75,7 @@ function createByteCounter(onProgress: (bytesSent: number) => void): TransformSt
 
 export const MANAGER_FEATURE_MISSING = 'MANAGER_FEATURE_MISSING'
 
-const DEFAULT_FEATURE_NAME = 'ocm goals and multi-runs'
+const DEFAULT_FEATURE_NAME = 'ocm multi-runs'
 const MOVE_FEATURE_NAME = '/ocm-move worktrees'
 
 function directoryQuery(directory: string | undefined): string {
@@ -160,7 +157,7 @@ export class ManagerApi {
     })
     if (!res.ok) {
       const featureLabel = feature === true ? (featureName ?? DEFAULT_FEATURE_NAME) : null
-      throw await this.handleErrorResponse(res, operation, featureLabel, requestInit.signal ?? undefined)
+      throw await this.handleErrorResponse(res, operation, featureLabel)
     }
     return parse(await res.json())
   }
@@ -169,11 +166,10 @@ export class ManagerApi {
     res: Response,
     operation: string,
     featureName: string | null,
-    signal?: AbortSignal,
   ): Promise<ManagerApiError> {
     const error = await formatErrorResponse(res, operation)
     if (featureName !== null && error.status === 401) {
-      return this.probeFeatureSupport(operation, featureName, error, signal)
+      return this.probeFeatureSupport(operation, featureName, error)
     }
     return error
   }
@@ -182,10 +178,9 @@ export class ManagerApi {
     operation: string,
     featureName: string,
     fallback: ManagerApiError,
-    signal?: AbortSignal,
   ): Promise<ManagerApiError> {
     try {
-      const res = await fetch(`${this.baseUrl}/api/internal/opencode-workspaces`, { headers: this.headers(), signal })
+      const res = await fetch(`${this.baseUrl}/api/internal/opencode-workspaces`, { headers: this.headers() })
       if (res.ok) {
         return new ManagerApiError(
           `${operation} failed: this OpenCode Manager is too old for ${featureName}; upgrade the Manager.`,
@@ -380,45 +375,6 @@ export class ManagerApi {
 
     if (!res.ok) throw await formatErrorResponse(res, 'mirror patch snapshot')
     return (await res.json()) as MirrorPatchSnapshot
-  }
-
-  getLatestSessionGoal(sessionId: string, signal?: AbortSignal): Promise<SessionGoal | null> {
-    return this.requestJson(
-      `/api/internal/session-goals?sessionId=${encodeURIComponent(sessionId)}`,
-      'read session goal',
-      (body) => SessionGoalSchema.nullable().parse((body as { goal: unknown }).goal),
-      { signal, feature: true },
-    )
-  }
-
-  startSessionGoal(input: StartSessionGoalRequest): Promise<SessionGoal> {
-    return this.requestJson(
-      '/api/internal/session-goals',
-      'start session goal',
-      (body) => SessionGoalSchema.parse((body as { goal: unknown }).goal),
-      { method: 'POST', body: JSON.stringify(input), feature: true },
-    )
-  }
-
-  private runSessionGoalAction(id: number, action: 'pause' | 'resume' | 'cancel'): Promise<SessionGoal> {
-    return this.requestJson(
-      `/api/internal/session-goals/${encodeURIComponent(id)}/${action}`,
-      `${action} session goal`,
-      (body) => SessionGoalSchema.parse((body as { goal: unknown }).goal),
-      { method: 'POST', feature: true },
-    )
-  }
-
-  pauseSessionGoal(id: number): Promise<SessionGoal> {
-    return this.runSessionGoalAction(id, 'pause')
-  }
-
-  resumeSessionGoal(id: number): Promise<SessionGoal> {
-    return this.runSessionGoalAction(id, 'resume')
-  }
-
-  cancelSessionGoal(id: number): Promise<SessionGoal> {
-    return this.runSessionGoalAction(id, 'cancel')
   }
 
   listMultiRuns(repoId: number): Promise<MultiRun[]> {

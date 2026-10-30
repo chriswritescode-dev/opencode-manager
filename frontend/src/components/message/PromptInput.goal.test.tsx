@@ -9,7 +9,9 @@ const mocks = vi.hoisted(() => ({
   sendPrompt: vi.fn(),
   sendShell: vi.fn(),
   interrupt: vi.fn(),
-  startGoal: vi.fn(),
+  runCommand: vi.fn(),
+  syncSelection: vi.fn(),
+  getSessionGoal: vi.fn(),
   useSessionGoal: vi.fn(),
   useSessionPermissionMode: vi.fn(),
   agents: [] as Array<{ id: string; name: string; description?: string; mode?: string; hidden?: boolean }>,
@@ -48,27 +50,24 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
     useAgents: () => ({ data: mocks.agents }),
     useSkills: () => ({ data: mocks.skills }),
     useSession: () => ({ data: undefined }),
+    useSyncSessionSelection: () => mocks.syncSelection,
   }
 })
 
-vi.mock('@/hooks/useSessionGoals', async () => {
-  const { useState } = await import('react')
+vi.mock('@/api/opencode', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/opencode')>()
   return {
+    ...actual,
+    runCommand: mocks.runCommand,
+    getSessionGoal: mocks.getSessionGoal,
+  }
+})
+
+vi.mock('@/hooks/useSessionGoals', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/useSessionGoals')>()
+  return {
+    ...actual,
     useSessionGoal: mocks.useSessionGoal,
-    useStartSessionGoal: () => {
-      const [isPending, setIsPending] = useState(false)
-      return {
-        mutateAsync: async (variables: unknown) => {
-          setIsPending(true)
-          try {
-            return await mocks.startGoal(variables)
-          } finally {
-            setIsPending(false)
-          }
-        },
-        isPending,
-      }
-    },
   }
 })
 
@@ -142,6 +141,17 @@ const createTestQueryClient = () => new QueryClient({
 
 const GOAL_BUTTON = 'Goal mode: the next message becomes the objective'
 const OPEN_GOAL_BUTTON = 'A goal is already active for this session'
+const UNSUPPORTED_GOAL_BUTTON = "This server's OpenCode has no goals"
+
+const goalState = {
+  id: 'goal_1',
+  objective: 'Ship the feature',
+  status: 'active',
+  rounds: 1,
+  maxRounds: 50,
+  boot: 'boot_1',
+  updatedAt: 1,
+}
 
 describe('PromptInput goal mode', () => {
   const defaultProps = {
@@ -167,9 +177,11 @@ describe('PromptInput goal mode', () => {
     vi.clearAllMocks()
     useComposerDraftStore.setState({ drafts: {} })
     mocks.useVoiceConversation.mockReturnValue(createVoiceConversationControllerMock())
-    mocks.useSessionGoal.mockReturnValue({ data: null })
+    mocks.useSessionGoal.mockReturnValue({ data: { supported: true, goal: null } })
     mocks.useSessionPermissionMode.mockReturnValue({ data: undefined })
-    mocks.startGoal.mockResolvedValue({ id: 1 })
+    mocks.runCommand.mockResolvedValue(undefined)
+    mocks.syncSelection.mockResolvedValue(undefined)
+    mocks.getSessionGoal.mockResolvedValue({ supported: true, goal: null })
     mocks.sendPrompt.mockResolvedValue({ id: 'inbox_1' })
     mocks.sendShell.mockResolvedValue({ id: 'shell_1' })
     mocks.agents = []
@@ -190,6 +202,7 @@ describe('PromptInput goal mode', () => {
     mocks.useFileSearch.mockReturnValue({ files: [] })
     mocks.useModelSelection.mockReturnValue({
       model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
+      modelRef: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
       modelString: 'anthropic/claude-sonnet-4',
       setModel: vi.fn(),
       setActiveAgent: vi.fn(),
@@ -209,7 +222,7 @@ describe('PromptInput goal mode', () => {
     Reflect.deleteProperty(window, 'matchMedia')
   })
 
-  it('starts a goal with the message objective before sending it', async () => {
+  it('runs the goal command with the message objective instead of sending the prompt', async () => {
     stubMatchMedia(true)
     renderComponent()
 
@@ -218,42 +231,19 @@ describe('PromptInput goal mode', () => {
     fireEvent.click(screen.getByRole('button', { name: GOAL_BUTTON }))
     fireEvent.click(screen.getByTitle('Send'))
 
-    await waitFor(() => expect(mocks.startGoal).toHaveBeenCalledWith({
-      sessionId: 'test-session',
-      directory: '/test',
-      objective: 'Ship the feature',
-    }))
-    await waitFor(() => expect(mocks.sendPrompt).toHaveBeenCalled())
-    expect(mocks.startGoal.mock.invocationCallOrder[0]).toBeLessThan(mocks.sendPrompt.mock.invocationCallOrder[0])
-  })
-
-  it('does not send the message when starting the goal is rejected', async () => {
-    stubMatchMedia(true)
-    mocks.startGoal.mockRejectedValue(new Error('This session already has an open goal'))
-    renderComponent()
-
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: 'Ship the feature' } })
-    fireEvent.click(screen.getByRole('button', { name: GOAL_BUTTON }))
-    fireEvent.click(screen.getByTitle('Send'))
-
-    await waitFor(() => expect(mocks.startGoal).toHaveBeenCalled())
+    await waitFor(() => expect(mocks.runCommand).toHaveBeenCalledTimes(1))
+    expect(mocks.runCommand).toHaveBeenCalledWith({
+      sessionID: 'test-session',
+      name: 'goal',
+      text: 'Ship the feature',
+      files: [],
+      agents: [],
+      skills: [],
+    }, 'local')
     expect(mocks.sendPrompt).not.toHaveBeenCalled()
   })
 
-  it('does not start a goal when the mode was not armed', async () => {
-    stubMatchMedia(true)
-    renderComponent()
-
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: 'Just a message' } })
-    fireEvent.click(screen.getByTitle('Send'))
-
-    await waitFor(() => expect(mocks.sendPrompt).toHaveBeenCalled())
-    expect(mocks.startGoal).not.toHaveBeenCalled()
-  })
-
-  it('starts an armed goal before queueing when the session is busy', async () => {
+  it('runs the goal command instead of queueing when the session is busy', async () => {
     stubMatchMedia(true)
     renderComponent({ isStreamingResponse: true })
 
@@ -262,23 +252,99 @@ describe('PromptInput goal mode', () => {
     fireEvent.click(screen.getByRole('button', { name: GOAL_BUTTON }))
     fireEvent.click(screen.getByTitle('Queue message'))
 
-    await waitFor(() => expect(mocks.startGoal).toHaveBeenCalledWith({
-      sessionId: 'test-session',
-      directory: '/test',
-      objective: 'Ship the feature',
-    }))
-    await waitFor(() => expect(mocks.sendPrompt).toHaveBeenCalledWith(
-      expect.objectContaining({ delivery: 'queue' }),
-    ))
-    expect(mocks.startGoal.mock.invocationCallOrder[0]).toBeLessThan(mocks.sendPrompt.mock.invocationCallOrder[0])
+    await waitFor(() => expect(mocks.runCommand).toHaveBeenCalledTimes(1))
+    expect(mocks.runCommand).toHaveBeenCalledWith({
+      sessionID: 'test-session',
+      name: 'goal',
+      text: 'Ship the feature',
+      files: [],
+      agents: [],
+      skills: [],
+    }, 'local')
+    expect(mocks.sendPrompt).not.toHaveBeenCalled()
   })
 
-  it('does not start the goal again while it is still starting', async () => {
+  it('does not send the prompt when the goal command is rejected', async () => {
     stubMatchMedia(true)
-    let resolveGoal: (value: unknown) => void = () => {}
-    mocks.startGoal.mockImplementation(
+    mocks.runCommand.mockRejectedValue(new Error('goal command failed'))
+    renderComponent()
+
+    const input = await screen.findByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: 'Ship the feature' } })
+    fireEvent.click(screen.getByRole('button', { name: GOAL_BUTTON }))
+    fireEvent.click(screen.getByTitle('Send'))
+
+    await waitFor(() => expect(mocks.runCommand).toHaveBeenCalledTimes(1))
+    expect(mocks.sendPrompt).not.toHaveBeenCalled()
+  })
+
+  it('passes the selected model and agent to the goal selection sync', async () => {
+    stubMatchMedia(true)
+    renderComponent()
+
+    const input = await screen.findByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: 'Ship the feature' } })
+    fireEvent.click(screen.getByRole('button', { name: GOAL_BUTTON }))
+    fireEvent.click(screen.getByTitle('Send'))
+
+    await waitFor(() => expect(mocks.syncSelection).toHaveBeenCalledWith({
+      sessionID: 'test-session',
+      model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
+      agent: 'build',
+    }))
+    expect(mocks.runCommand).toHaveBeenCalled()
+  })
+
+  it('keeps the image draft and warns when an armed goal has no objective', async () => {
+    stubMatchMedia(true)
+    const { container } = renderComponent()
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, { target: { files: [new File(['img'], 'pic.png', { type: 'image/png' })] } })
+    await screen.findByText('pic.png')
+
+    fireEvent.click(screen.getByRole('button', { name: GOAL_BUTTON }))
+    fireEvent.click(screen.getByTitle('Send'))
+
+    await waitFor(() => expect(mocks.showToast.error).toHaveBeenCalledWith('Enter an objective for the goal'))
+    expect(mocks.runCommand).not.toHaveBeenCalled()
+    expect(mocks.sendPrompt).not.toHaveBeenCalled()
+    expect(screen.getByText('pic.png')).toBeInTheDocument()
+  })
+
+  it('keeps a whitespace-only draft and warns when an armed goal has no objective', async () => {
+    stubMatchMedia(true)
+    renderComponent()
+
+    const input = await screen.findByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: '   ' } })
+    fireEvent.click(screen.getByRole('button', { name: GOAL_BUTTON }))
+    fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true })
+
+    await waitFor(() => expect(mocks.showToast.error).toHaveBeenCalledWith('Enter an objective for the goal'))
+    expect(mocks.runCommand).not.toHaveBeenCalled()
+    expect(mocks.sendPrompt).not.toHaveBeenCalled()
+    expect(input).toHaveValue('   ')
+  })
+
+  it('sends the prompt without the goal command when the goal mode was not armed', async () => {
+    stubMatchMedia(true)
+    renderComponent()
+
+    const input = await screen.findByPlaceholderText('Send a message...')
+    fireEvent.change(input, { target: { value: 'Just a message' } })
+    fireEvent.click(screen.getByTitle('Send'))
+
+    await waitFor(() => expect(mocks.sendPrompt).toHaveBeenCalled())
+    expect(mocks.runCommand).not.toHaveBeenCalled()
+  })
+
+  it('does not run the goal command again while it is still pending', async () => {
+    stubMatchMedia(true)
+    let resolveCommand: (value: unknown) => void = () => {}
+    mocks.runCommand.mockImplementation(
       () => new Promise((resolve) => {
-        resolveGoal = resolve
+        resolveCommand = resolve
       }),
     )
     renderComponent({ isStreamingResponse: true })
@@ -288,19 +354,19 @@ describe('PromptInput goal mode', () => {
     fireEvent.click(screen.getByRole('button', { name: GOAL_BUTTON }))
     fireEvent.click(screen.getByTitle('Queue message'))
 
-    await waitFor(() => expect(mocks.startGoal).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mocks.runCommand).toHaveBeenCalledTimes(1))
 
     fireEvent.click(screen.getByTitle('Queue message'))
 
-    expect(mocks.startGoal).toHaveBeenCalledTimes(1)
+    expect(mocks.runCommand).toHaveBeenCalledTimes(1)
     expect(mocks.sendPrompt).not.toHaveBeenCalled()
 
     await act(async () => {
-      resolveGoal({ id: 1 })
+      resolveCommand(undefined)
     })
   })
 
-  it('does not start an armed goal for a slash command', async () => {
+  it('sends an exact slash command without running the goal command', async () => {
     stubMatchMedia(true)
     mocks.useCommands.mockReturnValue({
       searchCommands: () => [],
@@ -315,27 +381,36 @@ describe('PromptInput goal mode', () => {
     fireEvent.click(screen.getByTitle('Queue message'))
 
     await waitFor(() => expect(mocks.sendPrompt).toHaveBeenCalled())
-    expect(mocks.startGoal).not.toHaveBeenCalled()
+    expect(mocks.runCommand).not.toHaveBeenCalled()
+  })
+
+  it('disables goal mode when the server has no goal support', async () => {
+    stubMatchMedia(true)
+    mocks.useSessionGoal.mockReturnValue({ data: { supported: false } })
+    renderComponent()
+
+    const button = await screen.findByRole('button', { name: UNSUPPORTED_GOAL_BUTTON })
+    expect(button).toBeDisabled()
   })
 
   it('disables goal mode while a goal is already active', async () => {
     stubMatchMedia(true)
-    mocks.useSessionGoal.mockReturnValue({ data: { status: 'active' } })
+    mocks.useSessionGoal.mockReturnValue({ data: { supported: true, goal: goalState } })
     renderComponent()
 
     const button = await screen.findByRole('button', { name: OPEN_GOAL_BUTTON })
     expect(button).toBeDisabled()
   })
 
-  it('disables goal mode with a reason for scheduled-run sessions', async () => {
+  it('keeps goal mode enabled on child sessions', async () => {
     stubMatchMedia(true)
     mocks.useSessionPermissionMode.mockReturnValue({
-      data: { sessionId: 'test-session', rootSessionId: 'test-session', mode: 'ask', lockedReason: 'schedule' },
+      data: { sessionId: 'test-session', rootSessionId: 'test-session', mode: 'ask', lockedReason: 'child' },
     })
     renderComponent()
 
-    const button = await screen.findByRole('button', { name: 'Scheduled runs cannot run goals' })
-    expect(button).toBeDisabled()
+    const button = await screen.findByRole('button', { name: GOAL_BUTTON })
+    expect(button).toBeEnabled()
   })
 
   it('keeps permission and goal toggles inline on desktop', async () => {
@@ -358,7 +433,7 @@ describe('PromptInput goal mode', () => {
     expect(screen.queryByTestId('permission-mode-toggle')).not.toBeInTheDocument()
   })
 
-  it('starts a goal armed from the mobile composer options menu', async () => {
+  it('runs the goal command when armed from the mobile composer options menu', async () => {
     stubMatchMedia(true)
     mocks.useMobile.mockReturnValue(true)
     renderComponent()
@@ -368,32 +443,25 @@ describe('PromptInput goal mode', () => {
     fireEvent.click(screen.getByTestId('composer-tools-menu'))
     fireEvent.click(screen.getByTitle('Send'))
 
-    await waitFor(() => expect(mocks.startGoal).toHaveBeenCalledWith({
-      sessionId: 'test-session',
-      directory: '/test',
-      objective: 'Ship the feature',
-    }))
+    await waitFor(() => expect(mocks.runCommand).toHaveBeenCalledTimes(1))
+    expect(mocks.runCommand).toHaveBeenCalledWith({
+      sessionID: 'test-session',
+      name: 'goal',
+      text: 'Ship the feature',
+      files: [],
+      agents: [],
+      skills: [],
+    }, 'local')
   })
 
-  it('passes the goal lock reason to the mobile composer options menu', async () => {
+  it('passes the open goal state to the mobile composer options menu', async () => {
     stubMatchMedia(true)
     mocks.useMobile.mockReturnValue(true)
-    mocks.useSessionGoal.mockReturnValue({ data: { status: 'active' } })
+    mocks.useSessionGoal.mockReturnValue({ data: { supported: true, goal: goalState } })
     renderComponent()
 
     const menu = await screen.findByTestId('composer-tools-menu')
     expect(menu).toHaveAttribute('title', OPEN_GOAL_BUTTON)
     expect(menu).toBeDisabled()
-  })
-
-  it('disables goal mode with a reason for child sessions', async () => {
-    stubMatchMedia(true)
-    mocks.useSessionPermissionMode.mockReturnValue({
-      data: { sessionId: 'test-session', rootSessionId: 'test-session', mode: 'ask', lockedReason: 'child' },
-    })
-    renderComponent()
-
-    const button = await screen.findByRole('button', { name: 'Goals can only be started on top-level sessions' })
-    expect(button).toBeDisabled()
   })
 })

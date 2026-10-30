@@ -28,6 +28,7 @@ import { getServerSessionPath, getSessionPath, parseRepoRoute, parseServerProjec
 import { serverScopedKey } from '@/lib/serverScope'
 import { repoMatchesDirectory } from '@/components/navigation/sidebar-session-tree'
 import { changeWalkthroughQueryKey } from '@/hooks/useChangeWalkthrough'
+import { applySessionGoalEvent, SESSION_GOAL_QUERY_ROOT } from '@/hooks/useSessionGoals'
 import { busyStatusesFromActiveSessions, useSessionStatus } from '@/stores/sessionStatusStore'
 import {
   invalidateChildSessionCaches,
@@ -1051,6 +1052,9 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       const event = data as StreamEvent
       const serverId = (event as { serverId?: string }).serverId ?? LOCAL_OPENCODE_SERVER_ID
 
+      const goalEvent = { type: event.type, data: 'data' in event ? event.data : null }
+      if (applySessionGoalEvent(queryClient, goalEvent, serverId)) return
+
       switch (event.type) {
         case 'permission.asked': {
           const request = event.data
@@ -1235,6 +1239,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         invalidateChildSessionCaches(queryClient)
         invalidateQueryKeysDebounced(queryClient, LOCATION_CATALOG_QUERY_KEYS)
         invalidateProviderCachesDebounced(queryClient)
+        queryClient.invalidateQueries({ queryKey: [SESSION_GOAL_QUERY_ROOT] })
         startStatusPoll()
       } else {
         streamConnectedRef.current = false
@@ -1246,6 +1251,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     }
 
     const handleResync = (subscribedDirectories: string[], serverId?: string) => {
+      queryClient.invalidateQueries({ queryKey: [SESSION_GOAL_QUERY_ROOT] })
       if (serverId && !isLocalOpenCodeServer(serverId)) {
         void reconcileRemoteDirectoryActivity(serverId, subscribedDirectories)
         invalidateSessionListCachesDebounced(queryClient, undefined, serverId)
