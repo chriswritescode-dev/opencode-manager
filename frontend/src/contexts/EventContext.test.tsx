@@ -3027,6 +3027,7 @@ describe('EventProvider permissions and forms', () => {
     await waitFor(() => {
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'commands', 'srv_remote'] })
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'agents', 'srv_remote'] })
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['provider-integrations'] })
     })
     expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['opencode', 'commands'] })
   })

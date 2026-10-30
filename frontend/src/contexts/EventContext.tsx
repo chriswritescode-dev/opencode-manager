@@ -1252,6 +1252,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
     const handleResync = (subscribedDirectories: string[], serverId?: string) => {
       queryClient.invalidateQueries({ queryKey: [SESSION_GOAL_QUERY_ROOT] })
+      invalidateProviderCachesDebounced(queryClient)
       if (serverId && !isLocalOpenCodeServer(serverId)) {
         void reconcileRemoteDirectoryActivity(serverId, subscribedDirectories)
         invalidateSessionListCachesDebounced(queryClient, undefined, serverId)
@@ -1267,7 +1268,6 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       void syncRunningShells(directories)
       invalidateChildSessionCaches(queryClient)
       invalidateQueryKeysDebounced(queryClient, LOCATION_CATALOG_QUERY_KEYS)
-      invalidateProviderCachesDebounced(queryClient)
     }
 
     const initialDirectories = [...new Set((reposRef.current ?? []).map(r => r.fullPath))]
