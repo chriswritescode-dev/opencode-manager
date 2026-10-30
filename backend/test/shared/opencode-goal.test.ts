@@ -91,6 +91,15 @@ describe('readSessionGoal', () => {
     })
   })
 
+  it.each([
+    ['an unknown status', goalWith({ status: 'bogus' as GoalState['status'] })],
+    ['a missing objective', goalWithout('objective')],
+    ['a non-object output', 'not a goal'],
+  ])('reports a goal with %s as unsupported', async (_label, output) => {
+    const call = vi.fn().mockResolvedValue({ output })
+    await expect(readSessionGoal(createApi(call), { sessionID: SESSION_ID })).resolves.toEqual({ supported: false })
+  })
+
   it('reports an unavailable rpc as unsupported', async () => {
     const call = vi.fn().mockRejectedValue(rpcError('rpc.unavailable', 'RPC is unavailable: opencode.goal'))
     await expect(readSessionGoal(createApi(call), { sessionID: SESSION_ID })).resolves.toEqual({ supported: false })

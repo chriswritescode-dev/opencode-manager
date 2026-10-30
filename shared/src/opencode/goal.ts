@@ -50,7 +50,10 @@ export async function readSessionGoal(
       input: { sessionID: input.sessionID },
       ...(input.directory ? { location: { directory: input.directory } } : {}),
     })
-    return { supported: true, goal: (result.output ?? null) as GoalState | null }
+    const output: unknown = result.output ?? null
+    if (output === null) return { supported: true, goal: null }
+    if (!isGoalState(output)) return { supported: false }
+    return { supported: true, goal: output }
   } catch (error) {
     if (isRpcError(error) && error.type === 'rpc.unavailable') return { supported: false }
     throw error
