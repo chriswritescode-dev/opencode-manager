@@ -3,7 +3,7 @@ import { EventEmitter } from 'events'
 import { mkdtemp, rm } from 'fs/promises'
 import os from 'os'
 import path from 'path'
-import { OPENCODE_SERVER_USERNAME } from '@opencode-manager/shared/opencode'
+import { OPENCODE_PINNED_VERSION, OPENCODE_SERVER_USERNAME } from '@opencode-manager/shared/opencode'
 import { resolveOpenCode2Binary, startOpenCodeServe } from './opencode-binary'
 
 const childProcessMock = vi.hoisted(() => ({
@@ -16,7 +16,7 @@ vi.mock('child_process', () => ({
   spawn: childProcessMock.spawn,
 }))
 
-const SUPPORTED_VERSION = '2.2.1'
+const SUPPORTED_VERSION = OPENCODE_PINNED_VERSION
 const OPENCODE_BIN_FIXTURE = '/fixture/opencode-2'
 const PATH_CANDIDATE = 'opencode'
 const ABSOLUTE_CANDIDATES = ['/usr/local/bin/opencode', '/opt/opencode/bin/opencode']

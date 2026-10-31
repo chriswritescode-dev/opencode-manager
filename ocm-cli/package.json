@@ -18,10 +18,10 @@
     }
   },
   "peerDependencies": {
-    "@opencode/theme": ">=2.2.1 <3.0.0",
-    "@opentui/core": ">=0.7.0 <0.8.0",
-    "@opentui/solid": ">=0.7.0 <0.8.0",
-    "solid-js": ">=1.9.0"
+    "@opencode/theme": ">=2.2.3 <3.0.0",
+    "@opentui/core": ">=0.8.0 <0.9.0",
+    "@opentui/solid": ">=0.8.0 <0.9.0",
+    "solid-js": ">=1.9.16"
   },
   "peerDependenciesMeta": {
     "@opencode/theme": {
@@ -58,16 +58,16 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",
-    "@opencode/plugin": "2.2.1",
-    "@opencode/theme": "2.2.1",
+    "@opencode/plugin": "2.2.3",
+    "@opencode/theme": "2.2.3",
     "@opencode-manager/shared": "workspace:*",
-    "@opentui/core": "0.7.0",
-    "@opentui/solid": "0.7.0",
+    "@opentui/core": "0.8.0",
+    "@opentui/solid": "0.8.0",
     "@types/bun": "^1.3.14",
     "@types/node": "^22.0.0",
     "eslint": "^9.39.1",
     "jsonc-parser": "^3.3.1",
-    "solid-js": "1.9.12",
+    "solid-js": "1.9.16",
     "typescript": "^5.5.0",
     "typescript-eslint": "^8.45.0",
     "uqr": "^0.1.3",

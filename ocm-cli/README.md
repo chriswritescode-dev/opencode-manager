@@ -10,9 +10,11 @@ to the local working tree.
 
 | ocm | OpenCode Manager | Local OpenCode |
 |---|---|---|
-| 0.5.x | >= 0.19.0 | >= 2.2.0, < 3 |
-| 0.4.x | >= 0.19.0 | >= 2.0.15, < 3 |
-| 0.3.x | >= 0.19.0 | >= 2.0.15, < 3 |
+| 0.5.x | >= 0.19.0 | >= 2.2.3, < 3 |
+| 0.4.x | >= 0.19.0 | >= 2.0.15, < 3 [^legacy-opencode] |
+| 0.3.x | >= 0.19.0 | >= 2.0.15, < 3 [^legacy-opencode] |
+
+[^legacy-opencode]: The 0.4.x and 0.3.x lines are not tested with OpenCode >= 2.2.3; use the 0.5.x line on those hosts.
 
 ocm 0.5.x, 0.4.x and 0.3.x attach through the repo-scoped Manager proxy
 (`/api/opencode-proxy/repos/:repoId`), load the plugin from the OpenCode 2
@@ -24,10 +26,10 @@ Use ocm 0.2.x with OpenCode Manager < 0.19.0 and OpenCode 1.x, installed pinned
 `@opencode-manager/ocm-cli@0.2`. ocm is published together with each OpenCode Manager
 release.
 
-From ocm 0.5.0, the TUI plugin is built against `@opencode/plugin` 2.2.x and
-OpenTUI 0.7, so it requires a local OpenCode >= 2.2.0: OpenCode 2.2.0 refuses
-plugins built for OpenTUI 0.6, and older OpenCode builds may refuse the OpenTUI
-0.7 peers. Stay on ocm 0.4.x with a local OpenCode older than 2.2.0.
+From ocm 0.5.0, the TUI plugin is built against `@opencode/plugin` 2.2.3 and
+OpenTUI 0.8, so it requires a local OpenCode >= 2.2.3. OpenCode 2.2.3 requires
+TUI plugins built for OpenTUI 0.8, and older OpenCode 2.2.x builds pin OpenTUI
+0.7; stay on ocm 0.4.x with a local OpenCode older than 2.2.3.
 
 ocm 0.5.0 removes `/ocm-goal`; session goals use OpenCode's built-in `/goal`
 command, and OpenCode Manager no longer serves `/api/internal/session-goals`.
@@ -320,7 +322,7 @@ global installs); the plugin surface is TUI-only.
 ## Requirements
 
 - macOS or Linux (Windows is unsupported)
-- OpenCode >= 2.2.0 (same major, 2.x) available on `PATH` for the TUI plugin
+- OpenCode >= 2.2.3 (same major, 2.x) available on `PATH` for the TUI plugin
 - Node available on `PATH` (runs the `ocm` binary)
 - OpenCode Manager >= 0.19.0
 - `git` and `tar` (with gzip support, i.e. the `-z` flag) available on `PATH`
