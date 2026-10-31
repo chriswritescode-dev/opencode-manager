@@ -125,7 +125,7 @@ jobs:
       - name: Install OpenCode CLI
         run: |
           source scripts/lib/opencode-release.sh
-          download_opencode_to 2.2.1 "$RUNNER_TEMP/opencode/bin/opencode"
+          download_opencode_to 2.2.3 "$RUNNER_TEMP/opencode/bin/opencode"
           echo "$RUNNER_TEMP/opencode/bin" >> "$GITHUB_PATH"
 
       - name: Verify OpenCode CLI

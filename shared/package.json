@@ -21,8 +21,8 @@
     "./themes": "./src/themes/index.ts"
   },
   "dependencies": {
-    "@opencode/client": "2.2.1",
-    "@opencode/schema": "2.2.1",
+    "@opencode/client": "2.2.3",
+    "@opencode/schema": "2.2.3",
     "jsonc-parser": "^3.3.1",
     "zod": "^4.1.12"
   },
