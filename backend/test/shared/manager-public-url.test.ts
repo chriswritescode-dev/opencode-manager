@@ -110,10 +110,39 @@ describe('getTrustedOrigins with MANAGER_PUBLIC_URL', () => {
 
 describe('passkey config derived from MANAGER_PUBLIC_URL', () => {
   it('derives the passkey origin and relying party id from the public origin', async () => {
-    const { ENV } = await loadEnv({ MANAGER_PUBLIC_URL: 'https://m.example.com' })
+    const { ENV, getPasskeyDefaultsWarning } = await loadEnv({ MANAGER_PUBLIC_URL: 'https://m.example.com' })
 
     expect(ENV.AUTH.PASSKEY_ORIGIN).toBe('https://m.example.com')
     expect(ENV.AUTH.PASSKEY_RP_ID).toBe('m.example.com')
+    expect(getPasskeyDefaultsWarning()).toBeNull()
+  })
+
+  it('keeps the localhost passkey defaults for an IPv4 public address', async () => {
+    const { ENV, getPasskeyDefaultsWarning } = await loadEnv({ MANAGER_PUBLIC_URL: 'http://192.168.1.20:5003' })
+
+    expect(ENV.AUTH.PASSKEY_RP_ID).toBe('localhost')
+    expect(ENV.AUTH.PASSKEY_ORIGIN).toBe('http://localhost:5003')
+    const warning = getPasskeyDefaultsWarning()
+    expect(warning).toEqual(expect.any(String))
+    expect(warning).toContain('PASSKEY_RP_ID')
+  })
+
+  it('keeps the localhost passkey defaults for an IPv6 public address', async () => {
+    const { ENV, getPasskeyDefaultsWarning } = await loadEnv({ MANAGER_PUBLIC_URL: 'http://[fd00::1]:5003' })
+
+    expect(ENV.AUTH.PASSKEY_RP_ID).toBe('localhost')
+    expect(ENV.AUTH.PASSKEY_ORIGIN).toBe('http://localhost:5003')
+    expect(getPasskeyDefaultsWarning()).toContain('PASSKEY_RP_ID')
+  })
+
+  it('keeps an explicit relying party id for an IPv4 public address without warning', async () => {
+    const { ENV, getPasskeyDefaultsWarning } = await loadEnv({
+      MANAGER_PUBLIC_URL: 'http://192.168.1.20:5003',
+      PASSKEY_RP_ID: 'example.test',
+    })
+
+    expect(ENV.AUTH.PASSKEY_RP_ID).toBe('example.test')
+    expect(getPasskeyDefaultsWarning()).toBeNull()
   })
 
   it('keeps explicit passkey settings when both are provided', async () => {

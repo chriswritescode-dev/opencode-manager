@@ -1,5 +1,6 @@
 import path from 'path'
 import os from 'os'
+import { isIP } from 'node:net'
 import { randomBytes } from 'crypto'
 import { DEFAULTS } from './defaults'
 import { ASSISTANT_REPO_PATH, ASSISTANT_OPENCODE_DIR_NAME } from '../utils/repo'
@@ -88,6 +89,20 @@ const defaultHealthWatchEnabled = getEnvString('NODE_ENV', 'development') === 't
 
 const managerPublicOrigin = parseManagerPublicUrl(process.env.MANAGER_PUBLIC_URL).origin
 
+/**
+ * Reports whether a hostname is an IPv4 or IPv6 literal, optionally wrapped in
+ * the IPv6 brackets a URL hostname carries.
+ */
+const isIpLiteralHostname = (hostname: string): boolean => isIP(hostname.replace(/^\[|\]$/g, '')) !== 0
+
+const managerPasskeyBase = ((): { hostname: string; origin: string } | null => {
+  if (managerPublicOrigin === null) return null
+  const { hostname } = new URL(managerPublicOrigin)
+  return isIpLiteralHostname(hostname) ? null : { hostname, origin: managerPublicOrigin }
+})()
+
+const isPasskeyRpIdConfigured = (): boolean => getEnvNonEmptyString('PASSKEY_RP_ID', '').length > 0
+
 export const ENV = {
   SERVER: {
     PORT: getEnvNumber('PORT', DEFAULTS.SERVER.PORT),
@@ -171,9 +186,9 @@ export const ENV = {
     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
     DISCORD_CLIENT_ID: process.env.DISCORD_CLIENT_ID,
     DISCORD_CLIENT_SECRET: process.env.DISCORD_CLIENT_SECRET,
-    PASSKEY_RP_ID: getEnvNonEmptyString('PASSKEY_RP_ID', managerPublicOrigin ? new URL(managerPublicOrigin).hostname : 'localhost'),
+    PASSKEY_RP_ID: getEnvNonEmptyString('PASSKEY_RP_ID', managerPasskeyBase?.hostname ?? 'localhost'),
     PASSKEY_RP_NAME: getEnvString('PASSKEY_RP_NAME', 'OpenCode Manager'),
-    PASSKEY_ORIGIN: getEnvNonEmptyString('PASSKEY_ORIGIN', managerPublicOrigin ?? 'http://localhost:5003'),
+    PASSKEY_ORIGIN: getEnvNonEmptyString('PASSKEY_ORIGIN', managerPasskeyBase?.origin ?? 'http://localhost:5003'),
   },
 
 } as const
@@ -208,6 +223,18 @@ export const getManagerPublicOrigin = (): string | null => parseManagerPublicUrl
 
 /** Returns the MANAGER_PUBLIC_URL validation error, or null when it is unset or valid. */
 export const getManagerPublicUrlError = (): string | null => parseManagerPublicUrl(ENV.SERVER.PUBLIC_URL).error
+
+/**
+ * Returns a one-line startup warning when MANAGER_PUBLIC_URL uses an IP literal
+ * while PASSKEY_RP_ID is not set explicitly, or null when passkeys use the
+ * configured defaults.
+ */
+export const getPasskeyDefaultsWarning = (): string | null => {
+  const publicOrigin = getManagerPublicOrigin()
+  if (publicOrigin === null || isPasskeyRpIdConfigured()) return null
+  if (!isIpLiteralHostname(new URL(publicOrigin).hostname)) return null
+  return `MANAGER_PUBLIC_URL uses the IP address ${publicOrigin}, but a passkey RP ID must be a domain name, not an IP address, so passkeys keep the localhost defaults. Set PASSKEY_RP_ID and PASSKEY_ORIGIN to a domain name to enable passkeys on this address.`
+}
 
 export const getTrustedOrigins = (): string[] => {
   const configured = ENV.AUTH.TRUSTED_ORIGINS

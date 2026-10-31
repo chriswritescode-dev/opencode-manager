@@ -100,6 +100,7 @@ import {
   getDatabasePath,
   getTrustedOrigins,
   getManagerPublicUrlError,
+  getPasskeyDefaultsWarning,
   isTrustedOrigin,
   ENV
 } from '@opencode-manager/shared/config/env'
@@ -215,6 +216,11 @@ try {
   if (managerPublicUrlError) {
     logger.error(managerPublicUrlError)
     process.exit(1)
+  }
+
+  const passkeyDefaultsWarning = getPasskeyDefaultsWarning()
+  if (passkeyDefaultsWarning) {
+    logger.warn(passkeyDefaultsWarning)
   }
 
   if (ENV.SERVER.NODE_ENV === 'production' && !ENV.AUTH.SECRET) {

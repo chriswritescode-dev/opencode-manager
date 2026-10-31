@@ -4,6 +4,7 @@ import {
   isPrivateNetworkHost,
   isPublicPlainHttpUrl,
   parseHttpUrl,
+  readHttpOrigin,
 } from '@opencode-manager/shared/utils'
 
 describe('isLoopbackHost', () => {
@@ -96,6 +97,28 @@ describe('parseHttpUrl', () => {
     'returns null for %s',
     (value) => {
       expect(parseHttpUrl(value)).toBeNull()
+    },
+  )
+})
+
+describe('readHttpOrigin', () => {
+  it.each([
+    ['http://m.example.com:5003', 'http://m.example.com:5003'],
+    ['https://m.example.com', 'https://m.example.com'],
+  ])('returns the origin of %s', (value, expected) => {
+    expect(readHttpOrigin(value)).toBe(expected)
+  })
+
+  it('strips the path to the origin', () => {
+    expect(readHttpOrigin('https://m.example.com:5003/pair?x=1#top')).toBe(
+      'https://m.example.com:5003',
+    )
+  })
+
+  it.each(['', 'not a url', '//m.example.com', 'ocm://link?v=2&kind=manager', 'ftp://example.com'])(
+    'returns null for %s',
+    (value) => {
+      expect(readHttpOrigin(value)).toBeNull()
     },
   )
 })

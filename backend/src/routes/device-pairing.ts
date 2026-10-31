@@ -2,9 +2,9 @@ import { Hono } from 'hono'
 import type { MiddlewareHandler } from 'hono'
 import { ENV, getManagerPublicOrigin, getTrustedOrigins } from '@opencode-manager/shared/config/env'
 import { CreateDevicePairingLinksRequestSchema } from '@opencode-manager/shared/schemas'
+import { readHttpOrigin } from '@opencode-manager/shared/utils'
 import {
   buildDevicePairingLinks,
-  normalizeDevicePairingOrigin,
   resolveAppLinkPolicy,
   resolveDevicePairingAvailability,
 } from '../services/device-pairing-links'
@@ -46,7 +46,7 @@ export function createDevicePairingRoutes(deps: DevicePairingRouteDeps) {
     const requestedOrigin = c.req.query('origin')
     if (!requestedOrigin) return c.json({ error: MISSING_ORIGIN_QUERY_MESSAGE }, 400)
 
-    const origin = normalizeDevicePairingOrigin(requestedOrigin)
+    const origin = readHttpOrigin(requestedOrigin)
     if (!origin) return c.json({ error: INVALID_ORIGIN_QUERY_MESSAGE }, 400)
 
     const { available, reason, message } = resolveDevicePairingAvailability(origin, {

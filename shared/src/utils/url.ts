@@ -15,10 +15,15 @@ export function parseHttpUrl(value: string): URL | null {
   return url
 }
 
+/** Returns the origin of an absolute http(s) address, or null when it is not one. */
+export function readHttpOrigin(value: string): string | null {
+  return parseHttpUrl(value)?.origin ?? null
+}
+
 /** Reports whether two URLs share the same origin; false when either URL is invalid. */
 export function haveSameUrlOrigin(first: string, second: string): boolean {
-  const origin = readUrlOrigin(first)
-  return origin !== null && origin === readUrlOrigin(second)
+  const origin = readHttpOrigin(first)
+  return origin !== null && origin === readHttpOrigin(second)
 }
 
 /** Reports whether a hostname refers to the local machine. */
@@ -72,8 +77,4 @@ function parseIpv4Octets(host: string): [number, number, number, number] | null 
     octets[index] = value
   }
   return octets
-}
-
-function readUrlOrigin(value: string): string | null {
-  return parseHttpUrl(value)?.origin ?? null
 }

@@ -3,7 +3,7 @@ import type { Database } from 'bun:sqlite'
 import { isAdminConfigured, type AuthInstance } from '../auth'
 import { applyClientIpHeaders, resolveSocketIp } from '../auth/client-ip'
 import { ENV, getTrustedOrigins, isTrustedOrigin } from '@opencode-manager/shared/config/env'
-import { parseHttpUrl } from '@opencode-manager/shared/utils'
+import { readHttpOrigin } from '@opencode-manager/shared/utils'
 import { logger } from '../utils/logger'
 import { deletePushSubscriptionsForSessions } from '../db/push-subscriptions'
 
@@ -86,7 +86,7 @@ export function createAuthInfoRoutes(auth: AuthInstance) {
 
     const userCount = await (await auth.$context).adapter.count({ model: 'user' })
     const adminConfigured = isAdminConfigured()
-    const origin = parseHttpUrl(c.req.query('origin') ?? '')?.origin ?? null
+    const origin = readHttpOrigin(c.req.query('origin') ?? '')
 
     const config = {
       enabledProviders,

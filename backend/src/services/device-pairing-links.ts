@@ -58,11 +58,6 @@ function unavailable(
   return { available: false, reason, message }
 }
 
-/** Normalises an address to its origin, or null when it is not an absolute http(s) URL. */
-export function normalizeDevicePairingOrigin(value: string): string | null {
-  return parseHttpUrl(value)?.origin ?? null
-}
-
 /** Reports whether an origin can mint a pairing code, and why it cannot when blocked. */
 export function resolveDevicePairingAvailability(
   origin: string | undefined,
