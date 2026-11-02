@@ -11,7 +11,7 @@ import { AgentsEditor } from './AgentsEditor'
 import { AgentsMdEditor } from './AgentsMdEditor'
 import { McpManager } from './McpManager'
 import { SkillsEditor } from './SkillsEditor'
-import { OpenCodeModelsEditor, type ConfigProvider } from './OpenCodeModelsEditor'
+import { OpenCodeModelsEditor } from './OpenCodeModelsEditor'
 import { scrollSectionIntoView } from '@/lib/settingsScroll'
 import { VersionSelectDialog } from './VersionSelectDialog'
 import { settingsApi } from '@/api/settings'
@@ -85,6 +85,8 @@ export function OpenCodeConfigManager() {
   const { data: managedConfig, error: managedConfigError } = useOpenCodeManagedConfig()
   const managedAgents = managedConfig?.info.agents ?? {}
   const managedCommands = managedConfig?.info.commands ?? {}
+  const managedProviders = managedConfig?.info.providers ?? {}
+  const managedMcpServers = mcpServersFromConfig(managedConfig?.info.mcp)
   const isManagedConfigUnavailable = managedConfigError instanceof FetchError && managedConfigError.statusCode === 503
 
   const { data: managedSkills = [] } = useQuery({
@@ -142,23 +144,6 @@ export function OpenCodeConfigManager() {
     applyOpenCodeSaveFeedback({
       appliedMessage: 'Configuration updated',
       restartRequired: result.restartRequired,
-    })
-  }
-
-  const updateConfigContent = async (newContent: Record<string, unknown>) => {
-    const expectedRevision = queryClient.getQueryData<OpenCodeConfigFile>(
-      OPEN_CODE_CONFIG_QUERY_KEY,
-    )?.revision
-    const result = await settingsApi.updateOpenCodeConfig({
-      content: newContent,
-      expectedRevision,
-    })
-    applyOpenCodeConfigSave(result)
-  }
-
-  const updateConfigContentSafely = (newContent: Record<string, unknown>) => {
-    void updateConfigContent(newContent).catch((error) => {
-      showToast.error(getApiErrorMessage(error, 'Failed to update config'))
     })
   }
 
@@ -478,7 +463,7 @@ export function OpenCodeConfigManager() {
                 <div className="flex min-w-0 items-center gap-3">
                   <h4 className={SECTION_TITLE_CLASS}>MCP Servers</h4>
                   <span className={SECTION_META_CLASS}>
-                    {Object.keys(mcpServersFromConfig(config.content.mcp)).length} configured
+                    {Object.keys(managedMcpServers).length} configured
                   </span>
                 </div>
                 <ChevronDown className={cn(SECTION_CHEVRON_CLASS, expandedSections.mcp && 'rotate-180')} />
@@ -487,10 +472,17 @@ export function OpenCodeConfigManager() {
                 id={mcpContentId}
                 className={cn(SECTION_CONTENT_CLASS, expandedSections.mcp ? 'block' : 'hidden')}
               >
-                <McpManager
-                  config={config}
-                  onUpdate={updateConfigContent}
-                />
+                {isManagedConfigUnavailable ? (
+                  <p className="py-4 text-sm text-muted-foreground">
+                    OpenCode is not running, so the configured MCP servers cannot be listed. Use Edit to change the config file directly.
+                  </p>
+                ) : (
+                  <McpManager
+                    mcp={managedConfig?.info.mcp}
+                    onSave={(serverId, server) => patchManagedConfig({ mcp: { servers: { [serverId]: server } } })}
+                    onDelete={(serverId) => patchManagedConfig({ mcp: { servers: { [serverId]: null } } })}
+                  />
+                )}
               </div>
             </div>
 
@@ -506,14 +498,10 @@ export function OpenCodeConfigManager() {
                 <div className="flex min-w-0 items-center gap-3">
                   <h4 className={SECTION_TITLE_CLASS}>Models</h4>
                   <span className={SECTION_META_CLASS}>
-                    {(() => {
-                      const provider = config.content.provider as Record<string, unknown> | undefined
-                      if (!provider) return 0
-                      return Object.values(provider).reduce<number>((acc, p) => {
-                        const models = (p as { models?: Record<string, unknown> })?.models
-                        return acc + (models ? Object.keys(models).length : 0)
-                      }, 0)
-                    })()} configured
+                    {Object.values(managedProviders).reduce<number>(
+                      (acc, provider) => acc + Object.keys(provider.models ?? {}).length,
+                      0,
+                    )} configured
                   </span>
                 </div>
                 <ChevronDown className={cn(SECTION_CHEVRON_CLASS, expandedSections.models && 'rotate-180')} />
@@ -522,15 +510,16 @@ export function OpenCodeConfigManager() {
                 id={modelsContentId}
                 className={cn(SECTION_CONTENT_CLASS, expandedSections.models ? 'block' : 'hidden')}
               >
-                <OpenCodeModelsEditor
-                  providers={(config.content.provider as Record<string, ConfigProvider> | undefined) ?? {}}
-                  onChange={(providers) => {
-                    updateConfigContentSafely({
-                      ...config.content,
-                      provider: providers
-                    })
-                  }}
-                />
+                {isManagedConfigUnavailable ? (
+                  <p className="py-4 text-sm text-muted-foreground">
+                    OpenCode is not running, so the configured models cannot be listed. Use Edit to change the config file directly.
+                  </p>
+                ) : (
+                  <OpenCodeModelsEditor
+                    providers={managedProviders}
+                    onSave={(providers) => patchManagedConfigSafely({ providers })}
+                  />
+                )}
               </div>
             </div>
           </>

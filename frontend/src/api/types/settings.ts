@@ -15,8 +15,6 @@ import {
   type OpenCodeConfigSourceFile,
   type OpenCodeConfigSourceName,
   type UpdateOpenCodeConfigRequest,
-  type ModelConfig,
-  type ProviderConfig,
   type SandboxPreferences,
   type SkillFileInfo,
   type CreateSkillRequest,
@@ -30,11 +28,13 @@ import type { OpenCodeConfigInfo } from '@opencode-manager/shared/opencode'
 import type {
   OpenCodeAgentConfig,
   OpenCodeCommandConfig,
+  OpenCodeProviderConfig,
+  OpenCodeProviderModelConfig,
 } from '@opencode-manager/shared/opencode'
 import type { NotificationPreferences } from '@opencode-manager/shared/types'
 import { saveFile } from '@/lib/download'
 
-export type { TTSConfig, STTConfig, OpenCodeConfigFile, OpenCodeConfigSourceFile, OpenCodeConfigSourceName, UpdateOpenCodeConfigRequest, ModelConfig, ProviderConfig, SandboxPreferences, NotificationPreferences, SkillFileInfo, CreateSkillRequest, UpdateSkillRequest, SkillScope, InstallSkillFromGithubRequest, InstallSkillResponse }
+export type { TTSConfig, STTConfig, OpenCodeConfigFile, OpenCodeConfigSourceFile, OpenCodeConfigSourceName, UpdateOpenCodeConfigRequest, SandboxPreferences, NotificationPreferences, SkillFileInfo, CreateSkillRequest, UpdateSkillRequest, SkillScope, InstallSkillFromGithubRequest, InstallSkillResponse }
 export type { UserPreferences, UpdateSettingsRequest, CustomCommand, GitCredential, GitIdentity, GitIdentityProfile, KeyboardShortcutAction } from '@opencode-manager/shared'
 export { DEFAULT_TTS_CONFIG, DEFAULT_STT_CONFIG, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_USER_PREFERENCES, DEFAULT_LEADER_KEY, DEFAULT_DIRECT_SHORTCUTS, BLOCKED_SERVER_ENV_KEYS, DEFAULT_ACTIVITY_WINDOW_MINUTES, ACTIVITY_WINDOW_MINUTE_OPTIONS }
 export { isOpenCodeConfigSourceName } from '@opencode-manager/shared'
@@ -115,6 +115,24 @@ export type OpenCodeAgentPatch = {
  */
 export type OpenCodeCommandPatch = {
   [K in keyof OpenCodeCommandConfig]?: OpenCodeCommandConfig[K] | null
+}
+
+/**
+ * Merge-patch value for one provider model: an explicit null clears the stored
+ * field, while an omitted field stays untouched.
+ */
+export type OpenCodeProviderModelPatch = {
+  [K in keyof OpenCodeProviderModelConfig]?: OpenCodeProviderModelConfig[K] | null
+}
+
+/**
+ * Merge-patch value for one provider: an explicit null clears the stored field,
+ * a null model entry removes that model, and omitted entries stay untouched.
+ */
+export type OpenCodeProviderPatch = {
+  [K in keyof OpenCodeProviderConfig]?: K extends 'models'
+    ? Record<string, OpenCodeProviderModelPatch | null> | null
+    : OpenCodeProviderConfig[K] | null
 }
 
 export interface UpdateOpenCodeConfigPatchRequest {

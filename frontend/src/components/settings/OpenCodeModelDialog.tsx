@@ -13,68 +13,97 @@ import { Combobox } from '@/components/ui/combobox'
 import { Label } from '@/components/ui/label'
 import { RefreshCw, Loader2 } from 'lucide-react'
 import { settingsApi } from '@/api/settings'
-import type { ModelConfig, ProviderConfig } from '@/api/types/settings'
-
-type ConfigModel = Partial<ModelConfig> & {
-  limit?: {
-    context?: number
-    input?: number
-    output?: number
-  }
-} & Record<string, unknown>
-
-type ConfigProvider = Omit<Partial<ProviderConfig>, 'models' | 'env'> & {
-  api?: string
-  npm?: string
-  env?: string[]
-  models?: Record<string, ConfigModel>
-} & Record<string, unknown>
+import type { OpenCodeProviderConfig, OpenCodeProviderModelConfig } from '@opencode-manager/shared/opencode'
+import type { OpenCodeProviderModelPatch } from '@/api/types/settings'
 
 const handledModelKeys = new Set([
-  'id',
-  'providerID',
-  'api',
+  'modelID',
   'name',
   'family',
+  'releaseDate',
+  'package',
+  'settings',
+  'headers',
   'capabilities',
   'cost',
-  'limit',
-  'status',
-  'options',
-  'headers',
-  'release_date',
   'variants',
+  'limit',
 ])
 
-function parseJsonObject(value: string): Record<string, unknown> | null {
+type JsonObject = Record<string, unknown>
+
+function parseJson(value: string): unknown {
   try {
-    const parsed = JSON.parse(value) as unknown
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>
-    }
-    return null
+    return JSON.parse(value) as unknown
   } catch {
     return null
   }
 }
 
+function parseJsonObject(value: string): JsonObject | null {
+  const parsed = parseJson(value)
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    return parsed as JsonObject
+  }
+  return null
+}
+
+function parseJsonContainer(value: string): JsonObject | unknown[] | null {
+  const parsed = parseJson(value)
+  if (Array.isArray(parsed)) return parsed
+  if (parsed && typeof parsed === 'object') return parsed as JsonObject
+  return null
+}
+
+function parseJsonArray(value: string): unknown[] | null {
+  const parsed = parseJson(value)
+  return Array.isArray(parsed) ? parsed : null
+}
+
 function stringifyJson(value: unknown): string {
-  if (!value || (typeof value === 'object' && !Array.isArray(value) && Object.keys(value as Record<string, unknown>).length === 0)) {
+  if (!value || (typeof value === 'object' && !Array.isArray(value) && Object.keys(value as JsonObject).length === 0)) {
     return ''
   }
 
   return JSON.stringify(value, null, 2)
 }
 
-function parseOptionalJsonField(value: string): Record<string, unknown> | undefined {
+function parseOptionalJsonField(value: string): JsonObject | undefined {
   if (!value.trim()) return undefined
   return parseJsonObject(value) ?? undefined
+}
+
+function parseOptionalJsonContainerField(value: string): JsonObject | unknown[] | undefined {
+  if (!value.trim()) return undefined
+  return parseJsonContainer(value) ?? undefined
+}
+
+function parseOptionalJsonArrayField(value: string): unknown[] | undefined {
+  if (!value.trim()) return undefined
+  return parseJsonArray(value) ?? undefined
 }
 
 function parseOptionalNumber(value: string): number | undefined {
   if (!value.trim()) return undefined
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function withRemovedKeysAsNull(previous: unknown, next: unknown): unknown {
+  if (!isPlainObject(previous) || !isPlainObject(next)) return next
+
+  const patch: Record<string, unknown> = {}
+  for (const key of Object.keys(previous)) {
+    if (!(key in next)) patch[key] = null
+  }
+  for (const [key, value] of Object.entries(next)) {
+    patch[key] = withRemovedKeysAsNull(previous[key], value)
+  }
+  return patch
 }
 
 function sanitizeModelId(modelId: string): string {
@@ -101,32 +130,53 @@ function jsonObjectField(label: string) {
   })
 }
 
+function jsonContainerField(label: string) {
+  return z.string().superRefine((value, ctx) => {
+    if (!value.trim()) return
+    if (!parseJsonContainer(value)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `${label} must be a valid JSON object or array`,
+      })
+    }
+  })
+}
+
+function jsonArrayField(label: string) {
+  return z.string().superRefine((value, ctx) => {
+    if (!value.trim()) return
+    if (!parseJsonArray(value)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `${label} must be a valid JSON array`,
+      })
+    }
+  })
+}
+
 const modelFormSchema = z.object({
   providerId: z.string(),
   modelId: z.string().min(1, 'Model ID is required').regex(/^[a-zA-Z0-9._-]+$/, 'Must use only letters, numbers, dots, hyphens, and underscores'),
   backingModelId: z.string(),
-  providerModelProviderId: z.string(),
   displayName: z.string(),
   family: z.string(),
-  status: z.enum(['none', 'alpha', 'beta', 'deprecated', 'active']),
   releaseDate: z.string(),
-  apiUrl: z.string(),
-  apiNpm: z.string(),
+  modelPackage: z.string(),
   contextLimit: z.string(),
   inputLimit: z.string(),
   outputLimit: z.string(),
-  capabilitiesJson: jsonObjectField('Capabilities'),
-  costJson: jsonObjectField('Cost'),
-  optionsJson: jsonObjectField('Options'),
+  settingsJson: jsonObjectField('Settings'),
   headersJson: jsonObjectField('Headers'),
-  variantsJson: jsonObjectField('Variants'),
+  capabilitiesJson: jsonObjectField('Capabilities'),
+  costJson: jsonContainerField('Cost'),
+  variantsJson: jsonArrayField('Variants'),
   extraJson: jsonObjectField('Advanced fields'),
   createNewProvider: z.boolean(),
   newProviderType: z.enum(['api', 'npm']),
   newProviderId: z.string(),
   newProviderName: z.string().optional(),
   newProviderBaseUrl: z.string().optional(),
-  newProviderNpm: z.string().optional(),
+  newProviderPackage: z.string().optional(),
 }).superRefine((data, ctx) => {
   if (data.createNewProvider) {
     if (!data.newProviderId?.trim()) {
@@ -137,8 +187,8 @@ const modelFormSchema = z.object({
     if (data.newProviderType === 'api' && !data.newProviderBaseUrl?.trim()) {
       ctx.addIssue({ code: 'custom', message: 'Base URL is required for API providers', path: ['newProviderBaseUrl'] })
     }
-    if (data.newProviderType === 'npm' && !data.newProviderNpm?.trim()) {
-      ctx.addIssue({ code: 'custom', message: 'NPM package is required for npm providers', path: ['newProviderNpm'] })
+    if (data.newProviderType === 'npm' && !data.newProviderPackage?.trim()) {
+      ctx.addIssue({ code: 'custom', message: 'NPM package is required for npm providers', path: ['newProviderPackage'] })
     }
   } else {
     if (!data.providerId?.trim()) {
@@ -165,20 +215,20 @@ export interface NewProviderConfig {
   type: 'api' | 'npm'
   name?: string
   baseUrl?: string
-  npm?: string
+  package?: string
 }
 
 interface OpenCodeModelDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSubmit: (providerId: string, modelId: string, model: ConfigModel, newProvider?: NewProviderConfig) => void
+  onSubmit: (providerId: string, modelId: string, model: OpenCodeProviderModelPatch, newProvider?: NewProviderConfig) => void
   availableProviders: string[]
-  existingProviders?: Record<string, ConfigProvider>
+  existingProviders?: Record<string, OpenCodeProviderConfig>
   selectedProviderId: string
   editingModel?: {
     providerId: string
     modelId: string
-    model: ConfigModel
+    model: OpenCodeProviderModelConfig
   }
 }
 
@@ -200,21 +250,18 @@ export function OpenCodeModelDialog({
       return {
         providerId: editingModel.providerId,
         modelId: editingModel.modelId,
-        backingModelId: typeof editingModel.model.id === 'string' ? editingModel.model.id : '',
-        providerModelProviderId: typeof editingModel.model.providerID === 'string' ? editingModel.model.providerID : '',
+        backingModelId: editingModel.model.modelID || '',
         displayName: editingModel.model.name || '',
         family: editingModel.model.family || '',
-        status: (editingModel.model.status as ModelFormValues['status']) || 'none',
-        releaseDate: editingModel.model.release_date || '',
-        apiUrl: editingModel.model.api?.url || '',
-        apiNpm: editingModel.model.api?.npm || '',
+        releaseDate: editingModel.model.releaseDate || '',
+        modelPackage: editingModel.model.package || '',
         contextLimit: editingModel.model.limit?.context?.toString() || '',
         inputLimit: editingModel.model.limit?.input?.toString() || '',
         outputLimit: editingModel.model.limit?.output?.toString() || '',
+        settingsJson: stringifyJson(editingModel.model.settings),
+        headersJson: stringifyJson(editingModel.model.headers),
         capabilitiesJson: stringifyJson(editingModel.model.capabilities),
         costJson: stringifyJson(editingModel.model.cost),
-        optionsJson: stringifyJson(editingModel.model.options),
-        headersJson: stringifyJson(editingModel.model.headers),
         variantsJson: stringifyJson(editingModel.model.variants),
         extraJson: stringifyJson(extraEntries),
         createNewProvider: false,
@@ -222,7 +269,7 @@ export function OpenCodeModelDialog({
         newProviderId: '',
         newProviderName: '',
         newProviderBaseUrl: '',
-        newProviderNpm: '',
+        newProviderPackage: '',
       }
     }
 
@@ -230,20 +277,17 @@ export function OpenCodeModelDialog({
       providerId: selectedProviderId || availableProviders[0] || '',
       modelId: '',
       backingModelId: '',
-      providerModelProviderId: '',
       displayName: '',
       family: '',
-      status: 'none',
       releaseDate: '',
-      apiUrl: '',
-      apiNpm: '',
+      modelPackage: '',
       contextLimit: '',
       inputLimit: '',
       outputLimit: '',
+      settingsJson: '',
+      headersJson: '',
       capabilitiesJson: '',
       costJson: '',
-      optionsJson: '',
-      headersJson: '',
       variantsJson: '',
       extraJson: '',
       createNewProvider: availableProviders.length === 0,
@@ -251,7 +295,7 @@ export function OpenCodeModelDialog({
       newProviderId: '',
       newProviderName: '',
       newProviderBaseUrl: '',
-      newProviderNpm: '',
+      newProviderPackage: '',
     }
   }, [editingModel, selectedProviderId, availableProviders])
 
@@ -280,9 +324,8 @@ export function OpenCodeModelDialog({
     if (createNewProvider) {
       return watchedNewProviderBaseUrl?.trim() || ''
     }
-    const provider = existingProviders?.[watchedProviderId]
-    const options = provider?.options as { baseURL?: string } | undefined
-    return (options?.baseURL || provider?.api || '').trim()
+    const baseURL = existingProviders?.[watchedProviderId]?.settings?.baseURL
+    return typeof baseURL === 'string' ? baseURL.trim() : ''
   }, [createNewProvider, watchedNewProviderBaseUrl, watchedProviderId, existingProviders])
 
   const discoverModels = useCallback(async (forceRefresh = false) => {
@@ -353,43 +396,41 @@ export function OpenCodeModelDialog({
 
   const handleSubmit = (values: ModelFormValues) => {
     const extra = parseOptionalJsonField(values.extraJson)
-    const capabilities = parseOptionalJsonField(values.capabilitiesJson)
-    const cost = parseOptionalJsonField(values.costJson)
-    const options = parseOptionalJsonField(values.optionsJson)
+    const settings = parseOptionalJsonField(values.settingsJson)
     const headers = parseOptionalJsonField(values.headersJson)
-    const variants = parseOptionalJsonField(values.variantsJson)
+    const capabilities = parseOptionalJsonField(values.capabilitiesJson)
+    const cost = parseOptionalJsonContainerField(values.costJson)
+    const variants = parseOptionalJsonArrayField(values.variantsJson)
 
-    const model: ConfigModel = {
-      ...(extra || {}),
-    }
-
-    if (values.backingModelId.trim()) model.id = values.backingModelId.trim()
-    if (values.providerModelProviderId.trim()) model.providerID = values.providerModelProviderId.trim()
-    if (values.displayName.trim()) model.name = values.displayName.trim()
-    if (values.family.trim()) model.family = values.family.trim()
-    if (values.status !== 'none') model.status = values.status
-    if (values.releaseDate.trim()) model.release_date = values.releaseDate.trim()
-
-    if (values.apiUrl.trim() || values.apiNpm.trim()) {
-      model.api = { url: values.apiUrl.trim(), ...(values.apiNpm.trim() ? { npm: values.apiNpm.trim() } : {}) }
+    const builtModel: OpenCodeProviderModelPatch = {
+      ...(extra ?? {}),
+      modelID: values.backingModelId.trim() || null,
+      name: values.displayName.trim() || null,
+      family: values.family.trim() || null,
+      releaseDate: values.releaseDate.trim() || null,
+      package: values.modelPackage.trim() || null,
     }
 
     const contextLimit = parseOptionalNumber(values.contextLimit)
     const inputLimit = parseOptionalNumber(values.inputLimit)
     const outputLimit = parseOptionalNumber(values.outputLimit)
-    if (contextLimit !== undefined || inputLimit !== undefined || outputLimit !== undefined) {
-      model.limit = {
-        ...(contextLimit !== undefined ? { context: contextLimit } : {}),
-        ...(inputLimit !== undefined ? { input: inputLimit } : {}),
-        ...(outputLimit !== undefined ? { output: outputLimit } : {}),
-      } as ConfigModel['limit']
-    }
+    builtModel.limit = contextLimit !== undefined || inputLimit !== undefined || outputLimit !== undefined
+      ? {
+          ...(contextLimit !== undefined ? { context: contextLimit } : {}),
+          ...(inputLimit !== undefined ? { input: inputLimit } : {}),
+          ...(outputLimit !== undefined ? { output: outputLimit } : {}),
+        }
+      : null
 
-    if (capabilities) model.capabilities = capabilities as ConfigModel['capabilities']
-    if (cost) model.cost = cost as ConfigModel['cost']
-    if (options) model.options = options
-    if (headers) model.headers = headers as Record<string, string>
-    if (variants) model.variants = variants as ConfigModel['variants']
+    builtModel.settings = (settings as OpenCodeProviderModelConfig['settings'] | undefined) ?? null
+    builtModel.headers = (headers as Record<string, string> | undefined) ?? null
+    builtModel.capabilities = (capabilities as OpenCodeProviderModelConfig['capabilities'] | undefined) ?? null
+    builtModel.cost = (cost as OpenCodeProviderModelConfig['cost'] | undefined) ?? null
+    builtModel.variants = (variants as OpenCodeProviderModelConfig['variants'] | undefined) ?? null
+
+    const model = editingModel
+      ? withRemovedKeysAsNull(editingModel.model, builtModel) as OpenCodeProviderModelPatch
+      : builtModel
 
     let newProvider: NewProviderConfig | undefined
     if (values.createNewProvider) {
@@ -398,7 +439,7 @@ export function OpenCodeModelDialog({
         type: values.newProviderType,
         name: values.newProviderName || undefined,
         baseUrl: values.newProviderBaseUrl || undefined,
-        npm: values.newProviderNpm || undefined,
+        package: values.newProviderPackage || undefined,
       }
     }
 
@@ -516,7 +557,7 @@ export function OpenCodeModelDialog({
                   )}
 
                   {newProviderType === 'npm' && (
-                    <FormField control={form.control} name="newProviderNpm" render={({ field }) => (
+                    <FormField control={form.control} name="newProviderPackage" render={({ field }) => (
                       <FormItem>
                         <FormLabel>NPM Package</FormLabel>
                         <FormControl><Input {...field} placeholder="e.g., @scope/package" /></FormControl>
@@ -596,7 +637,7 @@ export function OpenCodeModelDialog({
                 )} />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <FormField control={form.control} name="displayName" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Display Name</FormLabel>
@@ -612,64 +653,23 @@ export function OpenCodeModelDialog({
                     <FormMessage />
                   </FormItem>
                 )} />
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <FormField control={form.control} name="status" render={({ field }) => (
+                <FormField control={form.control} name="modelPackage" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Status</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="none">None</SelectItem>
-                        <SelectItem value="active">Active</SelectItem>
-                        <SelectItem value="beta">Beta</SelectItem>
-                        <SelectItem value="alpha">Alpha</SelectItem>
-                        <SelectItem value="deprecated">Deprecated</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-
-                <FormField control={form.control} name="releaseDate" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Release Date</FormLabel>
-                    <FormControl><Input {...field} placeholder="YYYY-MM-DD" /></FormControl>
+                    <FormLabel>Package</FormLabel>
+                    <FormControl><Input {...field} placeholder="Optional" /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <FormField control={form.control} name="providerModelProviderId" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Model Provider ID</FormLabel>
-                    <FormControl><Input {...field} placeholder="Optional provider override" /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-
-                <div className="grid grid-cols-2 gap-4">
-                  <FormField control={form.control} name="apiUrl" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>API URL</FormLabel>
-                      <FormControl><Input {...field} placeholder="Optional" /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-
-                  <FormField control={form.control} name="apiNpm" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>API NPM</FormLabel>
-                      <FormControl><Input {...field} placeholder="Optional" /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-                </div>
-              </div>
+              <FormField control={form.control} name="releaseDate" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Release Date</FormLabel>
+                  <FormControl><Input {...field} placeholder="YYYY-MM-DD or YYYY-MM" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <FormField control={form.control} name="contextLimit" render={({ field }) => (
@@ -700,9 +700,9 @@ export function OpenCodeModelDialog({
               <div className="space-y-4 rounded-lg border p-4 bg-muted/20">
                 <h4 className="text-sm font-medium">Structured JSON fields</h4>
 
-                <FormField control={form.control} name="optionsJson" render={({ field }) => (
+                <FormField control={form.control} name="settingsJson" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Options JSON</FormLabel>
+                    <FormLabel>Settings JSON</FormLabel>
                     <FormControl>
                       <Textarea {...field} className="min-h-[120px] font-mono text-xs" placeholder={`{
   "temperature": 1
@@ -753,9 +753,9 @@ export function OpenCodeModelDialog({
                   <FormItem>
                     <FormLabel>Variants JSON</FormLabel>
                     <FormControl>
-                      <Textarea {...field} className="min-h-[120px] font-mono text-xs" placeholder={`{
-  "fast": {}
-}`} />
+                      <Textarea {...field} className="min-h-[120px] font-mono text-xs" placeholder={`[
+  { "id": "fast", "settings": {} }
+]`} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

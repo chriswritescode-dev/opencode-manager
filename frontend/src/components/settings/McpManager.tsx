@@ -13,26 +13,17 @@ import { invalidateConfigCaches } from '@/lib/queryInvalidation'
 import type { McpAuthStartResponse } from '@/api/mcp'
 import { mcpApi } from '@/api/mcp'
 import { mcpServersFromConfig, type McpServerConfig } from '@opencode-manager/shared/opencode'
-import { settingsApi } from '@/api/settings'
 import { showToast } from '@/lib/toast'
 import { getOpenCodeApiErrorMessage } from '@/lib/opencode-errors'
 import { formatMcpServerName } from '@/lib/mcp'
 
 interface McpManagerProps {
-  config: {
-    content: Record<string, unknown>
-  } | null
-  onUpdate: (content: Record<string, unknown>) => Promise<void>
+  mcp: unknown
+  onSave: (serverId: string, config: McpServerConfig) => Promise<void>
+  onDelete: (serverId: string) => Promise<void>
 }
 
-function withoutMcpServer(mcp: unknown, serverId: string): Record<string, unknown> {
-  const current = (mcp && typeof mcp === 'object' ? mcp : {}) as Record<string, unknown>
-  const servers = { ...(current.servers as Record<string, unknown> | undefined) }
-  delete servers[serverId]
-  return { ...current, servers }
-}
-
-export function McpManager({ config, onUpdate }: McpManagerProps) {
+export function McpManager({ mcp, onSave, onDelete }: McpManagerProps) {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [deleteConfirmServer, setDeleteConfirmServer] = useState<{ id: string; name: string } | null>(null)
   const [togglingServerId, setTogglingServerId] = useState<string | null>(null)
@@ -50,7 +41,7 @@ export function McpManager({ config, onUpdate }: McpManagerProps) {
     isRemovingAuth
   } = useMcpServers()
 
-  const mcpServers = useMemo(() => mcpServersFromConfig(config?.content?.mcp), [config])
+  const mcpServers = useMemo(() => mcpServersFromConfig(mcp), [mcp])
   const serverIds = useMemo(
     () => [...new Set([...Object.keys(mcpServers), ...Object.keys(mcpStatus ?? {})])],
     [mcpServers, mcpStatus],
@@ -58,11 +49,8 @@ export function McpManager({ config, onUpdate }: McpManagerProps) {
 
   const deleteServerMutation = useMutation({
     mutationFn: async (serverId: string) => {
-      if (config && mcpServers[serverId]) {
-        await onUpdate({
-          ...config.content,
-          mcp: withoutMcpServer(config.content.mcp, serverId),
-        })
+      if (mcpServers[serverId]) {
+        await onDelete(serverId)
         return
       }
 
@@ -79,15 +67,7 @@ export function McpManager({ config, onUpdate }: McpManagerProps) {
   })
 
   const addServer = async (serverId: string, serverConfig: McpServerConfig) => {
-    const latest = await settingsApi.getOpenCodeConfig()
-    const mcp = (latest.content.mcp as Record<string, unknown> | undefined) ?? {}
-    await onUpdate({
-      ...latest.content,
-      mcp: {
-        ...mcp,
-        servers: { ...(mcp.servers as Record<string, unknown> | undefined), [serverId]: serverConfig },
-      },
-    })
+    await onSave(serverId, serverConfig)
   }
 
   const isAnyOperationPending = deleteServerMutation.isPending || togglingServerId !== null
@@ -159,14 +139,6 @@ export function McpManager({ config, onUpdate }: McpManagerProps) {
     const status = mcpStatus?.[serverId]
     if (status?.status === 'failed') return status.error ?? null
     return null
-  }
-
-  if (!config) {
-    return (
-      <div className="text-center py-8">
-        <p className="text-muted-foreground">No OpenCode configuration file found.</p>
-      </div>
-    )
   }
 
   return (

@@ -78,6 +78,7 @@ vi.mock('@/api/settings', () => ({
     listManagedSkills: mockListManagedSkills,
     listOpenCodeDirectoryFiles: mockListOpenCodeDirectoryFiles,
     getAgentsMd: mockGetAgentsMd,
+    discoverOpenCodeModels: vi.fn().mockResolvedValue({ models: [], cached: false }),
     syncOpenCodeImport: vi.fn(),
     upgradeOpenCode: vi.fn(),
   },
@@ -113,6 +114,17 @@ const defaultContent = {
   },
 }
 
+const defaultManagedInfo = {
+  providers: {
+    openai: {
+      name: 'OpenAI',
+      models: {
+        'gpt-4o': { name: 'GPT-4o', modelID: 'gpt-4o' },
+      },
+    },
+  },
+}
+
 const defaultConfig = makeOpenCodeConfigFile({
   path: '/workspace/.opencode/opencode.json',
   rawContent: JSON.stringify(defaultContent, null, 2),
@@ -134,7 +146,7 @@ describe('OpenCodeConfigManager', () => {
     vi.clearAllMocks()
     healthState.data = { opencode: 'healthy', opencodeRestartPending: false }
     mockGetOpenCodeConfig.mockResolvedValue(defaultConfig)
-    mockGetManagedOpenCodeConfig.mockResolvedValue({ revision: 'rev-1', info: {} })
+    mockGetManagedOpenCodeConfig.mockResolvedValue({ revision: 'rev-1', info: defaultManagedInfo })
     mockPatchOpenCodeConfig.mockResolvedValue({ ...defaultConfig, revision: 'rev-2' })
     mockGetOpenCodeImportStatus.mockResolvedValue({})
     mockGetAgentsMd.mockResolvedValue({ content: '# Agent Instructions' })
@@ -174,7 +186,7 @@ describe('OpenCodeConfigManager', () => {
   })
 
   it('optimistic delete saves without eager restart modal', async () => {
-    mockUpdateOpenCodeConfig.mockResolvedValueOnce({ ...defaultConfig, restartRequired: true })
+    mockPatchOpenCodeConfig.mockResolvedValueOnce({ ...defaultConfig, restartRequired: true })
 
     const user = userEvent.setup()
     renderWithQuery(<OpenCodeConfigManager />)
@@ -186,9 +198,9 @@ describe('OpenCodeConfigManager', () => {
     await user.click(screen.getByLabelText('Actions for GPT-4o'))
     await user.click(screen.getByText('Delete'))
 
-    expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(1)
-    const [payload] = mockUpdateOpenCodeConfig.mock.calls[0]
-    expect(payload.content.provider.openai.models).not.toHaveProperty('gpt-4o')
+    expect(mockPatchOpenCodeConfig).toHaveBeenCalledTimes(1)
+    const [payload] = mockPatchOpenCodeConfig.mock.calls[0]
+    expect(payload.patch.providers.openai.models).toEqual({ 'gpt-4o': null })
 
     expect(screen.queryByText('Restart OpenCode Server?')).not.toBeInTheDocument()
   })
@@ -209,7 +221,7 @@ describe('OpenCodeConfigManager', () => {
   })
 
   it('rollback on failure', async () => {
-    mockUpdateOpenCodeConfig.mockRejectedValueOnce(new Error('boom'))
+    mockPatchOpenCodeConfig.mockRejectedValueOnce(new Error('boom'))
 
     const user = userEvent.setup()
     renderWithQuery(<OpenCodeConfigManager />)
@@ -221,7 +233,7 @@ describe('OpenCodeConfigManager', () => {
     await user.click(screen.getByLabelText('Actions for GPT-4o'))
     await user.click(screen.getByText('Delete'))
 
-    expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(1)
+    expect(mockPatchOpenCodeConfig).toHaveBeenCalledTimes(1)
 
     const { showToast } = await import('@/lib/toast')
     await vi.waitFor(() => {
@@ -388,7 +400,7 @@ describe('OpenCodeConfigManager', () => {
   })
 
   it('sends the expected revision for structured updates', async () => {
-    mockUpdateOpenCodeConfig.mockResolvedValueOnce({ ...defaultConfig, restartRequired: true })
+    mockPatchOpenCodeConfig.mockResolvedValueOnce({ ...defaultConfig, restartRequired: true })
 
     const user = userEvent.setup()
     renderWithQuery(<OpenCodeConfigManager />)
@@ -400,22 +412,17 @@ describe('OpenCodeConfigManager', () => {
     await user.click(screen.getByLabelText('Actions for GPT-4o'))
     await user.click(screen.getByText('Delete'))
 
-    await waitFor(() => expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(1))
-    const [payload] = mockUpdateOpenCodeConfig.mock.calls[0]
+    await waitFor(() => expect(mockPatchOpenCodeConfig).toHaveBeenCalledTimes(1))
+    const [payload] = mockPatchOpenCodeConfig.mock.calls[0]
     expect(payload.expectedRevision).toBe('rev-1')
     expect(payload.source).toBeUndefined()
-    expect(payload.content.provider.openai.models).not.toHaveProperty('gpt-4o')
+    expect(payload.patch.providers.openai.models).toEqual({ 'gpt-4o': null })
   })
 
   it('resolves the add-server expected revision from the query cache', async () => {
     const cachedConfig = { ...defaultConfig, revision: 'rev-A' }
-    const dialogFetchedConfig = { ...defaultConfig, revision: 'rev-B' }
-    let configRequests = 0
-    mockGetOpenCodeConfig.mockImplementation(() => {
-      configRequests += 1
-      return Promise.resolve(configRequests === 1 ? cachedConfig : dialogFetchedConfig)
-    })
-    mockUpdateOpenCodeConfig.mockResolvedValue({ ...cachedConfig, restartRequired: true })
+    mockGetOpenCodeConfig.mockResolvedValue(cachedConfig)
+    mockPatchOpenCodeConfig.mockResolvedValue({ ...cachedConfig, restartRequired: true })
 
     const user = userEvent.setup()
     renderWithQuery(<OpenCodeConfigManager />)
@@ -427,46 +434,55 @@ describe('OpenCodeConfigManager', () => {
     await user.type(screen.getByLabelText('Command'), 'npx server-filesystem /tmp')
     await user.click(screen.getByRole('button', { name: 'Add MCP Server' }))
 
-    await waitFor(() => expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(1))
-    const [payload] = mockUpdateOpenCodeConfig.mock.calls[0]
+    await waitFor(() => expect(mockPatchOpenCodeConfig).toHaveBeenCalledTimes(1))
+    const [payload] = mockPatchOpenCodeConfig.mock.calls[0]
     expect(payload.expectedRevision).toBe('rev-A')
+    expect(payload.patch.mcp.servers.filesystem).toEqual(expect.objectContaining({
+      type: 'local',
+      command: ['npx', 'server-filesystem', '/tmp'],
+    }))
+  })
+
+  it('deletes a configured MCP server through an mcp.servers patch', async () => {
+    mockGetManagedOpenCodeConfig.mockResolvedValue({
+      revision: 'rev-1',
+      info: { mcp: { servers: { filesystem: { type: 'local', command: ['npx', 'server'] } } } },
+    })
+    mockPatchOpenCodeConfig.mockResolvedValue({ ...defaultConfig, revision: 'rev-2' })
+
+    const user = userEvent.setup()
+    renderWithQuery(<OpenCodeConfigManager />)
+
+    await screen.findByText('opencode.json')
+    await user.click(screen.getByRole('button', { name: /MCP Servers/i }))
+    await user.click(await screen.findByLabelText('Actions for Filesystem'))
+    await user.click(screen.getByText('Delete Server'))
+    await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+    await waitFor(() => expect(mockPatchOpenCodeConfig).toHaveBeenCalledWith({
+      patch: { mcp: { servers: { filesystem: null } } },
+      expectedRevision: 'rev-1',
+    }))
   })
 
   it('sends the revision from the previous save on the next structured save', async () => {
-    const twoModelsContent = {
-      provider: {
-        openai: {
-          name: 'OpenAI',
-          models: {
-            'gpt-4o': { name: 'GPT-4o' },
-            'gpt-3.5': { name: 'GPT-3.5' },
-          },
-        },
-      },
-    }
-    const twoModelsConfig = makeOpenCodeConfigFile({
-      path: '/workspace/.opencode/opencode.json',
-      rawContent: JSON.stringify(twoModelsContent, null, 2),
-      content: twoModelsContent,
-    })
-    mockGetOpenCodeConfig.mockResolvedValue(twoModelsConfig)
-
-    const afterFirstDelete = {
-      ...twoModelsConfig,
-      content: {
-        provider: {
+    mockGetManagedOpenCodeConfig.mockResolvedValue({
+      revision: 'rev-1',
+      info: {
+        providers: {
           openai: {
             name: 'OpenAI',
             models: {
+              'gpt-4o': { name: 'GPT-4o' },
               'gpt-3.5': { name: 'GPT-3.5' },
             },
           },
         },
       },
-      revision: 'rev-2',
-    }
-    const afterSecondDelete = { ...afterFirstDelete, revision: 'rev-3' }
-    mockUpdateOpenCodeConfig
+    })
+    const afterFirstDelete = { ...defaultConfig, revision: 'rev-2' }
+    const afterSecondDelete = { ...defaultConfig, revision: 'rev-3' }
+    mockPatchOpenCodeConfig
       .mockResolvedValueOnce(afterFirstDelete)
       .mockResolvedValueOnce(afterSecondDelete)
 
@@ -478,13 +494,133 @@ describe('OpenCodeConfigManager', () => {
 
     await user.click(screen.getByLabelText('Actions for GPT-4o'))
     await user.click(screen.getByText('Delete'))
-    await waitFor(() => expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(1))
-    expect(mockUpdateOpenCodeConfig.mock.calls[0][0].expectedRevision).toBe('rev-1')
+    await waitFor(() => expect(mockPatchOpenCodeConfig).toHaveBeenCalledTimes(1))
+    expect(mockPatchOpenCodeConfig.mock.calls[0][0].expectedRevision).toBe('rev-1')
 
     await user.click(screen.getByLabelText('Actions for GPT-3.5'))
     await user.click(screen.getByText('Delete'))
-    await waitFor(() => expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(2))
-    expect(mockUpdateOpenCodeConfig.mock.calls[1][0].expectedRevision).toBe('rev-2')
+    await waitFor(() => expect(mockPatchOpenCodeConfig).toHaveBeenCalledTimes(2))
+    expect(mockPatchOpenCodeConfig.mock.calls[1][0].expectedRevision).toBe('rev-2')
+  })
+
+  it('adds a model to a new API provider through a providers patch', async () => {
+    mockGetManagedOpenCodeConfig.mockResolvedValue({ revision: 'rev-1', info: {} })
+    mockPatchOpenCodeConfig.mockResolvedValue({ ...defaultConfig, revision: 'rev-2' })
+
+    const user = userEvent.setup()
+    renderWithQuery(<OpenCodeConfigManager />)
+
+    await screen.findByText('opencode.json')
+    await user.click(screen.getByRole('button', { name: /Models/i }))
+    await user.click(screen.getByRole('button', { name: /Add Model/i }))
+
+    fireEvent.change(await screen.findByPlaceholderText('e.g., my-provider'), { target: { value: 'my-provider' } })
+    fireEvent.change(screen.getByPlaceholderText('e.g., My Provider'), { target: { value: 'My Provider' } })
+    fireEvent.change(screen.getByPlaceholderText('e.g., https://api.openai.com/v1'), { target: { value: 'https://api.example.com/v1' } })
+    fireEvent.change(screen.getByPlaceholderText('e.g., qwen-3.5-27b'), { target: { value: 'gpt-5' } })
+    fireEvent.change(screen.getByPlaceholderText('e.g., MiniMax-M2.7'), { target: { value: 'gpt-5-model' } })
+    fireEvent.change(screen.getByPlaceholderText('e.g., Qwen3.5-27B'), { target: { value: 'GPT-5' } })
+
+    const createButton = screen.getByRole('button', { name: /create/i })
+    await waitFor(() => expect(createButton).not.toBeDisabled())
+    await user.click(createButton)
+
+    await waitFor(() => expect(mockPatchOpenCodeConfig).toHaveBeenCalledWith({
+      patch: {
+        providers: {
+          'my-provider': {
+            name: 'My Provider',
+            settings: { baseURL: 'https://api.example.com/v1' },
+            models: {
+              'gpt-5': expect.objectContaining({ modelID: 'gpt-5-model', name: 'GPT-5' }),
+            },
+          },
+        },
+      },
+      expectedRevision: 'rev-1',
+    }))
+  })
+
+  it('saves an edited model under providers when the managed response converted a v1 entry', async () => {
+    mockGetManagedOpenCodeConfig.mockResolvedValue({
+      revision: 'rev-1',
+      info: {
+        providers: {
+          openai: {
+            name: 'OpenAI',
+            models: { 'gpt-4o': { name: 'GPT-4o', modelID: 'gpt-4o' } },
+          },
+        },
+      },
+    })
+    mockPatchOpenCodeConfig.mockResolvedValue({ ...defaultConfig, revision: 'rev-2' })
+
+    const user = userEvent.setup()
+    renderWithQuery(<OpenCodeConfigManager />)
+
+    await screen.findByText('opencode.json')
+    await user.click(screen.getByRole('button', { name: /Models/i }))
+    await user.click(await screen.findByText('GPT-4o'))
+
+    fireEvent.change(await screen.findByPlaceholderText('e.g., Qwen3.5-27B'), { target: { value: 'GPT-4o Updated' } })
+    await user.click(screen.getByRole('button', { name: /update/i }))
+
+    await waitFor(() => expect(mockPatchOpenCodeConfig).toHaveBeenCalledWith({
+      patch: {
+        providers: {
+          openai: {
+            name: 'OpenAI',
+            models: {
+              'gpt-4o': expect.objectContaining({ name: 'GPT-4o Updated', modelID: 'gpt-4o' }),
+            },
+          },
+        },
+      },
+      expectedRevision: 'rev-1',
+    }))
+  })
+
+  it('keeps a converted provider and its sibling models when deleting one model', async () => {
+    mockGetManagedOpenCodeConfig.mockResolvedValue({
+      revision: 'rev-1',
+      info: {
+        providers: {
+          p: {
+            name: 'Provider P',
+            settings: { baseURL: 'http://x' },
+            models: {
+              a: { name: 'Model A' },
+              b: { name: 'Model B' },
+            },
+          },
+        },
+      },
+    })
+    mockPatchOpenCodeConfig.mockResolvedValue({ ...defaultConfig, revision: 'rev-2' })
+
+    const user = userEvent.setup()
+    renderWithQuery(<OpenCodeConfigManager />)
+
+    await screen.findByText('opencode.json')
+    await user.click(screen.getByRole('button', { name: /Models/i }))
+    await user.click(await screen.findByLabelText('Actions for Model A'))
+    await user.click(screen.getByText('Delete'))
+
+    await waitFor(() => expect(mockPatchOpenCodeConfig).toHaveBeenCalledWith({
+      patch: {
+        providers: {
+          p: {
+            name: 'Provider P',
+            settings: { baseURL: 'http://x' },
+            models: {
+              a: null,
+              b: { name: 'Model B' },
+            },
+          },
+        },
+      },
+      expectedRevision: 'rev-1',
+    }))
   })
 
   it('reports a comment-only raw save as applied without a restart', async () => {
@@ -512,7 +648,7 @@ describe('OpenCodeConfigManager', () => {
   })
 
   it('asks for a restart after a semantic structured change', async () => {
-    mockUpdateOpenCodeConfig.mockResolvedValueOnce({ ...defaultConfig, restartRequired: true })
+    mockPatchOpenCodeConfig.mockResolvedValueOnce({ ...defaultConfig, restartRequired: true })
 
     const user = userEvent.setup()
     renderWithQuery(<OpenCodeConfigManager />)
