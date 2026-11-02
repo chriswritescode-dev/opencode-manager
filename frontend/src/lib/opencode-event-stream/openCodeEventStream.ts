@@ -1,5 +1,10 @@
 import { DEFAULTS } from '@opencode-manager/shared/config'
-import { LOCAL_OPENCODE_SERVER_ID, type SSEEventEnvelope } from '@opencode-manager/shared/schemas'
+import {
+  LOCAL_OPENCODE_SERVER_ID,
+  type OpenCodeStreamEvent,
+  type SSHHostKeyRequestEvent,
+} from '@opencode-manager/shared/schemas'
+import type { V2Event } from '@opencode-manager/shared/opencode'
 import { createBrowserEventStreamTransport } from './browserTransport'
 import type {
   EventStreamHealthState,
@@ -268,7 +273,8 @@ export class OpenCodeEventStream {
   private handleMessage(data: string): void {
     try {
       this.markActivity()
-      this.broadcast(flattenEventEnvelope(JSON.parse(data)))
+      const event = flattenEventEnvelope(JSON.parse(data))
+      if (event) this.broadcast(event)
     } catch {
       this.markActivity()
     }
@@ -427,10 +433,10 @@ export class OpenCodeEventStream {
     })
   }
 
-  private broadcast(data: unknown): void {
+  private broadcast(event: OpenCodeStreamEvent): void {
     this.subscribers.forEach((subscriber) => {
       try {
-        subscriber.onEvent(data)
+        subscriber.onEvent(event)
       } catch {
         void 0
       }
@@ -502,22 +508,22 @@ function parseResyncServerId(data?: string): string | undefined {
   }
 }
 
-function flattenEventEnvelope(parsed: unknown): unknown {
-  if (
-    parsed !== null &&
-    typeof parsed === 'object' &&
-    'payload' in parsed &&
-    (parsed as { payload: unknown }).payload !== null &&
-    typeof (parsed as { payload: unknown }).payload === 'object'
-  ) {
-    const { payload, directory, serverId } = parsed as SSEEventEnvelope
-    return {
-      ...payload,
-      ...(typeof directory === 'string' ? { directory } : {}),
-      ...(typeof serverId === 'string' ? { serverId } : {}),
-    }
-  }
-  return parsed
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object'
+}
+
+function isEventPayload(value: unknown): value is V2Event | SSHHostKeyRequestEvent {
+  return isRecord(value) && typeof value.type === 'string'
+}
+
+function flattenEventEnvelope(parsed: unknown): OpenCodeStreamEvent | null {
+  if (!isRecord(parsed) || !isEventPayload(parsed.payload)) return null
+
+  const { payload, directory, serverId } = parsed
+  const event: OpenCodeStreamEvent = { ...payload }
+  if (typeof directory === 'string') event.directory = directory
+  if (typeof serverId === 'string') event.serverId = serverId
+  return event
 }
 
 export const openCodeEventStream = new OpenCodeEventStream()

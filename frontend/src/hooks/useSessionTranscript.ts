@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FetchError } from '@opencode-manager/shared'
 import { sessionIDFromEvent, type V2Event } from '@opencode-manager/shared/opencode'
-import { buildServerDirectoryKey, LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
+import {
+  buildServerDirectoryKey,
+  LOCAL_OPENCODE_SERVER_ID,
+  type OpenCodeStreamEvent,
+} from '@opencode-manager/shared/schemas'
 import { listSessionMessages, readSessionSnapshot } from '@/api/opencode'
 import { openCodeEventStream } from '@/lib/opencode-event-stream'
 import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
@@ -150,9 +154,9 @@ export function useSessionTranscript(sessionID: string, directory: string) {
 
     const subscription = openCodeEventStream.subscribeGlobalMonitor({
       directories: [buildServerDirectoryKey(serverId, directory)],
-      onEvent: (data) => {
-        const event = data as V2Event & { serverId?: string }
+      onEvent: (event: OpenCodeStreamEvent) => {
         if ((event.serverId ?? LOCAL_OPENCODE_SERVER_ID) !== serverId) return
+        if (event.type === 'ssh.host-key-request') return
         if (sessionIDFromEvent(event) !== sessionID) return
         newestReadRef.current?.buffered.push(event)
         queuedEventsRef.current.push(event)

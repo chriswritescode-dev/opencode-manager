@@ -164,6 +164,7 @@ const childSessionForm: FormInfo = {
 function Harness() {
   const { current, pendingCount, syncForSession, navigateToCurrent, cancel, reply, getForSession } = useForms()
   const permissions = usePermissions()
+  const { sshHostKey } = useEventContext()
   const location = useLocation()
   const [rejection, setRejection] = useState('none')
   const recordRejection = (action: Promise<void>) => {
@@ -192,6 +193,7 @@ function Harness() {
       <div data-testid="path">{location.pathname}</div>
       <div data-testid="search">{location.search}</div>
       <div data-testid="location-key">{location.key}</div>
+      <div data-testid="ssh-host">{sshHostKey.request?.host ?? 'none'}</div>
       <button onClick={() => syncForSession('/repo', 'session-1')}>Sync</button>
       <button onClick={() => permissions.syncForSession('/repo', 'session-1')}>Sync Permissions</button>
       <button onClick={navigateToCurrent}>Navigate</button>
@@ -938,6 +940,36 @@ describe('EventProvider permissions and forms', () => {
     await waitFor(() => {
       expect(screen.getByTestId('count')).toHaveTextContent('1')
       expect(screen.getByTestId('current')).toHaveTextContent('form-1')
+    })
+  })
+
+  it('exposes an SSH host key request received via the global monitor onEvent', async () => {
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled()
+    })
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({
+        type: 'ssh.host-key-request',
+        properties: {
+          id: 'host-key-1',
+          host: 'example.com:22',
+          ip: '203.0.113.10',
+          keyType: 'ssh-ed25519',
+          fingerprint: 'SHA256:abc',
+          timestamp: Date.now(),
+          isKeyChanged: false,
+        },
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ssh-host')).toHaveTextContent('example.com:22')
     })
   })
 

@@ -12,7 +12,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { CopyButton } from '@/components/ui/copy-button'
 import { Shield, ShieldAlert } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { SSHHostKeyRequest } from '@/api/types'
+import type { SSHHostKeyRequest } from '@opencode-manager/shared/schemas'
 import { showToast } from '@/lib/toast'
 
 type SSHHostKeyResponse = 'accept' | 'reject'

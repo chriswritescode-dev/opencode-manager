@@ -14,13 +14,19 @@ import {
 } from '@/api/opencode'
 import { listRepos } from '@/api/repos'
 import { FetchError } from '@opencode-manager/shared'
-import { buildServerDirectoryKey, LOCAL_OPENCODE_SERVER_ID, parseServerDirectoryKey } from '@opencode-manager/shared/schemas'
+import {
+  buildServerDirectoryKey,
+  LOCAL_OPENCODE_SERVER_ID,
+  parseServerDirectoryKey,
+  type OpenCodeStreamEvent,
+  type SSHHostKeyRequest,
+} from '@opencode-manager/shared/schemas'
 import { isLocalOpenCodeServer } from '@/contexts/OpenCodeServerContext'
 import { useAuth } from '@/hooks/useAuth'
 import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
 import { remoteProjectsQueryOptions } from '@/hooks/useRemoteProjects'
-import type { FormAnswer, FormInfo, PermissionRequest, V2Event } from '@opencode-manager/shared/opencode'
-import type { PermissionResponse, SSHHostKeyRequest, Repo } from '@/api/types'
+import type { FormAnswer, FormInfo, PermissionRequest } from '@opencode-manager/shared/opencode'
+import type { PermissionResponse, Repo } from '@/api/types'
 import { showToast } from '@/lib/toast'
 import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode-event-stream'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
@@ -53,9 +59,6 @@ type PendingForm = ServerScoped<FormInfo>
 type PermissionsBySession = Record<string, PendingPermission[]>
 type FormsBySession = Record<string, PendingForm[]>
 type SSEHealthState = Pick<EventStreamHealthState, 'isConnected' | 'isHealthy' | 'isStalled'>
-type StreamEvent =
-  | (V2Event & { directory?: string; serverId?: string })
-  | { type: 'ssh.host-key-request'; properties: SSHHostKeyRequest }
 
 type SessionScopedItem = { id: string; sessionID: string }
 
@@ -1046,11 +1049,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isAuthenticated) return
 
-    const handleSSEMessage = (data: unknown) => {
-      if (!data || typeof data !== 'object' || !('type' in data)) return
-      
-      const event = data as StreamEvent
-      const serverId = (event as { serverId?: string }).serverId ?? LOCAL_OPENCODE_SERVER_ID
+    const handleSSEMessage = (event: OpenCodeStreamEvent) => {
+      const serverId = event.serverId ?? LOCAL_OPENCODE_SERVER_ID
 
       const goalEvent = { type: event.type, data: 'data' in event ? event.data : null }
       if (applySessionGoalEvent(queryClient, goalEvent, serverId)) return

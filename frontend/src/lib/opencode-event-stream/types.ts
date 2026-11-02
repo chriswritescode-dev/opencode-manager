@@ -1,4 +1,6 @@
-export type OpenCodeEventHandler = (data: unknown) => void
+import type { OpenCodeStreamEvent } from '@opencode-manager/shared/schemas'
+
+export type OpenCodeEventHandler = (event: OpenCodeStreamEvent) => void
 export type EventStreamStatusHandler = (connected: boolean) => void
 
 export interface EventStreamHealthState {

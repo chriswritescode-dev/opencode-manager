@@ -71,7 +71,13 @@ interface TestTransport {
 }
 
 function testTransport(): TestTransport {
-  return mocks.transport as TestTransport
+  const transport = mocks.transport as TestTransport
+  return {
+    connected: () => transport.connected(),
+    fail: () => transport.fail(),
+    message: (event) => transport.message({ payload: event }),
+    resync: (payload) => transport.resync(payload),
+  }
 }
 
 function deferred<Value>() {

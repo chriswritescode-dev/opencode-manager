@@ -36,15 +36,3 @@ export interface ImageAttachment {
   mime: string
   dataUrl: string
 }
-
-export interface SSHHostKeyRequest {
-  id: string
-  requestId: string
-  host: string
-  ip?: string
-  keyType: string
-  fingerprint: string
-  isKeyChanged?: boolean
-  timestamp: number
-  action: 'verify'
-}
