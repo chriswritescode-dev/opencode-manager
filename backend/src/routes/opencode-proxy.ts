@@ -16,6 +16,7 @@ import { getRepoById } from '../db/queries'
 import { getTrustedOrigins, getWorkspacePath } from '@opencode-manager/shared/config/env'
 import { isPathWithinRoot } from '../utils/fs-safe'
 import { buildProxyResponseHeaders, filterProxyHeaders } from '../utils/proxy-headers'
+import { forwardProxyRequest } from '../utils/proxy-forward'
 import {
   connectUpstreamWebSocket,
   createBridgedSocketEvents,
@@ -192,20 +193,12 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
     const upstreamUrl = `${getOpenCodeUpstreamBaseUrl()}${pathSuffix}${url.search}`
 
     try {
-      const upstreamResponse = await fetch(upstreamUrl, {
+      return await forwardProxyRequest({
+        url: upstreamUrl,
         method: c.req.method,
         headers,
         body: requestBody,
-        redirect: 'manual',
-        duplex: 'half',
-      })
-
-      const responseHeaders = buildProxyResponseHeaders(upstreamResponse.headers)
-
-      return new Response(upstreamResponse.body, {
-        status: upstreamResponse.status,
-        statusText: upstreamResponse.statusText,
-        headers: responseHeaders,
+        buildResponseHeaders: buildProxyResponseHeaders,
       })
     } catch {
       return c.json({ error: 'Proxy request failed' }, 502)
