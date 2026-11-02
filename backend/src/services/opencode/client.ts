@@ -1,7 +1,8 @@
 import { logger } from '../../utils/logger'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { createOpenCodeApi, type OpenCodeApi } from '@opencode-manager/shared/opencode'
-import { filterProxyHeaders, NULL_BODY_STATUSES } from '../../utils/proxy-headers'
+import { filterProxyHeaders } from '../../utils/proxy-headers'
+import { forwardProxyRequest } from '../../utils/proxy-forward'
 import { getOpenCodeBasicAuthHeader, type OpenCodePasswordResolver } from './auth'
 import { getOpenCodeUpstreamBaseUrl, withDefaultOpenCodeDirectory } from './upstream'
 
@@ -61,75 +62,35 @@ export class FetchOpenCodeClient implements OpenCodeClient {
     return this.fetchFn(input, { ...init, headers })
   }
 
-  private async request(req: { method: string; path: string; body?: string; headers?: Record<string, string> }): Promise<Response> {
-    const url = new URL(this.resolveBaseUrl() + req.path)
-
-    const headers: Record<string, string> = this.withDirectoryHeader({ ...(req.headers ?? {}) })
-
+  async forwardRaw(request: Request): Promise<Response> {
+    const url = new URL(request.url)
+    const path = url.pathname.replace(/^\/api\/opencode/, '') + url.search
+    const headers = this.withDirectoryHeader(filterProxyHeaders(request.headers))
     const basicAuth = await this.getBasicAuth()
 
     if (basicAuth) {
       headers.Authorization = basicAuth
     }
 
+    const hasBody = request.method !== 'GET' && request.method !== 'HEAD'
+
     try {
-      const response = await this.fetchFn(url, {
-        method: req.method,
+      return await forwardProxyRequest({
+        url: this.resolveBaseUrl() + path,
+        method: request.method,
         headers,
-        body: req.body,
-      })
-
-      const filteredHeaders = filterProxyHeaders(response.headers)
-
-      if (NULL_BODY_STATUSES.has(response.status)) {
-        return new Response(null, {
-          status: response.status,
-          statusText: response.statusText,
-          headers: filteredHeaders,
-        })
-      }
-
-      const body = await response.text()
-      return new Response(body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: filteredHeaders,
+        body: hasBody ? request.body : null,
+        signal: request.signal,
+        fetchFn: this.fetchFn,
+        buildResponseHeaders: (upstream) => new Headers(filterProxyHeaders(upstream)),
       })
     } catch (error) {
-      logger.error(`Proxy request failed for ${req.path}:`, error)
+      logger.error(`Proxy request failed for ${path}:`, error)
       return new Response(JSON.stringify({ error: 'Proxy request failed' }), {
         status: 502,
         headers: { 'Content-Type': 'application/json' },
       })
     }
-  }
-
-  async forwardRaw(request: Request): Promise<Response> {
-    const url = new URL(request.url)
-    const cleanPathname = url.pathname.replace(/^\/api\/opencode/, '')
-
-    if (url.pathname.includes('/permissions/')) {
-      logger.info(`Proxying permission request: ${url.pathname}${url.search} -> ${cleanPathname}${url.search}`)
-    }
-
-    const headers: Record<string, string> = {}
-    request.headers.forEach((value, key) => {
-      const lowerKey = key.toLowerCase()
-      if (!['host', 'connection', 'authorization'].includes(lowerKey)) {
-        headers[key] = value
-      }
-    })
-
-    const body = request.method !== 'GET' && request.method !== 'HEAD'
-      ? await request.text()
-      : undefined
-
-    return this.request({
-      method: request.method,
-      path: cleanPathname + url.search,
-      body,
-      headers,
-    })
   }
 }
 

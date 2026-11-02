@@ -36,6 +36,11 @@ import { createOpenCodeClient, FetchOpenCodeClient } from '../../../src/services
 import { ENV } from '@opencode-manager/shared/config/env'
 import { openCodeLocation } from '@opencode-manager/shared/opencode'
 
+async function readBodyText(body: RequestInit['body']): Promise<string | null> {
+  if (!(body instanceof ReadableStream)) return null
+  return await new Response(body).text()
+}
+
 describe('OpenCodeClient', () => {
   const baseUrl = 'http://127.0.0.1:5551'
   const basicAuth = 'Basic dXNlcjpwYXNz'
@@ -91,9 +96,9 @@ describe('OpenCodeClient', () => {
       expect((capturedInit?.headers as Record<string, string>)['x-opencode-directory']).toBe('%2Frepo%2Fb')
     })
 
-    it('should read body for POST but not for GET/HEAD', async () => {
+    it('should stream the body for POST but not for GET/HEAD', async () => {
       const mockResponse = new Response(JSON.stringify({}), { status: 200 })
-      const capturedBodies: unknown[] = []
+      const capturedBodies: Array<RequestInit['body']> = []
       const fetchFn = async (_: URL | Request | string, init?: RequestInit) => {
         capturedBodies.push(init?.body)
         return mockResponse
@@ -119,7 +124,8 @@ describe('OpenCodeClient', () => {
 
       await client.forwardRaw(headRequest)
 
-      expect(capturedBodies[0]).toBe('test body')
+      expect(capturedBodies[0]).toBeInstanceOf(ReadableStream)
+      expect(await readBodyText(capturedBodies[0])).toBe('test body')
       expect(capturedBodies[1]).toBeUndefined()
       expect(capturedBodies[2]).toBeUndefined()
     })
@@ -177,7 +183,9 @@ describe('OpenCodeClient', () => {
 
       expect(capturedUrl?.toString()).toBe(baseUrl + '/config?foo=bar')
       expect(capturedInit?.method).toBe('POST')
-      expect(capturedInit?.body).toBe('request-body-content')
+      expect(capturedInit?.body).toBeInstanceOf(ReadableStream)
+      expect(await readBodyText(capturedInit?.body)).toBe('request-body-content')
+      expect(capturedInit?.duplex).toBe('half')
       expect(capturedInit?.headers).toEqual(expect.objectContaining({
         Authorization: basicAuth,
         'x-caller': 'caller-value',
