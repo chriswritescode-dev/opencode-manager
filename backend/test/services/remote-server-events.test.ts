@@ -219,7 +219,7 @@ describe('RemoteServerEventHub event delivery', () => {
 
   beforeEach(() => {
     sseAggregator.shutdown()
-    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setOpenCodeClient(null)
     sseAggregator.setScheduledSessionsResolver(() => [])
     fake = createRegistry([SERVER_A, SERVER_B])
     sources = createSourceFactory()
@@ -434,7 +434,7 @@ describe('RemoteServerEventHub reconnection', () => {
 
   beforeEach(() => {
     sseAggregator.shutdown()
-    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setOpenCodeClient(null)
     sseAggregator.setScheduledSessionsResolver(() => [])
     fake = createRegistry([SERVER_A])
     sources = createSourceFactory()
@@ -654,7 +654,7 @@ describe('RemoteServerEventHub failure handling', () => {
 
   beforeEach(() => {
     sseAggregator.shutdown()
-    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setOpenCodeClient(null)
     sseAggregator.setScheduledSessionsResolver(() => [])
     fake = createRegistry([SERVER_A])
     sources = createSourceFactory()
@@ -768,7 +768,7 @@ describe('RemoteServerEventHub pending action replay', () => {
 
   beforeEach(() => {
     sseAggregator.shutdown()
-    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setOpenCodeClient(null)
     sseAggregator.setScheduledSessionsResolver(() => [])
     fake = createRegistry([SERVER_A], {
       permissions: { '/repo': [{ id: 'perm-1', sessionID: 'ses-1', action: 'shell', resources: ['ls'] }] },
@@ -858,7 +858,7 @@ describe('RemoteServerEventHub pending action replay', () => {
 
   it('does not use the local pending action fetcher for remote keys', async () => {
     const localApi = makeApi({ permissions: { '/repo': [{ id: 'local-perm' }] } })
-    sseAggregator.setPendingActionsFetcher({ api: localApi })
+    sseAggregator.setOpenCodeClient({ api: localApi })
 
     hub.start()
     trackSessionStatus('ses-1', '/repo', 'busy')
@@ -913,7 +913,7 @@ describe('RemoteServerEventHub session status replay', () => {
 
   beforeEach(() => {
     sseAggregator.shutdown()
-    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setOpenCodeClient(null)
     sseAggregator.setScheduledSessionsResolver(() => [])
     sources = createSourceFactory()
   })

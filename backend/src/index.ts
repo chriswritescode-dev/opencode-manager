@@ -359,8 +359,7 @@ if (ENV.VAPID.PUBLIC_KEY && ENV.VAPID.PRIVATE_KEY) {
   })
 }
 
-sseAggregator.setPendingActionsFetcher(openCodeClient)
-sseAggregator.setPasswordResolver(() => new SettingsService(db).getOpenCodeServerPassword())
+sseAggregator.setOpenCodeClient(openCodeClient)
 sseAggregator.onServerConnected((serverId) => {
   void sessionPermissionModeService.acceptPendingRequestsForActiveSessions(serverId).catch((err) => {
     logger.error(`Failed to accept pending permission requests for server ${serverId}:`, err)

@@ -1,20 +1,16 @@
-import { EventSource } from 'eventsource'
 import { logger } from '../utils/logger'
-import { DEFAULTS } from '@opencode-manager/shared/config'
 import { buildServerDirectoryKey, LOCAL_OPENCODE_SERVER_ID, parseServerDirectoryKey } from '@opencode-manager/shared/schemas'
-import { type OpenCodeApi, type V2Event } from '@opencode-manager/shared/opencode'
-import { getOpenCodeBasicAuthHeader, type OpenCodePasswordResolver } from './opencode/auth'
-import { getOpenCodeUpstreamBaseUrl } from './opencode/upstream'
+import { type V2Event } from '@opencode-manager/shared/opencode'
+import type { OpenCodeClient } from './opencode/client'
 import { encodeSSEFrame } from '../utils/sse-frame'
 import {
   collectPendingReplayEvents,
-  createAuthorizedEventSourceInit,
   createReplayEventBuilder,
-  nextBackoffDelay,
-  parseOpenCodeEvent,
   planSessionStatusReplay,
+  routeOpenCodeEvent,
   type ReplayEventBuilder,
 } from './opencode-event-routing'
+import { subscribeOpenCodeEvents, type OpenCodeEventSubscription } from './opencode-event-subscription'
 
 type SSEClientCallback = (event: string, data: string) => void
 type SSEClientFrameWriter = (frame: Uint8Array) => void
@@ -37,16 +33,11 @@ interface SSEClient {
 
 export type SSEEvent = V2Event
 
-export interface PendingActionsFetcher {
-  api: OpenCodeApi
-}
-
 export interface ScheduledSessionRef {
   sessionID: string
   directory: string
 }
 
-const { RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS } = DEFAULTS.SSE
 const LOCATION_CATALOG_EVENT_TYPES = new Set(['command.updated', 'agent.updated', 'skill.updated', 'model.updated', 'provider.updated', 'integration.updated'])
 
 function serializeEnvelope(directory: string | null, payloadJson: string, serverId?: string): string {
@@ -66,26 +57,19 @@ class SSEAggregator {
   private serverConnectedListeners: Set<ServerConnectedListener> = new Set()
   private remoteSubagentResolver: RemoteSubagentResolver | null = null
   private subagentSessions: Map<string, Set<string>> = new Map()
-  private upstream: EventSource | null = null
-  private reconnectTimeout: ReturnType<typeof setTimeout> | null = null
-  private reconnectDelay: number = RECONNECT_DELAY_MS
+  private subscription: OpenCodeEventSubscription | null = null
   private upstreamConnected = false
   private everConnected = false
   private started = false
-  private pendingActionsFetcher: PendingActionsFetcher | null = null
-  private passwordResolver: OpenCodePasswordResolver | null = null
+  private openCodeClient: Pick<OpenCodeClient, 'api'> | null = null
   private scheduledSessionsResolver: (() => ScheduledSessionRef[]) | null = null
   private remoteReplayHandler: RemoteReplayHandler | null = null
   private readonly buildReplayEvent: ReplayEventBuilder = createReplayEventBuilder('ocm_replay_')
 
   private constructor() {}
 
-  setPendingActionsFetcher(fetcher: PendingActionsFetcher | null): void {
-    this.pendingActionsFetcher = fetcher
-  }
-
-  setPasswordResolver(resolver: OpenCodePasswordResolver | null): void {
-    this.passwordResolver = resolver
+  setOpenCodeClient(client: Pick<OpenCodeClient, 'api'> | null): void {
+    this.openCodeClient = client
   }
 
   setScheduledSessionsResolver(resolver: () => ScheduledSessionRef[]): void {
@@ -99,12 +83,7 @@ class SSEAggregator {
   reconnect(): void {
     if (!this.started) return
     logger.info('SSE forcing upstream reconnect (auth changed)')
-    if (this.reconnectTimeout) {
-      clearTimeout(this.reconnectTimeout)
-      this.reconnectTimeout = null
-    }
-    this.reconnectDelay = RECONNECT_DELAY_MS
-    void this.connectUpstream()
+    this.subscription?.reconnect()
   }
 
   static getInstance(): SSEAggregator {
@@ -116,8 +95,26 @@ class SSEAggregator {
 
   start(): void {
     if (this.started) return
+    const client = this.openCodeClient
+    if (!client) {
+      logger.warn('SSE aggregator cannot start without an OpenCode client')
+      return
+    }
     this.started = true
-    void this.connectUpstream()
+    this.subscription = subscribeOpenCodeEvents({
+      api: () => client.api,
+      label: 'SSE aggregator',
+      onOpen: () => {
+        this.handleUpstreamOpen(this.everConnected)
+      },
+      onEvent: (event) => {
+        this.handleUpstreamEvent(event)
+      },
+      onDisconnect: (error) => {
+        this.upstreamConnected = false
+        logger.warn(`SSE upstream disconnected: ${String(error)}`)
+      },
+    })
   }
 
   addClient(id: string, callback: SSEClientCallback, writeFrame: SSEClientFrameWriter, directories: string[]): () => void {
@@ -250,21 +247,21 @@ class SSEAggregator {
   }
 
   private async replayPendingActionsForClient(clientId: string, directories: string[]): Promise<void> {
-    const fetcher = this.pendingActionsFetcher
-    if (!fetcher) return
+    const client = this.openCodeClient
+    if (!client) return
 
     await Promise.allSettled(directories.map(directory =>
-      this.replayPendingActionsForDirectory(clientId, directory, fetcher)
+      this.replayPendingActionsForDirectory(clientId, directory, client)
     ))
   }
 
   private async replayPendingActionsForDirectory(
     clientId: string,
     directory: string,
-    fetcher: PendingActionsFetcher,
+    client: Pick<OpenCodeClient, 'api'>,
   ): Promise<void> {
     const events = await collectPendingReplayEvents({
-      api: fetcher.api,
+      api: client.api,
       directory,
       buildEvent: this.buildReplayEvent,
       logScope: 'replay',
@@ -294,12 +291,12 @@ class SSEAggregator {
   }
 
   private async replaySessionStatusesForTrackedDirectories(): Promise<void> {
-    const fetcher = this.pendingActionsFetcher
-    if (!fetcher) return
+    const client = this.openCodeClient
+    if (!client) return
 
     let running: Record<string, { type: string }>
     try {
-      running = await fetcher.api.session.active()
+      running = await client.api.session.active()
     } catch (error) {
       logger.warn(`replay: failed to fetch active sessions: ${String(error)}`)
       return
@@ -317,7 +314,7 @@ class SSEAggregator {
 
     const runningDirectories = await Promise.all(plan.busy.map(async (sessionID) => ({
       sessionID,
-      directory: tracked.get(sessionID) ?? await this.resolveSessionDirectory(fetcher, sessionID),
+      directory: tracked.get(sessionID) ?? await this.resolveSessionDirectory(client, sessionID),
     })))
 
     for (const { sessionID, directory } of runningDirectories) {
@@ -343,9 +340,9 @@ class SSEAggregator {
     return tracked
   }
 
-  private async resolveSessionDirectory(fetcher: PendingActionsFetcher, sessionID: string): Promise<string | null> {
+  private async resolveSessionDirectory(client: Pick<OpenCodeClient, 'api'>, sessionID: string): Promise<string | null> {
     try {
-      const session = await fetcher.api.session.get({ sessionID })
+      const session = await client.api.session.get({ sessionID })
       this.sessionDirectories.set(sessionID, session.location.directory)
       return session.location.directory
     } catch (error) {
@@ -354,53 +351,9 @@ class SSEAggregator {
     }
   }
 
-  private async connectUpstream(): Promise<void> {
-    if (!this.started) return
-    if (this.upstream) {
-      this.upstream.close()
-      this.upstream = null
-    }
-
-    const url = `${getOpenCodeUpstreamBaseUrl()}/api/event`
-    const wasConnectedBefore = this.everConnected
-    logger.info(`SSE connecting to OpenCode global stream: ${url}`)
-
-    const authHeader = this.passwordResolver
-      ? await getOpenCodeBasicAuthHeader(this.passwordResolver)
-      : null
-
-    if (!this.started) return
-
-    const init: ConstructorParameters<typeof EventSource>[1] = createAuthorizedEventSourceInit(authHeader)
-
-    const es = new EventSource(url, init)
-    this.upstream = es
-
-    es.onopen = () => {
-      this.handleUpstreamOpen(wasConnectedBefore)
-    }
-
-    es.onerror = (event) => {
-      this.upstreamConnected = false
-      if (es === this.upstream) {
-        const code = (event as { code?: number }).code
-        const message = (event as { message?: string }).message
-        logger.warn(`SSE upstream error${code ? ` (code=${code})` : ''}${message ? `: ${message}` : ''}`)
-        es.close()
-        this.upstream = null
-        this.scheduleReconnect()
-      }
-    }
-
-    es.onmessage = (event) => {
-      this.handleUpstreamMessage(event.data)
-    }
-  }
-
   private handleUpstreamOpen(wasConnectedBefore: boolean): void {
     logger.info('SSE global stream connected')
     this.upstreamConnected = true
-    this.reconnectDelay = RECONNECT_DELAY_MS
     this.everConnected = true
     this.notifyUpstreamConnected()
     this.broadcastResync()
@@ -418,15 +371,6 @@ class SSEAggregator {
 
   private broadcastResync(): void {
     this.broadcastToAll('resync', JSON.stringify({ timestamp: Date.now() }))
-  }
-
-  private scheduleReconnect(): void {
-    if (!this.started || this.reconnectTimeout) return
-    this.reconnectTimeout = setTimeout(() => {
-      this.reconnectTimeout = null
-      this.reconnectDelay = nextBackoffDelay(this.reconnectDelay, MAX_RECONNECT_DELAY_MS)
-      void this.connectUpstream()
-    }, this.reconnectDelay)
   }
 
   onEvent(listener: SSEEventListener): () => void {
@@ -465,32 +409,25 @@ class SSEAggregator {
     this.remoteSubagentResolver = resolver
   }
 
-  private handleUpstreamMessage(data: string): void {
-    const routed = parseOpenCodeEvent(data, this.sessionDirectories)
-    if (!routed) return
+  private handleUpstreamEvent(event: V2Event): void {
+    const { payloadJson, directory, resolvedDirectory } = routeOpenCodeEvent(event, this.sessionDirectories)
 
-    const { event, payloadJson, directory, resolvedDirectory } = routed
-
-    try {
-      if (directory) {
-        if (LOCATION_CATALOG_EVENT_TYPES.has(event.type)) {
-          this.deliverResolvedEvent(directory, event, payloadJson)
-        } else {
-          this.deliverEvent(directory, event, payloadJson)
-        }
-        return
+    if (directory) {
+      if (LOCATION_CATALOG_EVENT_TYPES.has(event.type)) {
+        this.deliverResolvedEvent(directory, event, payloadJson)
+      } else {
+        this.deliverEvent(directory, event, payloadJson)
       }
-
-      if (resolvedDirectory) {
-        this.deliverResolvedEvent(resolvedDirectory, event, payloadJson)
-        return
-      }
-
-      this.notifyListeners(null, event)
-      this.writeEnvelopeToClients(this.clients.keys(), null, payloadJson)
-    } catch (error) {
-      logger.error(`SSE failed to handle ${event.type} event:`, error)
+      return
     }
+
+    if (resolvedDirectory) {
+      this.deliverResolvedEvent(resolvedDirectory, event, payloadJson)
+      return
+    }
+
+    this.notifyListeners(null, event)
+    this.writeEnvelopeToClients(this.clients.keys(), null, payloadJson)
   }
 
   private deliverEvent(directory: string, event: SSEEvent, payloadJson?: string): void {
@@ -731,15 +668,10 @@ class SSEAggregator {
 
   shutdown(): void {
     this.started = false
+    this.everConnected = false
 
-    if (this.reconnectTimeout) {
-      clearTimeout(this.reconnectTimeout)
-      this.reconnectTimeout = null
-    }
-    if (this.upstream) {
-      this.upstream.close()
-      this.upstream = null
-    }
+    this.subscription?.close()
+    this.subscription = null
     this.upstreamConnected = false
 
     this.activeSessions.clear()
