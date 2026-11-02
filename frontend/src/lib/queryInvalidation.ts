@@ -3,6 +3,8 @@ import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { serverScopedKey } from '@/lib/serverScope'
 import type { GitStatusResponse } from '@/types/git'
 
+export const OPEN_CODE_MANAGED_CONFIG_QUERY_KEY = ['opencode-config', 'managed'] as const
+
 export function sessionTranscriptQueryKey(sessionID: string | null | undefined) {
   return ['opencode', 'transcript', sessionID]
 }
@@ -78,6 +80,7 @@ export function invalidateConfigCaches(
   queryClient.invalidateQueries({ queryKey: ['opencode', 'commands'] })
   if (!options.skipOpenCodeConfig) {
     queryClient.invalidateQueries({ queryKey: ['opencode-config'] })
+    queryClient.invalidateQueries({ queryKey: OPEN_CODE_MANAGED_CONFIG_QUERY_KEY })
   }
   queryClient.invalidateQueries({ queryKey: ['health'] })
   queryClient.invalidateQueries({ queryKey: ['mcp-status'] })

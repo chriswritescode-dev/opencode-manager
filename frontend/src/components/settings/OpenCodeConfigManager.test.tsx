@@ -3,12 +3,15 @@ import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { OpenCodeConfigManager } from './OpenCodeConfigManager'
+import { FetchError } from '@/api/fetchWrapper'
 import type { OpenCodeConfigFile } from '@/api/types/settings'
 import { makeOpenCodeConfigFile, makeOpenCodeConfigSource } from '@/test/fixtures/opencode-config'
 
 const {
   mockGetOpenCodeConfig,
   mockUpdateOpenCodeConfig,
+  mockGetManagedOpenCodeConfig,
+  mockPatchOpenCodeConfig,
   mockRestartOpenCodeServer,
   mockGetActiveOpenCodeSessions,
   mockGetOpenCodeImportStatus,
@@ -19,6 +22,8 @@ const {
 } = vi.hoisted(() => ({
   mockGetOpenCodeConfig: vi.fn(),
   mockUpdateOpenCodeConfig: vi.fn(),
+  mockGetManagedOpenCodeConfig: vi.fn(),
+  mockPatchOpenCodeConfig: vi.fn(),
   mockRestartOpenCodeServer: vi.fn(),
   mockGetActiveOpenCodeSessions: vi.fn(),
   mockGetOpenCodeImportStatus: vi.fn(),
@@ -65,6 +70,8 @@ vi.mock('@/api/settings', () => ({
   settingsApi: {
     getOpenCodeConfig: mockGetOpenCodeConfig,
     updateOpenCodeConfig: mockUpdateOpenCodeConfig,
+    getManagedOpenCodeConfig: mockGetManagedOpenCodeConfig,
+    patchOpenCodeConfig: mockPatchOpenCodeConfig,
     restartOpenCodeServer: mockRestartOpenCodeServer,
     getActiveOpenCodeSessions: mockGetActiveOpenCodeSessions,
     getOpenCodeImportStatus: mockGetOpenCodeImportStatus,
@@ -74,6 +81,25 @@ vi.mock('@/api/settings', () => ({
     syncOpenCodeImport: vi.fn(),
     upgradeOpenCode: vi.fn(),
   },
+}))
+
+vi.mock('@/components/model/ModelCombobox', () => ({ ModelCombobox: () => null }))
+
+vi.mock('./AgentDialog', () => ({
+  AgentDialog: ({ open, onSubmit, editingAgent }: {
+    open: boolean
+    onSubmit: (name: string, agent: Record<string, unknown>) => void
+    editingAgent?: { name: string } | null
+  }) => open ? (
+    <div>
+      <button onClick={() => onSubmit(editingAgent?.name ?? 'new-agent', { system: 'Updated', mode: 'subagent' })}>
+        Submit Agent
+      </button>
+      <button onClick={() => onSubmit('renamed-agent', { system: 'Renamed', mode: 'subagent' })}>
+        Submit Renamed Agent
+      </button>
+    </div>
+  ) : null,
 }))
 
 const defaultContent = {
@@ -108,6 +134,8 @@ describe('OpenCodeConfigManager', () => {
     vi.clearAllMocks()
     healthState.data = { opencode: 'healthy', opencodeRestartPending: false }
     mockGetOpenCodeConfig.mockResolvedValue(defaultConfig)
+    mockGetManagedOpenCodeConfig.mockResolvedValue({ revision: 'rev-1', info: {} })
+    mockPatchOpenCodeConfig.mockResolvedValue({ ...defaultConfig, revision: 'rev-2' })
     mockGetOpenCodeImportStatus.mockResolvedValue({})
     mockGetAgentsMd.mockResolvedValue({ content: '# Agent Instructions' })
     mockListManagedSkills.mockResolvedValue([])
@@ -642,5 +670,141 @@ describe('OpenCodeConfigManager', () => {
     expect(notice).toHaveTextContent('opencode.json, opencode.jsonc')
     expect(notice).toHaveTextContent('Saves apply only to opencode.jsonc')
     expect(notice).toHaveTextContent('For simpler configuration, consolidate the settings you need into one file, then remove redundant files after verifying the result.')
+  })
+
+  it('lists agents and commands from the managed config query', async () => {
+    mockGetManagedOpenCodeConfig.mockResolvedValue({
+      revision: 'rev-1',
+      info: {
+        agents: { reviewer: { system: 'Review code', description: 'Reviews code', mode: 'subagent' } },
+        commands: { deploy: { template: 'Deploy it', description: 'Deploys the app' } },
+      },
+    })
+
+    const user = userEvent.setup()
+    renderWithQuery(<OpenCodeConfigManager />)
+
+    await screen.findByText('opencode.json')
+    await user.click(screen.getByRole('button', { name: /Commands/i }))
+    expect(await screen.findByText('deploy')).toBeInTheDocument()
+
+    const agentsButton = screen.getAllByRole('button', { name: /Agents/i }).find(button => button.textContent?.startsWith('Agents'))
+    expect(agentsButton).toBeDefined()
+    await user.click(agentsButton!)
+    expect(await screen.findByText('reviewer')).toBeInTheDocument()
+  })
+
+  it('shows the unavailable notice and keeps the raw editor reachable when OpenCode is down', async () => {
+    mockGetManagedOpenCodeConfig.mockRejectedValue(new FetchError('OpenCode server unavailable', 503))
+
+    const user = userEvent.setup()
+    const { container } = renderWithQuery(<OpenCodeConfigManager />)
+
+    await screen.findByText('opencode.json')
+    await user.click(screen.getByRole('button', { name: /Commands/i }))
+    expect(await screen.findByText(/OpenCode is not running, so the configured commands cannot be listed/)).toBeInTheDocument()
+
+    const agentsButton = screen.getAllByRole('button', { name: /Agents/i }).find(button => button.textContent?.startsWith('Agents'))
+    expect(agentsButton).toBeDefined()
+    await user.click(agentsButton!)
+    expect(await screen.findByText(/OpenCode is not running, so the configured agents cannot be listed/)).toBeInTheDocument()
+
+    const editIcon = container.querySelector('.lucide-square-pen') as SVGElement
+    await user.click(editIcon.closest('button') as HTMLButtonElement)
+    expect(await screen.findByLabelText('Config content')).toBeInTheDocument()
+  })
+
+  it('saves an agent with an entity patch through the managed config endpoint', async () => {
+    mockGetManagedOpenCodeConfig.mockResolvedValue({
+      revision: 'rev-1',
+      info: { agents: { reviewer: { system: 'Review code', mode: 'subagent' } } },
+    })
+
+    const user = userEvent.setup()
+    renderWithQuery(<OpenCodeConfigManager />)
+
+    await screen.findByText('opencode.json')
+    const agentsButton = screen.getAllByRole('button', { name: /Agents/i }).find(button => button.textContent?.startsWith('Agents'))
+    expect(agentsButton).toBeDefined()
+    await user.click(agentsButton!)
+    await user.click(await screen.findByText('reviewer'))
+    await user.click(await screen.findByRole('button', { name: 'Submit Agent' }))
+
+    await waitFor(() => expect(mockPatchOpenCodeConfig).toHaveBeenCalledWith({
+      patch: { agents: { reviewer: { system: 'Updated', mode: 'subagent' } } },
+      expectedRevision: 'rev-1',
+    }))
+  })
+
+  it('deletes the previous agent name in the same patch when renaming', async () => {
+    mockGetManagedOpenCodeConfig.mockResolvedValue({
+      revision: 'rev-1',
+      info: { agents: { reviewer: { system: 'Review code', mode: 'subagent' } } },
+    })
+
+    const user = userEvent.setup()
+    renderWithQuery(<OpenCodeConfigManager />)
+
+    await screen.findByText('opencode.json')
+    const agentsButton = screen.getAllByRole('button', { name: /Agents/i }).find(button => button.textContent?.startsWith('Agents'))
+    expect(agentsButton).toBeDefined()
+    await user.click(agentsButton!)
+    await user.click(await screen.findByText('reviewer'))
+    await user.click(await screen.findByRole('button', { name: 'Submit Renamed Agent' }))
+
+    await waitFor(() => expect(mockPatchOpenCodeConfig).toHaveBeenCalledWith({
+      patch: {
+        agents: {
+          'renamed-agent': { system: 'Renamed', mode: 'subagent' },
+          reviewer: null,
+        },
+      },
+      expectedRevision: 'rev-1',
+    }))
+  })
+
+  it('sends null for cleared command fields and a disabled subagent', async () => {
+    mockGetManagedOpenCodeConfig.mockResolvedValue({
+      revision: 'rev-1',
+      info: {
+        commands: {
+          review: {
+            template: 'Review this code',
+            description: 'Reviews changes',
+            agent: 'reviewer',
+            model: 'openai/gpt-5',
+            subagent: true,
+          },
+        },
+      },
+    })
+
+    const user = userEvent.setup()
+    renderWithQuery(<OpenCodeConfigManager />)
+
+    await screen.findByText('opencode.json')
+    await user.click(screen.getByRole('button', { name: /Commands/i }))
+    await user.click(await screen.findByText('review'))
+
+    await user.clear(screen.getByLabelText('Description'))
+    await user.clear(screen.getByLabelText('Agent (optional)'))
+    await user.clear(screen.getByLabelText('Model (optional)'))
+    await user.click(screen.getByRole('switch'))
+    await user.click(screen.getByRole('button', { name: 'Update' }))
+
+    await waitFor(() => expect(mockPatchOpenCodeConfig).toHaveBeenCalledWith({
+      patch: {
+        commands: {
+          review: {
+            template: 'Review this code',
+            description: null,
+            agent: null,
+            model: null,
+            subagent: null,
+          },
+        },
+      },
+      expectedRevision: 'rev-1',
+    }))
   })
 })

@@ -24,7 +24,7 @@ const mockAgents = {
   'helper': {
     description: 'General helper agent',
     mode: 'primary' as const,
-    disable: true,
+    disabled: true,
   },
 }
 
@@ -34,28 +34,26 @@ describe('AgentsEditor', () => {
   })
 
   it('renders empty state when no agents configured', () => {
-    const onChange = vi.fn()
-    render(<AgentsEditor agents={{}} onChange={onChange} />, { wrapper: createWrapper() })
+    render(<AgentsEditor agents={{}} onSave={vi.fn()} onDelete={vi.fn()} />, { wrapper: createWrapper() })
 
     expect(screen.getByText('No agents configured')).toBeInTheDocument()
     expect(screen.getByText('Add your first agent to get started.')).toBeInTheDocument()
   })
 
   it('renders agent names', () => {
-    const onChange = vi.fn()
-    render(<AgentsEditor agents={mockAgents} onChange={onChange} />, { wrapper: createWrapper() })
+    render(<AgentsEditor agents={mockAgents} onSave={vi.fn()} onDelete={vi.fn()} />, { wrapper: createWrapper() })
 
     expect(screen.getByText('code-reviewer')).toBeInTheDocument()
     expect(screen.getByText('helper')).toBeInTheDocument()
   })
 
   it('renders uploaded directory agent files', () => {
-    const onChange = vi.fn()
     render(
       <AgentsEditor
         agents={{}}
         directoryAgents={[{ kind: 'agents', name: 'planner', relativePath: 'team/planner.md' }]}
-        onChange={onChange}
+        onSave={vi.fn()}
+        onDelete={vi.fn()}
       />,
       { wrapper: createWrapper() },
     )
@@ -68,8 +66,7 @@ describe('AgentsEditor', () => {
 
   it('opens AgentDialog when clicking Edit on a row', async () => {
     const user = userEvent.setup()
-    const onChange = vi.fn()
-    render(<AgentsEditor agents={mockAgents} onChange={onChange} />, { wrapper: createWrapper() })
+    render(<AgentsEditor agents={mockAgents} onSave={vi.fn()} onDelete={vi.fn()} />, { wrapper: createWrapper() })
 
     const editButtons = screen.getAllByText('Edit')
     await user.click(editButtons[0])
@@ -80,8 +77,7 @@ describe('AgentsEditor', () => {
 
   it('opens AgentDialog when clicking row body', async () => {
     const user = userEvent.setup()
-    const onChange = vi.fn()
-    render(<AgentsEditor agents={mockAgents} onChange={onChange} />, { wrapper: createWrapper() })
+    render(<AgentsEditor agents={mockAgents} onSave={vi.fn()} onDelete={vi.fn()} />, { wrapper: createWrapper() })
 
     await user.click(screen.getByText('code-reviewer'))
 
@@ -90,8 +86,7 @@ describe('AgentsEditor', () => {
 
   it('opens AgentDialog and displays Create Agent text when clicking Add Agent button', async () => {
     const user = userEvent.setup()
-    const onChange = vi.fn()
-    render(<AgentsEditor agents={{}} onChange={onChange} />, { wrapper: createWrapper() })
+    render(<AgentsEditor agents={{}} onSave={vi.fn()} onDelete={vi.fn()} />, { wrapper: createWrapper() })
 
     await user.click(screen.getByText('Add Agent'))
 
@@ -99,21 +94,20 @@ describe('AgentsEditor', () => {
     expect(screen.getByText('Create Agent')).toBeInTheDocument()
   })
 
-  it('calls onChange with agent removed when Delete is clicked from overflow menu', async () => {
+  it('calls onDelete with the agent name when Delete is clicked from overflow menu', async () => {
     const user = userEvent.setup()
-    const onChange = vi.fn()
-    render(<AgentsEditor agents={mockAgents} onChange={onChange} />, { wrapper: createWrapper() })
+    const onDelete = vi.fn()
+    render(<AgentsEditor agents={mockAgents} onSave={vi.fn()} onDelete={onDelete} />, { wrapper: createWrapper() })
 
     await user.click(screen.getByLabelText('Actions for code-reviewer'))
     await user.click(screen.getByText('Delete'))
 
-    expect(onChange).toHaveBeenCalledTimes(1)
-    expect(onChange).toHaveBeenCalledWith({ helper: mockAgents.helper })
+    expect(onDelete).toHaveBeenCalledTimes(1)
+    expect(onDelete).toHaveBeenCalledWith('code-reviewer')
   })
 
   it('renders mode and disabled badges for agents', () => {
-    const onChange = vi.fn()
-    render(<AgentsEditor agents={mockAgents} onChange={onChange} />, { wrapper: createWrapper() })
+    render(<AgentsEditor agents={mockAgents} onSave={vi.fn()} onDelete={vi.fn()} />, { wrapper: createWrapper() })
 
     expect(screen.getByText('subagent')).toBeInTheDocument()
     expect(screen.getByText('Disabled')).toBeInTheDocument()

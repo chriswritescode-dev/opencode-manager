@@ -43,7 +43,7 @@ describe('AgentDialog model field', () => {
         open
         onOpenChange={vi.fn()}
         onSubmit={vi.fn()}
-        editingAgent={{ name: 'reviewer', agent: { prompt: 'Review code', model: 'openai/gpt-4o' } }}
+        editingAgent={{ name: 'reviewer', agent: { system: 'Review code', model: 'openai/gpt-4o' } }}
       />,
     )
 
@@ -58,7 +58,7 @@ describe('AgentDialog model field', () => {
         open
         onOpenChange={vi.fn()}
         onSubmit={onSubmit}
-        editingAgent={{ name: 'reviewer', agent: { prompt: 'Review code', model: 'openai/gpt-4o#high' } }}
+        editingAgent={{ name: 'reviewer', agent: { system: 'Review code', model: 'openai/gpt-4o#high' } }}
       />,
     )
 
@@ -80,7 +80,7 @@ describe('AgentDialog model field', () => {
         onSubmit={onSubmit}
         editingAgent={{
           name: 'reviewer',
-          agent: { prompt: 'Review code', model: { providerID: 'openai', model: 'gpt-4o', variant: 'high' } },
+          agent: { system: 'Review code', model: { providerID: 'openai', model: 'gpt-4o', variant: 'high' } },
         }}
       />,
     )
@@ -95,7 +95,7 @@ describe('AgentDialog model field', () => {
     )
   })
 
-  it('submits no model when the field is empty', async () => {
+  it('submits null for a cleared model', async () => {
     const onSubmit = vi.fn()
     const user = userEvent.setup()
     render(
@@ -103,14 +103,39 @@ describe('AgentDialog model field', () => {
         open
         onOpenChange={vi.fn()}
         onSubmit={onSubmit}
-        editingAgent={{ name: 'reviewer', agent: { prompt: 'Review code' } }}
+        editingAgent={{ name: 'reviewer', agent: { system: 'Review code' } }}
       />,
     )
 
     await user.click(screen.getByRole('button', { name: 'Update' }))
 
     const agent = onSubmit.mock.calls[0][1]
-    expect(agent.model).toBeUndefined()
+    expect(agent.model).toBeNull()
+  })
+
+  it('sends null for cleared description and model so the merge patch deletes them', async () => {
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <AgentDialog
+        open
+        onOpenChange={vi.fn()}
+        onSubmit={onSubmit}
+        editingAgent={{
+          name: 'reviewer',
+          agent: { system: 'Review code', description: 'Reviews changes', model: 'openai/gpt-4o' },
+        }}
+      />,
+    )
+
+    await user.clear(screen.getByLabelText('Description'))
+    await user.clear(screen.getByLabelText('Model'))
+    await user.click(screen.getByRole('button', { name: 'Update' }))
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      'reviewer',
+      expect.objectContaining({ description: null, model: null }),
+    )
   })
 
   it('saves the OpenCode key of an aliased model on create', async () => {
@@ -128,5 +153,58 @@ describe('AgentDialog model field', () => {
       'reviewer',
       expect.objectContaining({ model: 'anthropic/claude-opus-5-5-fast' }),
     )
+  })
+
+  it('maps v2 request body values and permission rules into the form and preserves unrelated fields on save', async () => {
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <AgentDialog
+        open
+        onOpenChange={vi.fn()}
+        onSubmit={onSubmit}
+        editingAgent={{
+          name: 'reviewer',
+          agent: {
+            system: 'Review code',
+            description: 'Reviews changes',
+            mode: 'subagent',
+            hidden: true,
+            color: '#fff',
+            steps: 7,
+            request: {
+              headers: { 'x-test': '1' },
+              body: { temperature: 0.2, top_p: 0.5, reasoning_effort: 'high' },
+            },
+            permissions: [
+              { action: 'shell', resource: '*', effect: 'deny' },
+              { action: 'edit', resource: 'src/**', effect: 'ask' },
+              { action: 'webfetch', resource: '*', effect: 'allow' },
+            ],
+          },
+        }}
+      />,
+    )
+
+    expect(screen.getByLabelText('Temperature')).toHaveValue(0.2)
+    expect(screen.getByLabelText('Top P')).toHaveValue(0.5)
+    expect(screen.getByText('Deny')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Update' }))
+
+    const agent = onSubmit.mock.calls[0][1]
+    expect(agent.request).toEqual({
+      headers: { 'x-test': '1' },
+      body: { temperature: 0.2, top_p: 0.5, reasoning_effort: 'high' },
+    })
+    expect(agent.permissions).toEqual([
+      { action: 'edit', resource: 'src/**', effect: 'ask' },
+      { action: 'edit', resource: '*', effect: 'allow' },
+      { action: 'shell', resource: '*', effect: 'deny' },
+      { action: 'webfetch', resource: '*', effect: 'allow' },
+    ])
+    expect(agent.hidden).toBe(true)
+    expect(agent.color).toBe('#fff')
+    expect(agent.steps).toBe(7)
   })
 })

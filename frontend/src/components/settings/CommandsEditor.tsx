@@ -1,58 +1,34 @@
 import { useState } from 'react'
 import { Plus } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Dialog, DialogTrigger } from '@/components/ui/dialog'
 import { SettingsList, SettingsListRow } from '@/components/ui/settings-list'
+import type { OpenCodeCommandConfig } from '@opencode-manager/shared/opencode'
+import type { OpenCodeCommandPatch, OpenCodeDirectoryFileInfo } from '@/api/types/settings'
 import { CommandDialog } from './CommandDialog'
 import { UploadFolderButton } from './UploadFolderButton'
 import { DirectoryFilesList } from './DirectoryFilesList'
-import type { OpenCodeDirectoryFileInfo } from '@/api/types/settings'
-
-interface Command {
-  template: string
-  description?: string
-  agent?: string
-  model?: string
-  subtask?: boolean
-  topP?: number
-}
 
 interface CommandsEditorProps {
-  commands: Record<string, Command>
+  commands: Record<string, OpenCodeCommandConfig>
   directoryCommands?: OpenCodeDirectoryFileInfo[]
-  onChange: (commands: Record<string, Command>) => void
+  onSave: (name: string, command: OpenCodeCommandPatch, previousName?: string) => void
+  onDelete: (name: string) => void
 }
 
-export function CommandsEditor({ commands, directoryCommands = [], onChange }: CommandsEditorProps) {
+export function CommandsEditor({ commands, directoryCommands = [], onSave, onDelete }: CommandsEditorProps) {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
-  const [editingCommand, setEditingCommand] = useState<{ name: string; command: Command } | null>(null)
+  const [editingCommand, setEditingCommand] = useState<{ name: string; command: OpenCodeCommandConfig } | null>(null)
   const hasCommands = Object.keys(commands).length > 0 || directoryCommands.length > 0
 
-  const handleCommandSubmit = (name: string, command: Command) => {
-    if (editingCommand) {
-      const updatedCommands = { ...commands }
-      delete updatedCommands[editingCommand.name]
-      updatedCommands[name] = command
-      onChange(updatedCommands)
-      setEditingCommand(null)
-    } else {
-      const updatedCommands = {
-        ...commands,
-        [name]: command
-      }
-      onChange(updatedCommands)
-      setIsCreateDialogOpen(false)
-    }
+  const handleCommandSubmit = (name: string, command: OpenCodeCommandPatch) => {
+    onSave(name, command, editingCommand?.name)
+    setEditingCommand(null)
+    setIsCreateDialogOpen(false)
   }
 
-  const deleteCommand = (name: string) => {
-    const updatedCommands = { ...commands }
-    delete updatedCommands[name]
-    onChange(updatedCommands)
-  }
-
-  const startEdit = (name: string, command: Command) => {
+  const startEdit = (name: string, command: OpenCodeCommandConfig) => {
     setEditingCommand({ name, command })
   }
 
@@ -91,7 +67,7 @@ export function CommandsEditor({ commands, directoryCommands = [], onChange }: C
             }
             onClick={() => startEdit(name, command)}
             primaryAction={{ label: 'Edit', onClick: () => startEdit(name, command) }}
-            actions={[{ label: 'Delete', destructive: true, onClick: () => deleteCommand(name) }]}
+            actions={[{ label: 'Delete', destructive: true, onClick: () => onDelete(name) }]}
             actionsLabel={`Actions for ${name}`}
           />
         ))}

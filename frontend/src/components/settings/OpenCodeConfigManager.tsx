@@ -19,41 +19,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useServerHealth } from '@/hooks/useServerHealth'
 import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 import { useOpenCodeConfigFile, OPEN_CODE_CONFIG_QUERY_KEY } from '@/hooks/useOpenCodeConfigFile'
+import { useOpenCodeManagedConfig } from '@/hooks/useOpenCodeManagedConfig'
 import { useOpenCodeApplyFeedback } from '@/hooks/useOpenCodeApplyFeedback'
 import { showToast } from '@/lib/toast'
-import { invalidateConfigCaches } from '@/lib/queryInvalidation'
+import { invalidateConfigCaches, OPEN_CODE_MANAGED_CONFIG_QUERY_KEY } from '@/lib/queryInvalidation'
 import { getOpenCodeApiErrorMessage } from '@/lib/opencode-errors'
 import { mcpServersFromConfig } from '@opencode-manager/shared/opencode'
 import { FetchError } from '@/api/fetchWrapper'
 import { getPreferredOpenCodeConfigSource, downloadOpenCodeConfigSource } from '@/api/types/settings'
-import type { OpenCodeConfigFile, OpenCodeConfigSaveResponse, OpenCodeImportStatus } from '@/api/types/settings'
-
-interface Command {
-  template: string
-  description?: string
-  agent?: string
-  model?: string
-  subtask?: boolean
-  topP?: number
-}
-
-interface Agent {
-  prompt?: string
-  description?: string
-  mode?: 'subagent' | 'primary' | 'all'
-  temperature?: number
-  topP?: number
-  top_p?: number
-  model?: string
-  tools?: Record<string, boolean>
-  permission?: {
-    edit?: 'ask' | 'allow' | 'deny'
-    bash?: 'ask' | 'allow' | 'deny' | Record<string, 'ask' | 'allow' | 'deny'>
-    webfetch?: 'ask' | 'allow' | 'deny'
-  }
-  disable?: boolean
-  [key: string]: unknown
-}
+import type { OpenCodeConfigFile, OpenCodeConfigSaveResponse, OpenCodeImportStatus, OpenCodeAgentPatch, OpenCodeCommandPatch } from '@/api/types/settings'
 
 type ConfigSectionKey = 'agentsMd' | 'commands' | 'agents' | 'skills' | 'mcp' | 'models' | 'hostImport'
 
@@ -108,6 +82,10 @@ export function OpenCodeConfigManager() {
   const hostImportRef = useRef<HTMLButtonElement>(null)
   
   const { data: config, isLoading } = useOpenCodeConfigFile()
+  const { data: managedConfig, error: managedConfigError } = useOpenCodeManagedConfig()
+  const managedAgents = managedConfig?.info.agents ?? {}
+  const managedCommands = managedConfig?.info.commands ?? {}
+  const isManagedConfigUnavailable = managedConfigError instanceof FetchError && managedConfigError.statusCode === 503
 
   const { data: managedSkills = [] } = useQuery({
     queryKey: ['managed-skills'],
@@ -182,6 +160,42 @@ export function OpenCodeConfigManager() {
     void updateConfigContent(newContent).catch((error) => {
       showToast.error(getApiErrorMessage(error, 'Failed to update config'))
     })
+  }
+
+  const patchManagedConfig = async (patch: Record<string, unknown>) => {
+    const expectedRevision = queryClient.getQueryData<OpenCodeConfigFile>(
+      OPEN_CODE_CONFIG_QUERY_KEY,
+    )?.revision
+    const result = await settingsApi.patchOpenCodeConfig({ patch, expectedRevision })
+    queryClient.setQueryData<OpenCodeConfigFile>(OPEN_CODE_CONFIG_QUERY_KEY, result)
+    applyOpenCodeSaveFeedback({
+      appliedMessage: 'Configuration updated',
+      restartRequired: result.restartRequired,
+    })
+    queryClient.invalidateQueries({ queryKey: OPEN_CODE_MANAGED_CONFIG_QUERY_KEY })
+  }
+
+  const patchManagedConfigSafely = (patch: Record<string, unknown>) => {
+    void patchManagedConfig(patch).catch((error) => {
+      showToast.error(getApiErrorMessage(error, 'Failed to update config'))
+    })
+  }
+
+  const saveManagedEntity = (
+    key: 'agents' | 'commands',
+    name: string,
+    value: OpenCodeAgentPatch | OpenCodeCommandPatch,
+    previousName?: string,
+  ) => {
+    const entries: Record<string, unknown> = { [name]: value }
+    if (previousName && previousName !== name) {
+      entries[previousName] = null
+    }
+    patchManagedConfigSafely({ [key]: entries })
+  }
+
+  const deleteManagedEntity = (key: 'agents' | 'commands', name: string) => {
+    patchManagedConfigSafely({ [key]: { [name]: null } })
   }
 
   const downloadConfig = (config: OpenCodeConfigFile) => {
@@ -365,7 +379,7 @@ export function OpenCodeConfigManager() {
                 <div className="flex min-w-0 items-center gap-3">
                   <h4 className={SECTION_TITLE_CLASS}>Commands</h4>
                   <span className={SECTION_META_CLASS}>
-                    {Object.keys((config.content.command as Record<string, Command> | undefined) ?? {}).length + directoryCommands.length} configured
+                    {Object.keys(managedCommands).length + directoryCommands.length} configured
                   </span>
                 </div>
                 <ChevronDown className={cn(SECTION_CHEVRON_CLASS, expandedSections.commands && 'rotate-180')} />
@@ -374,16 +388,18 @@ export function OpenCodeConfigManager() {
                 id={commandsContentId}
                 className={cn(SECTION_CONTENT_CLASS, expandedSections.commands ? 'block' : 'hidden')}
               >
-                <CommandsEditor
-                  commands={(config.content.command as Record<string, Command> | undefined) ?? {}}
-                  directoryCommands={directoryCommands}
-                  onChange={(commands) => {
-                    updateConfigContentSafely({
-                      ...config.content,
-                      command: commands
-                    })
-                  }}
-                />
+                {isManagedConfigUnavailable ? (
+                  <p className="py-4 text-sm text-muted-foreground">
+                    OpenCode is not running, so the configured commands cannot be listed. Use Edit to change the config file directly.
+                  </p>
+                ) : (
+                  <CommandsEditor
+                    commands={managedCommands}
+                    directoryCommands={directoryCommands}
+                    onSave={(name, command, previousName) => saveManagedEntity('commands', name, command, previousName)}
+                    onDelete={(name) => deleteManagedEntity('commands', name)}
+                  />
+                )}
               </div>
             </div>
 
@@ -399,7 +415,7 @@ export function OpenCodeConfigManager() {
                 <div className="flex min-w-0 items-center gap-3">
                   <h4 className={SECTION_TITLE_CLASS}>Agents</h4>
                   <span className={SECTION_META_CLASS}>
-                    {Object.keys((config.content.agent as Record<string, Agent> | undefined) ?? {}).length + directoryAgents.length} configured
+                    {Object.keys(managedAgents).length + directoryAgents.length} configured
                   </span>
                 </div>
                 <ChevronDown className={cn(SECTION_CHEVRON_CLASS, expandedSections.agents && 'rotate-180')} />
@@ -408,16 +424,18 @@ export function OpenCodeConfigManager() {
                 id={agentsContentId}
                 className={cn(SECTION_CONTENT_CLASS, expandedSections.agents ? 'block' : 'hidden')}
               >
-                <AgentsEditor
-                  agents={(config.content.agent as Record<string, Agent> | undefined) ?? {}}
-                  directoryAgents={directoryAgents}
-                  onChange={(agents) => {
-                    updateConfigContentSafely({
-                      ...config.content,
-                      agent: agents
-                    })
-                  }}
-                />
+                {isManagedConfigUnavailable ? (
+                  <p className="py-4 text-sm text-muted-foreground">
+                    OpenCode is not running, so the configured agents cannot be listed. Use Edit to change the config file directly.
+                  </p>
+                ) : (
+                  <AgentsEditor
+                    agents={managedAgents}
+                    directoryAgents={directoryAgents}
+                    onSave={(name, agent, previousName) => saveManagedEntity('agents', name, agent, previousName)}
+                    onDelete={(name) => deleteManagedEntity('agents', name)}
+                  />
+                )}
               </div>
             </div>
 

@@ -11,6 +11,27 @@ import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ModelCombobox } from '@/components/model/ModelCombobox'
 import { configModelRef, formatOpenCodeModelRef } from '@opencode-manager/shared/opencode'
+import type { OpenCodeAgentConfig, OpenCodePermissionRule } from '@opencode-manager/shared/opencode'
+import type { OpenCodeAgentPatch } from '@/api/types/settings'
+
+const MANAGED_PERMISSION_ACTIONS = ['edit', 'shell', 'webfetch'] as const
+
+type ManagedPermissionAction = typeof MANAGED_PERMISSION_ACTIONS[number]
+
+type PermissionEffect = OpenCodePermissionRule['effect']
+
+const permissionEffect = (
+  permissions: OpenCodePermissionRule[] | undefined,
+  action: ManagedPermissionAction,
+): PermissionEffect => {
+  const rule = permissions?.find((entry) => entry.action === action && entry.resource === '*')
+  return rule?.effect ?? 'allow'
+}
+
+const requestBodyNumber = (agent: OpenCodeAgentConfig | undefined, key: string): number | undefined => {
+  const value = agent?.request?.body?.[key]
+  return typeof value === 'number' ? value : undefined
+}
 
 const agentFormSchema = z.object({
   name: z.string().min(1, 'Agent name is required').regex(/^[a-z0-9-]+$/, 'Must be lowercase letters, numbers, and hyphens only'),
@@ -20,70 +41,42 @@ const agentFormSchema = z.object({
   temperature: z.number().min(0).max(2),
   topP: z.number().min(0).max(1),
   model: z.string().optional(),
-  write: z.boolean(),
-  edit: z.boolean(),
-  bash: z.boolean(),
-  webfetch: z.boolean(),
   editPermission: z.enum(['ask', 'allow', 'deny']),
-  bashPermission: z.enum(['ask', 'allow', 'deny']),
+  shellPermission: z.enum(['ask', 'allow', 'deny']),
   webfetchPermission: z.enum(['ask', 'allow', 'deny']),
-  disable: z.boolean()
+  disable: z.boolean(),
 })
 
 type AgentFormValues = z.infer<typeof agentFormSchema>
 
-interface Agent<TModel = string> {
-  prompt?: string
-  description?: string
-  mode?: 'subagent' | 'primary' | 'all'
-  temperature?: number
-  topP?: number
-  top_p?: number
-  model?: TModel
-  tools?: Record<string, boolean>
-  permission?: {
-    edit?: 'ask' | 'allow' | 'deny'
-    bash?: 'ask' | 'allow' | 'deny' | Record<string, 'ask' | 'allow' | 'deny'>
-    webfetch?: 'ask' | 'allow' | 'deny'
-  }
-  disable?: boolean
-  [key: string]: unknown
-}
-
-type StoredAgent = Agent<string | { providerID: string; model: string; variant?: string }>
-
 interface AgentDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSubmit: (name: string, agent: Agent) => void
-  editingAgent?: { name: string; agent: StoredAgent } | null
+  onSubmit: (name: string, agent: OpenCodeAgentPatch) => void
+  editingAgent?: { name: string; agent: OpenCodeAgentConfig } | null
 }
 
 export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: AgentDialogProps) {
-  const getDefaultValues = (agent?: { name: string; agent: StoredAgent } | null): AgentFormValues => {
+  const getDefaultValues = (agent?: { name: string; agent: OpenCodeAgentConfig } | null): AgentFormValues => {
     const modelRef = configModelRef(agent?.agent.model)
     return {
       name: agent?.name || '',
       description: agent?.agent.description || '',
-      prompt: agent?.agent.prompt || '',
+      prompt: agent?.agent.system || '',
       mode: agent?.agent.mode || 'subagent',
-      temperature: agent?.agent.temperature ?? 0.7,
-      topP: agent?.agent.topP ?? agent?.agent.top_p ?? 1,
+      temperature: requestBodyNumber(agent?.agent, 'temperature') ?? 0.7,
+      topP: requestBodyNumber(agent?.agent, 'top_p') ?? 1,
       model: modelRef ? formatOpenCodeModelRef(modelRef) : '',
-      write: agent?.agent.tools?.write ?? true,
-      edit: agent?.agent.tools?.edit ?? true,
-      bash: agent?.agent.tools?.bash ?? true,
-      webfetch: agent?.agent.tools?.webfetch ?? true,
-      editPermission: agent?.agent.permission?.edit ?? 'allow',
-      bashPermission: typeof agent?.agent.permission?.bash === 'string' ? agent.agent.permission.bash : 'allow',
-      webfetchPermission: agent?.agent.permission?.webfetch ?? 'allow',
-      disable: agent?.agent.disable ?? false
+      editPermission: permissionEffect(agent?.agent.permissions, 'edit'),
+      shellPermission: permissionEffect(agent?.agent.permissions, 'shell'),
+      webfetchPermission: permissionEffect(agent?.agent.permissions, 'webfetch'),
+      disable: agent?.agent.disabled ?? false,
     }
   }
 
   const form = useForm<AgentFormValues>({
     resolver: zodResolver(agentFormSchema),
-    defaultValues: getDefaultValues(editingAgent)
+    defaultValues: getDefaultValues(editingAgent),
   })
 
   useEffect(() => {
@@ -93,28 +86,31 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
   }, [open, editingAgent, form])
 
   const handleSubmit = (values: AgentFormValues) => {
-    const agent: Agent = {
-      prompt: values.prompt,
-      description: values.description || undefined,
+    const previous = editingAgent?.agent
+    const preservedPermissions = (previous?.permissions ?? []).filter(
+      (rule) => rule.resource !== '*' || !MANAGED_PERMISSION_ACTIONS.includes(rule.action as ManagedPermissionAction),
+    )
+    const agent: OpenCodeAgentPatch = {
+      ...previous,
+      system: values.prompt,
+      description: values.description || null,
       mode: values.mode,
-      temperature: values.temperature,
-      topP: values.topP,
-      disable: values.disable,
-      tools: {
-        write: values.write,
-        edit: values.edit,
-        bash: values.bash,
-        webfetch: values.webfetch
+      model: values.model?.trim() || null,
+      disabled: values.disable,
+      permissions: [
+        ...preservedPermissions,
+        { action: 'edit', resource: '*', effect: values.editPermission },
+        { action: 'shell', resource: '*', effect: values.shellPermission },
+        { action: 'webfetch', resource: '*', effect: values.webfetchPermission },
+      ],
+      request: {
+        ...previous?.request,
+        body: {
+          ...previous?.request?.body,
+          temperature: values.temperature,
+          top_p: values.topP,
+        },
       },
-      permission: {
-        edit: values.editPermission,
-        bash: values.bashPermission,
-        webfetch: values.webfetchPermission
-      }
-    }
-
-    if (values.model?.trim()) {
-      agent.model = values.model.trim()
     }
 
     onSubmit(values.name, agent)
@@ -288,75 +284,6 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
               />
 
               <div className="space-y-2">
-                <div className="text-sm font-medium">Tools Configuration</div>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <FormField
-                    control={form.control}
-                    name="write"
-                    render={({ field }) => (
-                      <FormItem className="flex flex-row items-center space-x-2 space-y-0">
-                        <FormControl>
-                          <Switch
-                            checked={field.value}
-                            onCheckedChange={field.onChange}
-                          />
-                        </FormControl>
-                        <FormLabel className="font-normal">Write</FormLabel>
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="edit"
-                    render={({ field }) => (
-                      <FormItem className="flex flex-row items-center space-x-2 space-y-0">
-                        <FormControl>
-                          <Switch
-                            checked={field.value}
-                            onCheckedChange={field.onChange}
-                          />
-                        </FormControl>
-                        <FormLabel className="font-normal">Edit</FormLabel>
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="bash"
-                    render={({ field }) => (
-                      <FormItem className="flex flex-row items-center space-x-2 space-y-0">
-                        <FormControl>
-                          <Switch
-                            checked={field.value}
-                            onCheckedChange={field.onChange}
-                          />
-                        </FormControl>
-                        <FormLabel className="font-normal">Bash</FormLabel>
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="webfetch"
-                    render={({ field }) => (
-                      <FormItem className="flex flex-row items-center space-x-2 space-y-0">
-                        <FormControl>
-                          <Switch
-                            checked={field.value}
-                            onCheckedChange={field.onChange}
-                          />
-                        </FormControl>
-                        <FormLabel className="font-normal">Web Fetch</FormLabel>
-                      </FormItem>
-                    )}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
                 <div className="text-sm font-medium">Permissions</div>
                 <div className="grid grid-cols-3 gap-2 text-sm">
                   <FormField
@@ -384,10 +311,10 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
 
                   <FormField
                     control={form.control}
-                    name="bashPermission"
+                    name="shellPermission"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel className="text-xs">Bash</FormLabel>
+                        <FormLabel className="text-xs">Shell</FormLabel>
                         <Select onValueChange={field.onChange} defaultValue={field.value}>
                           <FormControl>
                             <SelectTrigger>

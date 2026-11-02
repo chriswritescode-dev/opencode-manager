@@ -26,6 +26,11 @@ import {
   type InstallSkillResponse,
   type SettingsResponse as SharedSettingsResponse,
 } from '@opencode-manager/shared'
+import type { OpenCodeConfigInfo } from '@opencode-manager/shared/opencode'
+import type {
+  OpenCodeAgentConfig,
+  OpenCodeCommandConfig,
+} from '@opencode-manager/shared/opencode'
 import type { NotificationPreferences } from '@opencode-manager/shared/types'
 import { saveFile } from '@/lib/download'
 
@@ -89,4 +94,31 @@ export interface OpenCodeDirectoryFileInfo {
   kind: 'agents' | 'commands'
   name: string
   relativePath: string
+}
+
+export interface ManagedOpenCodeConfig {
+  revision: string | null
+  info: OpenCodeConfigInfo
+}
+
+/**
+ * Merge-patch value for one agent: an explicit null clears the stored field,
+ * while an omitted field stays untouched.
+ */
+export type OpenCodeAgentPatch = {
+  [K in keyof OpenCodeAgentConfig]?: OpenCodeAgentConfig[K] | null
+}
+
+/**
+ * Merge-patch value for one command: an explicit null clears the stored field,
+ * while an omitted field stays untouched.
+ */
+export type OpenCodeCommandPatch = {
+  [K in keyof OpenCodeCommandConfig]?: OpenCodeCommandConfig[K] | null
+}
+
+export interface UpdateOpenCodeConfigPatchRequest {
+  patch: Record<string, unknown>
+  source?: OpenCodeConfigSourceName
+  expectedRevision?: string
 }
