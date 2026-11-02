@@ -26,7 +26,7 @@ export type ApplyOpenCodeConfigResult =
   | { status: 'reloaded'; config: OpenCodeConfigFile }
   | { status: 'restart_pending'; config: OpenCodeConfigFile }
 
-export interface ApplyOpenCodeConfigInput {
+export interface ApplyOpenCodeConfigOptions {
   content: Record<string, unknown> | string
   source?: OpenCodeConfigSourceName
   expectedRevision?: string
@@ -99,7 +99,7 @@ function requiresOpenCodeReload(previous: OpenCodeConfigFile | null, next: OpenC
 }
 
 export async function applyOpenCodeConfigUpdate(
-  input: ApplyOpenCodeConfigInput,
+  input: ApplyOpenCodeConfigOptions,
 ): Promise<ApplyOpenCodeConfigResult> {
   const { reloadRequired, config } = await withOpenCodeConfigLock(async () => {
     const { content, source, expectedRevision, mode, settingsService } = input

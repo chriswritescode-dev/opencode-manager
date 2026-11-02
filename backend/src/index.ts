@@ -84,7 +84,7 @@ import { RepoWorkspaceService } from './services/repo-workspace'
 import { createGitService } from './services/git/GitService'
 import { ScheduleWorktreeManager } from './services/schedule-worktree'
 import { migrateGlobalSkills } from './services/skills'
-import { installAssistantWorkspace } from './services/assistant-mode'
+import { installAssistantWorkspace, convertAssistantOpenCodeConfigToV2 } from './services/assistant-mode'
 import { detectSandboxCapability } from './services/sandbox/capability'
 import { SandboxRuntimeService, stopSandboxesOnShutdown } from './services/sandbox/runtime'
 import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode-import'
@@ -254,6 +254,7 @@ try {
   const openCodeStatus = await openCodeSupervisor.start()
   if (openCodeStatus.healthy) {
     logger.info(`OpenCode server running on port ${openCodeStatus.port}`)
+    void convertAssistantOpenCodeConfigToV2(openCodeClient.api)
   } else {
     logger.warn(`OpenCode server unavailable after startup recovery: ${openCodeStatus.lastError ?? openCodeStatus.state}`)
   }

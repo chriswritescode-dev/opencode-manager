@@ -598,7 +598,10 @@ function buildOpenCodeConfigCommentPreservingRemovalEdits(
   return edits
 }
 
-function removeOpenCodeConfigProperty(rawContent: string, jsonPath: JSONPath): string {
+/**
+ * Removes one property from raw JSONC config text while keeping neighbouring comments and formatting.
+ */
+export function removeOpenCodeConfigProperty(rawContent: string, jsonPath: JSONPath): string {
   const edits = buildOpenCodeConfigCommentPreservingRemovalEdits(rawContent, jsonPath)
   if (!edits) return rawContent
   return applyEdits(rawContent, edits)

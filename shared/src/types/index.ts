@@ -4,7 +4,6 @@ import {
   SettingsResponseSchema,
   UpdateSettingsRequestSchema,
   CustomCommandSchema,
-  OpenCodeConfigSchema,
   OpenCodeConfigFileSchema,
   OpenCodeConfigSourceFileSchema,
   OpenCodeConfigValidationIssueSchema,
@@ -80,7 +79,6 @@ export type OpenCodeConfigFile = z.infer<typeof OpenCodeConfigFileSchema>
 export type { OpenCodeConfigSourceName } from '../config/defaults'
 export type OpenCodeConfigSourceFile = z.infer<typeof OpenCodeConfigSourceFileSchema>
 export type OpenCodeConfigValidationIssue = z.infer<typeof OpenCodeConfigValidationIssueSchema>
-export type OpenCodeConfigInput = z.infer<typeof OpenCodeConfigSchema>
 export type UpdateOpenCodeConfigRequest = z.infer<typeof UpdateOpenCodeConfigRequestSchema>
 
 export type Repo = z.infer<typeof RepoSchema>
@@ -145,12 +143,6 @@ export interface SuccessResponse {
 
 export type { SSHHostKeyRequest, SSHHostKeyResponse, TrustedSSHHost } from '../schemas/ssh'
 export type { GitCredential, GitIdentityProfile } from '../schemas/settings'
-export type {
-  ProviderApiConfig,
-  ModelConfig,
-  ProviderConfig,
-  ProviderSource,
-} from '../schemas/settings'
 
 export type {
   ScheduleMode,

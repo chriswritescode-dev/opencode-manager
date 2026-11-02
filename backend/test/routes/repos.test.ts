@@ -47,6 +47,7 @@ vi.mock('../../src/services/repo', () => ({
 vi.mock('../../src/services/assistant-mode', () => ({
   getAssistantModeStatus: vi.fn(),
   ensureAssistantMode: vi.fn(),
+  convertAssistantOpenCodeConfigToV2: vi.fn(),
   getAssistantModeDirectory: vi.fn(),
   buildAssistantOpenCodeConfig: vi.fn(),
   buildAssistantRepo: vi.fn(),

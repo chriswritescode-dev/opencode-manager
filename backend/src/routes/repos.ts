@@ -27,7 +27,7 @@ import type { SecretsService } from '../services/secrets'
 import type { RepoWorkspaceService } from '../services/repo-workspace'
 import { createGitService } from '../services/git/GitService'
 import { ScheduleService } from '../services/schedules'
-import { ensureAssistantMode, getAssistantModeStatus } from '../services/assistant-mode'
+import { ensureAssistantMode, getAssistantModeStatus, convertAssistantOpenCodeConfigToV2 } from '../services/assistant-mode'
 import path from 'path'
 
 const DeleteWorkspaceRequestSchema = z.object({
@@ -614,6 +614,7 @@ app.get('/', async (c) => {
       const options = AssistantModeInitRequestSchema.parse(body)
 
       const status = await ensureAssistantMode(repo, options)
+      await convertAssistantOpenCodeConfigToV2(openCodeClient.api)
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to initialize assistant mode:', error)

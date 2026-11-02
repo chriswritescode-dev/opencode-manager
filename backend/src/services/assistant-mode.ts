@@ -4,7 +4,6 @@ import type { Repo } from '@opencode-manager/shared/types'
 import type {
   AssistantModeStatus,
   AssistantModeInitRequest,
-  OpenCodeConfigInput,
 } from '@opencode-manager/shared/types'
 import {
   readFileContent,
@@ -12,12 +11,17 @@ import {
   fileExists,
   ensureDirectoryExists,
 } from './file-operations'
-import { ASSISTANT_NOTIFICATION_LIMITS, AssistantSettingsPatchSchema, OpenCodeConfigSchema, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_LEADER_KEY, MANAGER_TOOL_NAME } from '@opencode-manager/shared/schemas'
+import { ASSISTANT_NOTIFICATION_LIMITS, AssistantSettingsPatchSchema, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_LEADER_KEY, MANAGER_TOOL_NAME } from '@opencode-manager/shared/schemas'
 import { MANAGER_COLOR_THEME_ID, OPENCODE_THEMES } from '@opencode-manager/shared/themes'
-import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH, ASSISTANT_OPENCODE_DIR_NAME } from '@opencode-manager/shared/utils'
+import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH, ASSISTANT_OPENCODE_DIR_NAME, parseJsonc } from '@opencode-manager/shared/utils'
 import { getAssistantModePath, getReposPath } from '@opencode-manager/shared/config/env'
+import type { OpenCodeAgentConfig, OpenCodeApi, OpenCodeConfigInfo } from '@opencode-manager/shared/opencode'
+import { openCodeLocation } from '@opencode-manager/shared/opencode'
+import { validateOpenCodeConfig } from '@opencode-manager/shared/opencode/config-validation'
 import type { Database } from 'bun:sqlite'
 import { ensureAssistantRepo } from '../db/queries'
+import { applyOpenCodeConfigEdits, removeOpenCodeConfigProperty, type OpenCodeConfigPathOperation } from './opencode-config-file'
+import { logger } from '../utils/logger'
 
 
 const ASSISTANT_MODE_DIR = ASSISTANT_REPO_PATH
@@ -1126,18 +1130,25 @@ Fork a session, optionally before a specific message. Omit \`beforeMessageId\` t
 `
 }
 
-export function buildAssistantOpenCodeConfig(): OpenCodeConfigInput {
-  const config: OpenCodeConfigInput = {
+export function buildAssistantOpenCodeConfig(): OpenCodeConfigInfo {
+  const permission = buildAssistantAgentPermission()
+  const config: OpenCodeConfigInfo = {
     default_agent: ASSISTANT_DEFAULT_AGENT_NAME,
-    permission: buildAssistantAgentPermission(),
-    agent: {
+    permissions: Object.entries(permission).map(([action, effect]) => ({
+      action,
+      resource: '*',
+      effect,
+    })),
+    agents: {
       [ASSISTANT_DEFAULT_AGENT_NAME]: { mode: 'primary' },
     },
   }
 
-  const result = OpenCodeConfigSchema.safeParse(config)
+  const result = validateOpenCodeConfig(config)
   if (!result.success) {
-    throw new Error(`Generated OpenCode config is invalid: ${result.error.message}`)
+    throw new Error(
+      `Generated OpenCode config is invalid: ${result.issues.map((issue) => `${issue.path}: ${issue.message}`).join(', ')}`,
+    )
   }
 
   return config
@@ -1185,44 +1196,32 @@ export async function ensureAssistantMode(
     await writeFileContent(agentsMdPath, agentsMdContent)
   }
 
-  const hasLegacyOpenCodeConfig = opencodeJsonExists && await isLegacyAssistantOpenCodeConfig(opencodeJsonPath)
+  const existingOpenCodeJsonContent = opencodeJsonExists ? await readFileContent(opencodeJsonPath) : undefined
+  const parsedOpenCodeConfig = existingOpenCodeJsonContent === undefined
+    ? undefined
+    : parseAssistantOpenCodeConfig(existingOpenCodeJsonContent)
+  const hasV1OpenCodeConfig = parsedOpenCodeConfig !== undefined && hasAssistantV1OpenCodeConfig(parsedOpenCodeConfig)
+  const existingOpenCodeConfig = parsedOpenCodeConfig as OpenCodeConfigInfo | undefined
 
   let opencodeJsonUpdated = false
-  if (!opencodeJsonExists || overwriteOpenCodeConfig || hasLegacyOpenCodeConfig) {
-    const config = hasLegacyOpenCodeConfig && opencodeJsonExists
-      ? await (async () => {
-          try {
-            const existingContent = await readFileContent(opencodeJsonPath)
-            const existingConfig = JSON.parse(existingContent) as OpenCodeConfigInput
-            const mergedConfig = mergeAssistantOpenCodeConfig(existingConfig)
-            return assistantOpenCodeConfigHasGeneratedAgentPersona(mergedConfig)
-              ? stripGeneratedAssistantAgentPersona(mergedConfig)
-              : mergedConfig
-          } catch {
-            return buildAssistantOpenCodeConfig()
-          }
-        })()
-      : buildAssistantOpenCodeConfig()
-    await writeFileContent(opencodeJsonPath, JSON.stringify(config, null, 2))
-    opencodeJsonUpdated = true
-  } else if (opencodeJsonExists) {
-    try {
-      const existingContent = await readFileContent(opencodeJsonPath)
-      const existingConfig = JSON.parse(existingContent) as OpenCodeConfigInput
-      const repairedConfig = assistantOpenCodeConfigNeedsRepair(existingConfig)
-        ? mergeAssistantOpenCodeConfig(existingConfig)
-        : existingConfig
+  if (!hasV1OpenCodeConfig) {
+    if (!opencodeJsonExists || overwriteOpenCodeConfig) {
+      await writeFileContent(opencodeJsonPath, JSON.stringify(buildAssistantOpenCodeConfig(), null, 2))
+      opencodeJsonUpdated = true
+    } else if (existingOpenCodeConfig !== undefined) {
+      const repairedConfig = assistantOpenCodeConfigNeedsRepair(existingOpenCodeConfig)
+        ? mergeAssistantOpenCodeConfig(existingOpenCodeConfig)
+        : existingOpenCodeConfig
       const updatedConfig = assistantOpenCodeConfigHasGeneratedAgentPersona(repairedConfig)
         ? stripGeneratedAssistantAgentPersona(repairedConfig)
         : repairedConfig
 
-      if (updatedConfig !== existingConfig) {
+      if (updatedConfig !== existingOpenCodeConfig) {
         await writeFileContent(opencodeJsonPath, JSON.stringify(updatedConfig, null, 2))
         opencodeJsonUpdated = true
       }
-    } catch {
-      const config = buildAssistantOpenCodeConfig()
-      await writeFileContent(opencodeJsonPath, JSON.stringify(config, null, 2))
+    } else {
+      await writeFileContent(opencodeJsonPath, JSON.stringify(buildAssistantOpenCodeConfig(), null, 2))
       opencodeJsonUpdated = true
     }
   }
@@ -1349,23 +1348,40 @@ export async function ensureAssistantMode(
   }
 }
 
-function assistantOpenCodeConfigNeedsRepair(config: OpenCodeConfigInput): boolean {
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function parseAssistantOpenCodeConfig(rawContent: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = parseJsonc(rawContent)
+    return isPlainObject(parsed) ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function hasAssistantV1OpenCodeConfig(config: Record<string, unknown>): boolean {
+  if (config.permission !== undefined) return true
+  return isPlainObject(config.agent) && isPlainObject(config.agent.assistant)
+}
+
+function assistantOpenCodeConfigNeedsRepair(config: OpenCodeConfigInfo): boolean {
   if (config.default_agent !== ASSISTANT_DEFAULT_AGENT_NAME) return true
-  if (!config.agent || typeof config.agent !== 'object') return true
-  const assistantAgent = config.agent[ASSISTANT_DEFAULT_AGENT_NAME]
+  const agents = config.agents
+  if (!agents || typeof agents !== 'object') return true
+  const assistantAgent = agents[ASSISTANT_DEFAULT_AGENT_NAME]
   if (!assistantAgent || typeof assistantAgent !== 'object') return true
-  const mode = (assistantAgent as { mode?: unknown }).mode
-  if (mode !== 'primary' && mode !== 'all') return true
-  if ((assistantAgent as { disable?: unknown }).disable === true) return true
+  if (assistantAgent.mode !== 'primary' && assistantAgent.mode !== 'all') return true
+  if (assistantAgent.disabled === true) return true
   if (assistantOpenCodeConfigHasGeneratedAgentPersona(config)) return true
   return false
 }
 
-function assistantOpenCodeConfigHasGeneratedAgentPersona(config: OpenCodeConfigInput): boolean {
-  const agent = config.agent?.[ASSISTANT_DEFAULT_AGENT_NAME]
+function assistantOpenCodeConfigHasGeneratedAgentPersona(config: OpenCodeConfigInfo): boolean {
+  const agent = config.agents?.[ASSISTANT_DEFAULT_AGENT_NAME]
   if (typeof agent !== 'object' || agent === null) return false
-  const prompt = (agent as { prompt?: unknown }).prompt
-  return matchesGeneratedAssistantAgentPrompt(prompt)
+  return matchesGeneratedAssistantAgentPrompt(agent.system)
 }
 
 function resolveValidAssistantMode(agent: unknown): 'primary' | 'all' {
@@ -1373,38 +1389,36 @@ function resolveValidAssistantMode(agent: unknown): 'primary' | 'all' {
   return mode === 'primary' || mode === 'all' ? mode : 'primary'
 }
 
-function stripGeneratedAssistantAgentPersona(config: OpenCodeConfigInput): OpenCodeConfigInput {
-  const existingAssistantAgent = config.agent?.[ASSISTANT_DEFAULT_AGENT_NAME]
+function stripGeneratedAssistantAgentPersona(config: OpenCodeConfigInfo): OpenCodeConfigInfo {
+  const existingAssistantAgent = config.agents?.[ASSISTANT_DEFAULT_AGENT_NAME]
   const validMode = resolveValidAssistantMode(existingAssistantAgent)
 
   return {
     ...config,
-    agent: {
-      ...(config.agent ?? {}),
+    agents: {
+      ...(config.agents ?? {}),
       [ASSISTANT_DEFAULT_AGENT_NAME]: { mode: validMode },
     },
   }
 }
 
-function mergeAssistantOpenCodeConfig(existing?: OpenCodeConfigInput): OpenCodeConfigInput {
+function mergeAssistantOpenCodeConfig(existing?: OpenCodeConfigInfo): OpenCodeConfigInfo {
   const generated = buildAssistantOpenCodeConfig()
-  const existingAssistantAgent = existing?.agent?.[ASSISTANT_DEFAULT_AGENT_NAME]
+  const existingAssistantAgent = existing?.agents?.[ASSISTANT_DEFAULT_AGENT_NAME]
   const validMode = resolveValidAssistantMode(existingAssistantAgent)
 
-  const existingIsGenerated = existingAssistantAgent != null &&
-    typeof existingAssistantAgent === 'object' &&
-    matchesGeneratedAssistantAgentPrompt(
-      (existingAssistantAgent as { prompt?: unknown }).prompt,
-    )
+  const existingIsGenerated = typeof existingAssistantAgent === 'object' &&
+    existingAssistantAgent !== null &&
+    matchesGeneratedAssistantAgentPrompt(existingAssistantAgent.system)
 
-  let mergedAssistantAgent: Record<string, unknown>
+  let mergedAssistantAgent: OpenCodeAgentConfig
   if (existingIsGenerated) {
     mergedAssistantAgent = { mode: validMode }
   } else {
     mergedAssistantAgent = {
       ...(typeof existingAssistantAgent === 'object' && existingAssistantAgent !== null ? existingAssistantAgent : {}),
       mode: validMode,
-      disable: false,
+      disabled: false,
     }
   }
 
@@ -1412,24 +1426,84 @@ function mergeAssistantOpenCodeConfig(existing?: OpenCodeConfigInput): OpenCodeC
     ...generated,
     ...existing,
     default_agent: ASSISTANT_DEFAULT_AGENT_NAME,
-    instructions: existing?.instructions ?? generated.instructions,
-    permission: existing?.permission ?? generated.permission,
-    agent: {
-      ...(existing?.agent ?? {}),
+    permissions: existing?.permissions ?? generated.permissions,
+    agents: {
+      ...(existing?.agents ?? {}),
       [ASSISTANT_DEFAULT_AGENT_NAME]: mergedAssistantAgent,
     },
   }
 }
 
-async function isLegacyAssistantOpenCodeConfig(opencodeJsonPath: string): Promise<boolean> {
+function buildAssistantV1ConfigRemovalPaths(config: Record<string, unknown>): string[][] {
+  const v1Agent = config.agent
+  const removeWholeAgent = isPlainObject(v1Agent) &&
+    Object.keys(v1Agent).length === 1 &&
+    isPlainObject(v1Agent.assistant)
+
+  const paths: string[][] = [removeWholeAgent ? ['agent'] : ['agent', ASSISTANT_DEFAULT_AGENT_NAME]]
+  if (config.permission !== undefined) {
+    paths.push(['permission'])
+  }
+  return paths
+}
+
+function resolveConvertedAssistantAgent(
+  agent: OpenCodeAgentConfig | undefined,
+  v1Agent: unknown,
+): OpenCodeAgentConfig {
+  if (agent === undefined) {
+    return { mode: resolveValidAssistantMode(v1Agent) }
+  }
+  return matchesGeneratedAssistantAgentPrompt(agent.system)
+    ? { mode: resolveValidAssistantMode(agent) }
+    : agent
+}
+
+/**
+ * Rewrites a v1 Assistant `opencode.json` to the v2 shape using OpenCode's own conversion,
+ * keeping comments and formatting. The file is left untouched when OpenCode is unreachable.
+ */
+export async function convertAssistantOpenCodeConfigToV2(api: OpenCodeApi): Promise<boolean> {
   try {
-    const content = await readFileContent(opencodeJsonPath)
-    const config = JSON.parse(content) as {
-      permission?: { allow?: unknown; ask?: unknown }
+    const assistantDir = getAssistantModeDirectory()
+    const opencodeJsonPath = path.join(assistantDir, ASSISTANT_OPENCODE_CONFIG_FILENAME)
+
+    if (!await fileExists(opencodeJsonPath)) return false
+
+    const rawContent = await readFileContent(opencodeJsonPath)
+    const rawConfig = parseAssistantOpenCodeConfig(rawContent)
+    if (rawConfig === undefined || !hasAssistantV1OpenCodeConfig(rawConfig)) return false
+
+    const entries = await api.config.get(openCodeLocation(assistantDir))
+    const resolvedPath = path.resolve(opencodeJsonPath)
+    const documentEntry = entries.find(
+      (entry) => entry.type === 'document' && entry.path !== undefined && path.resolve(entry.path) === resolvedPath,
+    )
+    if (documentEntry === undefined || documentEntry.type !== 'document') return false
+
+    const v1AssistantAgent = isPlainObject(rawConfig.agent) ? rawConfig.agent.assistant : undefined
+    const setOperations: OpenCodeConfigPathOperation[] = [
+      {
+        path: ['agents', ASSISTANT_DEFAULT_AGENT_NAME],
+        value: resolveConvertedAssistantAgent(
+          documentEntry.info.agents?.[ASSISTANT_DEFAULT_AGENT_NAME],
+          v1AssistantAgent,
+        ),
+      },
+    ]
+    if (documentEntry.info.permissions !== undefined) {
+      setOperations.push({ path: ['permissions'], value: documentEntry.info.permissions })
     }
-    if (Array.isArray(config.permission?.allow) || Array.isArray(config.permission?.ask)) return true
-    return false
-  } catch {
+
+    let updatedText = applyOpenCodeConfigEdits(rawContent, setOperations)
+    for (const removalPath of buildAssistantV1ConfigRemovalPaths(rawConfig)) {
+      updatedText = removeOpenCodeConfigProperty(updatedText, removalPath)
+    }
+
+    await writeFileContent(opencodeJsonPath, updatedText)
+    return true
+  } catch (error) {
+    logger.warn('Skipped the Assistant OpenCode config conversion:', error)
     return false
   }
 }
