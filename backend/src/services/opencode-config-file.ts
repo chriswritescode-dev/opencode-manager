@@ -3,7 +3,7 @@ import { promises as fs } from 'fs'
 import { readFile, readdir, rename, rm, stat } from 'fs/promises'
 import path from 'path'
 import { isDeepStrictEqual } from 'node:util'
-import { applyEdits, modify, type JSONPath } from 'jsonc-parser'
+import { applyEdits, findNodeAtLocation, modify, parseTree, type Edit, type JSONPath } from 'jsonc-parser'
 import { getConfigPath, getOpenCodeConfigHome, getOpenCodeHealthWatchPath } from '@opencode-manager/shared/config/env'
 import {
   DEFAULT_OPENCODE_CONFIG_SOURCE_NAME,
@@ -148,10 +148,29 @@ interface AppliedOpenCodeConfigSourceFileState {
   previousMode: number | undefined
 }
 
-interface OpenCodeConfigPathOperation {
+export interface OpenCodeConfigPathOperation {
   path: JSONPath
   value: unknown
 }
+
+interface OpenCodeConfigV1EntityPath {
+  v2Path: string[]
+  v1Path: string[]
+  named: boolean
+}
+
+interface OpenCodeConfigV1EntityRemoval {
+  path: JSONPath
+  container?: JSONPath
+}
+
+const V1_ENTITY_PATHS: readonly OpenCodeConfigV1EntityPath[] = [
+  { v2Path: ['agents'], v1Path: ['agent'], named: true },
+  { v2Path: ['commands'], v1Path: ['command'], named: true },
+  { v2Path: ['providers'], v1Path: ['provider'], named: true },
+  { v2Path: ['mcp', 'servers'], v1Path: ['mcp'], named: true },
+  { v2Path: ['permissions'], v1Path: ['permission'], named: false },
+]
 
 interface OpenCodeConfigSnapshotEnvelopeSource {
   name: OpenCodeConfigRestorableSourceName
@@ -187,18 +206,40 @@ function hasOwn(object: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(object, key)
 }
 
-function hasOpenCodeConfigPath(content: Record<string, unknown>, jsonPath: JSONPath): boolean {
+function readOpenCodeConfigPath(
+  content: Record<string, unknown>,
+  jsonPath: JSONPath,
+): { found: boolean; value: unknown } {
   let current: unknown = content
   for (const segment of jsonPath) {
     if (typeof segment === 'number') {
-      if (!Array.isArray(current) || segment < 0 || segment >= current.length) return false
+      if (!Array.isArray(current) || segment < 0 || segment >= current.length) {
+        return { found: false, value: undefined }
+      }
       current = current[segment]
       continue
     }
-    if (!isPlainObject(current) || !hasOwn(current, segment)) return false
+    if (!isPlainObject(current) || !hasOwn(current, segment)) return { found: false, value: undefined }
     current = current[segment]
   }
-  return true
+  return { found: true, value: current }
+}
+
+function hasOpenCodeConfigPath(content: Record<string, unknown>, jsonPath: JSONPath): boolean {
+  return readOpenCodeConfigPath(content, jsonPath).found
+}
+
+function readPatchedOpenCodeConfigPath(
+  patch: Record<string, unknown>,
+  jsonPath: readonly string[],
+): { found: boolean; value: unknown } {
+  let current: unknown = patch
+  for (const segment of jsonPath) {
+    if (current === null) return { found: true, value: null }
+    if (!isPlainObject(current) || !hasOwn(current, segment)) return { found: false, value: undefined }
+    current = current[segment]
+  }
+  return { found: true, value: current }
 }
 
 function defineOwnConfigValue(target: Record<string, unknown>, key: string, value: unknown): void {
@@ -459,7 +500,136 @@ function collectOpenCodeConfigPathOperations(
   return operations
 }
 
-function applyOpenCodeConfigPathOperations(
+function collectOpenCodeConfigV1EntityRemovals(
+  patch: Record<string, unknown>,
+): OpenCodeConfigV1EntityRemoval[] {
+  const removals: OpenCodeConfigV1EntityRemoval[] = []
+  for (const mapping of V1_ENTITY_PATHS) {
+    const patched = readPatchedOpenCodeConfigPath(patch, mapping.v2Path)
+    if (!patched.found) continue
+    if (!mapping.named || patched.value === null) {
+      removals.push({ path: mapping.v1Path })
+      continue
+    }
+    if (!isPlainObject(patched.value)) continue
+    for (const name of Object.keys(patched.value)) {
+      removals.push({ path: [...mapping.v1Path, name], container: mapping.v1Path })
+    }
+  }
+  return removals
+}
+
+function findOpenCodeConfigSeparatorComma(rawContent: string, start: number, end: number): number {
+  let index = start
+  while (index < end) {
+    if (rawContent.startsWith('//', index)) {
+      const newline = rawContent.indexOf('\n', index)
+      if (newline < 0 || newline >= end) return -1
+      index = newline + 1
+      continue
+    }
+    if (rawContent.startsWith('/*', index)) {
+      const close = rawContent.indexOf('*/', index + 2)
+      if (close < 0 || close >= end) return -1
+      index = close + 2
+      continue
+    }
+    if (rawContent[index] === ',') return index
+    index += 1
+  }
+  return -1
+}
+
+function findOpenCodeConfigLineEnd(rawContent: string, offset: number): number | null {
+  let index = offset
+  while (index < rawContent.length && (rawContent[index] === ' ' || rawContent[index] === '\t')) {
+    index += 1
+  }
+  if (rawContent.startsWith('\r\n', index)) return index + 2
+  if (rawContent[index] === '\n') return index + 1
+  return null
+}
+
+function buildOpenCodeConfigCommentPreservingRemovalEdits(
+  rawContent: string,
+  jsonPath: JSONPath,
+): Edit[] | null {
+  const root = parseTree(rawContent)
+  const node = root ? findNodeAtLocation(root, jsonPath) : undefined
+  const property = node?.parent
+  const container = property?.parent
+  if (!property || !container?.children) return null
+
+  const index = container.children.indexOf(property)
+  const previous = index > 0 ? container.children[index - 1] : undefined
+  const next = container.children[index + 1]
+  const propertyEnd = property.offset + property.length
+  const lineStart = rawContent.lastIndexOf('\n', property.offset - 1) + 1
+  const aloneOnLine = rawContent.slice(lineStart, property.offset).trim() === ''
+  const removeStart = aloneOnLine ? lineStart : property.offset
+
+  if (next) {
+    const separatorOffset = findOpenCodeConfigSeparatorComma(rawContent, propertyEnd, next.offset)
+    if (separatorOffset < 0) return null
+    if (rawContent.slice(propertyEnd, separatorOffset).includes('/')) {
+      return [
+        { offset: removeStart, length: propertyEnd - removeStart, content: '' },
+        { offset: separatorOffset, length: 1, content: '' },
+      ]
+    }
+    const lineEnd = aloneOnLine ? findOpenCodeConfigLineEnd(rawContent, separatorOffset + 1) : null
+    const removeEnd = lineEnd ?? separatorOffset + 1
+    return [{ offset: removeStart, length: removeEnd - removeStart, content: '' }]
+  }
+
+  const edits: Edit[] = []
+  if (previous) {
+    const separatorOffset = findOpenCodeConfigSeparatorComma(
+      rawContent,
+      previous.offset + previous.length,
+      property.offset,
+    )
+    if (separatorOffset < 0) return null
+    edits.push({ offset: separatorOffset, length: 1, content: '' })
+  }
+  const lineEnd = aloneOnLine ? findOpenCodeConfigLineEnd(rawContent, propertyEnd) : null
+  const removeEnd = lineEnd ?? propertyEnd
+  edits.push({ offset: removeStart, length: removeEnd - removeStart, content: '' })
+  return edits
+}
+
+function removeOpenCodeConfigProperty(rawContent: string, jsonPath: JSONPath): string {
+  const edits = buildOpenCodeConfigCommentPreservingRemovalEdits(rawContent, jsonPath)
+  if (!edits) return rawContent
+  return applyEdits(rawContent, edits)
+}
+
+function collectEmptyOpenCodeConfigContainers(
+  rawContent: string,
+  removals: OpenCodeConfigV1EntityRemoval[],
+): JSONPath[] {
+  const parsed = parseJsonc(rawContent)
+  if (!isPlainObject(parsed)) return []
+
+  const containers: JSONPath[] = []
+  const visited = new Set<string>()
+  for (const removal of removals) {
+    if (!removal.container) continue
+    const key = removal.container.join('\0')
+    if (visited.has(key)) continue
+    visited.add(key)
+    const container = readOpenCodeConfigPath(parsed, removal.container)
+    if (isPlainObject(container.value) && Object.keys(container.value).length === 0) {
+      containers.push(removal.container)
+    }
+  }
+  return containers
+}
+
+/**
+ * Applies path edits to raw JSONC config text, preserving comments and formatting.
+ */
+export function applyOpenCodeConfigEdits(
   rawContent: string,
   operations: OpenCodeConfigPathOperation[],
 ): string {
@@ -532,14 +702,27 @@ export async function updateOpenCodeConfigFile(
 
   const mode = options.mode ?? 'replace'
   const operations = collectOpenCodeConfigPathOperations(content, snapshot.content, mode)
+  const v1EntityRemovals = mode === 'merge' ? collectOpenCodeConfigV1EntityRemovals(content) : []
 
   assertValidOpenCodeConfig(
     mode === 'merge' ? mergeOpenCodeConfigValues(snapshot.content, content, { deleteNullValues: true }) : content,
   )
 
   const originalText = targetSource?.rawContent ?? '{}\n'
-  assertNoShadowedOpenCodeConfigRemovals(operations, targetSource, snapshot.sources, targetName)
-  const updatedText = applyOpenCodeConfigPathOperations(originalText, operations)
+  assertNoShadowedOpenCodeConfigRemovals(
+    [...operations, ...v1EntityRemovals.map((removal) => ({ path: removal.path, value: undefined }))],
+    targetSource,
+    snapshot.sources,
+    targetName,
+  )
+
+  let updatedText = applyOpenCodeConfigEdits(originalText, operations)
+  for (const removal of v1EntityRemovals) {
+    updatedText = removeOpenCodeConfigProperty(updatedText, removal.path)
+  }
+  for (const container of collectEmptyOpenCodeConfigContainers(updatedText, v1EntityRemovals)) {
+    updatedText = removeOpenCodeConfigProperty(updatedText, container)
+  }
 
   if (updatedText !== originalText) {
     assertValidOpenCodeConfig(parseJsonc(updatedText))
@@ -761,7 +944,7 @@ export async function foldLegacyConfigJsonSource(): Promise<boolean> {
     const operations = collectOpenCodeConfigPathOperations(legacyContent, lowestPrecedenceSource.content, 'replace')
       .filter((operation) => operation.value !== undefined && !hasOpenCodeConfigPath(lowestPrecedenceSource.content, operation.path))
     if (operations.length > 0) {
-      const updatedText = applyOpenCodeConfigPathOperations(lowestPrecedenceSource.rawContent, operations)
+      const updatedText = applyOpenCodeConfigEdits(lowestPrecedenceSource.rawContent, operations)
       assertValidOpenCodeConfig(parseJsonc(updatedText))
       await writeFileAtomic(lowestPrecedenceSource.path, updatedText, { mode: await existingFileMode(lowestPrecedenceSource.path) })
     }

@@ -790,6 +790,177 @@ describe('opencode-config-file', () => {
     await expect(deleteOpenCodeConfigFile()).resolves.toBe(false)
   })
 
+  describe('v1 entity replacement', () => {
+    it.each([
+      {
+        label: 'agents',
+        v1Content: { agent: { reviewer: { description: 'Legacy reviewer' } } },
+        patch: { agents: { reviewer: { description: 'New reviewer' } } },
+        expected: { agents: { reviewer: { description: 'New reviewer' } } },
+      },
+      {
+        label: 'commands',
+        v1Content: { command: { build: { template: 'legacy template' } } },
+        patch: { commands: { build: { template: 'new template' } } },
+        expected: { commands: { build: { template: 'new template' } } },
+      },
+      {
+        label: 'providers',
+        v1Content: { provider: { example: { name: 'Legacy provider' } } },
+        patch: { providers: { example: { name: 'Example provider' } } },
+        expected: { providers: { example: { name: 'Example provider' } } },
+      },
+      {
+        label: 'mcp servers',
+        v1Content: { mcp: { linear: { type: 'remote', url: 'https://legacy.example.com' } } },
+        patch: { mcp: { servers: { linear: { type: 'remote', url: 'https://current.example.com' } } } },
+        expected: { mcp: { servers: { linear: { type: 'remote', url: 'https://current.example.com' } } } },
+      },
+      {
+        label: 'permissions',
+        v1Content: { permission: { edit: 'deny' } },
+        patch: { permissions: [{ action: 'edit', resource: '*', effect: 'deny' }] },
+        expected: { permissions: [{ action: 'edit', resource: '*', effect: 'deny' }] },
+      },
+    ])('replaces the v1 $label entry when saving its v2 entity', async ({ v1Content, patch, expected }) => {
+      const raw = `{\n  // keep this comment\n  ${JSON.stringify(v1Content).slice(1, -1)}\n}\n`
+      await writeFile(sourcePath('opencode.json'), raw, 'utf8')
+
+      const updated = await updateOpenCodeConfigFile(patch, { mode: 'merge' })
+
+      expect(updated.content).toEqual(expected)
+      const onDisk = await readFile(sourcePath('opencode.json'), 'utf8')
+      expect(onDisk).toContain('// keep this comment')
+    })
+
+    it('keeps a comment that leads the sibling after the removed v1 container', async () => {
+      const raw = '{\n  // lead\n  "agent": {"reviewer":{"description":"Legacy reviewer"}},\n  // theme comment\n  "theme": "dark"\n}\n'
+      await writeFile(sourcePath('opencode.json'), raw, 'utf8')
+
+      const updated = await updateOpenCodeConfigFile(
+        { agents: { reviewer: { description: 'New reviewer' } } },
+        { mode: 'merge' },
+      )
+
+      expect(updated.content).toEqual({
+        theme: 'dark',
+        agents: { reviewer: { description: 'New reviewer' } },
+      })
+      const onDisk = await readFile(sourcePath('opencode.json'), 'utf8')
+      expect(onDisk).toContain('// lead')
+      expect(onDisk).toContain('// theme comment')
+      expect(onDisk).not.toContain('"agent"')
+    })
+
+    it('keeps the following sibling comment when the v1 container has no leading comment', async () => {
+      const raw = '{\n  "agent": {"reviewer":{"description":"Legacy reviewer"}},\n  // theme comment\n  "theme": "dark"\n}\n'
+      await writeFile(sourcePath('opencode.json'), raw, 'utf8')
+
+      await updateOpenCodeConfigFile({ agents: { reviewer: { description: 'New reviewer' } } }, { mode: 'merge' })
+
+      const onDisk = await readFile(sourcePath('opencode.json'), 'utf8')
+      expect(onDisk).toContain('// theme comment')
+      expect(onDisk).not.toContain('"agent"')
+    })
+
+    it('keeps a comment that leads the next sibling inside the v1 container', async () => {
+      const raw = [
+        '{',
+        '  "agent": {',
+        '    "reviewer": { "description": "Legacy reviewer" }, // keep',
+        '    "keeper": { "description": "Keeper" }',
+        '  }',
+        '}',
+      ].join('\n')
+      await writeFile(sourcePath('opencode.json'), raw, 'utf8')
+
+      const updated = await updateOpenCodeConfigFile(
+        { agents: { reviewer: { description: 'New reviewer' } } },
+        { mode: 'merge' },
+      )
+
+      expect(updated.content).toEqual({
+        agent: { keeper: { description: 'Keeper' } },
+        agents: { reviewer: { description: 'New reviewer' } },
+      })
+      const onDisk = await readFile(sourcePath('opencode.json'), 'utf8')
+      expect(onDisk).toContain('// keep')
+      expect(onDisk).not.toContain('Legacy reviewer')
+    })
+
+    it('removes both definitions when the v2 entity is patched with null', async () => {
+      const raw = JSON.stringify({
+        agent: { reviewer: { description: 'Legacy reviewer' } },
+        agents: { reviewer: { description: 'Current reviewer' } },
+      }, null, 2)
+      await writeFile(sourcePath('opencode.json'), raw, 'utf8')
+
+      const updated = await updateOpenCodeConfigFile({ agents: { reviewer: null } }, { mode: 'merge' })
+
+      expect(updated.content).toEqual({ agents: {} })
+      const onDisk = JSON.parse(await readFile(sourcePath('opencode.json'), 'utf8')) as Record<string, unknown>
+      expect(onDisk).toEqual({ agents: {} })
+      expect(onDisk).not.toHaveProperty('agent')
+    })
+
+    it('keeps the v2 definition when the same entity exists in both shapes', async () => {
+      const raw = JSON.stringify({
+        agent: { reviewer: { description: 'Legacy reviewer' } },
+        agents: { reviewer: { description: 'Current reviewer' } },
+      }, null, 2)
+      await writeFile(sourcePath('opencode.json'), raw, 'utf8')
+
+      const updated = await updateOpenCodeConfigFile(
+        { agents: { reviewer: { description: 'Current reviewer' } } },
+        { mode: 'merge' },
+      )
+
+      expect(updated.content).toEqual({ agents: { reviewer: { description: 'Current reviewer' } } })
+      const onDisk = await readFile(sourcePath('opencode.json'), 'utf8')
+      expect(JSON.parse(onDisk)).toEqual({ agents: { reviewer: { description: 'Current reviewer' } } })
+      expect(onDisk).not.toContain('Legacy reviewer')
+    })
+
+    it('keeps other v1 entities in the container', async () => {
+      const raw = JSON.stringify({
+        agent: {
+          reviewer: { description: 'Legacy reviewer' },
+          keeper: { description: 'Keeper' },
+        },
+      }, null, 2)
+      await writeFile(sourcePath('opencode.json'), raw, 'utf8')
+
+      const updated = await updateOpenCodeConfigFile(
+        { agents: { reviewer: { description: 'New reviewer' } } },
+        { mode: 'merge' },
+      )
+
+      expect(updated.content).toEqual({
+        agent: { keeper: { description: 'Keeper' } },
+        agents: { reviewer: { description: 'New reviewer' } },
+      })
+      const onDisk = JSON.parse(await readFile(sourcePath('opencode.json'), 'utf8')) as Record<string, unknown>
+      expect(onDisk).toHaveProperty('agent.keeper')
+    })
+
+    it('rejects the save when the v1 entity only a lower-priority source defines', async () => {
+      const lower = JSON.stringify({ agent: { reviewer: { description: 'Legacy reviewer' } } })
+      const target = '{"theme":"dark"}'
+      await writeFile(sourcePath('opencode.json'), lower, 'utf8')
+      await writeFile(sourcePath('opencode.jsonc'), target, 'utf8')
+
+      const error = await updateOpenCodeConfigFile(
+        { agents: { reviewer: { description: 'New reviewer' } } },
+        { mode: 'merge' },
+      ).catch((caught: unknown) => caught)
+
+      expect(error).toBeInstanceOf(OpenCodeConfigShadowedRemovalError)
+      expect((error as OpenCodeConfigShadowedRemovalError).paths).toEqual(['agent.reviewer'])
+      expect((error as OpenCodeConfigShadowedRemovalError).sources).toEqual(['opencode.json'])
+      await expect(readFile(sourcePath('opencode.jsonc'), 'utf8')).resolves.toBe(target)
+    })
+  })
+
   describe('restoreLegacyOpenCodeConfigBackup', () => {
     const backupPath = (configPath: string) => `${configPath}.ocm-sandbox-backup`
 
