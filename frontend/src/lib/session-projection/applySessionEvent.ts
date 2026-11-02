@@ -9,7 +9,7 @@ import type {
 export interface SessionTranscript {
   messages: SessionMessageInfo[]
   pending: SessionInboxInfo[]
-  status: 'idle' | 'busy' | 'retry'
+  status: SessionStatus['type']
   retry?: SessionStatus
 }
 

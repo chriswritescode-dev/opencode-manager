@@ -89,7 +89,7 @@ export const useSessionsAcrossDirectories = (
    */
   const persistedGcTime = normalizedSearch === undefined ? PERSISTED_CACHE_MAX_AGE_MS : undefined;
   const directoryKey = uniqueDirectories.join('|');
-  const childSessionsParam = includeChildren ? { includeChildren: true } : {};
+  const childSessionsParam = includeChildren ? {} : { parentID: null };
   const isQueryEnabled = uniqueDirectories.length > 0 || allDirectories;
 
   const query = useInfiniteQuery<

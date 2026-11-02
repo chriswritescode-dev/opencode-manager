@@ -154,6 +154,43 @@ describe('sessionStatusStore', () => {
     expect(useSessionStatus.getState().getStatus('session-compact')).toEqual({ type: 'compact' })
   })
 
+  it('restores the pre-compaction status when compaction ends', () => {
+    const store = useSessionStatus.getState()
+    store.setStatus('session-a', { type: 'busy' })
+
+    store.beginCompaction('session-a')
+    expect(useSessionStatus.getState().getStatus('session-a')).toEqual({ type: 'compact' })
+
+    store.endCompaction('session-a')
+    expect(useSessionStatus.getState().getStatus('session-a')).toEqual({ type: 'busy' })
+  })
+
+  it('keeps a status event that arrives during compaction', () => {
+    const store = useSessionStatus.getState()
+    store.setStatus('session-a', { type: 'busy' })
+    store.beginCompaction('session-a')
+
+    const retry = { type: 'retry' as const, attempt: 1, message: 'rate limited', next: 9 }
+    store.setStatus('session-a', retry)
+    store.endCompaction('session-a')
+
+    expect(useSessionStatus.getState().getStatus('session-a')).toEqual(retry)
+  })
+
+  it('keeps the retry action of a retry status', () => {
+    const retry = {
+      type: 'retry' as const,
+      attempt: 2,
+      message: 'rate limited',
+      next: 1234,
+      action: { reason: 'usage', provider: 'provider', title: 'Usage limit', message: 'Try later', label: 'Upgrade' },
+    }
+
+    useSessionStatus.getState().setStatus('session-retry', retry)
+
+    expect(useSessionStatus.getState().getStatus('session-retry')).toEqual(retry)
+  })
+
   it('maps active session ids to busy statuses', () => {
     expect(busyStatusesFromActiveSessions({ 'session-a': { type: 'running' } })).toEqual({
       'session-a': { type: 'busy' },

@@ -59,7 +59,7 @@ describe('resolveDefaultSessionAgent', () => {
 
   it('ignores agents that are not primary or all mode', () => {
     const agents = [
-      { id: 'sub-agent', name: 'sub-agent', mode: 'secondary' },
+      { id: 'sub-agent', name: 'sub-agent', mode: 'subagent' },
       { id: 'build', name: 'build', mode: 'primary' },
     ]
     expect(resolveDefaultSessionAgent(agents, true)).toBe('build')

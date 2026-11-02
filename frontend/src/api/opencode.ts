@@ -10,6 +10,7 @@ import type {
   FormInfo,
   ModelRef,
   OpenCodeApi,
+  PermissionReply,
   PermissionRequest,
   SessionGoalRead,
   SessionInboxCompaction,
@@ -146,16 +147,7 @@ export interface SessionPage {
   nextCursor?: string
 }
 
-export interface SessionPageInput {
-  directory?: string
-  project?: string
-  subpath?: string
-  limit?: number
-  order?: 'asc' | 'desc'
-  search?: string
-  cursor?: string
-  includeChildren?: boolean
-}
+export type SessionPageInput = NonNullable<Parameters<OpenCodeApi['session']['list']>[0]>
 
 export interface CreateSessionInput {
   directory: string
@@ -164,11 +156,7 @@ export interface CreateSessionInput {
   model?: string
 }
 
-export interface FindFilesInput {
-  directory?: string
-  query: string
-  limit?: number
-}
+export type FindFilesInput = Parameters<OpenCodeApi['file']['find']>[0]
 
 export interface SessionMessagesPage {
   messages: SessionMessageInfo[]
@@ -204,19 +192,7 @@ function buildPromptFields(input: PromptFields) {
 }
 
 export async function listSessionPage(input: SessionPageInput, serverId?: string): Promise<SessionPage> {
-  const { data, cursor } = await callOpenCode((api) =>
-    api.session.list({
-      ...(input.directory === undefined ? {} : { directory: input.directory }),
-      ...(input.project === undefined ? {} : { project: input.project }),
-      ...(input.subpath === undefined ? {} : { subpath: input.subpath }),
-      ...(input.includeChildren ? {} : { parentID: 'null' }),
-      limit: input.limit,
-      order: input.order,
-      search: input.search,
-      cursor: input.cursor,
-    }),
-    serverId,
-  )
+  const { data, cursor } = await callOpenCode((api) => api.session.list(input), serverId)
   return { items: data, nextCursor: cursor.next ?? undefined }
 }
 
@@ -546,7 +522,7 @@ export async function listPendingPermissions(
 export async function replyPermission(
   sessionID: string,
   requestID: string,
-  decision: 'once' | 'always' | 'reject',
+  decision: PermissionReply,
   message?: string,
   serverId?: string,
 ): Promise<void> {
@@ -581,16 +557,7 @@ export async function cancelForm(sessionID: string, formID: string, serverId?: s
 }
 
 export async function findFiles(input: FindFilesInput, serverId?: string): Promise<string[]> {
-  const { data } = await callOpenCode(
-    (api) =>
-      api.file.find({
-        ...openCodeLocation(input.directory),
-        query: input.query,
-        type: 'file',
-        limit: input.limit,
-      }),
-    serverId,
-  )
+  const { data } = await callOpenCode((api) => api.file.find({ ...input, type: 'file' }), serverId)
   return data.map((entry) => entry.path)
 }
 

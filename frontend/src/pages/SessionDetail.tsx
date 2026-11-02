@@ -331,7 +331,8 @@ export function SessionDetail() {
     [sessionId, session?.agent, session?.model],
   );
   const { modelRef } = useModelSelection(sessionDirectory, modelSelectionSession);
-  const setSessionStatus = useSessionStatus((state) => state.setStatus);
+  const beginCompaction = useSessionStatus((state) => state.beginCompaction);
+  const endCompaction = useSessionStatus((state) => state.endCompaction);
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
   const { isEnabled: ttsEnabled } = useTTS();
   const { syncForSession: syncPermissionsForSession } = usePermissions();
@@ -466,16 +467,16 @@ export function SessionDetail() {
 
     const toastId = `compact-${sessionId}`;
     showToast.loading('Compacting session...', { id: toastId });
-    setSessionStatus(sessionId, { type: 'compact' });
+    beginCompaction(sessionId);
 
     try {
       await compactSession(sessionId, serverId);
       showToast.success('Compaction requested', { id: toastId });
     } catch (error) {
       showToast.error(`Compact failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { id: toastId });
-      setSessionStatus(sessionId, { type: 'idle' });
+      endCompaction(sessionId);
     }
-  }, [sessionId, serverId, setSessionStatus]);
+  }, [sessionId, serverId, beginCompaction, endCompaction]);
 
   const handleUndo = useCallback(async () => {
     if (!sessionId) return;

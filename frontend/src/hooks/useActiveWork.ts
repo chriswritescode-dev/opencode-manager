@@ -303,7 +303,7 @@ export function useActiveWork(windowMs: number): {
       queryKey: activeWorkSessionsQueryKey(serverId),
       queryFn: async (): Promise<SessionInfo[]> => {
         const page = await listSessionPage(
-          { limit: ACTIVE_WORK_SESSION_LIMIT, order: 'desc', includeChildren: true },
+          { limit: ACTIVE_WORK_SESSION_LIMIT, order: 'desc' },
           serverId,
         )
         return page.items

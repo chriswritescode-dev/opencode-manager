@@ -31,6 +31,8 @@ const mocks = vi.hoisted(() => ({
   copyTextToClipboard: vi.fn(),
   downloadMarkdown: vi.fn(),
   setStatus: vi.fn(),
+  beginCompaction: vi.fn(),
+  endCompaction: vi.fn(),
   setPromptValue: vi.fn(),
   openModelPicker: vi.fn(),
   promptInputProps: null as Record<string, unknown> | null,
@@ -158,8 +160,16 @@ vi.mock('@/stores/uiStateStore', () => ({
 }))
 
 vi.mock('@/stores/sessionStatusStore', () => ({
-  useSessionStatus: vi.fn((selector: (state: { setStatus: typeof mocks.setStatus }) => unknown) =>
-    selector({ setStatus: mocks.setStatus })
+  useSessionStatus: vi.fn((selector: (state: {
+    setStatus: typeof mocks.setStatus
+    beginCompaction: typeof mocks.beginCompaction
+    endCompaction: typeof mocks.endCompaction
+  }) => unknown) =>
+    selector({
+      setStatus: mocks.setStatus,
+      beginCompaction: mocks.beginCompaction,
+      endCompaction: mocks.endCompaction,
+    })
   ),
   useSessionStatusForSession: mocks.useSessionStatusForSession,
 }))
@@ -354,7 +364,7 @@ describe('SessionDetail command actions', () => {
       await compact()
     })
 
-    expect(mocks.setStatus).toHaveBeenCalledWith(SESSION_ID, { type: 'compact' })
+    expect(mocks.beginCompaction).toHaveBeenCalledWith(SESSION_ID)
     expect(mocks.compactSession).toHaveBeenCalledWith(SESSION_ID, 'local')
     expect(mocks.showToast.loading).toHaveBeenCalledWith('Compacting session...', { id: `compact-${SESSION_ID}` })
     expect(mocks.showToast.success).toHaveBeenCalledWith('Compaction requested', { id: `compact-${SESSION_ID}` })
@@ -369,7 +379,7 @@ describe('SessionDetail command actions', () => {
       await compact()
     })
 
-    expect(mocks.setStatus).toHaveBeenCalledWith(SESSION_ID, { type: 'idle' })
+    expect(mocks.endCompaction).toHaveBeenCalledWith(SESSION_ID)
     expect(mocks.showToast.error).toHaveBeenCalledWith('Compact failed: nope', { id: `compact-${SESSION_ID}` })
   })
 

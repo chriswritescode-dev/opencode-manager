@@ -80,6 +80,7 @@ describe('OpenCode facade', () => {
       limit: 25,
       order: 'desc',
       search: 'deploy',
+      parentID: null,
     })
 
     expect(lastRequest().url).toBe(
@@ -93,7 +94,7 @@ describe('OpenCode facade', () => {
   it('passes the directory and cursor for continuation pages', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ data: [], cursor: {} }))
 
-    const page = await listSessionPage({ directory: '/repo', cursor: 'cursor_1' })
+    const page = await listSessionPage({ directory: '/repo', cursor: 'cursor_1', parentID: null })
 
     expect(lastRequest().url).toBe(
       'http://localhost/api/opencode/api/session?parentID=null&directory=%2Frepo&cursor=cursor_1',
@@ -108,7 +109,7 @@ describe('OpenCode facade', () => {
       jsonResponse({ data: [sessionInfo('ses_1', '/repo')], cursor: { next: 'cursor_next' } }),
     )
 
-    const page = await listSessionPage({ limit: 25, order: 'desc' })
+    const page = await listSessionPage({ limit: 25, order: 'desc', parentID: null })
 
     expect(lastRequest().url).toBe(
       'http://localhost/api/opencode/api/session?limit=25&order=desc&parentID=null',
@@ -121,7 +122,7 @@ describe('OpenCode facade', () => {
   it('omits the directory on an all-directories continuation page', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ data: [], cursor: {} }))
 
-    await listSessionPage({ cursor: 'cursor_1' })
+    await listSessionPage({ cursor: 'cursor_1', parentID: null })
 
     expect(lastRequest().url).toBe(
       'http://localhost/api/opencode/api/session?parentID=null&cursor=cursor_1',
@@ -134,7 +135,7 @@ describe('OpenCode facade', () => {
       jsonResponse({ data: [sessionInfo('ses_child', '/repo')], cursor: {} }),
     )
 
-    await listSessionPage({ directory: '/repo', limit: 25, order: 'desc', includeChildren: true })
+    await listSessionPage({ directory: '/repo', limit: 25, order: 'desc' })
 
     expect(lastRequest().url).toBe(
       'http://localhost/api/opencode/api/session?limit=25&order=desc&directory=%2Frepo',
@@ -313,7 +314,7 @@ describe('OpenCode facade', () => {
       }),
     )
 
-    const files = await findFiles({ directory: '/repo', query: 'index', limit: 20 })
+    const files = await findFiles({ location: { directory: '/repo' }, query: 'index', limit: 20 })
 
     expect(lastRequest().url).toBe(
       'http://localhost/api/opencode/api/fs/find?location%5Bdirectory%5D=%2Frepo&query=index&type=file&limit=20',
@@ -325,7 +326,7 @@ describe('OpenCode facade', () => {
   it('finds files without a limit when none is given', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ location: { directory: '/repo' }, data: [] }))
 
-    await findFiles({ directory: '/repo', query: 'index' })
+    await findFiles({ location: { directory: '/repo' }, query: 'index' })
 
     expect(lastRequest().url).toBe(
       'http://localhost/api/opencode/api/fs/find?location%5Bdirectory%5D=%2Frepo&query=index&type=file',

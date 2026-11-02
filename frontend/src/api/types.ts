@@ -22,7 +22,6 @@ export interface Repo {
 }
 
 export type Session = SessionInfo
-export type PermissionResponse = 'once' | 'always' | 'reject'
 
 export interface FileAttachmentInfo {
   path: string

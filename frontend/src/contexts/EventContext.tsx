@@ -25,8 +25,8 @@ import { isLocalOpenCodeServer } from '@/contexts/OpenCodeServerContext'
 import { useAuth } from '@/hooks/useAuth'
 import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
 import { remoteProjectsQueryOptions } from '@/hooks/useRemoteProjects'
-import type { FormAnswer, FormInfo, PermissionRequest } from '@opencode-manager/shared/opencode'
-import type { PermissionResponse, Repo } from '@/api/types'
+import type { FormAnswer, FormInfo, PermissionReply, PermissionRequest } from '@opencode-manager/shared/opencode'
+import type { Repo } from '@/api/types'
 import { showToast } from '@/lib/toast'
 import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode-event-stream'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
@@ -238,7 +238,7 @@ interface EventContextValue {
     respond: (
       permissionID: string,
       sessionID: string,
-      response: PermissionResponse,
+      response: PermissionReply,
       message?: string,
     ) => Promise<void>
     dismiss: (permissionID: string, sessionID?: string) => void
@@ -626,7 +626,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const replyToPermission = useCallback(async (
     permissionID: string,
     sessionID: string,
-    response: PermissionResponse,
+    response: PermissionReply,
     message?: string,
   ) => {
     const permission = allPermissions.find(candidate => candidate.id === permissionID)
@@ -1096,6 +1096,15 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           useSessionStatus.getState().setSessionServer(event.data.sessionID, serverId)
           rememberSessionDirectory(event.data.sessionID, event.directory, serverId)
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
+          break
+        }
+        case 'session.compaction.started': {
+          useSessionStatus.getState().beginCompaction(event.data.sessionID)
+          break
+        }
+        case 'session.compaction.ended':
+        case 'session.compaction.failed': {
+          useSessionStatus.getState().endCompaction(event.data.sessionID)
           break
         }
         case 'session.execution.started': {

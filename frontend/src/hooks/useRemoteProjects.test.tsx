@@ -217,7 +217,7 @@ describe('useRemoteProjectsByActivity', () => {
     await waitFor(() => expect(mocks.listSessionPage).toHaveBeenCalledTimes(1))
 
     expect(mocks.listSessionPage).toHaveBeenCalledWith(
-      { limit: 100, order: 'desc' },
+      { limit: 100, order: 'desc', search: undefined, parentID: null },
       'srv_kitchen',
     )
   })

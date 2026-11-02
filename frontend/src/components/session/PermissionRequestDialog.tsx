@@ -9,8 +9,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import type { PermissionResponse } from '@/api/types'
-import type { PermissionRequest } from '@opencode-manager/shared/opencode'
+import type { PermissionReply, PermissionRequest } from '@opencode-manager/shared/opencode'
 import {
   getPermissionLabel,
   getPermissionPhrase,
@@ -30,7 +29,7 @@ interface PermissionRequestDialogProps {
   onRespond: (
     permissionID: string,
     sessionID: string,
-    response: PermissionResponse,
+    response: PermissionReply,
     message?: string,
   ) => Promise<void>
   open?: boolean
@@ -49,7 +48,7 @@ export function PermissionRequestDialog({
   onOpenChange,
 }: PermissionRequestDialogProps) {
   const [isLoading, setIsLoading] = useState(false)
-  const [loadingAction, setLoadingAction] = useState<PermissionResponse | null>(null)
+  const [loadingAction, setLoadingAction] = useState<PermissionReply | null>(null)
   const [rejectReason, setRejectReason] = useState('')
   const reasonInputId = useId()
   const allowOnceRef = useRef<HTMLButtonElement>(null)
@@ -61,7 +60,7 @@ export function PermissionRequestDialog({
   if (!permission) return null
   if (parentOpen === false) return null
 
-  const handleResponse = async (response: PermissionResponse) => {
+  const handleResponse = async (response: PermissionReply) => {
     setIsLoading(true)
     setLoadingAction(response)
     const message = response === 'reject' ? rejectReason.trim() : ''

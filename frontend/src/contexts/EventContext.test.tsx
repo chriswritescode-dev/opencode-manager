@@ -1929,6 +1929,58 @@ describe('EventProvider permissions and forms', () => {
     expect(useSessionStatus.getState().getStatus('session-9')).toEqual({ type: 'busy' })
   })
 
+  it('shows compaction from compaction events and restores the previous status', async () => {
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'session.execution.started', data: { sessionID: 'session-compact' }, directory: '/repo' })
+      onEvent({
+        type: 'session.compaction.started',
+        data: { sessionID: 'session-compact', reason: 'manual' },
+        directory: '/repo',
+      })
+    })
+    expect(useSessionStatus.getState().getStatus('session-compact')).toEqual({ type: 'compact' })
+
+    act(() => {
+      onEvent({
+        type: 'session.compaction.ended',
+        data: { sessionID: 'session-compact', reason: 'manual', text: 'summary' },
+        directory: '/repo',
+      })
+    })
+    expect(useSessionStatus.getState().getStatus('session-compact')).toEqual({ type: 'busy' })
+
+    act(() => {
+      onEvent({
+        type: 'session.compaction.started',
+        data: { sessionID: 'session-compact', reason: 'auto' },
+        directory: '/repo',
+      })
+      onEvent({
+        type: 'session.status',
+        data: { sessionID: 'session-compact', status: { type: 'retry', attempt: 1, message: 'rate limited', next: 5 } },
+        directory: '/repo',
+      })
+      onEvent({
+        type: 'session.compaction.failed',
+        data: { sessionID: 'session-compact', reason: 'auto', error: { message: 'boom' } },
+        directory: '/repo',
+      })
+    })
+    expect(useSessionStatus.getState().getStatus('session-compact')).toEqual({
+      type: 'retry',
+      attempt: 1,
+      message: 'rate limited',
+      next: 5,
+    })
+  })
+
   it('applies execution lifecycle and idle events from the global monitor to the status store', async () => {
     render(<Harness />, { wrapper: createWrapper() })
 
