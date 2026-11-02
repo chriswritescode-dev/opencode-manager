@@ -12,7 +12,6 @@ import { useMobile } from '@/hooks/useMobile'
 import { useFindInText } from '@/lib/useFindInText'
 import { parseJsonc, parseJsoncErrorLine, resolveJsoncIssueLine } from '@/lib/jsonc'
 import { FetchError } from '@/api/fetchWrapper'
-import { OpenCodeConfigSchema } from '@opencode-manager/shared'
 import {
   downloadOpenCodeConfigSource,
   getOpenCodeConfigSources,
@@ -143,14 +142,7 @@ export function OpenCodeConfigEditor({
 
     try {
       resetErrors()
-      const parsedConfig = parseJsonc<Record<string, unknown>>(editConfigContent)
-      const validationResult = OpenCodeConfigSchema.safeParse(parsedConfig)
-      if (!validationResult.success) {
-        const issues = resolveIssues(validationResult.error.issues)
-        setValidationIssues(issues)
-        setEditError(`Configuration validation failed: ${issues.map(getIssueText).join('; ')}`)
-        return
-      }
+      parseJsonc<Record<string, unknown>>(editConfigContent)
 
       setIsSaving(true)
       await onUpdate({ content: editConfigContent, source: draftSource.name, expectedRevision: draftRevision })

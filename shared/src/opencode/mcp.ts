@@ -1,11 +1,10 @@
-import type { ConfigEntry, McpServer } from '@opencode/client'
+import type { McpServer } from '@opencode/client'
+import type { OpenCodeConfigInfo } from './config'
 import { isRecord } from '../utils/record'
 
 export const MCP_OAUTH_CALLBACK_PATH = '/api/mcp-oauth-proxy/callback'
 
-type ConfigDocumentInfo = Extract<ConfigEntry, { type: 'document' }>['info']
-
-type McpConfig = NonNullable<ConfigDocumentInfo['mcp']>
+type McpConfig = NonNullable<OpenCodeConfigInfo['mcp']>
 
 export type McpServerConfig = NonNullable<McpConfig['servers']>[string]
 

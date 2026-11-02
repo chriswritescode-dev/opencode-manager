@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { access, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import path from 'path'
-import { ZodError } from 'zod'
 
 const paths = vi.hoisted(() => ({ config: '', configDir: '', configHome: '', healthWatch: '' }))
 
@@ -79,6 +78,7 @@ import {
   OpenCodeConfigRedactedValueError,
   OpenCodeConfigShadowedRemovalError,
   OpenCodeConfigSnapshotError,
+  OpenCodeConfigValidationError,
   archiveBrokenOpenCodeConfigFile,
   deleteOpenCodeConfigFile,
   foldLegacyConfigJsonSource,
@@ -88,7 +88,6 @@ import {
   restoreLegacyOpenCodeConfigBackup,
   restoreOpenCodeConfigSnapshot,
   serializeOpenCodeConfigSnapshot,
-  toOpenCodeConfigValidationIssues,
   updateOpenCodeConfigFile,
   writeHealthWatchArtifact,
   writeOpenCodeConfigFile,
@@ -166,10 +165,10 @@ describe('opencode-config-file', () => {
     }
   })
 
-  it('rejects invalid content with a ZodError and leaves the previous file untouched', async () => {
+  it('rejects invalid content with a validation error and leaves the previous file untouched', async () => {
     await writeOpenCodeConfigFile(OPENCODE_CONFIG_SEED)
 
-    await expect(writeOpenCodeConfigFile('{"model": 5}')).rejects.toBeInstanceOf(ZodError)
+    await expect(writeOpenCodeConfigFile('{"model": 5}')).rejects.toBeInstanceOf(OpenCodeConfigValidationError)
     await expect(readFile(sourcePath('opencode.jsonc'), 'utf8')).resolves.toBe(OPENCODE_CONFIG_SEED)
   })
 
@@ -236,16 +235,13 @@ describe('opencode-config-file', () => {
     expect(file?.validationIssues?.[0]?.path).toBe('root')
   })
 
-  it('maps Zod issues to config validation issues with a root fallback', () => {
-    const issues = new ZodError([
-      { code: 'custom', path: ['model'], message: 'Invalid model' },
-      { code: 'custom', path: [], message: 'Invalid root' },
-    ]).issues
+  it('maps validation issues to dotted paths with a root fallback', async () => {
+    await writeFile(sourcePath('opencode.json'), JSON.stringify({ agents: { a: { mode: 'boss' } } }), 'utf8')
 
-    expect(toOpenCodeConfigValidationIssues(issues)).toEqual([
-      { path: 'model', message: 'Invalid model' },
-      { path: 'root', message: 'Invalid root' },
-    ])
+    const file = await readOpenCodeConfigFile()
+
+    expect(file?.isValid).toBe(false)
+    expect(file?.validationIssues?.[0]?.path).toBe('agents.a.mode')
   })
 
   it('modifies only changed paths in the preferred source and preserves comments and untouched fields', async () => {
@@ -338,14 +334,14 @@ describe('opencode-config-file', () => {
     const raw = '{"theme":"dark"}'
     await writeFile(sourcePath('opencode.json'), raw, 'utf8')
 
-    await expect(updateOpenCodeConfigFile({ model: 5 }, { mode: 'merge' })).rejects.toBeInstanceOf(ZodError)
+    await expect(updateOpenCodeConfigFile({ model: 5 }, { mode: 'merge' })).rejects.toBeInstanceOf(OpenCodeConfigValidationError)
 
     await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(raw)
   })
 
   it('rejects a merge patch that removes a value only a lower-priority source defines', async () => {
     const lower = '{"theme":"light"}'
-    const target = '{"model":"b"}'
+    const target = '{"model":"test/b"}'
     await writeFile(sourcePath('opencode.json'), lower, 'utf8')
     await writeFile(sourcePath('opencode.jsonc'), target, 'utf8')
 
@@ -360,7 +356,7 @@ describe('opencode-config-file', () => {
 
   it('merges into an existing nested object while deleting sibling keys with null', async () => {
     const raw = JSON.stringify({
-      mcp: { servers: { linear: { url: 'https://linear.example.com', headers: { Authorization: 'Bearer old', 'X-Keep': '1' } } } },
+      mcp: { servers: { linear: { type: 'remote', url: 'https://linear.example.com', headers: { Authorization: 'Bearer old', 'X-Keep': '1' } } } },
     })
     await writeFile(sourcePath('opencode.json'), raw, 'utf8')
 
@@ -370,7 +366,7 @@ describe('opencode-config-file', () => {
     )
 
     expect(updated.content).toEqual({
-      mcp: { servers: { linear: { url: 'https://linear.example.com', headers: { 'X-Keep': '1' } } } },
+      mcp: { servers: { linear: { type: 'remote', url: 'https://linear.example.com', headers: { 'X-Keep': '1' } } } },
     })
     const onDisk = JSON.parse(await readFile(sourcePath('opencode.json'), 'utf8')) as Record<string, unknown>
     expect(onDisk).toEqual(updated.content)
@@ -380,13 +376,13 @@ describe('opencode-config-file', () => {
     await writeFile(sourcePath('opencode.json'), '{"theme":"dark"}', 'utf8')
 
     const updated = await updateOpenCodeConfigFile(
-      { mcp: { servers: { linear: { url: 'https://linear.example.com', headers: { Authorization: null, 'X-Trace': 'on' } } } } },
+      { mcp: { servers: { linear: { type: 'remote', url: 'https://linear.example.com', headers: { Authorization: null, 'X-Trace': 'on' } } } } },
       { mode: 'merge' },
     )
 
     expect(updated.content).toEqual({
       theme: 'dark',
-      mcp: { servers: { linear: { url: 'https://linear.example.com', headers: { 'X-Trace': 'on' } } } },
+      mcp: { servers: { linear: { type: 'remote', url: 'https://linear.example.com', headers: { 'X-Trace': 'on' } } } },
     })
     const onDisk = await readFile(sourcePath('opencode.json'), 'utf8')
     expect(onDisk).not.toContain('null')
@@ -436,25 +432,25 @@ describe('opencode-config-file', () => {
   })
 
   it('removes an override from the target source only and reveals inherited values', async () => {
-    const lower = JSON.stringify({ theme: 'light', model: 'a' })
+    const lower = JSON.stringify({ theme: 'light', model: 'test/a' })
     await writeFile(sourcePath('opencode.json'), lower, 'utf8')
     await writeFile(sourcePath('opencode.jsonc'), '{\n  "theme": "dark"\n}\n', 'utf8')
 
-    await updateOpenCodeConfigFile({ model: 'a' })
+    await updateOpenCodeConfigFile({ model: 'test/a' })
 
     await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(lower)
     const revealed = await readOpenCodeConfigFile()
-    expect(revealed?.content).toEqual({ theme: 'light', model: 'a' })
+    expect(revealed?.content).toEqual({ theme: 'light', model: 'test/a' })
   })
 
   it('rejects a removal of a value that only a lower-priority source defines and writes nothing', async () => {
-    const lower = '{\n  "theme": "light",\n  "model": "a"\n}\n'
-    const target = '{\n  "model": "b"\n}\n'
+    const lower = '{\n  "theme": "light",\n  "model": "test/a"\n}\n'
+    const target = '{\n  "model": "test/b"\n}\n'
     await writeFile(sourcePath('opencode.json'), lower, 'utf8')
     await writeFile(sourcePath('opencode.jsonc'), target, 'utf8')
     const targetStats = await stat(sourcePath('opencode.jsonc'))
 
-    const error = await updateOpenCodeConfigFile({ model: 'b' }).catch((caught: unknown) => caught)
+    const error = await updateOpenCodeConfigFile({ model: 'test/b' }).catch((caught: unknown) => caught)
 
     expect(error).toBeInstanceOf(OpenCodeConfigShadowedRemovalError)
     expect((error as OpenCodeConfigShadowedRemovalError).paths).toEqual(['theme'])
@@ -465,12 +461,12 @@ describe('opencode-config-file', () => {
   })
 
   it('rejects a mixed shadowed removal and legitimate change without writing anything', async () => {
-    const lower = '{\n  "theme": "light",\n  "model": "a"\n}\n'
-    const target = '{\n  "model": "b"\n}\n'
+    const lower = '{\n  "theme": "light",\n  "model": "test/a"\n}\n'
+    const target = '{\n  "model": "test/b"\n}\n'
     await writeFile(sourcePath('opencode.json'), lower, 'utf8')
     await writeFile(sourcePath('opencode.jsonc'), target, 'utf8')
 
-    const error = await updateOpenCodeConfigFile({ model: 'b', plugin: ['x'] }).catch((caught: unknown) => caught)
+    const error = await updateOpenCodeConfigFile({ model: 'test/b', plugin: ['x'] }).catch((caught: unknown) => caught)
 
     expect(error).toBeInstanceOf(OpenCodeConfigShadowedRemovalError)
     expect((error as OpenCodeConfigShadowedRemovalError).paths).toEqual(['theme'])

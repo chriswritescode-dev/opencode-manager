@@ -1,5 +1,4 @@
 import { Hono, type Context } from 'hono'
-import { z } from 'zod'
 import {
   UpdateOpenCodeConfigPatchRequestSchema,
   UpdateOpenCodeConfigRequestSchema,
@@ -20,6 +19,7 @@ import {
   OpenCodeConfigRedactedValueError,
   OpenCodeConfigShadowedRemovalError,
   OpenCodeConfigSourceInvalidError,
+  OpenCodeConfigValidationError,
   readOpenCodeConfigFile,
   withOpenCodeConfigLock,
 } from '../services/opencode-config-file'
@@ -198,8 +198,8 @@ async function applyUpdate(
     if (error instanceof OpenCodeConfigRedactedValueError) {
       return c.json({ error: error.message, paths: error.paths }, 400)
     }
-    if (error instanceof z.ZodError) {
-      return c.json({ error: 'Invalid config data', details: error.issues }, 400)
+    if (error instanceof OpenCodeConfigValidationError) {
+      return c.json({ error: 'Invalid config data', validationIssues: error.issues }, 400)
     }
     if (error instanceof SyntaxError) {
       return c.json({ error: 'Invalid config data', details: error.message }, 400)

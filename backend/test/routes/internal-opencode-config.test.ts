@@ -415,15 +415,15 @@ describe('internal/opencode-config routes', () => {
   })
 
   it('PUT /api/internal/opencode-config returns 409 for a shadowed removal', async () => {
-    const lower = '{"theme":"light","model":"a"}'
-    const target = '{"model":"b"}'
+    const lower = '{"theme":"light","model":"test/a"}'
+    const target = '{"model":"test/b"}'
     await writeOpenCodeConfigFile(target, 'opencode.jsonc')
     await writeFile(configPath('opencode.json'), lower, 'utf8')
 
     const res = await app.request('/api/internal/opencode-config', {
       method: 'PUT',
       headers: { 'content-type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ content: { model: 'b' } }),
+      body: JSON.stringify({ content: { model: 'test/b' } }),
     })
 
     expect(res.status).toBe(409)
@@ -445,6 +445,24 @@ describe('internal/opencode-config routes', () => {
     })
 
     expect(res.status).toBe(400)
+    const body = await res.json() as { error: string; validationIssues: Array<{ path: string; message: string }> }
+    expect(body.error).toBe('Invalid config data')
+    expect(body.validationIssues.map((issue) => issue.path)).toEqual(['model'])
+  })
+
+  it('PUT /api/internal/opencode-config returns 400 with validationIssues for invalid raw content', async () => {
+    await writeOpenCodeConfigFile(OPENCODE_CONFIG_SEED, 'opencode.jsonc')
+
+    const res = await app.request('/api/internal/opencode-config', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ content: '{"model": 5}' }),
+    })
+
+    expect(res.status).toBe(400)
+    const body = await res.json() as { error: string; validationIssues: Array<{ path: string; message: string }> }
+    expect(body.error).toBe('Invalid config data')
+    expect(body.validationIssues.map((issue) => issue.path)).toEqual(['model'])
   })
 
   it('PUT /api/internal/opencode-config returns 400 for an invalid JSON body', async () => {

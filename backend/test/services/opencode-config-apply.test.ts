@@ -3,7 +3,6 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import path from 'path'
 import { Database } from 'bun:sqlite'
-import { ZodError } from 'zod'
 
 const paths = vi.hoisted(() => ({ config: '', configDir: '', configHome: '', healthWatch: '' }))
 
@@ -48,6 +47,7 @@ import {
   OPENCODE_CONFIG_SEED,
   OpenCodeConfigConflictError,
   OpenCodeConfigSourceInvalidError,
+  OpenCodeConfigValidationError,
   readOpenCodeConfigFile,
   writeOpenCodeConfigFile,
 } from '../../src/services/opencode-config-file'
@@ -231,7 +231,7 @@ describe('opencode-config-apply', () => {
       source: 'opencode.json',
       settingsService,
       openCodeClient,
-    })).rejects.toBeInstanceOf(ZodError)
+    })).rejects.toBeInstanceOf(OpenCodeConfigValidationError)
 
     await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(previous)
     expect(markRestartPendingMock).not.toHaveBeenCalled()

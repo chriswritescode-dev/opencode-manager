@@ -1,6 +1,7 @@
 import type { ConfigEntry, ModelRef } from '@opencode/client'
+import type { OpenCodeConfigInfo } from './config'
 
-type ConfigDocumentModel = Extract<ConfigEntry, { type: 'document' }>['info']['model']
+type ConfigDocumentModel = OpenCodeConfigInfo['model']
 
 export function parseOpenCodeModelRef(model: string): ModelRef | undefined {
   const providerEnd = model.indexOf('/')

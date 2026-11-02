@@ -4,7 +4,6 @@ import { readFile, readdir, rename, rm, stat } from 'fs/promises'
 import path from 'path'
 import { isDeepStrictEqual } from 'node:util'
 import { applyEdits, modify, type JSONPath } from 'jsonc-parser'
-import type { ZodIssue } from 'zod'
 import { getConfigPath, getOpenCodeConfigHome, getOpenCodeHealthWatchPath } from '@opencode-manager/shared/config/env'
 import {
   DEFAULT_OPENCODE_CONFIG_SOURCE_NAME,
@@ -13,7 +12,7 @@ import {
   isOpenCodeConfigSourceName,
   selectPreferredOpenCodeConfigSourceName,
 } from '@opencode-manager/shared'
-import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
+import { validateOpenCodeConfig } from '@opencode-manager/shared/opencode/config-validation'
 import { parseJsonc } from '@opencode-manager/shared/utils'
 import type {
   OpenCodeConfigFile,
@@ -104,6 +103,16 @@ export class OpenCodeConfigRedactedValueError extends Error {
     super('Configuration contains redacted placeholder values')
     this.name = 'OpenCodeConfigRedactedValueError'
     this.paths = paths
+  }
+}
+
+export class OpenCodeConfigValidationError extends Error {
+  readonly issues: OpenCodeConfigValidationIssue[]
+
+  constructor(issues: OpenCodeConfigValidationIssue[]) {
+    super('OpenCode config is invalid')
+    this.name = 'OpenCodeConfigValidationError'
+    this.issues = issues
   }
 }
 
@@ -271,11 +280,9 @@ export function withOpenCodeConfigLock<T>(fn: () => Promise<T>): Promise<T> {
   return withFileLock(getOpenCodeConfigDirectory(), fn)
 }
 
-export function toOpenCodeConfigValidationIssues(issues: ZodIssue[]): OpenCodeConfigValidationIssue[] {
-  return issues.map((issue) => ({
-    path: issue.path.length > 0 ? issue.path.join('.') : 'root',
-    message: issue.message,
-  }))
+function assertValidOpenCodeConfig(value: unknown): void {
+  const result = validateOpenCodeConfig(value)
+  if (!result.success) throw new OpenCodeConfigValidationError(result.issues)
 }
 
 export function parseOpenCodeConfigContent(rawContent: string): OpenCodeConfigParseResult {
@@ -294,7 +301,7 @@ export function parseOpenCodeConfigContent(rawContent: string): OpenCodeConfigPa
 
   const content = isPlainObject(parsed) ? parsed : {}
 
-  const validated = OpenCodeConfigSchema.safeParse(parsed)
+  const validated = validateOpenCodeConfig(parsed)
   if (validated.success) {
     return {
       content,
@@ -302,7 +309,7 @@ export function parseOpenCodeConfigContent(rawContent: string): OpenCodeConfigPa
     }
   }
 
-  const validationIssues = toOpenCodeConfigValidationIssues(validated.error.issues)
+  const validationIssues = validated.issues
   logger.error(`Failed to validate OpenCode config: ${validationIssues.map((issue) => `${issue.path}: ${issue.message}`).join('; ')}`)
 
   return {
@@ -402,7 +409,7 @@ export async function writeOpenCodeConfigFile(
   source?: OpenCodeConfigSourceName,
   snapshot?: OpenCodeConfigSnapshot,
 ): Promise<OpenCodeConfigFile> {
-  OpenCodeConfigSchema.parse(parseJsonc(rawContent))
+  assertValidOpenCodeConfig(parseJsonc(rawContent))
 
   const resolved = snapshot ?? await readOpenCodeConfigSnapshot()
   const targetName = source !== undefined
@@ -526,7 +533,7 @@ export async function updateOpenCodeConfigFile(
   const mode = options.mode ?? 'replace'
   const operations = collectOpenCodeConfigPathOperations(content, snapshot.content, mode)
 
-  OpenCodeConfigSchema.parse(
+  assertValidOpenCodeConfig(
     mode === 'merge' ? mergeOpenCodeConfigValues(snapshot.content, content, { deleteNullValues: true }) : content,
   )
 
@@ -535,7 +542,7 @@ export async function updateOpenCodeConfigFile(
   const updatedText = applyOpenCodeConfigPathOperations(originalText, operations)
 
   if (updatedText !== originalText) {
-    OpenCodeConfigSchema.parse(parseJsonc(updatedText))
+    assertValidOpenCodeConfig(parseJsonc(updatedText))
     await writeFileAtomic(targetPath, updatedText, { mode: await existingFileMode(targetPath) })
   }
 
@@ -755,7 +762,7 @@ export async function foldLegacyConfigJsonSource(): Promise<boolean> {
       .filter((operation) => operation.value !== undefined && !hasOpenCodeConfigPath(lowestPrecedenceSource.content, operation.path))
     if (operations.length > 0) {
       const updatedText = applyOpenCodeConfigPathOperations(lowestPrecedenceSource.rawContent, operations)
-      OpenCodeConfigSchema.parse(parseJsonc(updatedText))
+      assertValidOpenCodeConfig(parseJsonc(updatedText))
       await writeFileAtomic(lowestPrecedenceSource.path, updatedText, { mode: await existingFileMode(lowestPrecedenceSource.path) })
     }
     await rm(legacyPath, { force: true })
