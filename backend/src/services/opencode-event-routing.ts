@@ -1,12 +1,29 @@
 import { EventSource } from 'eventsource'
-import { openCodeLocation, sessionIDFromEvent, type OpenCodeApi, type V2Event } from '@opencode-manager/shared/opencode'
+import {
+  openCodeLocation,
+  sessionIDFromEvent,
+  type FormInfo,
+  type OpenCodeApi,
+  type V2Event,
+} from '@opencode-manager/shared/opencode'
 import { logger } from '../utils/logger'
 
 const MULTILINE_PATTERN = /[\r\n]/
 
-export type ReplayEventType = 'permission.asked' | 'form.created' | 'session.status'
+type PermissionAskedEvent = Extract<V2Event, { type: 'permission.asked' }>
+type FormCreatedEvent = Extract<V2Event, { type: 'form.created' }>
+type SessionStatusEvent = Extract<V2Event, { type: 'session.status' }>
 
-export type ReplayEventBuilder = (type: ReplayEventType, directory: string, data: unknown) => V2Event
+export type ReplayEvent = PermissionAskedEvent | FormCreatedEvent | SessionStatusEvent
+
+export type ReplayEventType = ReplayEvent['type']
+
+type ReplayEventArguments =
+  | [type: PermissionAskedEvent['type'], directory: string, data: PermissionAskedEvent['data']]
+  | [type: FormCreatedEvent['type'], directory: string, data: { form: FormInfo }]
+  | [type: SessionStatusEvent['type'], directory: string, data: SessionStatusEvent['data']]
+
+export type ReplayEventBuilder = (...args: ReplayEventArguments) => ReplayEvent
 
 export interface RoutedOpenCodeEvent {
   event: V2Event
@@ -81,29 +98,24 @@ export function applySessionActivity(busySessions: Set<string>, event: V2Event):
 
 export function createReplayEventBuilder(idPrefix: string): ReplayEventBuilder {
   let count = 0
-  return (type, directory, data) => {
+  return (...args) => {
     count += 1
-    return {
-      id: `${idPrefix}${count}`,
-      created: Date.now(),
-      type,
-      location: { directory },
-      data,
-    } as V2Event
+    const base = { id: `${idPrefix}${count}`, created: Date.now() }
+    switch (args[0]) {
+      case 'permission.asked':
+        return { ...base, type: args[0], location: { directory: args[1] }, data: args[2] }
+      case 'form.created':
+        return { ...base, type: args[0], location: { directory: args[1] }, data: args[2] as FormCreatedEvent['data'] }
+      case 'session.status':
+        return { ...base, type: args[0], location: { directory: args[1] }, data: args[2] }
+    }
   }
 }
 
-export function parseOpenCodeEvent(data: string, sessionDirectories: Map<string, string>): RoutedOpenCodeEvent | null {
-  let event: V2Event
-  try {
-    event = JSON.parse(data) as V2Event
-  } catch {
-    return null
-  }
-
-  if (!event?.type) return null
-
-  const payloadJson = MULTILINE_PATTERN.test(data) ? JSON.stringify(event) : data
+function resolveEventRouting(
+  event: V2Event,
+  sessionDirectories: Map<string, string>,
+): Omit<RoutedOpenCodeEvent, 'payloadJson'> {
   const directory = event.location?.directory
   const sessionID = sessionIDFromEvent(event)
   const forkParentId = event.type === 'session.forked' ? event.data.parentID : undefined
@@ -117,7 +129,36 @@ export function parseOpenCodeEvent(data: string, sessionDirectories: Map<string,
     sessionDirectories.set(sessionID, rememberedDirectory)
   }
 
-  return { event, payloadJson, directory, resolvedDirectory }
+  return { event, directory, resolvedDirectory }
+}
+
+/**
+ * Resolves the directory a parsed event belongs to and updates the remembered session directories.
+ *
+ * @param event Parsed event received from an OpenCode server.
+ * @param sessionDirectories Session directories remembered across events, updated in place.
+ * @returns The event with its serialized payload and resolved directories.
+ */
+export function routeOpenCodeEvent(
+  event: V2Event,
+  sessionDirectories: Map<string, string>,
+): RoutedOpenCodeEvent {
+  return { ...resolveEventRouting(event, sessionDirectories), payloadJson: JSON.stringify(event) }
+}
+
+export function parseOpenCodeEvent(data: string, sessionDirectories: Map<string, string>): RoutedOpenCodeEvent | null {
+  let event: V2Event
+  try {
+    event = JSON.parse(data) as V2Event
+  } catch {
+    return null
+  }
+
+  if (!event?.type) return null
+
+  const routed = resolveEventRouting(event, sessionDirectories)
+  const payloadJson = MULTILINE_PATTERN.test(data) ? JSON.stringify(event) : data
+  return { ...routed, payloadJson }
 }
 
 export async function collectPendingReplayEvents(request: PendingReplayRequest): Promise<PendingReplayEvents> {
