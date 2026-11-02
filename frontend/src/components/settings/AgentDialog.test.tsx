@@ -24,7 +24,7 @@ const providers: Provider[] = [
     id: 'anthropic',
     name: 'Anthropic',
     models: [
-      { id: 'claude-opus-5-5', key: 'claude-opus-5-5-fast', name: 'Claude Opus 5.5', released: 0, free: false },
+      { id: 'claude-opus-5-5-fast', modelID: 'claude-opus-5-5', name: 'Claude Opus 5.5', released: 0, free: false },
     ],
   },
 ]

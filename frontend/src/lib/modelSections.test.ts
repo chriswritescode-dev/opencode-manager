@@ -3,7 +3,7 @@ import { buildModelSections, filterModelSections, toModelComboboxOptions } from 
 import type { Model, Provider } from '@/api/providers'
 
 function makeModel(id: string, overrides: Partial<Model> = {}): Model {
-  return { id, key: id, name: id, released: 0, free: false, ...overrides }
+  return { id, modelID: id, name: id, released: 0, free: false, ...overrides }
 }
 
 function makeProvider(id: string, name: string, models: Model[]): Provider {
@@ -156,10 +156,10 @@ describe('buildModelSections', () => {
     expect(buildModelSections(providers, undefined).some((section) => section.key === 'default')).toBe(false)
   })
 
-  it('carries the provider id, the OpenCode key and the catalog model on every option', () => {
+  it('carries the provider id, the OpenCode model id and the catalog model on every option', () => {
     const aliased = [
       makeProvider('anthropic', 'Anthropic', [
-        makeModel('claude-sonnet-4-5-20250929', { key: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5' }),
+        makeModel('claude-sonnet-4.5', { modelID: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5' }),
       ]),
     ]
     const sections = buildModelSections(aliased, undefined, 'anthropic/claude-sonnet-4.5')
@@ -169,7 +169,7 @@ describe('buildModelSections', () => {
     expect(defaultOption.modelID).toBe('claude-sonnet-4.5')
     expect(defaultOption.value).toBe('anthropic/claude-sonnet-4.5')
     expect(defaultOption.providerName).toBe('Anthropic')
-    expect(defaultOption.model.id).toBe('claude-sonnet-4-5-20250929')
+    expect(defaultOption.model.modelID).toBe('claude-sonnet-4-5-20250929')
   })
 })
 

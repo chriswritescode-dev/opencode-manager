@@ -36,7 +36,7 @@ function createOption(provider: Provider, model: Model, value: string): ModelOpt
     value,
     label,
     providerID: provider.id,
-    modelID: model.key ?? model.id,
+    modelID: model.id,
     providerName,
     model,
     searchText: `${label} ${value} ${providerName}`.toLowerCase(),
@@ -75,7 +75,7 @@ export function buildModelSections(
     const parsed = parseOpenCodeModelRef(defaultModel)
     if (!parsed) return undefined
     const provider = providers.find((entry) => entry.id === parsed.providerID)
-    const model = provider?.models.find((entry) => (entry.key ?? entry.id) === parsed.id)
+    const model = provider?.models.find((entry) => entry.id === parsed.id)
     if (!provider || !model) return undefined
     if (!parsed.variant) pinnedValues.add(providerModelRef(provider, model))
     return createOption(provider, model, defaultModel)

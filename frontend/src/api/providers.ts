@@ -18,17 +18,14 @@ import {
 } from "@opencode-manager/shared/opencode";
 import type { CredentialListResponse, CredentialStatusResponse } from "@opencode-manager/shared/schemas";
 
-export interface Model {
-  id: string;
-  key?: string;
-  name: string;
+export type Model = Pick<ModelInfo, 'id' | 'modelID' | 'name'> & {
   limit?: {
     context: number;
     output: number;
   };
   released: number;
   free: boolean;
-}
+};
 
 export interface Provider {
   id: string;
@@ -47,8 +44,8 @@ export type OpenCodeModelState = ModelPreference
 
 function mapModelInfo(model: ModelInfo): Model {
   return {
-    id: model.modelID,
-    key: model.id,
+    id: model.id,
+    modelID: model.modelID,
     name: model.name,
     limit: {
       context: model.limit.context,
@@ -167,11 +164,11 @@ export async function toggleOpenCodeFavoriteModel(model: ModelSelection): Promis
 }
 
 export function formatModelName(model: Model): string {
-  return model.name || model.id;
+  return model.name || model.modelID;
 }
 
-export function providerModelRef(provider: { id: string }, model: { id: string; key?: string }): string {
-  return formatOpenCodeModelRef({ providerID: provider.id, id: model.key ?? model.id });
+export function providerModelRef(provider: { id: string }, model: { id: string }): string {
+  return formatOpenCodeModelRef({ providerID: provider.id, id: model.id });
 }
 
 export function modelSelectionRef(model: ModelSelection): string {

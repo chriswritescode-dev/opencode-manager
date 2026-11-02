@@ -67,19 +67,19 @@ const providers = [
     id: 'openai',
     name: 'OpenAI',
     models: [
-      { id: 'gpt-4o', name: 'GPT-4o', released: 0, free: false },
-      { id: 'gpt-4o-mini', name: 'GPT-4o mini', released: 0, free: false },
-      { id: 'gpt-4.1', name: 'GPT-4.1', released: 0, free: false },
+      { id: 'gpt-4o', modelID: 'gpt-4o', name: 'GPT-4o', released: 0, free: false },
+      { id: 'gpt-4o-mini', modelID: 'gpt-4o-mini', name: 'GPT-4o mini', released: 0, free: false },
+      { id: 'gpt-4.1', modelID: 'gpt-4.1', name: 'GPT-4.1', released: 0, free: false },
     ],
   },
   {
     id: 'anthropic',
     name: 'Anthropic',
     models: [
-      { id: 'claude-opus', name: 'Claude Opus', released: 0, free: false },
-      { id: 'claude-sonnet', name: 'Claude Sonnet', released: 0, free: false },
-      { id: 'claude-haiku', name: 'Claude Haiku', released: 0, free: false },
-      { id: 'claude-sonnet-4-5', key: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', released: 0, free: false },
+      { id: 'claude-opus', modelID: 'claude-opus', name: 'Claude Opus', released: 0, free: false },
+      { id: 'claude-sonnet', modelID: 'claude-sonnet', name: 'Claude Sonnet', released: 0, free: false },
+      { id: 'claude-haiku', modelID: 'claude-haiku', name: 'Claude Haiku', released: 0, free: false },
+      { id: 'claude-sonnet-4.5', modelID: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', released: 0, free: false },
     ],
   },
 ]

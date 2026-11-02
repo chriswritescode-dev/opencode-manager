@@ -24,17 +24,17 @@ const providers: Provider[] = [
     id: 'anthropic',
     name: 'Anthropic',
     models: [
-      { id: 'claude-opus-5-5', key: 'claude-opus-5-5-fast', name: 'Claude Opus 5.5', released: 0, free: false },
-      { id: 'claude-sonnet', key: 'claude-sonnet', name: 'Claude Sonnet', released: 0, free: false },
-      { id: 'claude-haiku', key: 'claude-haiku', name: 'Claude Haiku', released: 0, free: false },
+      { id: 'claude-opus-5-5-fast', modelID: 'claude-opus-5-5', name: 'Claude Opus 5.5', released: 0, free: false },
+      { id: 'claude-sonnet', modelID: 'claude-sonnet', name: 'Claude Sonnet', released: 0, free: false },
+      { id: 'claude-haiku', modelID: 'claude-haiku', name: 'Claude Haiku', released: 0, free: false },
     ],
   },
   {
     id: 'openai',
     name: 'OpenAI',
     models: [
-      { id: 'gpt-5', key: 'gpt-5', name: 'GPT-5', released: 0, free: false },
-      { id: 'gpt-4o', key: 'gpt-4o', name: 'GPT-4o', released: 0, free: false },
+      { id: 'gpt-5', modelID: 'gpt-5', name: 'GPT-5', released: 0, free: false },
+      { id: 'gpt-4o', modelID: 'gpt-4o', name: 'GPT-4o', released: 0, free: false },
     ],
   },
 ]
