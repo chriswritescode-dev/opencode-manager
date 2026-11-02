@@ -12,12 +12,14 @@ const mockResetSettings = vi.fn()
 const mockGetLastKnownGoodConfig = vi.fn()
 const {
   mockReadOpenCodeConfigFile,
+  mockReadOpenCodeConfigSnapshot,
   mockDeleteOpenCodeConfigFile,
   mockArchiveBrokenOpenCodeConfigFile,
   mockRestoreOpenCodeConfigSnapshot,
   mockApplyOpenCodeConfigUpdate,
 } = vi.hoisted(() => ({
   mockReadOpenCodeConfigFile: vi.fn(),
+  mockReadOpenCodeConfigSnapshot: vi.fn(),
   mockDeleteOpenCodeConfigFile: vi.fn(),
   mockArchiveBrokenOpenCodeConfigFile: vi.fn(),
   mockRestoreOpenCodeConfigSnapshot: vi.fn(),
@@ -183,6 +185,7 @@ vi.mock('../../src/services/opencode-config-file', async (importOriginal) => {
   return {
     ...actual,
     readOpenCodeConfigFile: mockReadOpenCodeConfigFile,
+    readOpenCodeConfigSnapshot: mockReadOpenCodeConfigSnapshot,
     deleteOpenCodeConfigFile: mockDeleteOpenCodeConfigFile,
     archiveBrokenOpenCodeConfigFile: mockArchiveBrokenOpenCodeConfigFile,
     restoreOpenCodeConfigSnapshot: mockRestoreOpenCodeConfigSnapshot,
@@ -327,6 +330,7 @@ import { detectSandboxCapability } from '../../src/services/sandbox/capability'
 import { forceProcessAttestation } from '../../src/services/opencode/process-identity'
 import { sseAggregator } from '../../src/services/sse-aggregator'
 import { createRepo } from '../../src/db/queries'
+import { ClientError } from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 
 const mockSpawnSync = spawnSync as ReturnType<typeof vi.fn>
@@ -363,6 +367,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     mockGetImportedSessionDirectories.mockReset()
     mockRelinkReposFromSessionDirectories.mockReset()
     mockReadOpenCodeConfigFile.mockReset()
+    mockReadOpenCodeConfigSnapshot.mockReset()
     mockDeleteOpenCodeConfigFile.mockReset()
     mockArchiveBrokenOpenCodeConfigFile.mockReset()
     mockRestoreOpenCodeConfigSnapshot.mockReset()
@@ -441,6 +446,114 @@ describe('Settings Routes - OpenCode Upgrade', () => {
 
       expect(res.status).toBe(404)
       expect(json.error).toBe('No OpenCode config file found')
+    })
+
+    it('returns the managed config merged from Manager source documents', async () => {
+      mockReadOpenCodeConfigSnapshot.mockResolvedValueOnce({
+        sources: [
+          { name: 'opencode.json', path: '/tmp/test-workspace/config/opencode.json', rawContent: '{}', content: {}, isValid: true, updatedAt: 1 },
+          { name: 'opencode.jsonc', path: '/tmp/test-workspace/config/opencode.jsonc', rawContent: '{}', content: {}, isValid: true, updatedAt: 1 },
+        ],
+        content: {},
+        revision: 'rev-managed',
+        updatedAt: 1,
+        path: '/tmp/test-workspace/config/opencode.jsonc',
+        rawContent: '{}',
+      })
+      const configGet = vi.fn(async () => [
+        { type: 'document', path: '/tmp/test-workspace/config/opencode.json', info: { theme: 'light', model: 'a/b' } },
+        { type: 'document', path: '/tmp/test-workspace/config/opencode.jsonc', info: { theme: 'dark' } },
+        { type: 'document', path: '/tmp/test-workspace/unmanaged.json', info: { theme: 'ignored' } },
+        { type: 'directory', path: '/tmp/test-workspace' },
+      ])
+      const app = createSettingsRoutes(
+        testDb,
+        { getGitEnvironment: vi.fn().mockReturnValue({}) } as any,
+        createStubOpenCodeClient({ api: { config: { get: configGet } } as unknown as OpenCodeClient['api'] }),
+      )
+
+      const res = await app.fetch(new Request('http://localhost/opencode-config/managed'))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({
+        revision: 'rev-managed',
+        info: { theme: 'dark', model: 'a/b' },
+      })
+      expect(configGet).toHaveBeenCalledWith({ location: { directory: '/tmp/test-workspace' } })
+    })
+
+    it('returns 503 from GET /opencode-config/managed when OpenCode is unavailable', async () => {
+      mockReadOpenCodeConfigSnapshot.mockResolvedValueOnce({
+        sources: [
+          { name: 'opencode.jsonc', path: '/tmp/test-workspace/config/opencode.jsonc', rawContent: '{}', content: {}, isValid: true, updatedAt: 1 },
+        ],
+        content: {},
+        revision: 'rev-managed',
+        updatedAt: 1,
+        path: '/tmp/test-workspace/config/opencode.jsonc',
+        rawContent: '{}',
+      })
+      const app = createSettingsRoutes(
+        testDb,
+        { getGitEnvironment: vi.fn().mockReturnValue({}) } as any,
+        createStubOpenCodeClient({
+          api: {
+            config: {
+              get: vi.fn(async () => {
+                throw new ClientError('Transport')
+              }),
+            },
+          } as unknown as OpenCodeClient['api'],
+        }),
+      )
+
+      const res = await app.fetch(new Request('http://localhost/opencode-config/managed'))
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(503)
+      expect(json.error).toBe('OpenCode server unavailable')
+    })
+
+    it('returns MCP servers from the managed config without a shape field', async () => {
+      mockReadOpenCodeConfigSnapshot.mockResolvedValueOnce({
+        sources: [
+          { name: 'opencode.jsonc', path: '/tmp/test-workspace/config/opencode.jsonc', rawContent: '{}', content: {}, isValid: true, updatedAt: 1 },
+        ],
+        content: {},
+        revision: 'rev-managed',
+        updatedAt: 1,
+        path: '/tmp/test-workspace/config/opencode.jsonc',
+        rawContent: '{}',
+      })
+      const configGet = vi.fn(async () => [
+        {
+          type: 'document',
+          path: '/tmp/test-workspace/config/opencode.jsonc',
+          info: { mcp: { servers: { local: { type: 'local', command: ['npx', 'local'] } } } },
+        },
+      ])
+      const mcpList = vi.fn(async () => ({
+        data: [{ name: 'local', status: { status: 'connected' } }],
+      }))
+      const app = createSettingsRoutes(
+        testDb,
+        { getGitEnvironment: vi.fn().mockReturnValue({}) } as any,
+        createStubOpenCodeClient({
+          api: { config: { get: configGet }, mcp: { list: mcpList } } as unknown as OpenCodeClient['api'],
+        }),
+      )
+
+      const res = await app.fetch(new Request('http://localhost/opencode-config/mcp'))
+      const json = await res.json() as { revision: string; servers: Array<Record<string, unknown>> }
+
+      expect(res.status).toBe(200)
+      expect(json).toEqual({
+        revision: 'rev-managed',
+        servers: [
+          { name: 'local', type: 'local', command: ['npx', 'local'], enabled: true, status: 'connected' },
+        ],
+      })
+      expect(json.servers.every((server) => !('shape' in server))).toBe(true)
     })
 
     it('maps a restart-pending apply result to 200 with restartRequired', async () => {

@@ -21,8 +21,10 @@ import {
   OpenCodeConfigSourceInvalidError,
   OpenCodeConfigValidationError,
   readOpenCodeConfigFile,
+  readOpenCodeConfigSnapshot,
   withOpenCodeConfigLock,
 } from '../services/opencode-config-file'
+import { readManagedOpenCodeConfig } from '../services/opencode-config-effective'
 import { applyOpenCodeConfigUpdate, toOpenCodeConfigApplyResponse } from '../services/opencode-config-apply'
 import { redactOpenCodeConfigContent, redactOpenCodeConfigFile } from '../services/opencode-config-redact'
 import { logger } from '../utils/logger'
@@ -51,6 +53,16 @@ function mergeMcpServerStatus(views: McpServerView[], status: McpStatusMap) {
       ...('error' in live && live.error ? { error: live.error } : {}),
     }
   })
+}
+
+function toClientReadErrorResponse(c: Context, error: unknown, message: string) {
+  if (error instanceof ClientError) {
+    if (error.reason === 'Transport') {
+      return c.json({ error: 'OpenCode server unavailable' }, 503)
+    }
+    return c.json({ error: message }, 502)
+  }
+  return c.json({ error: message }, 500)
 }
 
 export function createOpenCodeConfigRoutes(
@@ -90,30 +102,41 @@ export function createOpenCodeConfigRoutes(
       })
     } catch (error) {
       logger.error('Failed to get effective OpenCode config:', error)
-      if (error instanceof ClientError) {
-        if (error.reason === 'Transport') {
-          return c.json({ error: 'OpenCode server unavailable' }, 503)
-        }
-        return c.json({ error: 'Failed to get effective OpenCode config' }, 502)
-      }
-      return c.json({ error: 'Failed to get effective OpenCode config' }, 500)
+      return toClientReadErrorResponse(c, error, 'Failed to get effective OpenCode config')
+    }
+  })
+
+  app.get('/managed', async (c) => {
+    try {
+      const snapshot = await withOpenCodeConfigLock(readOpenCodeConfigSnapshot)
+      const info = await readManagedOpenCodeConfig(openCodeClient.api, snapshot.sources)
+      return c.json({
+        revision: snapshot.revision,
+        info: options.redactSecrets
+          ? redactOpenCodeConfigContent(info as Record<string, unknown>).content
+          : info,
+      })
+    } catch (error) {
+      logger.error('Failed to get managed OpenCode config:', error)
+      return toClientReadErrorResponse(c, error, 'Failed to get managed OpenCode config')
     }
   })
 
   app.get('/mcp', async (c) => {
     try {
-      const [config, status] = await Promise.all([
-        withOpenCodeConfigLock(readOpenCodeConfigFile),
+      const snapshot = await withOpenCodeConfigLock(readOpenCodeConfigSnapshot)
+      const [info, status] = await Promise.all([
+        readManagedOpenCodeConfig(openCodeClient.api, snapshot.sources),
         readMcpStatus(openCodeClient),
       ])
-      const views = mcpServerViewsFromConfig(config?.content.mcp)
+      const views = mcpServerViewsFromConfig(info.mcp)
       return c.json({
-        revision: config?.revision ?? null,
+        revision: snapshot.revision,
         servers: mergeMcpServerStatus(views, status),
       })
     } catch (error) {
       logger.error('Failed to get OpenCode MCP servers:', error)
-      return c.json({ error: 'Failed to get OpenCode MCP servers' }, 500)
+      return toClientReadErrorResponse(c, error, 'Failed to get OpenCode MCP servers')
     }
   })
 

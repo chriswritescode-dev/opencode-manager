@@ -55,20 +55,16 @@ function isSecretKey(key: string): boolean {
 
 function keysAreNames(path: string[]): boolean {
   const [head] = path
-  if (head === 'provider') {
+  if (head === 'providers') {
     return path.length === 1 || (path.length === 3 && path[2] === 'models')
   }
-  if (head === 'agent') {
+  if (head === 'agents' || head === 'commands') {
     return path.length === 1
   }
   if (head === 'mcp') {
-    return path.length === 1 || (path.length === 2 && path[1] === 'servers')
+    return path.length === 2 && path[1] === 'servers'
   }
   return false
-}
-
-function isNameMapException(key: string): boolean {
-  return key === 'servers' || key === 'timeout'
 }
 
 function redactOpaqueValue(value: unknown, path: string[], redactedPaths: string[]): unknown {
@@ -95,7 +91,7 @@ function redactValue(value: unknown, path: string[], redactedPaths: string[]): u
   return Object.fromEntries(
     Object.entries(value).map(([key, child]) => {
       const childPath = [...path, key]
-      if (names && !isNameMapException(key)) {
+      if (names) {
         return [key, redactValue(child, childPath, redactedPaths)]
       }
       if (OPAQUE_VALUE_KEYS.has(key)) {

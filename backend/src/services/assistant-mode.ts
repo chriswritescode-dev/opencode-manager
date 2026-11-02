@@ -822,21 +822,20 @@ Returns \`400\` for invalid configuration or a \`<redacted>\` value (\`paths\` l
 
 ### GET /opencode-config/mcp
 
-List the configured MCP servers with their stored shape, enabled state, and live connection status. Use this to answer questions about MCP servers instead of reading the whole configuration. Header and environment values are never returned.
+List the configured MCP servers with their enabled state and live connection status. Use this to answer questions about MCP servers instead of reading the whole configuration. Header and environment values are never returned.
 
-\`type\` is \`local\` or \`remote\`, and \`command\` or \`url\` is included for the matching type. \`enabled\` reflects the stored flag. \`shape\` is \`servers\` for a native \`mcp.servers.<name>\` entry or \`legacy\` for a flat \`mcp.<name>\` entry, so you can address the entry by the path it actually uses. \`status\` is the live OpenCode status (\`connected\`, \`pending\`, \`disabled\`, \`failed\`, or \`needs_auth\`) when the server is reachable, and \`error\` carries the failure reason.
+\`type\` is \`local\` or \`remote\`, and \`command\` or \`url\` is included for the matching type. \`enabled\` reflects the stored flag. Every entry comes from a native \`mcp.servers.<name>\` entry, so address it by that path; saving \`mcp.servers.<name>\` replaces a flat \`mcp.<name>\` entry left by an older config. \`status\` is the live OpenCode status (\`connected\`, \`pending\`, \`disabled\`, \`failed\`, or \`needs_auth\`) when the server is reachable, and \`error\` carries the failure reason.
 
 **Response:**
 \`\`\`ts
 {
-  revision: string | null
+  revision: string
   servers: Array<{
     name: string
     type: 'local' | 'remote'
     command?: string[]
     url?: string
     enabled: boolean
-    shape: 'servers' | 'legacy'
     status?: 'connected' | 'pending' | 'disabled' | 'failed' | 'needs_auth'
     error?: string
   }>

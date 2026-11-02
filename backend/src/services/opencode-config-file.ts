@@ -288,7 +288,7 @@ interface MergeOpenCodeConfigValuesOptions {
   deleteNullValues?: boolean
 }
 
-function mergeOpenCodeConfigValues(
+export function mergeOpenCodeConfigValues(
   target: Record<string, unknown>,
   source: Record<string, unknown>,
   options: MergeOpenCodeConfigValuesOptions = {},
