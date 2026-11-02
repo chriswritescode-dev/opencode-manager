@@ -1,7 +1,6 @@
 import { DEFAULTS } from '@opencode-manager/shared/config'
 import type { OpenCodeApi, V2Event } from '@opencode-manager/shared/opencode'
 import { logger } from '../utils/logger'
-import { nextBackoffDelay } from './opencode-event-routing'
 
 export interface OpenCodeEventSubscriptionOptions {
   api: () => OpenCodeApi
@@ -23,6 +22,10 @@ export interface OpenCodeEventSubscription {
 interface SubscriptionAttempt {
   controller: AbortController
   watchdog: ReturnType<typeof setInterval> | null
+}
+
+function nextBackoffDelay(currentDelayMs: number, maxDelayMs: number): number {
+  return Math.min(currentDelayMs * 2, maxDelayMs)
 }
 
 /**

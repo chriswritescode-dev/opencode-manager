@@ -22,12 +22,6 @@ export interface SSHHostKeyRequestEvent {
   properties: SSHHostKeyRequest;
 }
 
-export interface SSEEventEnvelope {
-  directory?: string | null;
-  serverId?: string;
-  payload: V2Event | SSHHostKeyRequestEvent;
-}
-
 export type OpenCodeStreamEvent = (V2Event | SSHHostKeyRequestEvent) & {
   directory?: string;
   serverId?: string;

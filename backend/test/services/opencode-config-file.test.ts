@@ -833,6 +833,60 @@ describe('opencode-config-file', () => {
       expect(onDisk).toContain('// keep this comment')
     })
 
+    it('keeps the v2 mcp timeout when saving an MCP server named like a v2 mcp key', async () => {
+      await writeFile(
+        sourcePath('opencode.json'),
+        JSON.stringify({ mcp: { timeout: { connect: 5000 }, servers: {} } }),
+        'utf8',
+      )
+
+      const updated = await updateOpenCodeConfigFile(
+        { mcp: { servers: { timeout: { type: 'remote', url: 'https://timeout.example.com' } } } },
+        { mode: 'merge' },
+      )
+
+      expect(updated.content).toEqual({
+        mcp: {
+          timeout: { connect: 5000 },
+          servers: { timeout: { type: 'remote', url: 'https://timeout.example.com' } },
+        },
+      })
+    })
+
+    it('keeps the v2 mcp servers when saving an MCP server named like the v2 servers map', async () => {
+      await writeFile(
+        sourcePath('opencode.json'),
+        JSON.stringify({ mcp: { servers: { linear: { type: 'remote', url: 'https://linear.example.com' } } } }),
+        'utf8',
+      )
+
+      const updated = await updateOpenCodeConfigFile(
+        { mcp: { servers: { servers: { type: 'remote', url: 'https://s.example.com' } } } },
+        { mode: 'merge' },
+      )
+
+      expect(updated.content).toEqual({
+        mcp: {
+          servers: {
+            linear: { type: 'remote', url: 'https://linear.example.com' },
+            servers: { type: 'remote', url: 'https://s.example.com' },
+          },
+        },
+      })
+    })
+
+    it('keeps the v2 mcp object when the whole servers map is removed', async () => {
+      await writeFile(
+        sourcePath('opencode.json'),
+        JSON.stringify({ mcp: { timeout: { connect: 5000 }, servers: { linear: { type: 'remote', url: 'https://linear.example.com' } } } }),
+        'utf8',
+      )
+
+      const updated = await updateOpenCodeConfigFile({ mcp: { servers: null } }, { mode: 'merge' })
+
+      expect(updated.content).toEqual({ mcp: { timeout: { connect: 5000 } } })
+    })
+
     it('keeps a comment that leads the sibling after the removed v1 container', async () => {
       const raw = '{\n  // lead\n  "agent": {"reviewer":{"description":"Legacy reviewer"}},\n  // theme comment\n  "theme": "dark"\n}\n'
       await writeFile(sourcePath('opencode.json'), raw, 'utf8')

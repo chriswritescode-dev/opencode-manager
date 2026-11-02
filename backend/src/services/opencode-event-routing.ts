@@ -13,8 +13,6 @@ type SessionStatusEvent = Extract<V2Event, { type: 'session.status' }>
 
 export type ReplayEvent = PermissionAskedEvent | FormCreatedEvent | SessionStatusEvent
 
-export type ReplayEventType = ReplayEvent['type']
-
 type ReplayEventArguments =
   | [type: PermissionAskedEvent['type'], directory: string, data: PermissionAskedEvent['data']]
   | [type: FormCreatedEvent['type'], directory: string, data: { form: FormInfo }]
@@ -24,7 +22,6 @@ export type ReplayEventBuilder = (...args: ReplayEventArguments) => ReplayEvent
 
 export interface RoutedOpenCodeEvent {
   event: V2Event
-  payloadJson: string
   directory: string | undefined
   resolvedDirectory: string | undefined
 }
@@ -107,10 +104,17 @@ export function createReplayEventBuilder(idPrefix: string): ReplayEventBuilder {
   }
 }
 
-function resolveEventRouting(
+/**
+ * Resolves the directory a parsed event belongs to and updates the remembered session directories.
+ *
+ * @param event Parsed event received from an OpenCode server.
+ * @param sessionDirectories Session directories remembered across events, updated in place.
+ * @returns The event with its resolved directories.
+ */
+export function routeOpenCodeEvent(
   event: V2Event,
   sessionDirectories: Map<string, string>,
-): Omit<RoutedOpenCodeEvent, 'payloadJson'> {
+): RoutedOpenCodeEvent {
   const directory = event.location?.directory
   const sessionID = sessionIDFromEvent(event)
   const forkParentId = event.type === 'session.forked' ? event.data.parentID : undefined
@@ -125,20 +129,6 @@ function resolveEventRouting(
   }
 
   return { event, directory, resolvedDirectory }
-}
-
-/**
- * Resolves the directory a parsed event belongs to and updates the remembered session directories.
- *
- * @param event Parsed event received from an OpenCode server.
- * @param sessionDirectories Session directories remembered across events, updated in place.
- * @returns The event with its serialized payload and resolved directories.
- */
-export function routeOpenCodeEvent(
-  event: V2Event,
-  sessionDirectories: Map<string, string>,
-): RoutedOpenCodeEvent {
-  return { ...resolveEventRouting(event, sessionDirectories), payloadJson: JSON.stringify(event) }
 }
 
 export async function collectPendingReplayEvents(request: PendingReplayRequest): Promise<PendingReplayEvents> {
@@ -167,8 +157,4 @@ export async function collectPendingReplayEvents(request: PendingReplayRequest):
   }
 
   return { permissions, forms }
-}
-
-export function nextBackoffDelay(currentDelayMs: number, maxDelayMs: number): number {
-  return Math.min(currentDelayMs * 2, maxDelayMs)
 }

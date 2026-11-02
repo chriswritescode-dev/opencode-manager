@@ -45,13 +45,12 @@ const deletedSession = {
 } satisfies V2Event
 
 describe('routeOpenCodeEvent', () => {
-  it('serializes the event payload and remembers its directory by session', () => {
+  it('remembers the directory of a located event by session', () => {
     const directories = new Map<string, string>()
 
     const routed = routeOpenCodeEvent(locatedStatus, directories)
 
     expect(routed.event).toBe(locatedStatus)
-    expect(routed.payloadJson).toBe(JSON.stringify(locatedStatus))
     expect(routed.directory).toBe('/work/alpha')
     expect(routed.resolvedDirectory).toBe('/work/alpha')
     expect(directories.get('ses_1')).toBe('/work/alpha')

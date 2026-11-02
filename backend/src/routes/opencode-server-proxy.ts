@@ -118,18 +118,16 @@ export function createOpenCodeServerProxyRoutes(
       headers.Authorization = connection.authorization
     }
 
-    const requestBody = c.req.method !== 'GET' && c.req.method !== 'HEAD'
-      ? c.req.raw.body
-      : null
+    const isBodylessMethod = c.req.method === 'GET' || c.req.method === 'HEAD'
 
     try {
       return await forwardProxyRequest({
         url: upstream.url.toString(),
         method: c.req.method,
         headers,
-        body: requestBody,
+        body: isBodylessMethod ? null : c.req.raw.body,
         signal: c.req.raw.signal,
-        headersTimeoutMs: requestBody === null ? upstreamHeadersTimeoutMs : undefined,
+        headersTimeoutMs: isBodylessMethod ? upstreamHeadersTimeoutMs : undefined,
         fetchFn,
         buildResponseHeaders: (upstreamHeaders) => new Headers(
           filterProxyHeaders(upstreamHeaders, RESPONSE_EXCLUDED_HEADERS),

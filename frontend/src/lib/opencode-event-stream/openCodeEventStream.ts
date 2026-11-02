@@ -5,6 +5,7 @@ import {
   type SSHHostKeyRequestEvent,
 } from '@opencode-manager/shared/schemas'
 import type { V2Event } from '@opencode-manager/shared/opencode'
+import { isRecord } from '@opencode-manager/shared/utils'
 import { createBrowserEventStreamTransport } from './browserTransport'
 import type {
   EventStreamHealthState,
@@ -506,10 +507,6 @@ function parseResyncServerId(data?: string): string | undefined {
   } catch {
     return undefined
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object'
 }
 
 function isEventPayload(value: unknown): value is V2Event | SSHHostKeyRequestEvent {

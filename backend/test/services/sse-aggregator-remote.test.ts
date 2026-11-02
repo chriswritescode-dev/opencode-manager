@@ -67,9 +67,13 @@ async function flushReplay(): Promise<void> {
   }
 }
 
-const PAYLOAD = '{"id":"evt_1","created":1,"type":"session.idle","location":{"directory":"/repo"},"data":{"sessionID":"ses_1"}}'
-
-const LOCAL_EVENT = JSON.parse(PAYLOAD) as V2Event
+const LOCAL_EVENT = {
+  id: 'evt_1',
+  created: 1,
+  type: 'session.idle',
+  location: { directory: '/repo' },
+  data: { sessionID: 'ses_1' },
+} satisfies V2Event
 
 describe('SSEAggregator remote envelope delivery', () => {
   beforeEach(() => {
@@ -90,9 +94,9 @@ describe('SSEAggregator remote envelope delivery', () => {
     sseAggregator.addClient('local-dir', local.callback, local.writeFrame, ['/repo'])
     sseAggregator.addClient('no-directories', unsubscribed.callback, unsubscribed.writeFrame, [])
 
-    sseAggregator.deliverRemoteEnvelope('srv_a', '/repo', PAYLOAD)
+    sseAggregator.deliverRemoteEnvelope('srv_a', '/repo', LOCAL_EVENT)
 
-    const expected = { directory: '/repo', serverId: 'srv_a', payload: JSON.parse(PAYLOAD) }
+    const expected = { directory: '/repo', serverId: 'srv_a', payload: LOCAL_EVENT }
     expect(subscribed.frames.map(parseFrame)).toEqual([expected])
     expect(otherDirectory.frames.map(parseFrame)).toEqual([expected])
     expect(otherServer.frames.map(parseFrame)).toEqual([expected])
@@ -110,9 +114,9 @@ describe('SSEAggregator remote envelope delivery', () => {
     sseAggregator.addClient('any-c', otherServer.callback, otherServer.writeFrame, ['srv_b|/repo'])
     sseAggregator.addClient('any-d', local.callback, local.writeFrame, ['/repo'])
 
-    sseAggregator.deliverRemoteEnvelope('srv_a', null, PAYLOAD)
+    sseAggregator.deliverRemoteEnvelope('srv_a', null, LOCAL_EVENT)
 
-    const expected = { directory: null, serverId: 'srv_a', payload: JSON.parse(PAYLOAD) }
+    const expected = { directory: null, serverId: 'srv_a', payload: LOCAL_EVENT }
     expect(first.frames.map(parseFrame)).toEqual([expected])
     expect(second.frames.map(parseFrame)).toEqual([expected])
     expect(otherServer.frames.map(parseFrame)).toEqual([expected])
@@ -124,7 +128,7 @@ describe('SSEAggregator remote envelope delivery', () => {
     sseAggregator.addClient('targeted', client.callback, client.writeFrame, ['srv_a|/repo'])
     sseAggregator.removeDirectories('targeted', ['srv_a|/repo'])
 
-    sseAggregator.deliverRemoteEnvelopeToClient('targeted', 'srv_a', '/repo', PAYLOAD)
+    sseAggregator.deliverRemoteEnvelopeToClient('targeted', 'srv_a', '/repo', LOCAL_EVENT)
 
     expect(client.frames).toHaveLength(0)
   })
@@ -133,10 +137,10 @@ describe('SSEAggregator remote envelope delivery', () => {
     const client = createCapturingClient()
     sseAggregator.addClient('targeted-ok', client.callback, client.writeFrame, ['srv_a|/repo'])
 
-    sseAggregator.deliverRemoteEnvelopeToClient('targeted-ok', 'srv_a', '/repo', PAYLOAD)
+    sseAggregator.deliverRemoteEnvelopeToClient('targeted-ok', 'srv_a', '/repo', LOCAL_EVENT)
 
     expect(client.frames.map(parseFrame)).toEqual([
-      { directory: '/repo', serverId: 'srv_a', payload: JSON.parse(PAYLOAD) },
+      { directory: '/repo', serverId: 'srv_a', payload: LOCAL_EVENT },
     ])
   })
 
@@ -218,8 +222,21 @@ describe('SSEAggregator remote envelope delivery', () => {
     sseAggregator.addClient('removed', client.callback, client.writeFrame, ['srv_a|/repo'])
     sseAggregator.removeClient('removed')
 
-    sseAggregator.deliverRemoteEnvelope('srv_a', null, PAYLOAD)
+    sseAggregator.deliverRemoteEnvelope('srv_a', null, LOCAL_EVENT)
 
     expect(client.frames).toHaveLength(0)
+  })
+
+  it('does not serialize an envelope that no client receives', () => {
+    const stringify = vi.spyOn(JSON, 'stringify')
+
+    try {
+      sseAggregator.deliverRemoteEnvelope('srv_a', '/repo', LOCAL_EVENT)
+      sseAggregator.deliverRemoteEnvelopeToClient('absent', 'srv_a', '/repo', LOCAL_EVENT)
+
+      expect(stringify).not.toHaveBeenCalledWith(LOCAL_EVENT)
+    } finally {
+      stringify.mockRestore()
+    }
   })
 })

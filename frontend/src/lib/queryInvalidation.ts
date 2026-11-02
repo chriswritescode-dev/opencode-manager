@@ -80,7 +80,6 @@ export function invalidateConfigCaches(
   queryClient.invalidateQueries({ queryKey: ['opencode', 'commands'] })
   if (!options.skipOpenCodeConfig) {
     queryClient.invalidateQueries({ queryKey: ['opencode-config'] })
-    queryClient.invalidateQueries({ queryKey: OPEN_CODE_MANAGED_CONFIG_QUERY_KEY })
   }
   queryClient.invalidateQueries({ queryKey: ['health'] })
   queryClient.invalidateQueries({ queryKey: ['mcp-status'] })

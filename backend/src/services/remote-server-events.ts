@@ -1,4 +1,3 @@
-import { DEFAULTS } from '@opencode-manager/shared/config'
 import {
   buildServerDirectoryKey,
   LOCAL_OPENCODE_SERVER_ID,
@@ -22,11 +21,9 @@ import {
 import { subscribeOpenCodeEvents, type OpenCodeEventSubscription } from './opencode-event-subscription'
 import type { RemoteReplayHandler } from './sse-aggregator'
 
-const { RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS } = DEFAULTS.SSE
-
 export interface RemoteEventAggregator {
-  deliverRemoteEnvelope(serverId: string, directory: string | null, payloadJson: string): void
-  deliverRemoteEnvelopeToClient(clientId: string, serverId: string, directory: string, payloadJson: string): void
+  deliverRemoteEnvelope(serverId: string, directory: string | null, event: V2Event): void
+  deliverRemoteEnvelopeToClient(clientId: string, serverId: string, directory: string, event: V2Event): void
   sendRemoteResync(serverId: string): void
   hasClientDirectory(clientId: string, key: string): boolean
   setRemoteReplayHandler(handler: RemoteReplayHandler | null): void
@@ -65,8 +62,6 @@ function describeStreamError(error: unknown): string {
 
 export class RemoteServerEventHub {
   private readonly streams = new Map<string, RemoteServerStream>()
-  private readonly reconnectDelayMs: number
-  private readonly maxReconnectDelayMs: number
   private unsubscribeRegistry: (() => void) | null = null
   private started = false
   private versionProbeSequence = 0
@@ -75,11 +70,8 @@ export class RemoteServerEventHub {
   constructor(
     private readonly registry: OpenCodeServerRegistry,
     private readonly aggregator: RemoteEventAggregator,
-    options: RemoteServerEventHubOptions = {},
-  ) {
-    this.reconnectDelayMs = options.reconnectDelayMs ?? RECONNECT_DELAY_MS
-    this.maxReconnectDelayMs = options.maxReconnectDelayMs ?? MAX_RECONNECT_DELAY_MS
-  }
+    private readonly options: RemoteServerEventHubOptions = {},
+  ) {}
 
   start(): void {
     if (this.started) return
@@ -169,7 +161,7 @@ export class RemoteServerEventHub {
     events: V2Event[],
   ): void {
     for (const event of events) {
-      this.aggregator.deliverRemoteEnvelopeToClient(clientId, serverId, directory, JSON.stringify(event))
+      this.aggregator.deliverRemoteEnvelopeToClient(clientId, serverId, directory, event)
     }
   }
 
@@ -209,8 +201,8 @@ export class RemoteServerEventHub {
       onOpen: () => this.handleOpen(serverId, subscription),
       onEvent: (event) => this.handleMessage(serverId, event),
       onDisconnect: (error) => this.handleStreamError(serverId, error),
-      reconnectDelayMs: this.reconnectDelayMs,
-      maxReconnectDelayMs: this.maxReconnectDelayMs,
+      reconnectDelayMs: this.options.reconnectDelayMs,
+      maxReconnectDelayMs: this.options.maxReconnectDelayMs,
     })
 
     stream.subscription = subscription
@@ -243,7 +235,7 @@ export class RemoteServerEventHub {
     const stream = this.streams.get(serverId)
     if (!stream) return
 
-    const { resolvedDirectory, payloadJson } = routeOpenCodeEvent(event, stream.sessionDirectories)
+    const { resolvedDirectory } = routeOpenCodeEvent(event, stream.sessionDirectories)
     const sessionID = sessionIDFromEvent(event)
     if (sessionID) applySessionActivity(stream.busySessions, event)
     if (sessionID && event.type === 'session.deleted') {
@@ -253,7 +245,7 @@ export class RemoteServerEventHub {
     }
 
     this.aggregator.notifyServerEvent(serverId, resolvedDirectory ?? null, event)
-    this.aggregator.deliverRemoteEnvelope(serverId, resolvedDirectory ?? null, payloadJson)
+    this.aggregator.deliverRemoteEnvelope(serverId, resolvedDirectory ?? null, event)
   }
 
   private handleRegistryChange(change: OpenCodeServerChange): void {
@@ -325,7 +317,7 @@ export class RemoteServerEventHub {
 
     for (const { sessionID, directory } of plan.idle) {
       const event = this.buildReplayEvent('session.status', directory, { sessionID, status: { type: 'idle' } })
-      this.aggregator.deliverRemoteEnvelope(serverId, directory, JSON.stringify(event))
+      this.aggregator.deliverRemoteEnvelope(serverId, directory, event)
       stream.busySessions.delete(sessionID)
       replayed++
     }
@@ -333,7 +325,7 @@ export class RemoteServerEventHub {
     for (const sessionID of plan.busy) {
       const directory = stream.sessionDirectories.get(sessionID) ?? null
       const event = this.buildReplayEvent('session.status', directory ?? '', { sessionID, status: { type: 'busy' } })
-      this.aggregator.deliverRemoteEnvelope(serverId, directory, JSON.stringify(event))
+      this.aggregator.deliverRemoteEnvelope(serverId, directory, event)
       stream.busySessions.add(sessionID)
       replayed++
     }

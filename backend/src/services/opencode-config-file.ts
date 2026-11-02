@@ -157,6 +157,7 @@ interface OpenCodeConfigV1EntityPath {
   v2Path: string[]
   v1Path: string[]
   named: boolean
+  reservedNames?: readonly string[]
 }
 
 interface OpenCodeConfigV1EntityRemoval {
@@ -168,7 +169,7 @@ const V1_ENTITY_PATHS: readonly OpenCodeConfigV1EntityPath[] = [
   { v2Path: ['agents'], v1Path: ['agent'], named: true },
   { v2Path: ['commands'], v1Path: ['command'], named: true },
   { v2Path: ['providers'], v1Path: ['provider'], named: true },
-  { v2Path: ['mcp', 'servers'], v1Path: ['mcp'], named: true },
+  { v2Path: ['mcp', 'servers'], v1Path: ['mcp'], named: true, reservedNames: ['servers', 'timeout'] },
   { v2Path: ['permissions'], v1Path: ['permission'], named: false },
 ]
 
@@ -206,12 +207,18 @@ function hasOwn(object: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(object, key)
 }
 
+interface ReadOpenCodeConfigPathOptions {
+  nullAncestorCountsAsFound?: boolean
+}
+
 function readOpenCodeConfigPath(
   content: Record<string, unknown>,
   jsonPath: JSONPath,
+  options: ReadOpenCodeConfigPathOptions = {},
 ): { found: boolean; value: unknown } {
   let current: unknown = content
   for (const segment of jsonPath) {
+    if (options.nullAncestorCountsAsFound && current === null) return { found: true, value: null }
     if (typeof segment === 'number') {
       if (!Array.isArray(current) || segment < 0 || segment >= current.length) {
         return { found: false, value: undefined }
@@ -227,19 +234,6 @@ function readOpenCodeConfigPath(
 
 function hasOpenCodeConfigPath(content: Record<string, unknown>, jsonPath: JSONPath): boolean {
   return readOpenCodeConfigPath(content, jsonPath).found
-}
-
-function readPatchedOpenCodeConfigPath(
-  patch: Record<string, unknown>,
-  jsonPath: readonly string[],
-): { found: boolean; value: unknown } {
-  let current: unknown = patch
-  for (const segment of jsonPath) {
-    if (current === null) return { found: true, value: null }
-    if (!isPlainObject(current) || !hasOwn(current, segment)) return { found: false, value: undefined }
-    current = current[segment]
-  }
-  return { found: true, value: current }
 }
 
 function defineOwnConfigValue(target: Record<string, unknown>, key: string, value: unknown): void {
@@ -505,14 +499,15 @@ function collectOpenCodeConfigV1EntityRemovals(
 ): OpenCodeConfigV1EntityRemoval[] {
   const removals: OpenCodeConfigV1EntityRemoval[] = []
   for (const mapping of V1_ENTITY_PATHS) {
-    const patched = readPatchedOpenCodeConfigPath(patch, mapping.v2Path)
+    const patched = readOpenCodeConfigPath(patch, mapping.v2Path, { nullAncestorCountsAsFound: true })
     if (!patched.found) continue
     if (!mapping.named || patched.value === null) {
-      removals.push({ path: mapping.v1Path })
+      if (!mapping.reservedNames) removals.push({ path: mapping.v1Path })
       continue
     }
     if (!isPlainObject(patched.value)) continue
     for (const name of Object.keys(patched.value)) {
+      if (mapping.reservedNames?.includes(name)) continue
       removals.push({ path: [...mapping.v1Path, name], container: mapping.v1Path })
     }
   }

@@ -850,6 +850,34 @@ describe('OpenCodeConfigManager', () => {
     expect(await screen.findByLabelText('Config content')).toBeInTheDocument()
   })
 
+  it('shows an error notice instead of empty managed sections when the managed config request fails', async () => {
+    mockGetManagedOpenCodeConfig.mockRejectedValue(new FetchError('Bad Gateway', 502))
+
+    renderWithQuery(<OpenCodeConfigManager />)
+
+    await screen.findByText('opencode.json')
+    expect(await screen.findAllByText('OpenCode configuration unavailable')).toHaveLength(4)
+    expect(screen.getAllByText('Bad Gateway')).toHaveLength(4)
+
+    const commandsHeader = screen.getByRole('button', { name: /^Commands/ })
+    expect(commandsHeader).toHaveTextContent('Unavailable')
+    expect(commandsHeader).not.toHaveTextContent('0 configured')
+    expect(screen.queryByText('No commands configured')).not.toBeInTheDocument()
+    expect(screen.queryByText('No agents configured')).not.toBeInTheDocument()
+    expect(screen.queryByText('No models configured')).not.toBeInTheDocument()
+  })
+
+  it('shows a loading state instead of empty managed sections while the managed config request is pending', async () => {
+    mockGetManagedOpenCodeConfig.mockReturnValue(new Promise(() => {}))
+
+    renderWithQuery(<OpenCodeConfigManager />)
+
+    await screen.findByText('opencode.json')
+    expect(await screen.findAllByText('Loading configuration...')).toHaveLength(4)
+    expect(screen.getByRole('button', { name: /^Commands/ })).toHaveTextContent('Loading...')
+    expect(screen.queryByText('No commands configured')).not.toBeInTheDocument()
+  })
+
   it('saves an agent with an entity patch through the managed config endpoint', async () => {
     mockGetManagedOpenCodeConfig.mockResolvedValue({
       revision: 'rev-1',

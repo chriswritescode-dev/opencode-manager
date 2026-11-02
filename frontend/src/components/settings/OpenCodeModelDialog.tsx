@@ -13,6 +13,7 @@ import { Combobox } from '@/components/ui/combobox'
 import { Label } from '@/components/ui/label'
 import { RefreshCw, Loader2 } from 'lucide-react'
 import { settingsApi } from '@/api/settings'
+import { isRecord } from '@opencode-manager/shared/utils'
 import type { OpenCodeProviderConfig, OpenCodeProviderModelConfig } from '@opencode-manager/shared/opencode'
 import type { OpenCodeProviderModelPatch } from '@/api/types/settings'
 
@@ -89,12 +90,8 @@ function parseOptionalNumber(value: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
 function withRemovedKeysAsNull(previous: unknown, next: unknown): unknown {
-  if (!isPlainObject(previous) || !isPlainObject(next)) return next
+  if (!isRecord(previous) || !isRecord(next)) return next
 
   const patch: Record<string, unknown> = {}
   for (const key of Object.keys(previous)) {

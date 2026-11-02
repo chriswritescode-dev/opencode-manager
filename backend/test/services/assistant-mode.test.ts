@@ -162,6 +162,15 @@ describe('buildSettingsSkill', () => {
     expect(skill).toContain('never copy this response into a save')
   })
 
+  it('names v2 config keys and documents the unreachable server response', () => {
+    const skill = buildSettingsSkill()
+    expect(skill).toContain('`plugins`')
+    expect(skill).toContain('`mcp.servers`')
+    expect(skill).toContain('`providers`')
+    expect(skill).not.toContain('including `plugin`')
+    expect(skill).toContain('GET /opencode-config/mcp returns `503`')
+  })
+
   it('documents the assistant reload as rebuilding every loaded location', () => {
     const skill = buildSettingsSkill()
     expect(skill).toContain('rebuilding every loaded location')
@@ -443,6 +452,22 @@ describe('ensureAssistantMode', () => {
 
     expect(await readFile(opencodeJsonPath, 'utf8')).toBe(v1Config)
     expect(result.files.opencodeJson?.created).toBe(false)
+  })
+
+  it('writes the generated v2 config over a v1 config when overwrite is requested', async () => {
+    await ensureAssistantMode(mockRepo)
+    const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
+    const v1Config = `{
+  "permission": { "read": "allow", "shell": "ask" },
+  "agent": { "assistant": { "mode": "primary", "prompt": "Custom v1 prompt" } }
+}
+`
+    await writeFile(opencodeJsonPath, v1Config)
+
+    const result = await ensureAssistantMode(mockRepo, { overwriteOpenCodeConfig: true })
+
+    expect(JSON.parse(await readFile(opencodeJsonPath, 'utf8'))).toEqual(buildAssistantOpenCodeConfig())
+    expect(result.files.opencodeJson?.created).toBe(true)
   })
 
   it('migrates generated legacy AGENTS.md and assistant.md to the new split', async () => {

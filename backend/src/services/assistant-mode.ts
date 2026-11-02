@@ -13,14 +13,14 @@ import {
 } from './file-operations'
 import { ASSISTANT_NOTIFICATION_LIMITS, AssistantSettingsPatchSchema, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_LEADER_KEY, MANAGER_TOOL_NAME } from '@opencode-manager/shared/schemas'
 import { MANAGER_COLOR_THEME_ID, OPENCODE_THEMES } from '@opencode-manager/shared/themes'
-import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH, ASSISTANT_OPENCODE_DIR_NAME, parseJsonc } from '@opencode-manager/shared/utils'
+import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH, ASSISTANT_OPENCODE_DIR_NAME, isRecord, parseJsonc } from '@opencode-manager/shared/utils'
 import { getAssistantModePath, getReposPath } from '@opencode-manager/shared/config/env'
 import type { OpenCodeAgentConfig, OpenCodeApi, OpenCodeConfigInfo } from '@opencode-manager/shared/opencode'
-import { openCodeLocation } from '@opencode-manager/shared/opencode'
 import { validateOpenCodeConfig } from '@opencode-manager/shared/opencode/config-validation'
 import type { Database } from 'bun:sqlite'
 import { ensureAssistantRepo } from '../db/queries'
 import { applyOpenCodeConfigEdits, removeOpenCodeConfigProperty, type OpenCodeConfigPathOperation } from './opencode-config-file'
+import { readOpenCodeConfigDocuments } from './opencode-config-effective'
 import { logger } from '../utils/logger'
 
 
@@ -846,6 +846,8 @@ List the configured MCP servers with their enabled state and live connection sta
 }
 \`\`\`
 
+GET /opencode-config/mcp returns \`503\` when the OpenCode server is unreachable.
+
 When the response contains \`restartRequired: true\`, tell the user to restart the OpenCode server from Settings. Never attempt the restart yourself: it would terminate your own session.
 
 Only changes to how the OpenCode process is launched need a user restart from Settings: server environment variables, Git credentials and identity, sandbox enforcement, rotating the manager token, the server password, and installing or upgrading the OpenCode version. You cannot make these changes through this API.
@@ -853,7 +855,7 @@ Only changes to how the OpenCode process is launched need a user restart from Se
 ## Safety
 
 - The settings PATCH endpoint rejects any attempt to modify credentials, API keys, or other sensitive settings; guide the user to the full UI for Git, TTS, and STT credentials
-- PATCH /opencode-config patches only the paths you name, including \`plugin\`, \`mcp\`, and \`provider\` entries; change only the keys the user explicitly asked for and never add plugins, MCP servers, or provider credentials the user did not request
+- PATCH /opencode-config patches only the paths you name, including \`plugins\`, \`mcp.servers\`, and \`providers\` entries; change only the keys the user explicitly asked for and never add plugins, MCP servers, or provider credentials the user did not request
 - GET /opencode-config redacts secrets; never reconstruct a secret you did not read, and never send a \`<redacted>\` value back
 - The settings PATCH endpoint does NOT trigger an OpenCode reload or restart
 `
@@ -1204,11 +1206,11 @@ export async function ensureAssistantMode(
   const existingOpenCodeConfig = parsedOpenCodeConfig as OpenCodeConfigInfo | undefined
 
   let opencodeJsonUpdated = false
-  if (!hasV1OpenCodeConfig) {
-    if (!opencodeJsonExists || overwriteOpenCodeConfig) {
-      await writeFileContent(opencodeJsonPath, JSON.stringify(buildAssistantOpenCodeConfig(), null, 2))
-      opencodeJsonUpdated = true
-    } else if (existingOpenCodeConfig !== undefined) {
+  if (!opencodeJsonExists || overwriteOpenCodeConfig) {
+    await writeFileContent(opencodeJsonPath, JSON.stringify(buildAssistantOpenCodeConfig(), null, 2))
+    opencodeJsonUpdated = true
+  } else if (!hasV1OpenCodeConfig) {
+    if (existingOpenCodeConfig !== undefined) {
       const repairedConfig = assistantOpenCodeConfigNeedsRepair(existingOpenCodeConfig)
         ? mergeAssistantOpenCodeConfig(existingOpenCodeConfig)
         : existingOpenCodeConfig
@@ -1348,14 +1350,10 @@ export async function ensureAssistantMode(
   }
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 function parseAssistantOpenCodeConfig(rawContent: string): Record<string, unknown> | undefined {
   try {
     const parsed = parseJsonc(rawContent)
-    return isPlainObject(parsed) ? parsed : undefined
+    return isRecord(parsed) ? parsed : undefined
   } catch {
     return undefined
   }
@@ -1363,7 +1361,7 @@ function parseAssistantOpenCodeConfig(rawContent: string): Record<string, unknow
 
 function hasAssistantV1OpenCodeConfig(config: Record<string, unknown>): boolean {
   if (config.permission !== undefined) return true
-  return isPlainObject(config.agent) && isPlainObject(config.agent.assistant)
+  return isRecord(config.agent) && isRecord(config.agent.assistant)
 }
 
 function assistantOpenCodeConfigNeedsRepair(config: OpenCodeConfigInfo): boolean {
@@ -1436,9 +1434,9 @@ function mergeAssistantOpenCodeConfig(existing?: OpenCodeConfigInfo): OpenCodeCo
 
 function buildAssistantV1ConfigRemovalPaths(config: Record<string, unknown>): string[][] {
   const v1Agent = config.agent
-  const removeWholeAgent = isPlainObject(v1Agent) &&
+  const removeWholeAgent = isRecord(v1Agent) &&
     Object.keys(v1Agent).length === 1 &&
-    isPlainObject(v1Agent.assistant)
+    isRecord(v1Agent.assistant)
 
   const paths: string[][] = [removeWholeAgent ? ['agent'] : ['agent', ASSISTANT_DEFAULT_AGENT_NAME]]
   if (config.permission !== undefined) {
@@ -1474,25 +1472,22 @@ export async function convertAssistantOpenCodeConfigToV2(api: OpenCodeApi): Prom
     const rawConfig = parseAssistantOpenCodeConfig(rawContent)
     if (rawConfig === undefined || !hasAssistantV1OpenCodeConfig(rawConfig)) return false
 
-    const entries = await api.config.get(openCodeLocation(assistantDir))
-    const resolvedPath = path.resolve(opencodeJsonPath)
-    const documentEntry = entries.find(
-      (entry) => entry.type === 'document' && entry.path !== undefined && path.resolve(entry.path) === resolvedPath,
-    )
-    if (documentEntry === undefined || documentEntry.type !== 'document') return false
+    const documents = await readOpenCodeConfigDocuments(api, assistantDir)
+    const documentInfo = documents.get(path.resolve(opencodeJsonPath))
+    if (documentInfo === undefined) return false
 
-    const v1AssistantAgent = isPlainObject(rawConfig.agent) ? rawConfig.agent.assistant : undefined
+    const v1AssistantAgent = isRecord(rawConfig.agent) ? rawConfig.agent.assistant : undefined
     const setOperations: OpenCodeConfigPathOperation[] = [
       {
         path: ['agents', ASSISTANT_DEFAULT_AGENT_NAME],
         value: resolveConvertedAssistantAgent(
-          documentEntry.info.agents?.[ASSISTANT_DEFAULT_AGENT_NAME],
+          documentInfo.agents?.[ASSISTANT_DEFAULT_AGENT_NAME],
           v1AssistantAgent,
         ),
       },
     ]
-    if (documentEntry.info.permissions !== undefined) {
-      setOperations.push({ path: ['permissions'], value: documentEntry.info.permissions })
+    if (documentInfo.permissions !== undefined) {
+      setOperations.push({ path: ['permissions'], value: documentInfo.permissions })
     }
 
     let updatedText = applyOpenCodeConfigEdits(rawContent, setOperations)

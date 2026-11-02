@@ -8,6 +8,7 @@ import {
   OpenCodeConfigSourceFileSchema,
   OpenCodeConfigValidationIssueSchema,
   UpdateOpenCodeConfigRequestSchema,
+  UpdateOpenCodeConfigPatchRequestSchema,
   ServerEnvVarSchema,
 } from '../schemas/settings'
 import {
@@ -76,6 +77,7 @@ export type { OpenCodeConfigSourceName } from '../config/defaults'
 export type OpenCodeConfigSourceFile = z.infer<typeof OpenCodeConfigSourceFileSchema>
 export type OpenCodeConfigValidationIssue = z.infer<typeof OpenCodeConfigValidationIssueSchema>
 export type UpdateOpenCodeConfigRequest = z.infer<typeof UpdateOpenCodeConfigRequestSchema>
+export type UpdateOpenCodeConfigPatchRequest = z.infer<typeof UpdateOpenCodeConfigPatchRequestSchema>
 
 export type Repo = z.infer<typeof RepoSchema>
 export type InternalRepoListResponse = z.infer<typeof InternalRepoListResponseSchema>

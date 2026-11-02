@@ -1,12 +1,28 @@
 import { describe, expect, it, vi } from 'vitest'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import { ClientError, openCodeLocation, type OpenCodeApi } from '@opencode-manager/shared/opencode'
-import { readManagedOpenCodeConfig } from '../../src/services/opencode-config-effective'
+import { readManagedOpenCodeConfig, readOpenCodeConfigDocuments } from '../../src/services/opencode-config-effective'
 
 function stubApi(entries: unknown[]) {
   const get = vi.fn(async () => entries)
   return { api: { config: { get } } as unknown as OpenCodeApi, get }
 }
+
+describe('readOpenCodeConfigDocuments', () => {
+  it('keys document entries by resolved path for the requested directory', async () => {
+    const { api, get } = stubApi([
+      { type: 'document', path: '/directory/./opencode.json', info: { theme: 'dark' } },
+      { type: 'document', info: { theme: 'pathless' } },
+      { type: 'directory', path: '/directory' },
+    ])
+
+    const documents = await readOpenCodeConfigDocuments(api, '/directory')
+
+    expect([...documents.keys()]).toEqual(['/directory/opencode.json'])
+    expect(documents.get('/directory/opencode.json')).toEqual({ theme: 'dark' })
+    expect(get).toHaveBeenCalledWith(openCodeLocation('/directory'))
+  })
+})
 
 describe('readManagedOpenCodeConfig', () => {
   it('merges only the documents whose path is a Manager source, in source order', async () => {

@@ -254,7 +254,6 @@ try {
   const openCodeStatus = await openCodeSupervisor.start()
   if (openCodeStatus.healthy) {
     logger.info(`OpenCode server running on port ${openCodeStatus.port}`)
-    void convertAssistantOpenCodeConfigToV2(openCodeClient.api)
   } else {
     logger.warn(`OpenCode server unavailable after startup recovery: ${openCodeStatus.lastError ?? openCodeStatus.state}`)
   }
@@ -365,6 +364,11 @@ sseAggregator.onServerConnected((serverId) => {
   void sessionPermissionModeService.acceptPendingRequestsForActiveSessions(serverId).catch((err) => {
     logger.error(`Failed to accept pending permission requests for server ${serverId}:`, err)
   })
+  if (serverId === LOCAL_OPENCODE_SERVER_ID) {
+    void convertAssistantOpenCodeConfigToV2(openCodeClient.api).catch((err) => {
+      logger.error('Failed to convert the Assistant OpenCode config to v2:', err)
+    })
+  }
 })
 sseAggregator.start()
 

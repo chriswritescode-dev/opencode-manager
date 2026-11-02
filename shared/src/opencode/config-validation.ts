@@ -1,10 +1,6 @@
 import { Info } from '@opencode/schema/config'
 import { Schema } from 'effect'
-
-export interface OpenCodeConfigValidationIssue {
-  path: string
-  message: string
-}
+import type { OpenCodeConfigValidationIssue } from '../types'
 
 export type OpenCodeConfigValidationResult =
   | { success: true }

@@ -15,6 +15,7 @@ import {
   type OpenCodeConfigSourceFile,
   type OpenCodeConfigSourceName,
   type UpdateOpenCodeConfigRequest,
+  type UpdateOpenCodeConfigPatchRequest,
   type SandboxPreferences,
   type SkillFileInfo,
   type CreateSkillRequest,
@@ -34,7 +35,7 @@ import type {
 import type { NotificationPreferences } from '@opencode-manager/shared/types'
 import { saveFile } from '@/lib/download'
 
-export type { TTSConfig, STTConfig, OpenCodeConfigFile, OpenCodeConfigSourceFile, OpenCodeConfigSourceName, UpdateOpenCodeConfigRequest, SandboxPreferences, NotificationPreferences, SkillFileInfo, CreateSkillRequest, UpdateSkillRequest, SkillScope, InstallSkillFromGithubRequest, InstallSkillResponse }
+export type { TTSConfig, STTConfig, OpenCodeConfigFile, OpenCodeConfigSourceFile, OpenCodeConfigSourceName, UpdateOpenCodeConfigRequest, UpdateOpenCodeConfigPatchRequest, SandboxPreferences, NotificationPreferences, SkillFileInfo, CreateSkillRequest, UpdateSkillRequest, SkillScope, InstallSkillFromGithubRequest, InstallSkillResponse }
 export type { UserPreferences, UpdateSettingsRequest, CustomCommand, GitCredential, GitIdentity, GitIdentityProfile, KeyboardShortcutAction } from '@opencode-manager/shared'
 export { DEFAULT_TTS_CONFIG, DEFAULT_STT_CONFIG, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_USER_PREFERENCES, DEFAULT_LEADER_KEY, DEFAULT_DIRECT_SHORTCUTS, BLOCKED_SERVER_ENV_KEYS, DEFAULT_ACTIVITY_WINDOW_MINUTES, ACTIVITY_WINDOW_MINUTE_OPTIONS }
 export { isOpenCodeConfigSourceName } from '@opencode-manager/shared'
@@ -133,10 +134,4 @@ export type OpenCodeProviderPatch = {
   [K in keyof OpenCodeProviderConfig]?: K extends 'models'
     ? Record<string, OpenCodeProviderModelPatch | null> | null
     : OpenCodeProviderConfig[K] | null
-}
-
-export interface UpdateOpenCodeConfigPatchRequest {
-  patch: Record<string, unknown>
-  source?: OpenCodeConfigSourceName
-  expectedRevision?: string
 }

@@ -40,6 +40,38 @@ const SECTION_META_CLASS = 'text-xs text-muted-foreground'
 
 const getConfigFileName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path
 
+interface ManagedConfigSectionFallbackProps {
+  isLoading: boolean
+  unavailableMessage: string | null
+  errorMessage: string | null
+}
+
+function ManagedConfigSectionFallback({ isLoading, unavailableMessage, errorMessage }: ManagedConfigSectionFallbackProps) {
+  if (isLoading) {
+    return (
+      <p className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading configuration...
+      </p>
+    )
+  }
+
+  if (unavailableMessage) {
+    return <p className="py-4 text-sm text-muted-foreground">{unavailableMessage}</p>
+  }
+
+  if (errorMessage) {
+    return (
+      <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+        <p className="font-medium text-destructive">OpenCode configuration unavailable</p>
+        <p className="mt-1 text-sm text-destructive/90">{errorMessage}</p>
+      </div>
+    )
+  }
+
+  return null
+}
+
 export function OpenCodeConfigManager() {
   const sectionIdPrefix = useId()
   const agentsMdContentId = `${sectionIdPrefix}-agents-md`
@@ -82,7 +114,11 @@ export function OpenCodeConfigManager() {
   const hostImportRef = useRef<HTMLButtonElement>(null)
   
   const { data: config, isLoading } = useOpenCodeConfigFile()
-  const { data: managedConfig, error: managedConfigError } = useOpenCodeManagedConfig()
+  const {
+    data: managedConfig,
+    error: managedConfigError,
+    isLoading: isManagedConfigLoading,
+  } = useOpenCodeManagedConfig()
   const managedAgents = managedConfig?.info.agents ?? {}
   const managedCommands = managedConfig?.info.commands ?? {}
   const managedProviders = managedConfig?.info.providers ?? {}
@@ -139,6 +175,28 @@ export function OpenCodeConfigManager() {
     return getApiErrorMessage(error, 'Failed to import existing OpenCode host data')
   }
 
+  const isManagedConfigPending = isManagedConfigLoading || Boolean(managedConfigError)
+  const managedConfigErrorMessage = managedConfigError && !isManagedConfigUnavailable
+    ? getApiErrorMessage(managedConfigError, 'Failed to load the OpenCode configuration')
+    : null
+
+  const getManagedConfigCountLabel = (count: number): string => {
+    if (isManagedConfigLoading) return 'Loading...'
+    if (managedConfigError) return 'Unavailable'
+    return `${count} configured`
+  }
+
+  const renderManagedConfigSection = (unavailableMessage: string, content: React.ReactNode) =>
+    isManagedConfigPending ? (
+      <ManagedConfigSectionFallback
+        isLoading={isManagedConfigLoading}
+        unavailableMessage={isManagedConfigUnavailable ? unavailableMessage : null}
+        errorMessage={managedConfigErrorMessage}
+      />
+    ) : (
+      content
+    )
+
   const applyOpenCodeConfigSave = (result: OpenCodeConfigSaveResponse) => {
     queryClient.setQueryData<OpenCodeConfigFile>(OPEN_CODE_CONFIG_QUERY_KEY, result)
     applyOpenCodeSaveFeedback({
@@ -152,11 +210,7 @@ export function OpenCodeConfigManager() {
       OPEN_CODE_CONFIG_QUERY_KEY,
     )?.revision
     const result = await settingsApi.patchOpenCodeConfig({ patch, expectedRevision })
-    queryClient.setQueryData<OpenCodeConfigFile>(OPEN_CODE_CONFIG_QUERY_KEY, result)
-    applyOpenCodeSaveFeedback({
-      appliedMessage: 'Configuration updated',
-      restartRequired: result.restartRequired,
-    })
+    applyOpenCodeConfigSave(result)
     queryClient.invalidateQueries({ queryKey: OPEN_CODE_MANAGED_CONFIG_QUERY_KEY })
   }
 
@@ -364,7 +418,7 @@ export function OpenCodeConfigManager() {
                 <div className="flex min-w-0 items-center gap-3">
                   <h4 className={SECTION_TITLE_CLASS}>Commands</h4>
                   <span className={SECTION_META_CLASS}>
-                    {Object.keys(managedCommands).length + directoryCommands.length} configured
+                    {getManagedConfigCountLabel(Object.keys(managedCommands).length + directoryCommands.length)}
                   </span>
                 </div>
                 <ChevronDown className={cn(SECTION_CHEVRON_CLASS, expandedSections.commands && 'rotate-180')} />
@@ -373,17 +427,14 @@ export function OpenCodeConfigManager() {
                 id={commandsContentId}
                 className={cn(SECTION_CONTENT_CLASS, expandedSections.commands ? 'block' : 'hidden')}
               >
-                {isManagedConfigUnavailable ? (
-                  <p className="py-4 text-sm text-muted-foreground">
-                    OpenCode is not running, so the configured commands cannot be listed. Use Edit to change the config file directly.
-                  </p>
-                ) : (
+                {renderManagedConfigSection(
+                  'OpenCode is not running, so the configured commands cannot be listed. Use Edit to change the config file directly.',
                   <CommandsEditor
                     commands={managedCommands}
                     directoryCommands={directoryCommands}
                     onSave={(name, command, previousName) => saveManagedEntity('commands', name, command, previousName)}
                     onDelete={(name) => deleteManagedEntity('commands', name)}
-                  />
+                  />,
                 )}
               </div>
             </div>
@@ -400,7 +451,7 @@ export function OpenCodeConfigManager() {
                 <div className="flex min-w-0 items-center gap-3">
                   <h4 className={SECTION_TITLE_CLASS}>Agents</h4>
                   <span className={SECTION_META_CLASS}>
-                    {Object.keys(managedAgents).length + directoryAgents.length} configured
+                    {getManagedConfigCountLabel(Object.keys(managedAgents).length + directoryAgents.length)}
                   </span>
                 </div>
                 <ChevronDown className={cn(SECTION_CHEVRON_CLASS, expandedSections.agents && 'rotate-180')} />
@@ -409,17 +460,14 @@ export function OpenCodeConfigManager() {
                 id={agentsContentId}
                 className={cn(SECTION_CONTENT_CLASS, expandedSections.agents ? 'block' : 'hidden')}
               >
-                {isManagedConfigUnavailable ? (
-                  <p className="py-4 text-sm text-muted-foreground">
-                    OpenCode is not running, so the configured agents cannot be listed. Use Edit to change the config file directly.
-                  </p>
-                ) : (
+                {renderManagedConfigSection(
+                  'OpenCode is not running, so the configured agents cannot be listed. Use Edit to change the config file directly.',
                   <AgentsEditor
                     agents={managedAgents}
                     directoryAgents={directoryAgents}
                     onSave={(name, agent, previousName) => saveManagedEntity('agents', name, agent, previousName)}
                     onDelete={(name) => deleteManagedEntity('agents', name)}
-                  />
+                  />,
                 )}
               </div>
             </div>
@@ -463,7 +511,7 @@ export function OpenCodeConfigManager() {
                 <div className="flex min-w-0 items-center gap-3">
                   <h4 className={SECTION_TITLE_CLASS}>MCP Servers</h4>
                   <span className={SECTION_META_CLASS}>
-                    {Object.keys(managedMcpServers).length} configured
+                    {getManagedConfigCountLabel(Object.keys(managedMcpServers).length)}
                   </span>
                 </div>
                 <ChevronDown className={cn(SECTION_CHEVRON_CLASS, expandedSections.mcp && 'rotate-180')} />
@@ -472,16 +520,13 @@ export function OpenCodeConfigManager() {
                 id={mcpContentId}
                 className={cn(SECTION_CONTENT_CLASS, expandedSections.mcp ? 'block' : 'hidden')}
               >
-                {isManagedConfigUnavailable ? (
-                  <p className="py-4 text-sm text-muted-foreground">
-                    OpenCode is not running, so the configured MCP servers cannot be listed. Use Edit to change the config file directly.
-                  </p>
-                ) : (
+                {renderManagedConfigSection(
+                  'OpenCode is not running, so the configured MCP servers cannot be listed. Use Edit to change the config file directly.',
                   <McpManager
                     mcp={managedConfig?.info.mcp}
                     onSave={(serverId, server) => patchManagedConfig({ mcp: { servers: { [serverId]: server } } })}
                     onDelete={(serverId) => patchManagedConfig({ mcp: { servers: { [serverId]: null } } })}
-                  />
+                  />,
                 )}
               </div>
             </div>
@@ -498,10 +543,12 @@ export function OpenCodeConfigManager() {
                 <div className="flex min-w-0 items-center gap-3">
                   <h4 className={SECTION_TITLE_CLASS}>Models</h4>
                   <span className={SECTION_META_CLASS}>
-                    {Object.values(managedProviders).reduce<number>(
-                      (acc, provider) => acc + Object.keys(provider.models ?? {}).length,
-                      0,
-                    )} configured
+                    {getManagedConfigCountLabel(
+                      Object.values(managedProviders).reduce<number>(
+                        (acc, provider) => acc + Object.keys(provider.models ?? {}).length,
+                        0,
+                      ),
+                    )}
                   </span>
                 </div>
                 <ChevronDown className={cn(SECTION_CHEVRON_CLASS, expandedSections.models && 'rotate-180')} />
@@ -510,15 +557,12 @@ export function OpenCodeConfigManager() {
                 id={modelsContentId}
                 className={cn(SECTION_CONTENT_CLASS, expandedSections.models ? 'block' : 'hidden')}
               >
-                {isManagedConfigUnavailable ? (
-                  <p className="py-4 text-sm text-muted-foreground">
-                    OpenCode is not running, so the configured models cannot be listed. Use Edit to change the config file directly.
-                  </p>
-                ) : (
+                {renderManagedConfigSection(
+                  'OpenCode is not running, so the configured models cannot be listed. Use Edit to change the config file directly.',
                   <OpenCodeModelsEditor
                     providers={managedProviders}
                     onSave={(providers) => patchManagedConfigSafely({ providers })}
-                  />
+                  />,
                 )}
               </div>
             </div>

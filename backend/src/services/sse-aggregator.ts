@@ -410,38 +410,38 @@ class SSEAggregator {
   }
 
   private handleUpstreamEvent(event: V2Event): void {
-    const { payloadJson, directory, resolvedDirectory } = routeOpenCodeEvent(event, this.sessionDirectories)
+    const { directory, resolvedDirectory } = routeOpenCodeEvent(event, this.sessionDirectories)
 
     if (directory) {
       if (LOCATION_CATALOG_EVENT_TYPES.has(event.type)) {
-        this.deliverResolvedEvent(directory, event, payloadJson)
+        this.deliverResolvedEvent(directory, event)
       } else {
-        this.deliverEvent(directory, event, payloadJson)
+        this.deliverEvent(directory, event)
       }
       return
     }
 
     if (resolvedDirectory) {
-      this.deliverResolvedEvent(resolvedDirectory, event, payloadJson)
+      this.deliverResolvedEvent(resolvedDirectory, event)
       return
     }
 
     this.notifyListeners(null, event)
-    this.writeEnvelopeToClients(this.clients.keys(), null, payloadJson)
+    this.writeEnvelopeToClients(this.clients.keys(), null, event)
   }
 
-  private deliverEvent(directory: string, event: SSEEvent, payloadJson?: string): void {
+  private deliverEvent(directory: string, event: SSEEvent): void {
     this.notifyEvent(directory, event)
 
     const subscriberIds = this.directoryClients.get(directory)
     if (!subscriberIds || subscriberIds.size === 0) return
 
-    this.writeEnvelopeToClients(subscriberIds, directory, payloadJson ?? JSON.stringify(event))
+    this.writeEnvelopeToClients(subscriberIds, directory, event)
   }
 
-  private deliverResolvedEvent(directory: string, event: SSEEvent, payloadJson: string): void {
+  private deliverResolvedEvent(directory: string, event: SSEEvent): void {
     this.notifyEvent(directory, event)
-    this.writeEnvelopeToClients(this.clients.keys(), null, payloadJson)
+    this.writeEnvelopeToClients(this.clients.keys(), null, event)
   }
 
   private notifyEvent(directory: string, event: SSEEvent): void {
@@ -459,14 +459,14 @@ class SSEAggregator {
   private writeEnvelopeToClients(
     clientIds: Iterable<string>,
     directory: string | null,
-    payloadJson: string,
+    event: SSEEvent,
     serverId?: string,
   ): void {
     let frame: Uint8Array | null = null
     for (const clientId of clientIds) {
       const client = this.clients.get(clientId)
       if (!client) continue
-      frame ??= encodeSSEFrame('message', serializeEnvelope(directory, payloadJson, serverId))
+      frame ??= encodeSSEFrame('message', serializeEnvelope(directory, JSON.stringify(event), serverId))
       this.writeFrame(client, frame, 'Failed to send to client')
     }
   }
@@ -483,15 +483,15 @@ class SSEAggregator {
     return this.clients.get(clientId)?.directories.has(key) ?? false
   }
 
-  deliverRemoteEnvelope(serverId: string, directory: string | null, payloadJson: string): void {
-    this.writeEnvelopeToClients(this.clients.keys(), directory, payloadJson, serverId)
+  deliverRemoteEnvelope(serverId: string, directory: string | null, event: SSEEvent): void {
+    this.writeEnvelopeToClients(this.clients.keys(), directory, event, serverId)
   }
 
-  deliverRemoteEnvelopeToClient(clientId: string, serverId: string, directory: string, payloadJson: string): void {
+  deliverRemoteEnvelopeToClient(clientId: string, serverId: string, directory: string, event: SSEEvent): void {
     if (!this.hasClientDirectory(clientId, buildServerDirectoryKey(serverId, directory))) return
     const client = this.clients.get(clientId)
     if (!client) return
-    const frame = encodeSSEFrame('message', serializeEnvelope(directory, payloadJson, serverId))
+    const frame = encodeSSEFrame('message', serializeEnvelope(directory, JSON.stringify(event), serverId))
     this.writeFrame(client, frame, 'Failed to send remote event to client')
   }
 

@@ -19,6 +19,7 @@ import {
   isOpenCodeConfigSourceName,
 } from '@/api/types/settings'
 import type { OpenCodeConfigFile, OpenCodeConfigSourceFile, OpenCodeConfigSourceName } from '@/api/types/settings'
+import type { OpenCodeConfigValidationIssue } from '@opencode-manager/shared'
 
 type ValidationIssue = {
   path: string
@@ -121,14 +122,11 @@ export function OpenCodeConfigEditor({
   const getIssueText = (issue: ValidationIssue) => `${issue.path}: ${issue.message}`
 
   const resolveIssues = (
-    issues: Array<{ path: PropertyKey[] | string; message: string }>,
+    issues: OpenCodeConfigValidationIssue[],
   ): ValidationIssue[] =>
     issues.map((issue) => {
       const path = issue.path
-      const isStructured = Array.isArray(path)
-      const displaySegments = isStructured
-        ? path.map(String)
-        : String(path).split('.').filter((segment) => segment.length > 0)
+      const displaySegments = path.split('.').filter((segment) => segment.length > 0)
       const displayPath = displaySegments.length > 0 ? displaySegments.join('.') : 'root'
       return {
         path: displayPath,
