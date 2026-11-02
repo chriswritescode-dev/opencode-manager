@@ -1,4 +1,3 @@
-import { EventSource } from 'eventsource'
 import {
   openCodeLocation,
   sessionIDFromEvent,
@@ -7,8 +6,6 @@ import {
   type V2Event,
 } from '@opencode-manager/shared/opencode'
 import { logger } from '../utils/logger'
-
-const MULTILINE_PATTERN = /[\r\n]/
 
 type PermissionAskedEvent = Extract<V2Event, { type: 'permission.asked' }>
 type FormCreatedEvent = Extract<V2Event, { type: 'form.created' }>
@@ -49,8 +46,6 @@ export interface SessionStatusReplayPlan {
   idle: Array<{ sessionID: string; directory: string }>
   busy: string[]
 }
-
-export type EventSourceInit = ConstructorParameters<typeof EventSource>[1]
 
 /**
  * Partitions tracked sessions into those that must be replayed as idle and the
@@ -146,21 +141,6 @@ export function routeOpenCodeEvent(
   return { ...resolveEventRouting(event, sessionDirectories), payloadJson: JSON.stringify(event) }
 }
 
-export function parseOpenCodeEvent(data: string, sessionDirectories: Map<string, string>): RoutedOpenCodeEvent | null {
-  let event: V2Event
-  try {
-    event = JSON.parse(data) as V2Event
-  } catch {
-    return null
-  }
-
-  if (!event?.type) return null
-
-  const routed = resolveEventRouting(event, sessionDirectories)
-  const payloadJson = MULTILINE_PATTERN.test(data) ? JSON.stringify(event) : data
-  return { ...routed, payloadJson }
-}
-
 export async function collectPendingReplayEvents(request: PendingReplayRequest): Promise<PendingReplayEvents> {
   const { api, directory, buildEvent, logScope, logTarget } = request
   const [permissionsResult, formsResult] = await Promise.allSettled([
@@ -187,20 +167,6 @@ export async function collectPendingReplayEvents(request: PendingReplayRequest):
   }
 
   return { permissions, forms }
-}
-
-export function createAuthorizedEventSourceInit(authorization: string | null): EventSourceInit {
-  if (!authorization) return undefined
-  return {
-    fetch: (input, init) =>
-      fetch(input, {
-        ...init,
-        headers: {
-          ...(init?.headers ?? {}),
-          Authorization: authorization,
-        },
-      }),
-  }
 }
 
 export function nextBackoffDelay(currentDelayMs: number, maxDelayMs: number): number {

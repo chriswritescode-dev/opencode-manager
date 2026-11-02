@@ -32,10 +32,6 @@ vi.mock('@opencode-manager/shared/config', () => ({
   },
 }))
 
-vi.mock('eventsource', () => ({
-  EventSource: vi.fn(),
-}))
-
 vi.mock('../../src/utils/logger', () => ({
   logger: {
     info: vi.fn(),
