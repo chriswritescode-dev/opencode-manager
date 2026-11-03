@@ -10,9 +10,12 @@ import {
   restoreOpenCodeConfigSnapshot,
   serializeOpenCodeConfigSnapshot,
   updateOpenCodeConfigFile,
+  type OpenCodeConfigSnapshot,
   type OpenCodeConfigUpdateMode,
   withOpenCodeConfigLock,
 } from './opencode-config-file'
+import { readManagedOpenCodeConfig } from './opencode-config-effective'
+import { restoreOpenCodeConfigReferences } from './opencode-config-references'
 import { opencodeServerManager } from './opencode-single-server'
 import { reloadOpenCodeConfig } from './opencode-restart'
 import type { OpenCodeClient } from './opencode/client'
@@ -98,6 +101,20 @@ function requiresOpenCodeReload(previous: OpenCodeConfigFile | null, next: OpenC
   return listChangedTopLevelKeys(previous?.content ?? {}, next.content).length > 0
 }
 
+async function keepOpenCodeConfigReferences(
+  patch: Record<string, unknown>,
+  snapshot: OpenCodeConfigSnapshot,
+  openCodeClient: OpenCodeClient,
+): Promise<Record<string, unknown>> {
+  try {
+    const resolved = await readManagedOpenCodeConfig(openCodeClient.api, snapshot.sources)
+    return restoreOpenCodeConfigReferences(patch, resolved as Record<string, unknown>, snapshot.content)
+  } catch (error) {
+    logger.warn('Could not read the resolved OpenCode config; saving the patch without reference restoration:', error)
+    return patch
+  }
+}
+
 export async function applyOpenCodeConfigUpdate(
   input: ApplyOpenCodeConfigOptions,
 ): Promise<ApplyOpenCodeConfigResult> {
@@ -106,8 +123,11 @@ export async function applyOpenCodeConfigUpdate(
 
     const snapshot = await readOpenCodeConfigSnapshot()
     const previous = await readOpenCodeConfigFile(snapshot)
+    const savedContent = mode === 'merge' && typeof content !== 'string'
+      ? await keepOpenCodeConfigReferences(content, snapshot, input.openCodeClient)
+      : content
 
-    const next = await updateOpenCodeConfigFile(content, { source, expectedRevision, snapshot, mode })
+    const next = await updateOpenCodeConfigFile(savedContent, { source, expectedRevision, snapshot, mode })
 
     if (previous?.isValid) {
       const snapshot = serializeOpenCodeConfigSnapshot(previous)

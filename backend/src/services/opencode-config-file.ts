@@ -153,7 +153,8 @@ export interface OpenCodeConfigPathOperation {
   value: unknown
 }
 
-interface OpenCodeConfigV1EntityPath {
+/** Maps a v2 config entity container to the v1 container OpenCode converts it from. */
+export interface OpenCodeConfigV1EntityPath {
   v2Path: string[]
   v1Path: string[]
   named: boolean
@@ -165,7 +166,7 @@ interface OpenCodeConfigV1EntityRemoval {
   container?: JSONPath
 }
 
-const V1_ENTITY_PATHS: readonly OpenCodeConfigV1EntityPath[] = [
+export const V1_ENTITY_PATHS: readonly OpenCodeConfigV1EntityPath[] = [
   { v2Path: ['agents'], v1Path: ['agent'], named: true },
   { v2Path: ['commands'], v1Path: ['command'], named: true },
   { v2Path: ['providers'], v1Path: ['provider'], named: true },

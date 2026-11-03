@@ -11,6 +11,7 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
   getOpenCodeConfigFilePath: () => paths.config,
   getOpenCodeConfigHome: () => paths.configHome,
   getOpenCodeHealthWatchPath: () => paths.healthWatch,
+  getWorkspacePath: () => paths.configDir,
   OPENCODE_CONFIG_SOURCE_NAMES: ['opencode.json', 'opencode.jsonc'],
 }))
 
@@ -67,8 +68,10 @@ function parseSnapshot(snapshot: string): { version: number; sources: Array<{ na
 const locationReloadMock = vi.hoisted(() => vi.fn<() => Promise<void>>())
 const mcpAddMock = vi.hoisted(() => vi.fn<() => Promise<void>>())
 const mcpRemoveMock = vi.hoisted(() => vi.fn<() => Promise<void>>())
+const configGetMock = vi.hoisted(() => vi.fn<() => Promise<unknown[]>>())
 const openCodeClient = {
   api: {
+    config: { get: configGetMock },
     location: { reload: locationReloadMock },
     mcp: { add: mcpAddMock, remove: mcpRemoveMock },
   },
@@ -88,6 +91,7 @@ describe('opencode-config-apply', () => {
     locationReloadMock.mockReset().mockResolvedValue(undefined)
     mcpAddMock.mockReset().mockResolvedValue(undefined)
     mcpRemoveMock.mockReset().mockResolvedValue(undefined)
+    configGetMock.mockReset().mockRejectedValue(new Error('OpenCode unavailable'))
     workDir = await mkdtemp(path.join(tmpdir(), 'opencode-config-apply-'))
     paths.config = path.join(workDir, 'opencode.json')
     paths.configDir = workDir
@@ -124,6 +128,34 @@ describe('opencode-config-apply', () => {
     expect(locationReloadMock).toHaveBeenCalledTimes(1)
     expect(markRestartPendingMock).not.toHaveBeenCalled()
     expect(result.config.content).toEqual(change)
+  })
+
+  it('keeps an unchanged {env:} reference when a merge patch resends the resolved value', async () => {
+    await writeFile(
+      sourcePath('opencode.json'),
+      '{\n  // keep me\n  "providers": { "acme": { "settings": { "apiKey": "{env:ACME_KEY}" } } }\n}\n',
+      'utf8',
+    )
+    configGetMock.mockResolvedValue([
+      {
+        type: 'document',
+        path: sourcePath('opencode.json'),
+        info: { providers: { acme: { settings: { apiKey: 'secret' } } } },
+      },
+    ])
+
+    await applyOpenCodeConfigUpdate({
+      content: { providers: { acme: { name: 'Acme', settings: { apiKey: 'secret' } } } },
+      mode: 'merge',
+      settingsService,
+      openCodeClient,
+    })
+
+    const written = await readFile(sourcePath('opencode.json'), 'utf8')
+    expect(written).toContain('"apiKey": "{env:ACME_KEY}"')
+    expect(written).toContain('"name": "Acme"')
+    expect(written).toContain('// keep me')
+    expect(written).not.toContain('secret')
   })
 
   it('marks a restart pending when the reload fails', async () => {

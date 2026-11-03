@@ -216,6 +216,41 @@ describe('subscribeOpenCodeEvents', () => {
     subscription.close()
   })
 
+  it('keeps reconnecting when the disconnect handler throws', async () => {
+    const { api, subscriptions } = createFakeApi()
+    const onOpen = vi.fn()
+    const onDisconnect = vi.fn(() => {
+      throw new Error('disconnect failure')
+    })
+
+    const subscription = subscribeOpenCodeEvents({
+      api: () => api,
+      label: 'test',
+      onOpen,
+      onEvent: () => undefined,
+      onDisconnect,
+      reconnectDelayMs: 100,
+      maxReconnectDelayMs: 1000,
+    })
+
+    subscriptions[0]!.stream.push(serverConnected)
+    await flush()
+    expect(onOpen).toHaveBeenCalledTimes(1)
+
+    subscriptions[0]!.stream.end()
+    await flush()
+    expect(onDisconnect).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(100)
+    expect(subscriptions).toHaveLength(2)
+
+    subscriptions[1]!.stream.push(serverConnected)
+    await flush()
+    expect(onOpen).toHaveBeenCalledTimes(2)
+
+    subscription.close()
+  })
+
   it('doubles the reconnect delay after a thrown transport error and caps it', async () => {
     const { api, subscriptions } = createFakeApi()
     const onDisconnect = vi.fn()

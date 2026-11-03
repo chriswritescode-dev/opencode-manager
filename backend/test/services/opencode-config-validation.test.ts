@@ -52,4 +52,22 @@ describe('validateOpenCodeConfig', () => {
       }),
     ).toEqual({ success: true })
   })
+
+  it('reports the legacy v1 skills object with an actionable message', () => {
+    const result = validateOpenCodeConfig({ skills: { paths: ['/home/user/skills'] } })
+
+    expect(result.success).toBe(false)
+    if (result.success) return
+    expect(result.issues).toEqual([
+      {
+        path: 'skills',
+        message:
+          'skills must be a list of skill paths. Replace the legacy `skills: { paths: [...] }` object with `skills: [...]`.',
+      },
+    ])
+  })
+
+  it('accepts the v2 skills array', () => {
+    expect(validateOpenCodeConfig({ skills: ['/home/user/skills'] })).toEqual({ success: true })
+  })
 })

@@ -553,6 +553,7 @@ class SSEAggregator {
       }
       case 'session.deleted': {
         this.unmarkSubagentSession(directory, event.data.sessionID)
+        this.markSessionIdle(directory, event.data.sessionID)
         return
       }
     }

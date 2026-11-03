@@ -130,14 +130,24 @@ export function subscribeOpenCodeEvents(options: OpenCodeEventSubscriptionOption
 
       if (closed || token !== loopToken) return
 
-      options.onDisconnect(stallError ?? failure)
+      try {
+        options.onDisconnect(stallError ?? failure)
+      } catch (error) {
+        logger.error(`${options.label}: disconnect handler failed`, error)
+      }
       await wait(currentDelay)
       if (closed || token !== loopToken) return
       currentDelay = nextBackoffDelay(currentDelay, maxReconnectDelayMs)
     }
   }
 
-  void run(loopToken)
+  const startLoop = (token: number): void => {
+    void run(token).catch((error) => {
+      logger.error(`${options.label}: subscription loop failed`, error)
+    })
+  }
+
+  startLoop(loopToken)
 
   return {
     close: () => {
@@ -153,7 +163,7 @@ export function subscribeOpenCodeEvents(options: OpenCodeEventSubscriptionOption
       stopDelay()
       stopAttempt()
       currentDelay = reconnectDelayMs
-      void run(loopToken)
+      startLoop(loopToken)
     },
   }
 }

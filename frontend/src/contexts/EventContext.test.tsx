@@ -1230,6 +1230,7 @@ describe('EventProvider permissions and forms', () => {
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'agents'] })
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'skills'] })
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'providers'] })
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode-config', 'managed'] })
     })
   })
 
@@ -3109,6 +3110,7 @@ describe('EventProvider permissions and forms', () => {
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'agents', 'srv_remote'] })
     })
     expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['opencode', 'commands'] })
+    expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['opencode-config', 'managed'] })
   })
 
   it('reconciles only linked directories with active work on a remote resync', async () => {

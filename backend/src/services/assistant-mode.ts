@@ -19,7 +19,8 @@ import type { OpenCodeAgentConfig, OpenCodeApi, OpenCodeConfigInfo } from '@open
 import { validateOpenCodeConfig } from '@opencode-manager/shared/opencode/config-validation'
 import type { Database } from 'bun:sqlite'
 import { ensureAssistantRepo } from '../db/queries'
-import { applyOpenCodeConfigEdits, removeOpenCodeConfigProperty, type OpenCodeConfigPathOperation } from './opencode-config-file'
+import { applyOpenCodeConfigEdits, removeOpenCodeConfigProperty, V1_ENTITY_PATHS, type OpenCodeConfigPathOperation } from './opencode-config-file'
+import { readConfigValueAtPath, restoreOpenCodeConfigReferences } from './opencode-config-references'
 import { readOpenCodeConfigDocuments } from './opencode-config-effective'
 import { logger } from '../utils/logger'
 
@@ -788,9 +789,9 @@ Read the merged persisted global configuration and its source files. Returns \`4
 
 ### PATCH /opencode-config
 
-Change only the paths the user asked for. Send a nested \`patch\` object naming those paths and the values to set; every path you do not name is left untouched, and a \`null\` value removes a path. Only changed fields are patched into the preferred existing source: JSONC, then JSON. New installations use opencode.jsonc. Unchanged inherited values and comments are preserved.
+Change only the paths the user asked for. Send a nested \`patch\` object naming those paths and the values to set; a path you do not name keeps its current value, and a \`null\` value removes a path. Naming a v2 entity (\`agents.<name>\`, \`commands.<name>\`, \`providers.<id>\`, \`mcp.servers.<name>\`, or \`permissions\`) also deletes its v1 counterpart (\`agent.<name>\`, \`command.<name>\`, \`provider.<id>\`, \`mcp.<name>\`, or \`permission\`) in the same edit. \`{env:…}\` and \`{file:…}\` references in fields whose value is sent back unchanged are kept. Only changed fields are patched into the preferred existing source: JSONC, then JSON. New installations use opencode.jsonc. Unchanged inherited values and comments are preserved.
 
-Send \`expectedRevision\` from a read. A \`409\` means the source files changed: read again and reconcile rather than retrying stale content.
+Send \`expectedRevision\` from a read. A \`409\` means either \`expectedRevision\` is stale or the v1 entry to remove exists only in a lower-priority config source (the \`OpenCodeConfigShadowedRemovalError\` case): read again and reconcile rather than retrying stale content.
 
 **Request Body:**
 \`\`\`ts
@@ -818,11 +819,11 @@ Send \`expectedRevision\` from a read. A \`409\` means the source files changed:
 \`\`\`
 
 **Response:**
-Returns the refreshed merged configuration and source files, with secrets redacted. A semantic change is applied automatically: the Manager reloads OpenCode without restarting the server, so agents, permissions, providers, models, and plugins take effect on the next message and running sessions keep running. An \`mcp\` change is applied the same way, and only the servers whose configuration changed reconnect. Comment-only changes do nothing. Saving never silently drops unsupported fields.
+Returns the refreshed merged configuration and source files, with secrets redacted. A semantic change is applied automatically: the Manager reloads OpenCode without restarting the server, so agents, permissions, providers, models, and plugins take effect on the next message and running sessions keep running. An \`mcp\` change is applied the same way, and only the servers whose configuration changed reconnect. Comment-only changes do nothing.
 
 The response adds \`restartRequired: true\` only when the automatic reload failed, for example because the OpenCode server is unavailable.
 
-Returns \`400\` for invalid configuration or a \`<redacted>\` value (\`paths\` lists them), and \`409\` for a stale revision.
+Returns \`400\` for invalid configuration or a \`<redacted>\` value (\`paths\` lists them), and \`409\` when \`expectedRevision\` is stale or the v1 entry to remove exists only in a lower-priority config source.
 
 ### GET /opencode-config/mcp
 
@@ -1359,9 +1360,26 @@ function parseAssistantOpenCodeConfig(rawContent: string): Record<string, unknow
   }
 }
 
+/**
+ * Resolves the v1 container that OpenCode converts into the given v2 container.
+ */
+function resolveV1EntityPath(v2Path: readonly string[]): string[] {
+  const mapping = V1_ENTITY_PATHS.find(
+    (entry) => entry.v2Path.length === v2Path.length && entry.v2Path.every((segment, index) => segment === v2Path[index]),
+  )
+  if (mapping === undefined) {
+    throw new Error(`No v1 config path is defined for ${v2Path.join('.')}`)
+  }
+  return [...mapping.v1Path]
+}
+
+const ASSISTANT_V1_AGENT_PATH = resolveV1EntityPath(['agents'])
+const ASSISTANT_V1_PERMISSION_PATH = resolveV1EntityPath(['permissions'])
+
 function hasAssistantV1OpenCodeConfig(config: Record<string, unknown>): boolean {
-  if (config.permission !== undefined) return true
-  return isRecord(config.agent) && isRecord(config.agent.assistant)
+  if (readConfigValueAtPath(config, ASSISTANT_V1_PERMISSION_PATH) !== undefined) return true
+  const v1Agents = readConfigValueAtPath(config, ASSISTANT_V1_AGENT_PATH)
+  return isRecord(v1Agents) && isRecord(v1Agents[ASSISTANT_DEFAULT_AGENT_NAME])
 }
 
 function assistantOpenCodeConfigNeedsRepair(config: OpenCodeConfigInfo): boolean {
@@ -1377,9 +1395,7 @@ function assistantOpenCodeConfigNeedsRepair(config: OpenCodeConfigInfo): boolean
 }
 
 function assistantOpenCodeConfigHasGeneratedAgentPersona(config: OpenCodeConfigInfo): boolean {
-  const agent = config.agents?.[ASSISTANT_DEFAULT_AGENT_NAME]
-  if (typeof agent !== 'object' || agent === null) return false
-  return matchesGeneratedAssistantAgentPrompt(agent.system)
+  return normalizeAssistantAgent(config.agents?.[ASSISTANT_DEFAULT_AGENT_NAME]) !== undefined
 }
 
 function resolveValidAssistantMode(agent: unknown): 'primary' | 'all' {
@@ -1387,15 +1403,24 @@ function resolveValidAssistantMode(agent: unknown): 'primary' | 'all' {
   return mode === 'primary' || mode === 'all' ? mode : 'primary'
 }
 
+/**
+ * Reduces a generated assistant persona to a mode-only agent, leaving a customized persona to the caller.
+ */
+function normalizeAssistantAgent(agent: unknown): OpenCodeAgentConfig | undefined {
+  if (!isRecord(agent) || !matchesGeneratedAssistantAgentPrompt(agent.system)) return undefined
+  return { mode: resolveValidAssistantMode(agent) }
+}
+
 function stripGeneratedAssistantAgentPersona(config: OpenCodeConfigInfo): OpenCodeConfigInfo {
   const existingAssistantAgent = config.agents?.[ASSISTANT_DEFAULT_AGENT_NAME]
-  const validMode = resolveValidAssistantMode(existingAssistantAgent)
 
   return {
     ...config,
     agents: {
       ...(config.agents ?? {}),
-      [ASSISTANT_DEFAULT_AGENT_NAME]: { mode: validMode },
+      [ASSISTANT_DEFAULT_AGENT_NAME]: normalizeAssistantAgent(existingAssistantAgent) ?? {
+        mode: resolveValidAssistantMode(existingAssistantAgent),
+      },
     },
   }
 }
@@ -1404,20 +1429,10 @@ function mergeAssistantOpenCodeConfig(existing?: OpenCodeConfigInfo): OpenCodeCo
   const generated = buildAssistantOpenCodeConfig()
   const existingAssistantAgent = existing?.agents?.[ASSISTANT_DEFAULT_AGENT_NAME]
   const validMode = resolveValidAssistantMode(existingAssistantAgent)
-
-  const existingIsGenerated = typeof existingAssistantAgent === 'object' &&
-    existingAssistantAgent !== null &&
-    matchesGeneratedAssistantAgentPrompt(existingAssistantAgent.system)
-
-  let mergedAssistantAgent: OpenCodeAgentConfig
-  if (existingIsGenerated) {
-    mergedAssistantAgent = { mode: validMode }
-  } else {
-    mergedAssistantAgent = {
-      ...(typeof existingAssistantAgent === 'object' && existingAssistantAgent !== null ? existingAssistantAgent : {}),
-      mode: validMode,
-      disabled: false,
-    }
+  const mergedAssistantAgent: OpenCodeAgentConfig = normalizeAssistantAgent(existingAssistantAgent) ?? {
+    ...(existingAssistantAgent ?? {}),
+    mode: validMode,
+    disabled: false,
   }
 
   return {
@@ -1432,15 +1447,20 @@ function mergeAssistantOpenCodeConfig(existing?: OpenCodeConfigInfo): OpenCodeCo
   }
 }
 
-function buildAssistantV1ConfigRemovalPaths(config: Record<string, unknown>): string[][] {
-  const v1Agent = config.agent
+function buildAssistantV1ConfigRemovalPaths(
+  config: Record<string, unknown>,
+  convertedPermissions: unknown,
+): string[][] {
+  const v1Agent = readConfigValueAtPath(config, ASSISTANT_V1_AGENT_PATH)
   const removeWholeAgent = isRecord(v1Agent) &&
     Object.keys(v1Agent).length === 1 &&
-    isRecord(v1Agent.assistant)
+    isRecord(v1Agent[ASSISTANT_DEFAULT_AGENT_NAME])
 
-  const paths: string[][] = [removeWholeAgent ? ['agent'] : ['agent', ASSISTANT_DEFAULT_AGENT_NAME]]
-  if (config.permission !== undefined) {
-    paths.push(['permission'])
+  const paths: string[][] = [
+    removeWholeAgent ? ASSISTANT_V1_AGENT_PATH : [...ASSISTANT_V1_AGENT_PATH, ASSISTANT_DEFAULT_AGENT_NAME],
+  ]
+  if (convertedPermissions !== undefined && readConfigValueAtPath(config, ASSISTANT_V1_PERMISSION_PATH) !== undefined) {
+    paths.push(ASSISTANT_V1_PERMISSION_PATH)
   }
   return paths
 }
@@ -1449,12 +1469,22 @@ function resolveConvertedAssistantAgent(
   agent: OpenCodeAgentConfig | undefined,
   v1Agent: unknown,
 ): OpenCodeAgentConfig {
-  if (agent === undefined) {
-    return { mode: resolveValidAssistantMode(v1Agent) }
-  }
-  return matchesGeneratedAssistantAgentPrompt(agent.system)
-    ? { mode: resolveValidAssistantMode(agent) }
-    : agent
+  return normalizeAssistantAgent(agent) ?? agent ?? { mode: resolveValidAssistantMode(v1Agent) }
+}
+
+function restoreAssistantAgentReferences(
+  agent: OpenCodeAgentConfig,
+  resolved: OpenCodeConfigInfo,
+  raw: Record<string, unknown>,
+): OpenCodeAgentConfig {
+  const restored = restoreOpenCodeConfigReferences(
+    { agents: { [ASSISTANT_DEFAULT_AGENT_NAME]: agent } },
+    resolved as Record<string, unknown>,
+    raw,
+  )
+  const restoredAgent = readConfigValueAtPath(restored, ['agents', ASSISTANT_DEFAULT_AGENT_NAME])
+  if (typeof restoredAgent !== 'object' || restoredAgent === null) return agent
+  return restoredAgent as OpenCodeAgentConfig
 }
 
 /**
@@ -1476,13 +1506,18 @@ export async function convertAssistantOpenCodeConfigToV2(api: OpenCodeApi): Prom
     const documentInfo = documents.get(path.resolve(opencodeJsonPath))
     if (documentInfo === undefined) return false
 
-    const v1AssistantAgent = isRecord(rawConfig.agent) ? rawConfig.agent.assistant : undefined
+    const v1Assistants = readConfigValueAtPath(rawConfig, ASSISTANT_V1_AGENT_PATH)
+    const v1AssistantAgent = isRecord(v1Assistants) ? v1Assistants[ASSISTANT_DEFAULT_AGENT_NAME] : undefined
     const setOperations: OpenCodeConfigPathOperation[] = [
       {
         path: ['agents', ASSISTANT_DEFAULT_AGENT_NAME],
-        value: resolveConvertedAssistantAgent(
-          documentInfo.agents?.[ASSISTANT_DEFAULT_AGENT_NAME],
-          v1AssistantAgent,
+        value: restoreAssistantAgentReferences(
+          resolveConvertedAssistantAgent(
+            documentInfo.agents?.[ASSISTANT_DEFAULT_AGENT_NAME],
+            v1AssistantAgent,
+          ),
+          documentInfo,
+          rawConfig,
         ),
       },
     ]
@@ -1491,7 +1526,7 @@ export async function convertAssistantOpenCodeConfigToV2(api: OpenCodeApi): Prom
     }
 
     let updatedText = applyOpenCodeConfigEdits(rawContent, setOperations)
-    for (const removalPath of buildAssistantV1ConfigRemovalPaths(rawConfig)) {
+    for (const removalPath of buildAssistantV1ConfigRemovalPaths(rawConfig, documentInfo.permissions)) {
       updatedText = removeOpenCodeConfigProperty(updatedText, removalPath)
     }
 

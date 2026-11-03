@@ -42,6 +42,7 @@ import {
   invalidateQueryKeysDebounced,
   invalidateRepoGitCachesDebounced,
   invalidateSessionListCachesDebounced,
+  OPEN_CODE_MANAGED_CONFIG_QUERY_KEY,
 } from '@/lib/queryInvalidation'
 
 const STATUS_POLL_INTERVAL_MS = 5000
@@ -1273,7 +1274,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       void fetchInitialSessionStatuses()
       void syncRunningShells(directories)
       invalidateChildSessionCaches(queryClient)
-      invalidateQueryKeysDebounced(queryClient, LOCATION_CATALOG_QUERY_KEYS)
+      invalidateQueryKeysDebounced(queryClient, [
+        ...LOCATION_CATALOG_QUERY_KEYS,
+        OPEN_CODE_MANAGED_CONFIG_QUERY_KEY,
+      ])
     }
 
     const initialDirectories = [...new Set((reposRef.current ?? []).map(r => r.fullPath))]

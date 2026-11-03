@@ -1,5 +1,5 @@
+import { isRecord } from '@opencode-manager/shared/utils'
 import type { OpenCodeConfigFile } from '../types/settings'
-import { isRecord } from './opencode/enforcement-config'
 import { OPENCODE_CONFIG_REDACTED_VALUE } from './opencode-config-file'
 
 const SECRET_KEYS = new Set([

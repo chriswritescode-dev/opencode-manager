@@ -206,6 +206,16 @@ describe('SSEAggregator V2 event handling', () => {
     expect(sseAggregator.getActiveSessions()).toEqual({})
   })
 
+  it('clears a busy session from the active set when it is deleted without going idle', () => {
+    emitEvent({ type: 'session.status', location: { directory: '/r' }, data: { sessionID: 'ses_deleted', status: { type: 'busy' } } })
+
+    expect(sseAggregator.getActiveSessions()).toEqual({ '/r': ['ses_deleted'] })
+
+    emitEvent({ type: 'session.deleted', location: { directory: '/r' }, data: { sessionID: 'ses_deleted' } })
+
+    expect(sseAggregator.getActiveSessions()).toEqual({})
+  })
+
   it('records subagent sessions from session.created parentID and forgets deleted ones', () => {
     emitEvent({
       type: 'session.created',
