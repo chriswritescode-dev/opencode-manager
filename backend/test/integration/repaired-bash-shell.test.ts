@@ -462,7 +462,7 @@ describe.skipIf(BINARY === null)('model bash calls over the shipped OpenCode 2 b
   }, SCENARIO_TIMEOUT_MS)
 
   afterAll(async () => {
-    await harness.dispose()
+    await harness?.dispose()
   })
 
   it.skipIf(!REPAIRS_BASH)(
@@ -622,7 +622,7 @@ describe.skipIf(BINARY === null)('plugin-provided bash tool over the shipped Ope
   }, SCENARIO_TIMEOUT_MS)
 
   afterAll(async () => {
-    await harness.dispose()
+    await harness?.dispose()
   })
 
   it(
