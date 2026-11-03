@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SessionMessageInfo } from '@opencode-manager/shared/opencode'
 import {
   applyShellExit,
+  backgroundShellID,
   childLifecycle,
   clearShellExitRecord,
   collectBackgroundParts,
@@ -17,6 +18,7 @@ import {
   upsertShell,
   type ShellRecord,
 } from './backgroundWork'
+import { repairedBashFixture, toolPart } from '@/test/fixtures/repaired-bash'
 
 const shellNotice = (
   id: string,
@@ -181,6 +183,47 @@ describe('shellBackgroundTasks', () => {
       true,
     )
 
+    expect(tasks[0]?.status).toBe('failed')
+  })
+})
+
+describe('background reconciliation with recorded repaired bash calls', () => {
+  it('does not treat a backgrounded bash call as a tracked shell', () => {
+    const fixture = repairedBashFixture('2.2.5', 'bash-background')
+
+    expect(backgroundShellID(toolPart(fixture.messages, 'bash'))).toBeUndefined()
+  })
+
+  it('tracks the shell handle of a backgrounded built-in shell call', () => {
+    const fixture = repairedBashFixture('2.2.5', 'shell-background')
+
+    expect(backgroundShellID(toolPart(fixture.messages, 'shell'))).toBe(
+      'sh_1a1d626e9001cFRHz7DSgXTPl3',
+    )
+  })
+
+  it('keeps a backgrounded bash call out of the shell tasks while its completion notice arrives', () => {
+    const fixture = repairedBashFixture('2.2.5', 'bash-background')
+    const collected = collectBackgroundParts(fixture.messages)
+
+    expect(collected.shells).toEqual([])
+    expect(collected.shellNotices.get('sh_1a1d62240001iKcnxmuOciN8v2')).toBe('failed')
+  })
+
+  it('ignores a plugin bash tool that reports shell-shaped metadata', () => {
+    const fixture = repairedBashFixture('2.2.5', 'custom-bash')
+
+    expect(collectBackgroundParts(fixture.messages).shells).toEqual([])
+  })
+
+  it('reports a backgrounded shell that exited non-zero as failed from its recorded notice', () => {
+    const fixture = repairedBashFixture('2.2.5', 'shell-background')
+    const collected = collectBackgroundParts(fixture.messages)
+
+    const tasks = shellBackgroundTasks([], collected.shells, collected.shellNotices, true)
+
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0]?.id).toBe('sh_1a1d626e9001cFRHz7DSgXTPl3')
     expect(tasks[0]?.status).toBe('failed')
   })
 })

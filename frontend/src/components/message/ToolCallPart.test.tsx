@@ -7,6 +7,7 @@ import { ToolCallPart } from './ToolCallPart'
 import { getFileApiUrl } from '@/api/files'
 import { useUserBash } from '@/stores/userBashStore'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
+import { repairedBashFixture, toolPart } from '@/test/fixtures/repaired-bash'
 
 const mocks = vi.hoisted(() => ({
   useSettings: vi.fn(),
@@ -361,6 +362,62 @@ describe('ToolCallPart shell exit status', () => {
 
     expect(screen.getByText('completed')).toBeInTheDocument()
     expect(screen.queryByText('✗')).not.toBeInTheDocument()
+  })
+})
+
+describe('ToolCallPart with recorded repaired bash calls', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useSettings.mockReturnValue({
+      preferences: { expandToolCalls: false },
+      isLoading: false,
+      updateSettings: vi.fn(),
+      isUpdating: false,
+    })
+    mocks.useToolCallPermission.mockReturnValue(null)
+    useUserBash.setState({ userBashCommands: new Map() })
+  })
+
+  const recordedPart = (scenario: string, name: string) =>
+    toolPart(repairedBashFixture('2.2.5', scenario).messages, name)
+
+  it('renders a failing bash call as a successful generic tool', () => {
+    renderWithProviders(
+      <ToolCallPart part={recordedPart('bash-exit-nonzero', 'bash')} messageID="msg_1" />,
+    )
+
+    expect(screen.getByText('completed')).toBeInTheDocument()
+    expect(screen.getByText('✓').parentElement).toHaveClass('text-success')
+    expect(screen.queryByText('exit 3')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Show shell details' })).not.toBeInTheDocument()
+  })
+
+  it('renders a backgrounded bash call as a completed generic tool', () => {
+    renderWithProviders(
+      <ToolCallPart part={recordedPart('bash-background', 'bash')} messageID="msg_1" />,
+    )
+
+    expect(screen.getByText('completed')).toBeInTheDocument()
+    expect(screen.queryByText('background')).not.toBeInTheDocument()
+  })
+
+  it('renders a plugin bash tool with shell-shaped metadata as a generic tool', () => {
+    renderWithProviders(<ToolCallPart part={recordedPart('custom-bash', 'bash')} messageID="msg_1" />)
+
+    expect(screen.getByText('bash')).toBeInTheDocument()
+    expect(screen.getByText('completed')).toBeInTheDocument()
+    expect(screen.queryByText('exit 7')).not.toBeInTheDocument()
+    expect(screen.queryByText('background')).not.toBeInTheDocument()
+  })
+
+  it('keeps the exit status of a failing built-in shell call', () => {
+    renderWithProviders(
+      <ToolCallPart part={recordedPart('shell-exit-nonzero', 'shell')} messageID="msg_1" />,
+    )
+
+    const statusGlyph = screen.getByText('✗').parentElement
+    expect(statusGlyph).toHaveClass('text-destructive')
+    expect(statusGlyph?.parentElement?.textContent).toContain('exit 5')
   })
 })
 
