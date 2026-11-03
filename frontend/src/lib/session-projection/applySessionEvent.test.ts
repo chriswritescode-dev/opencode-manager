@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import type { SessionMessageAssistant, V2Event } from '@opencode-manager/shared/opencode'
+import type {
+  SessionMessageAssistant,
+  SessionMessageAssistantTool,
+  V2Event,
+} from '@opencode-manager/shared/opencode'
 import {
   applySessionEvent,
   applySessionEvents,
@@ -33,6 +37,11 @@ import {
   syntheticSequence,
   textStreamSequence,
 } from '@/test/fixtures/session-projection'
+import {
+  repairedBashFixture,
+  toolPart,
+  type RepairedBashVersion,
+} from '@/test/fixtures/repaired-bash'
 
 function applyAll(events: V2Event[]): SessionTranscript {
   return events.reduce(applySessionEvent, emptySessionTranscript)
@@ -781,5 +790,71 @@ describe('hydrateSessionTranscript', () => {
     const transcript = hydrateSessionTranscript({ messages, pending: [], status: 'busy' })
 
     expect(transcript.messages).toBe(messages)
+  })
+})
+
+describe('repaired bash projection (OpenCode 2.2.5 recorded)', () => {
+  function projectedTool(
+    version: RepairedBashVersion,
+    scenario: string,
+    name: string,
+  ): { live: SessionMessageAssistantTool; reload: SessionMessageAssistantTool } {
+    const fixture = repairedBashFixture(version, scenario)
+    const live = toolPart(applyAll(fixture.events).messages, name)
+    const reload = toolPart(
+      hydrateSessionTranscript({ messages: fixture.messages, pending: [], status: 'idle' }).messages,
+      name,
+    )
+    return { live, reload }
+  }
+
+  function settledState(part: SessionMessageAssistantTool) {
+    if (part.state.status === 'streaming') throw new Error('expected a settled tool state')
+    return part.state
+  }
+
+  it('keeps the model-supplied bash name when the server ran a failing call as the built-in shell', () => {
+    const { live, reload } = projectedTool('2.2.5', 'bash-exit-nonzero', 'bash')
+
+    expect(live.name).toBe('bash')
+    expect(reload.name).toBe('bash')
+    expect(live.state.status).toBe(reload.state.status)
+    expect(settledState(live).metadata).toEqual(settledState(reload).metadata)
+    expect(settledState(live).metadata).toMatchObject({ exit: 3 })
+  })
+
+  it('keeps the model-supplied bash name and shell handle for a background built-in shell call', () => {
+    const { live, reload } = projectedTool('2.2.5', 'bash-background', 'bash')
+
+    expect(live.name).toBe('bash')
+    expect(reload.name).toBe('bash')
+    expect(live.state.status).toBe(reload.state.status)
+    expect(settledState(live).metadata).toEqual(settledState(reload).metadata)
+    expect(settledState(live).metadata).toMatchObject({ shellID: expect.any(String) })
+  })
+
+  it('keeps the model-supplied bash name for a plugin-provided bash tool', () => {
+    const { live, reload } = projectedTool('2.2.5', 'custom-bash', 'bash')
+
+    expect(live.name).toBe('bash')
+    expect(reload.name).toBe('bash')
+    expect(live.state.status).toBe(reload.state.status)
+    expect(settledState(live).metadata).toEqual(settledState(reload).metadata)
+  })
+
+  it('keeps the shell name when the model called the built-in shell tool', () => {
+    const { live, reload } = projectedTool('2.2.5', 'shell-exit-nonzero', 'shell')
+
+    expect(live.name).toBe('shell')
+    expect(reload.name).toBe('shell')
+  })
+
+  it('projects the failed 2.2.1 bash call as an error that keeps the bash name', () => {
+    const { live, reload } = projectedTool('2.2.1', 'bash-exit-nonzero', 'bash')
+
+    expect(live.name).toBe('bash')
+    expect(reload.name).toBe('bash')
+    expect(live.state.status).toBe('error')
+    expect(reload.state.status).toBe('error')
   })
 })
