@@ -1,0 +1,4078 @@
+{
+  "version": "2.2.1",
+  "scenarios": {
+    "bash-exit-0": {
+      "events": [
+        {
+          "id": "evt_1a1d639f1001ofqwrMW6QZWM4G",
+          "created": 1793716533745,
+          "type": "session.created",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "slug": "silent-island",
+            "version": "2.2.1",
+            "projectID": "c673d5ccdb3b5766e47ed3570b5904fd96230519",
+            "location": {
+              "directory": "/workspace"
+            },
+            "subpath": "",
+            "title": "bash-exit-0"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "seq": 0,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63c090019iqlwk3fST69mr",
+          "created": 1793716534281,
+          "type": "session.inbox.enqueued",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "inboxID": "msg_1a1d63a34001athxxCF28xJ7Hu",
+            "sessionID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "item": {
+              "type": "user",
+              "payload": {
+                "text": "SCENARIO:bash-exit-0"
+              },
+              "delivery": "steer"
+            }
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "seq": 1,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63c0c001JMhJP0JN5zJ852",
+          "created": 1793716534285,
+          "type": "session.execution.started",
+          "data": {
+            "sessionID": "ses_e5e29c613ffejG76M17tuhMV84"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "seq": 2,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63c14001bilSt2KXqRgnM0",
+          "created": 1793716534292,
+          "metadata": {
+            "instructions": {
+              "initial": true
+            }
+          },
+          "type": "session.instructions.updated",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "delta": {
+              "core/codemode": "1f1291478accf8b3e4d96a40c150bf844d60557dede4aae56c47ea0043bbdce2",
+              "core/skill-guidance": "8394362d28c82fa4d13c7a9f5568c05680f6687e07db8f426a0e3c92f3027dc9",
+              "core/date": "7df34de0f5e66dd7c4cf433fb9f6dac545e971cc1cc13570f58d41eb4e857c00",
+              "core/environment": "b7e1be42e58cdd1d6060532a203a8cda6a9fbe0341949369dac6dac0bd5de171"
+            }
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "seq": 3,
+            "version": 2
+          }
+        },
+        {
+          "id": "evt_1a1d63c15001b7f0EYuN0CtA1j",
+          "created": 1793716534293,
+          "type": "session.inbox.delivered",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "inboxID": "msg_1a1d63a34001athxxCF28xJ7Hu"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "seq": 4,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63c2f001IBmgpoIKe2lnc8",
+          "created": 1793716534319,
+          "type": "session.step.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "agent": "build",
+            "model": {
+              "id": "mock-model",
+              "providerID": "mock"
+            },
+            "assistantMessageID": "msg_1a1d63c1c001gE5MtUsugdyF62",
+            "started": 1793716534309
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "seq": 5,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63c31001Ud6lEvN5tJd9iz",
+          "created": 1793716534322,
+          "type": "session.tool.input.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "assistantMessageID": "msg_1a1d63c1c001gE5MtUsugdyF62",
+            "id": "call_1",
+            "name": "bash"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "seq": 6,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63c34001uVuBT457NlsHbS",
+          "created": 1793716534324,
+          "type": "session.tool.input.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "assistantMessageID": "msg_1a1d63c1c001gE5MtUsugdyF62",
+            "id": "call_1",
+            "text": "{\"command\":\"echo ok\"}"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "seq": 7,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63c36001Z7QBD2L1VSGL0f",
+          "created": 1793716534326,
+          "type": "session.tool.called",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "assistantMessageID": "msg_1a1d63c1c001gE5MtUsugdyF62",
+            "id": "call_1",
+            "input": {
+              "command": "echo ok"
+            },
+            "executed": false
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "seq": 8,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63c37001AYg9i1rSB6kWMn",
+          "created": 1793716534327,
+          "type": "session.step.streamed",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "assistantMessageID": "msg_1a1d63c1c001gE5MtUsugdyF62"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "seq": 9,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63c390016xMktIwsSm3Sn1",
+          "created": 1793716534329,
+          "type": "session.tool.failed",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "assistantMessageID": "msg_1a1d63c1c001gE5MtUsugdyF62",
+            "id": "call_1",
+            "error": {
+              "type": "tool.execution",
+              "message": "No tool named \"bash\" is currently available. Please use a tool from the available tool list."
+            },
+            "executed": false
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "seq": 10,
+            "version": 2
+          }
+        },
+        {
+          "id": "evt_1a1d63c3a001STtEf0yHlIxQ2b",
+          "created": 1793716534330,
+          "type": "session.step.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "assistantMessageID": "msg_1a1d63c1c001gE5MtUsugdyF62",
+            "finish": "tool-calls",
+            "rawFinish": "tool_calls",
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "cost": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "seq": 11,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63c3b001DyBejrWIUQR8Il",
+          "created": 1793716534331,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "evt_1a1d63c4a001U7hnCu8kcYsiCb",
+          "created": 1793716534346,
+          "type": "session.step.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "agent": "build",
+            "model": {
+              "id": "mock-model",
+              "providerID": "mock"
+            },
+            "assistantMessageID": "msg_1a1d63c40001uMNxp0VDp7VJls",
+            "started": 1793716534340
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "seq": 12,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63c4b001RevkjihziAv1Gu",
+          "created": 1793716534347,
+          "type": "session.text.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "assistantMessageID": "msg_1a1d63c40001uMNxp0VDp7VJls",
+            "ordinal": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "seq": 13,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63c4d001jHko0NmphphNCx",
+          "created": 1793716534349,
+          "type": "session.text.delta",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "assistantMessageID": "msg_1a1d63c40001uMNxp0VDp7VJls",
+            "ordinal": 0,
+            "delta": "FINAL"
+          }
+        },
+        {
+          "id": "evt_1a1d63c4d002o5BCa2MlwTGGcg",
+          "created": 1793716534349,
+          "type": "session.text.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "assistantMessageID": "msg_1a1d63c40001uMNxp0VDp7VJls",
+            "ordinal": 0,
+            "text": "FINAL"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "seq": 14,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63c4e001k9wwxCS2raswWP",
+          "created": 1793716534350,
+          "type": "session.step.streamed",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "assistantMessageID": "msg_1a1d63c40001uMNxp0VDp7VJls"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "seq": 15,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63c4f0012f4nfvNCdUXPVb",
+          "created": 1793716534351,
+          "type": "session.step.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "assistantMessageID": "msg_1a1d63c40001uMNxp0VDp7VJls",
+            "finish": "stop",
+            "rawFinish": "stop",
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "cost": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "seq": 16,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63c50001L8dLHp2JuyMI57",
+          "created": 1793716534352,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "evt_1a1d63c51001jClT3eZsR0Th1H",
+          "created": 1793716534353,
+          "type": "session.execution.succeeded",
+          "data": {
+            "sessionID": "ses_e5e29c613ffejG76M17tuhMV84"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c613ffejG76M17tuhMV84",
+            "seq": 17,
+            "version": 1
+          }
+        }
+      ],
+      "messages": [
+        {
+          "id": "msg_1a1d63a34001athxxCF28xJ7Hu",
+          "time": {
+            "created": 1793716534293
+          },
+          "text": "SCENARIO:bash-exit-0",
+          "type": "user"
+        },
+        {
+          "id": "msg_1a1d63c1c001gE5MtUsugdyF62",
+          "time": {
+            "created": 1793716534309,
+            "streamed": 1793716534327,
+            "completed": 1793716534330
+          },
+          "type": "assistant",
+          "agent": "build",
+          "model": {
+            "id": "mock-model",
+            "providerID": "mock"
+          },
+          "content": [
+            {
+              "type": "tool",
+              "id": "call_1",
+              "name": "bash",
+              "executed": false,
+              "state": {
+                "status": "error",
+                "input": {
+                  "command": "echo ok"
+                },
+                "error": {
+                  "type": "tool.execution",
+                  "message": "No tool named \"bash\" is currently available. Please use a tool from the available tool list."
+                }
+              },
+              "time": {
+                "created": 1793716534322,
+                "ran": 1793716534326,
+                "completed": 1793716534329
+              }
+            }
+          ],
+          "finish": "tool-calls",
+          "rawFinish": "tool_calls",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        },
+        {
+          "id": "msg_1a1d63c40001uMNxp0VDp7VJls",
+          "time": {
+            "created": 1793716534340,
+            "streamed": 1793716534350,
+            "completed": 1793716534351
+          },
+          "type": "assistant",
+          "agent": "build",
+          "model": {
+            "id": "mock-model",
+            "providerID": "mock"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "FINAL"
+            }
+          ],
+          "finish": "stop",
+          "rawFinish": "stop",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        },
+        {
+          "id": "msg_1a1d63c51001jClT3eZsR0Th1H",
+          "time": {
+            "created": 1793716534353
+          },
+          "type": "idle",
+          "outcome": "succeeded"
+        }
+      ],
+      "shells": []
+    },
+    "bash-exit-nonzero": {
+      "events": [
+        {
+          "id": "evt_1a1d63c87001nEihVCu7EuwNyf",
+          "created": 1793716534407,
+          "type": "session.created",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "slug": "cosmic-eagle",
+            "version": "2.2.1",
+            "projectID": "c673d5ccdb3b5766e47ed3570b5904fd96230519",
+            "location": {
+              "directory": "/workspace"
+            },
+            "subpath": "",
+            "title": "bash-exit-nonzero"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "seq": 0,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63c8d0027R45vDwb05wnJh",
+          "created": 1793716534413,
+          "type": "session.inbox.enqueued",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "inboxID": "msg_1a1d63c8d001mOPN1fFfTf3zMt",
+            "sessionID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "item": {
+              "type": "user",
+              "payload": {
+                "text": "SCENARIO:bash-exit-nonzero"
+              },
+              "delivery": "steer"
+            }
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "seq": 1,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63c8f001CTM2BX9RZokaK3",
+          "created": 1793716534415,
+          "type": "session.execution.started",
+          "data": {
+            "sessionID": "ses_e5e29c379ffeM5PALZPBJEpDVI"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "seq": 2,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63c92001zwz7fXKk2PsqhS",
+          "created": 1793716534418,
+          "metadata": {
+            "instructions": {
+              "initial": true
+            }
+          },
+          "type": "session.instructions.updated",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "delta": {
+              "core/codemode": "1f1291478accf8b3e4d96a40c150bf844d60557dede4aae56c47ea0043bbdce2",
+              "core/skill-guidance": "8394362d28c82fa4d13c7a9f5568c05680f6687e07db8f426a0e3c92f3027dc9",
+              "core/date": "7df34de0f5e66dd7c4cf433fb9f6dac545e971cc1cc13570f58d41eb4e857c00",
+              "core/environment": "b7e1be42e58cdd1d6060532a203a8cda6a9fbe0341949369dac6dac0bd5de171"
+            }
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "seq": 3,
+            "version": 2
+          }
+        },
+        {
+          "id": "evt_1a1d63c940014vJ2Sw1QHQJAKl",
+          "created": 1793716534420,
+          "type": "session.inbox.delivered",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "inboxID": "msg_1a1d63c8d001mOPN1fFfTf3zMt"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "seq": 4,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63ca20015YSzhxNYRfY6WG",
+          "created": 1793716534434,
+          "type": "session.step.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "agent": "build",
+            "model": {
+              "id": "mock-model",
+              "providerID": "mock"
+            },
+            "assistantMessageID": "msg_1a1d63c97001qwxUlmWvo04oBM",
+            "started": 1793716534427
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "seq": 5,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63ca4001UwcpFGeccgNzs6",
+          "created": 1793716534436,
+          "type": "session.tool.input.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "assistantMessageID": "msg_1a1d63c97001qwxUlmWvo04oBM",
+            "id": "call_1",
+            "name": "bash"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "seq": 6,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63ca6001yKwQMbhhIqajre",
+          "created": 1793716534438,
+          "type": "session.tool.input.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "assistantMessageID": "msg_1a1d63c97001qwxUlmWvo04oBM",
+            "id": "call_1",
+            "text": "{\"command\":\"echo no; exit 3\"}"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "seq": 7,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63ca7001MJO4CZWggfpzJp",
+          "created": 1793716534439,
+          "type": "session.tool.called",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "assistantMessageID": "msg_1a1d63c97001qwxUlmWvo04oBM",
+            "id": "call_1",
+            "input": {
+              "command": "echo no; exit 3"
+            },
+            "executed": false
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "seq": 8,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63ca80012cb7nnnKL4SuzH",
+          "created": 1793716534440,
+          "type": "session.step.streamed",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "assistantMessageID": "msg_1a1d63c97001qwxUlmWvo04oBM"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "seq": 9,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63ca9001gyRIMJxknuCWp1",
+          "created": 1793716534441,
+          "type": "session.tool.failed",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "assistantMessageID": "msg_1a1d63c97001qwxUlmWvo04oBM",
+            "id": "call_1",
+            "error": {
+              "type": "tool.execution",
+              "message": "No tool named \"bash\" is currently available. Please use a tool from the available tool list."
+            },
+            "executed": false
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "seq": 10,
+            "version": 2
+          }
+        },
+        {
+          "id": "evt_1a1d63caa001C8CwX62JL6vYqq",
+          "created": 1793716534442,
+          "type": "session.step.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "assistantMessageID": "msg_1a1d63c97001qwxUlmWvo04oBM",
+            "finish": "tool-calls",
+            "rawFinish": "tool_calls",
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "cost": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "seq": 11,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63cab001E78XC2aXHvPvK4",
+          "created": 1793716534443,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "evt_1a1d63cb60013mbJmKRe8cx0Ru",
+          "created": 1793716534454,
+          "type": "session.step.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "agent": "build",
+            "model": {
+              "id": "mock-model",
+              "providerID": "mock"
+            },
+            "assistantMessageID": "msg_1a1d63caf001oNAInBeGXBn4NY",
+            "started": 1793716534450
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "seq": 12,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63cb70016QnfzXXCrCh7Pe",
+          "created": 1793716534455,
+          "type": "session.text.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "assistantMessageID": "msg_1a1d63caf001oNAInBeGXBn4NY",
+            "ordinal": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "seq": 13,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63cb9001fjpFwDLl0IKrfB",
+          "created": 1793716534457,
+          "type": "session.text.delta",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "assistantMessageID": "msg_1a1d63caf001oNAInBeGXBn4NY",
+            "ordinal": 0,
+            "delta": "FINAL"
+          }
+        },
+        {
+          "id": "evt_1a1d63cb9002EBfM8yFunWjt6h",
+          "created": 1793716534457,
+          "type": "session.text.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "assistantMessageID": "msg_1a1d63caf001oNAInBeGXBn4NY",
+            "ordinal": 0,
+            "text": "FINAL"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "seq": 14,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63cba001eANn0LpEHADq72",
+          "created": 1793716534458,
+          "type": "session.step.streamed",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "assistantMessageID": "msg_1a1d63caf001oNAInBeGXBn4NY"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "seq": 15,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63cbb0018M5Rv5kRY1hhhi",
+          "created": 1793716534459,
+          "type": "session.step.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "assistantMessageID": "msg_1a1d63caf001oNAInBeGXBn4NY",
+            "finish": "stop",
+            "rawFinish": "stop",
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "cost": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "seq": 16,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63cbc0011s5XOvXRmwaWRV",
+          "created": 1793716534460,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "evt_1a1d63cbc002Z3ZUhnR2Tet0Sj",
+          "created": 1793716534460,
+          "type": "session.execution.succeeded",
+          "data": {
+            "sessionID": "ses_e5e29c379ffeM5PALZPBJEpDVI"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c379ffeM5PALZPBJEpDVI",
+            "seq": 17,
+            "version": 1
+          }
+        }
+      ],
+      "messages": [
+        {
+          "id": "msg_1a1d63c8d001mOPN1fFfTf3zMt",
+          "time": {
+            "created": 1793716534420
+          },
+          "text": "SCENARIO:bash-exit-nonzero",
+          "type": "user"
+        },
+        {
+          "id": "msg_1a1d63c97001qwxUlmWvo04oBM",
+          "time": {
+            "created": 1793716534427,
+            "streamed": 1793716534440,
+            "completed": 1793716534442
+          },
+          "type": "assistant",
+          "agent": "build",
+          "model": {
+            "id": "mock-model",
+            "providerID": "mock"
+          },
+          "content": [
+            {
+              "type": "tool",
+              "id": "call_1",
+              "name": "bash",
+              "executed": false,
+              "state": {
+                "status": "error",
+                "input": {
+                  "command": "echo no; exit 3"
+                },
+                "error": {
+                  "type": "tool.execution",
+                  "message": "No tool named \"bash\" is currently available. Please use a tool from the available tool list."
+                }
+              },
+              "time": {
+                "created": 1793716534436,
+                "ran": 1793716534439,
+                "completed": 1793716534441
+              }
+            }
+          ],
+          "finish": "tool-calls",
+          "rawFinish": "tool_calls",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        },
+        {
+          "id": "msg_1a1d63caf001oNAInBeGXBn4NY",
+          "time": {
+            "created": 1793716534450,
+            "streamed": 1793716534458,
+            "completed": 1793716534459
+          },
+          "type": "assistant",
+          "agent": "build",
+          "model": {
+            "id": "mock-model",
+            "providerID": "mock"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "FINAL"
+            }
+          ],
+          "finish": "stop",
+          "rawFinish": "stop",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        },
+        {
+          "id": "msg_1a1d63cbc002Z3ZUhnR2Tet0Sj",
+          "time": {
+            "created": 1793716534460
+          },
+          "type": "idle",
+          "outcome": "succeeded"
+        }
+      ],
+      "shells": []
+    },
+    "bash-error": {
+      "events": [
+        {
+          "id": "evt_1a1d63cfe001vdYGm2qZwGAQcY",
+          "created": 1793716534526,
+          "type": "session.created",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "slug": "brave-panda",
+            "version": "2.2.1",
+            "projectID": "c673d5ccdb3b5766e47ed3570b5904fd96230519",
+            "location": {
+              "directory": "/workspace"
+            },
+            "subpath": "",
+            "title": "bash-error"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "seq": 0,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d02002TagHEv0owXbsKu",
+          "created": 1793716534530,
+          "type": "session.inbox.enqueued",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "inboxID": "msg_1a1d63d02001gHfwuld3IN9SCi",
+            "sessionID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "item": {
+              "type": "user",
+              "payload": {
+                "text": "SCENARIO:bash-error"
+              },
+              "delivery": "steer"
+            }
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "seq": 1,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d0400136VIZeucDeVIh0",
+          "created": 1793716534532,
+          "type": "session.execution.started",
+          "data": {
+            "sessionID": "ses_e5e29c302ffegLI2aZ6AQbIhxw"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "seq": 2,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d07001qeNMrewpt5IFJH",
+          "created": 1793716534535,
+          "metadata": {
+            "instructions": {
+              "initial": true
+            }
+          },
+          "type": "session.instructions.updated",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "delta": {
+              "core/codemode": "1f1291478accf8b3e4d96a40c150bf844d60557dede4aae56c47ea0043bbdce2",
+              "core/skill-guidance": "8394362d28c82fa4d13c7a9f5568c05680f6687e07db8f426a0e3c92f3027dc9",
+              "core/date": "7df34de0f5e66dd7c4cf433fb9f6dac545e971cc1cc13570f58d41eb4e857c00",
+              "core/environment": "b7e1be42e58cdd1d6060532a203a8cda6a9fbe0341949369dac6dac0bd5de171"
+            }
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "seq": 3,
+            "version": 2
+          }
+        },
+        {
+          "id": "evt_1a1d63d080018zNLGWChrKtR9X",
+          "created": 1793716534536,
+          "type": "session.inbox.delivered",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "inboxID": "msg_1a1d63d02001gHfwuld3IN9SCi"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "seq": 4,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d12001EewY56bqMKUzom",
+          "created": 1793716534546,
+          "type": "session.step.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "agent": "build",
+            "model": {
+              "id": "mock-model",
+              "providerID": "mock"
+            },
+            "assistantMessageID": "msg_1a1d63d0c0012HqNM7t2AqPXVK",
+            "started": 1793716534543
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "seq": 5,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d1400172LGmsvuATDi3I",
+          "created": 1793716534548,
+          "type": "session.tool.input.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "assistantMessageID": "msg_1a1d63d0c0012HqNM7t2AqPXVK",
+            "id": "call_1",
+            "name": "bash"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "seq": 6,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d15001NR8h7V2E7B1JHe",
+          "created": 1793716534549,
+          "type": "session.tool.input.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "assistantMessageID": "msg_1a1d63d0c0012HqNM7t2AqPXVK",
+            "id": "call_1",
+            "text": "{}"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "seq": 7,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d16001p6Etvf5rBjmvIK",
+          "created": 1793716534550,
+          "type": "session.tool.called",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "assistantMessageID": "msg_1a1d63d0c0012HqNM7t2AqPXVK",
+            "id": "call_1",
+            "input": {},
+            "executed": false
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "seq": 8,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d170010LwfMQocLWMMuU",
+          "created": 1793716534551,
+          "type": "session.step.streamed",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "assistantMessageID": "msg_1a1d63d0c0012HqNM7t2AqPXVK"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "seq": 9,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d18001OPSpIaV3pNxVYH",
+          "created": 1793716534552,
+          "type": "session.tool.failed",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "assistantMessageID": "msg_1a1d63d0c0012HqNM7t2AqPXVK",
+            "id": "call_1",
+            "error": {
+              "type": "tool.execution",
+              "message": "No tool named \"bash\" is currently available. Please use a tool from the available tool list."
+            },
+            "executed": false
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "seq": 10,
+            "version": 2
+          }
+        },
+        {
+          "id": "evt_1a1d63d19001gaqFEcYizOYPZR",
+          "created": 1793716534553,
+          "type": "session.step.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "assistantMessageID": "msg_1a1d63d0c0012HqNM7t2AqPXVK",
+            "finish": "tool-calls",
+            "rawFinish": "tool_calls",
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "cost": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "seq": 11,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d1a001i68jZnmO5i0S7h",
+          "created": 1793716534554,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "evt_1a1d63d25001cSlhZptxAc4ujv",
+          "created": 1793716534565,
+          "type": "session.step.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "agent": "build",
+            "model": {
+              "id": "mock-model",
+              "providerID": "mock"
+            },
+            "assistantMessageID": "msg_1a1d63d1f001ttgMyxAZtQgxDW",
+            "started": 1793716534562
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "seq": 12,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d26001aE70t5igb4HrLk",
+          "created": 1793716534566,
+          "type": "session.text.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "assistantMessageID": "msg_1a1d63d1f001ttgMyxAZtQgxDW",
+            "ordinal": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "seq": 13,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d28001v8ReBirZAB7iPq",
+          "created": 1793716534568,
+          "type": "session.text.delta",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "assistantMessageID": "msg_1a1d63d1f001ttgMyxAZtQgxDW",
+            "ordinal": 0,
+            "delta": "FINAL"
+          }
+        },
+        {
+          "id": "evt_1a1d63d28002gV3XPG43HTXbr7",
+          "created": 1793716534568,
+          "type": "session.text.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "assistantMessageID": "msg_1a1d63d1f001ttgMyxAZtQgxDW",
+            "ordinal": 0,
+            "text": "FINAL"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "seq": 14,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d2900171F3mFmb1mZ0un",
+          "created": 1793716534569,
+          "type": "session.step.streamed",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "assistantMessageID": "msg_1a1d63d1f001ttgMyxAZtQgxDW"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "seq": 15,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d2a001AXPJ5gWX3YBclP",
+          "created": 1793716534570,
+          "type": "session.step.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "assistantMessageID": "msg_1a1d63d1f001ttgMyxAZtQgxDW",
+            "finish": "stop",
+            "rawFinish": "stop",
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "cost": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "seq": 16,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d2a002q2g7zCfV9xG6dN",
+          "created": 1793716534570,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "evt_1a1d63d2b001Q4Kld2S353F8Px",
+          "created": 1793716534571,
+          "type": "session.execution.succeeded",
+          "data": {
+            "sessionID": "ses_e5e29c302ffegLI2aZ6AQbIhxw"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c302ffegLI2aZ6AQbIhxw",
+            "seq": 17,
+            "version": 1
+          }
+        }
+      ],
+      "messages": [
+        {
+          "id": "msg_1a1d63d02001gHfwuld3IN9SCi",
+          "time": {
+            "created": 1793716534536
+          },
+          "text": "SCENARIO:bash-error",
+          "type": "user"
+        },
+        {
+          "id": "msg_1a1d63d0c0012HqNM7t2AqPXVK",
+          "time": {
+            "created": 1793716534543,
+            "streamed": 1793716534551,
+            "completed": 1793716534553
+          },
+          "type": "assistant",
+          "agent": "build",
+          "model": {
+            "id": "mock-model",
+            "providerID": "mock"
+          },
+          "content": [
+            {
+              "type": "tool",
+              "id": "call_1",
+              "name": "bash",
+              "executed": false,
+              "state": {
+                "status": "error",
+                "input": {},
+                "error": {
+                  "type": "tool.execution",
+                  "message": "No tool named \"bash\" is currently available. Please use a tool from the available tool list."
+                }
+              },
+              "time": {
+                "created": 1793716534548,
+                "ran": 1793716534550,
+                "completed": 1793716534552
+              }
+            }
+          ],
+          "finish": "tool-calls",
+          "rawFinish": "tool_calls",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        },
+        {
+          "id": "msg_1a1d63d1f001ttgMyxAZtQgxDW",
+          "time": {
+            "created": 1793716534562,
+            "streamed": 1793716534569,
+            "completed": 1793716534570
+          },
+          "type": "assistant",
+          "agent": "build",
+          "model": {
+            "id": "mock-model",
+            "providerID": "mock"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "FINAL"
+            }
+          ],
+          "finish": "stop",
+          "rawFinish": "stop",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        },
+        {
+          "id": "msg_1a1d63d2b001Q4Kld2S353F8Px",
+          "time": {
+            "created": 1793716534571
+          },
+          "type": "idle",
+          "outcome": "succeeded"
+        }
+      ],
+      "shells": []
+    },
+    "bash-background": {
+      "events": [
+        {
+          "id": "evt_1a1d63d74001XKcaXqB3BeWQPU",
+          "created": 1793716534644,
+          "type": "session.created",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "slug": "quick-sailor",
+            "version": "2.2.1",
+            "projectID": "c673d5ccdb3b5766e47ed3570b5904fd96230519",
+            "location": {
+              "directory": "/workspace"
+            },
+            "subpath": "",
+            "title": "bash-background"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "seq": 0,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d7c00137z0E6DxQiRgNS",
+          "created": 1793716534652,
+          "type": "session.inbox.enqueued",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "inboxID": "msg_1a1d63d7b001ZqoCgYB27af4tC",
+            "sessionID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "item": {
+              "type": "user",
+              "payload": {
+                "text": "SCENARIO:bash-background"
+              },
+              "delivery": "steer"
+            }
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "seq": 1,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d7d001wuwGO9ONn2Otcv",
+          "created": 1793716534653,
+          "type": "session.execution.started",
+          "data": {
+            "sessionID": "ses_e5e29c28cffeVyagHevGgKvSYa"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "seq": 2,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d80001SlQg0AnmV52jmh",
+          "created": 1793716534656,
+          "metadata": {
+            "instructions": {
+              "initial": true
+            }
+          },
+          "type": "session.instructions.updated",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "delta": {
+              "core/codemode": "1f1291478accf8b3e4d96a40c150bf844d60557dede4aae56c47ea0043bbdce2",
+              "core/skill-guidance": "8394362d28c82fa4d13c7a9f5568c05680f6687e07db8f426a0e3c92f3027dc9",
+              "core/date": "7df34de0f5e66dd7c4cf433fb9f6dac545e971cc1cc13570f58d41eb4e857c00",
+              "core/environment": "b7e1be42e58cdd1d6060532a203a8cda6a9fbe0341949369dac6dac0bd5de171"
+            }
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "seq": 3,
+            "version": 2
+          }
+        },
+        {
+          "id": "evt_1a1d63d81001RtUHfJ1eiB3jeI",
+          "created": 1793716534657,
+          "type": "session.inbox.delivered",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "inboxID": "msg_1a1d63d7b001ZqoCgYB27af4tC"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "seq": 4,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d8c001KeHjs9yRt3jiqE",
+          "created": 1793716534668,
+          "type": "session.step.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "agent": "build",
+            "model": {
+              "id": "mock-model",
+              "providerID": "mock"
+            },
+            "assistantMessageID": "msg_1a1d63d84001MQ3FiEPVbYm9aO",
+            "started": 1793716534664
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "seq": 5,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d8d001qXLYukq1JUQJMc",
+          "created": 1793716534669,
+          "type": "session.tool.input.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "assistantMessageID": "msg_1a1d63d84001MQ3FiEPVbYm9aO",
+            "id": "call_1",
+            "name": "bash"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "seq": 6,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d8f001TMkIaWprfqXAY1",
+          "created": 1793716534671,
+          "type": "session.tool.input.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "assistantMessageID": "msg_1a1d63d84001MQ3FiEPVbYm9aO",
+            "id": "call_1",
+            "text": "{\"command\":\"sleep 1; echo bg-done; exit 4\",\"background\":true}"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "seq": 7,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d90001dTb936178Xmfr6",
+          "created": 1793716534672,
+          "type": "session.tool.called",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "assistantMessageID": "msg_1a1d63d84001MQ3FiEPVbYm9aO",
+            "id": "call_1",
+            "input": {
+              "command": "sleep 1; echo bg-done; exit 4",
+              "background": true
+            },
+            "executed": false
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "seq": 8,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d91001iaIqup9caOe2WD",
+          "created": 1793716534673,
+          "type": "session.step.streamed",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "assistantMessageID": "msg_1a1d63d84001MQ3FiEPVbYm9aO"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "seq": 9,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d92001LR3PZMikKGgRDx",
+          "created": 1793716534674,
+          "type": "session.tool.failed",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "assistantMessageID": "msg_1a1d63d84001MQ3FiEPVbYm9aO",
+            "id": "call_1",
+            "error": {
+              "type": "tool.execution",
+              "message": "No tool named \"bash\" is currently available. Please use a tool from the available tool list."
+            },
+            "executed": false
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "seq": 10,
+            "version": 2
+          }
+        },
+        {
+          "id": "evt_1a1d63d93001vqIBnUwqN2jf5M",
+          "created": 1793716534675,
+          "type": "session.step.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "assistantMessageID": "msg_1a1d63d84001MQ3FiEPVbYm9aO",
+            "finish": "tool-calls",
+            "rawFinish": "tool_calls",
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "cost": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "seq": 11,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63d94001uP0hixMOOPUHdV",
+          "created": 1793716534676,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "evt_1a1d63d9f001fb61vzkjAt84d8",
+          "created": 1793716534687,
+          "type": "session.step.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "agent": "build",
+            "model": {
+              "id": "mock-model",
+              "providerID": "mock"
+            },
+            "assistantMessageID": "msg_1a1d63d99001mp6To7qdXgQFol",
+            "started": 1793716534684
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "seq": 12,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63da0001Ka11NHKYAPxIlF",
+          "created": 1793716534688,
+          "type": "session.text.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "assistantMessageID": "msg_1a1d63d99001mp6To7qdXgQFol",
+            "ordinal": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "seq": 13,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63da2001LtmkQmz1JzYGlP",
+          "created": 1793716534690,
+          "type": "session.text.delta",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "assistantMessageID": "msg_1a1d63d99001mp6To7qdXgQFol",
+            "ordinal": 0,
+            "delta": "FINAL"
+          }
+        },
+        {
+          "id": "evt_1a1d63da20025J6jIoZK2bPmeS",
+          "created": 1793716534690,
+          "type": "session.text.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "assistantMessageID": "msg_1a1d63d99001mp6To7qdXgQFol",
+            "ordinal": 0,
+            "text": "FINAL"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "seq": 14,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63da3001CEOBPUdBGmf966",
+          "created": 1793716534691,
+          "type": "session.step.streamed",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "assistantMessageID": "msg_1a1d63d99001mp6To7qdXgQFol"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "seq": 15,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63da30021N0ZVRpSJ7xX06",
+          "created": 1793716534691,
+          "type": "session.step.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "assistantMessageID": "msg_1a1d63d99001mp6To7qdXgQFol",
+            "finish": "stop",
+            "rawFinish": "stop",
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "cost": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "seq": 16,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63da4001FR6RY48L2KnsOJ",
+          "created": 1793716534692,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "evt_1a1d63da50014BvZKgC1CyqIsl",
+          "created": 1793716534693,
+          "type": "session.execution.succeeded",
+          "data": {
+            "sessionID": "ses_e5e29c28cffeVyagHevGgKvSYa"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c28cffeVyagHevGgKvSYa",
+            "seq": 17,
+            "version": 1
+          }
+        }
+      ],
+      "messages": [
+        {
+          "id": "msg_1a1d63d7b001ZqoCgYB27af4tC",
+          "time": {
+            "created": 1793716534657
+          },
+          "text": "SCENARIO:bash-background",
+          "type": "user"
+        },
+        {
+          "id": "msg_1a1d63d84001MQ3FiEPVbYm9aO",
+          "time": {
+            "created": 1793716534664,
+            "streamed": 1793716534673,
+            "completed": 1793716534675
+          },
+          "type": "assistant",
+          "agent": "build",
+          "model": {
+            "id": "mock-model",
+            "providerID": "mock"
+          },
+          "content": [
+            {
+              "type": "tool",
+              "id": "call_1",
+              "name": "bash",
+              "executed": false,
+              "state": {
+                "status": "error",
+                "input": {
+                  "command": "sleep 1; echo bg-done; exit 4",
+                  "background": true
+                },
+                "error": {
+                  "type": "tool.execution",
+                  "message": "No tool named \"bash\" is currently available. Please use a tool from the available tool list."
+                }
+              },
+              "time": {
+                "created": 1793716534669,
+                "ran": 1793716534672,
+                "completed": 1793716534674
+              }
+            }
+          ],
+          "finish": "tool-calls",
+          "rawFinish": "tool_calls",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        },
+        {
+          "id": "msg_1a1d63d99001mp6To7qdXgQFol",
+          "time": {
+            "created": 1793716534684,
+            "streamed": 1793716534691,
+            "completed": 1793716534691
+          },
+          "type": "assistant",
+          "agent": "build",
+          "model": {
+            "id": "mock-model",
+            "providerID": "mock"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "FINAL"
+            }
+          ],
+          "finish": "stop",
+          "rawFinish": "stop",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        },
+        {
+          "id": "msg_1a1d63da50014BvZKgC1CyqIsl",
+          "time": {
+            "created": 1793716534693
+          },
+          "type": "idle",
+          "outcome": "succeeded"
+        }
+      ],
+      "shells": []
+    },
+    "shell-exit-nonzero": {
+      "events": [
+        {
+          "id": "evt_1a1d63deb001tsWdKTImwz63Eh",
+          "created": 1793716534763,
+          "type": "session.created",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "slug": "glowing-lagoon",
+            "version": "2.2.1",
+            "projectID": "c673d5ccdb3b5766e47ed3570b5904fd96230519",
+            "location": {
+              "directory": "/workspace"
+            },
+            "subpath": "",
+            "title": "shell-exit-nonzero"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "seq": 0,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63dee002Ic64wb0aLBe8cp",
+          "created": 1793716534766,
+          "type": "session.inbox.enqueued",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "inboxID": "msg_1a1d63dee001F2KChHYt9Uw3HK",
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "item": {
+              "type": "user",
+              "payload": {
+                "text": "SCENARIO:shell-exit-nonzero"
+              },
+              "delivery": "steer"
+            }
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "seq": 1,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63df0001Uey7ljjucttzsS",
+          "created": 1793716534768,
+          "type": "session.execution.started",
+          "data": {
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "seq": 2,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63df3001h4TMuZ1BWnOO2b",
+          "created": 1793716534771,
+          "metadata": {
+            "instructions": {
+              "initial": true
+            }
+          },
+          "type": "session.instructions.updated",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "delta": {
+              "core/codemode": "1f1291478accf8b3e4d96a40c150bf844d60557dede4aae56c47ea0043bbdce2",
+              "core/skill-guidance": "8394362d28c82fa4d13c7a9f5568c05680f6687e07db8f426a0e3c92f3027dc9",
+              "core/date": "7df34de0f5e66dd7c4cf433fb9f6dac545e971cc1cc13570f58d41eb4e857c00",
+              "core/environment": "b7e1be42e58cdd1d6060532a203a8cda6a9fbe0341949369dac6dac0bd5de171"
+            }
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "seq": 3,
+            "version": 2
+          }
+        },
+        {
+          "id": "evt_1a1d63df4001PbNRB9dCC7fNpZ",
+          "created": 1793716534772,
+          "type": "session.inbox.delivered",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "inboxID": "msg_1a1d63dee001F2KChHYt9Uw3HK"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "seq": 4,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63dfe001RBJFlim0o9CKGm",
+          "created": 1793716534782,
+          "type": "session.step.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "agent": "build",
+            "model": {
+              "id": "mock-model",
+              "providerID": "mock"
+            },
+            "assistantMessageID": "msg_1a1d63df700133N0wBvJLCSg9M",
+            "started": 1793716534778
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "seq": 5,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63dff001Brhhua2MUB6pz8",
+          "created": 1793716534783,
+          "type": "session.tool.input.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "assistantMessageID": "msg_1a1d63df700133N0wBvJLCSg9M",
+            "id": "call_1",
+            "name": "shell"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "seq": 6,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63e010010wCEgOwpKwnmY8",
+          "created": 1793716534785,
+          "type": "session.tool.input.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "assistantMessageID": "msg_1a1d63df700133N0wBvJLCSg9M",
+            "id": "call_1",
+            "text": "{\"command\":\"exit 5\"}"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "seq": 7,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63e02001SfgeJnFtTthbzs",
+          "created": 1793716534786,
+          "type": "session.tool.called",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "assistantMessageID": "msg_1a1d63df700133N0wBvJLCSg9M",
+            "id": "call_1",
+            "input": {
+              "command": "exit 5"
+            },
+            "executed": false
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "seq": 8,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63e03001JkhuNJ8eV62nOf",
+          "created": 1793716534787,
+          "type": "session.step.streamed",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "assistantMessageID": "msg_1a1d63df700133N0wBvJLCSg9M"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "seq": 9,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63e2b001kBjx7Y6kyRApah",
+          "created": 1793716534827,
+          "type": "session.tool.progress",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "assistantMessageID": "msg_1a1d63df700133N0wBvJLCSg9M",
+            "id": "call_1",
+            "metadata": {
+              "shellID": "sh_1a1d63e260011srJWqRJfvwFRu"
+            }
+          }
+        },
+        {
+          "id": "evt_1a1d63e2e001Q3IZB0hhXOvR40",
+          "created": 1793716534830,
+          "type": "session.tool.success",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "assistantMessageID": "msg_1a1d63df700133N0wBvJLCSg9M",
+            "id": "call_1",
+            "content": [
+              {
+                "type": "text",
+                "text": "(no output)"
+              },
+              {
+                "type": "text",
+                "text": "Exited with code 5"
+              }
+            ],
+            "metadata": {
+              "status": "completed",
+              "truncated": false,
+              "exit": 5
+            },
+            "executed": false
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "seq": 10,
+            "version": 2
+          }
+        },
+        {
+          "id": "evt_1a1d63e30001B4C8ArvDbqRROM",
+          "created": 1793716534832,
+          "type": "session.step.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "assistantMessageID": "msg_1a1d63df700133N0wBvJLCSg9M",
+            "finish": "tool-calls",
+            "rawFinish": "tool_calls",
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "cost": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "seq": 11,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63e31001Skb2FMQkKnLpmD",
+          "created": 1793716534833,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "evt_1a1d63e3f001XcU3TGNapvK3LK",
+          "created": 1793716534847,
+          "type": "session.step.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "agent": "build",
+            "model": {
+              "id": "mock-model",
+              "providerID": "mock"
+            },
+            "assistantMessageID": "msg_1a1d63e360019Ng2YNCGqzbPCr",
+            "started": 1793716534842
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "seq": 12,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63e40001QEh5bAQ62Z1vsA",
+          "created": 1793716534848,
+          "type": "session.text.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "assistantMessageID": "msg_1a1d63e360019Ng2YNCGqzbPCr",
+            "ordinal": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "seq": 13,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63e42001agRvi1LfuK3eFr",
+          "created": 1793716534850,
+          "type": "session.text.delta",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "assistantMessageID": "msg_1a1d63e360019Ng2YNCGqzbPCr",
+            "ordinal": 0,
+            "delta": "FINAL"
+          }
+        },
+        {
+          "id": "evt_1a1d63e42002e2YxdZWsPGdtso",
+          "created": 1793716534850,
+          "type": "session.text.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "assistantMessageID": "msg_1a1d63e360019Ng2YNCGqzbPCr",
+            "ordinal": 0,
+            "text": "FINAL"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "seq": 14,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63e43001ni2OkDGXwyqN7x",
+          "created": 1793716534851,
+          "type": "session.step.streamed",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "assistantMessageID": "msg_1a1d63e360019Ng2YNCGqzbPCr"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "seq": 15,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63e46001m1srqDvcK1KnJp",
+          "created": 1793716534854,
+          "type": "session.step.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "assistantMessageID": "msg_1a1d63e360019Ng2YNCGqzbPCr",
+            "finish": "stop",
+            "rawFinish": "stop",
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "cost": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "seq": 16,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63e4800190HgIkDttMbP0g",
+          "created": 1793716534856,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "evt_1a1d63e49001An7Y8gZe6rPmQe",
+          "created": 1793716534857,
+          "type": "session.execution.succeeded",
+          "data": {
+            "sessionID": "ses_e5e29c216ffeEfHlotz4u5T6hi"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c216ffeEfHlotz4u5T6hi",
+            "seq": 17,
+            "version": 1
+          }
+        }
+      ],
+      "messages": [
+        {
+          "id": "msg_1a1d63dee001F2KChHYt9Uw3HK",
+          "time": {
+            "created": 1793716534772
+          },
+          "text": "SCENARIO:shell-exit-nonzero",
+          "type": "user"
+        },
+        {
+          "id": "msg_1a1d63df700133N0wBvJLCSg9M",
+          "time": {
+            "created": 1793716534778,
+            "streamed": 1793716534787,
+            "completed": 1793716534832
+          },
+          "type": "assistant",
+          "agent": "build",
+          "model": {
+            "id": "mock-model",
+            "providerID": "mock"
+          },
+          "content": [
+            {
+              "type": "tool",
+              "id": "call_1",
+              "name": "shell",
+              "executed": false,
+              "state": {
+                "status": "completed",
+                "input": {
+                  "command": "exit 5"
+                },
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "(no output)"
+                  },
+                  {
+                    "type": "text",
+                    "text": "Exited with code 5"
+                  }
+                ],
+                "metadata": {
+                  "status": "completed",
+                  "truncated": false,
+                  "exit": 5
+                }
+              },
+              "time": {
+                "created": 1793716534783,
+                "ran": 1793716534786,
+                "completed": 1793716534830
+              }
+            }
+          ],
+          "finish": "tool-calls",
+          "rawFinish": "tool_calls",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        },
+        {
+          "id": "msg_1a1d63e360019Ng2YNCGqzbPCr",
+          "time": {
+            "created": 1793716534842,
+            "streamed": 1793716534851,
+            "completed": 1793716534854
+          },
+          "type": "assistant",
+          "agent": "build",
+          "model": {
+            "id": "mock-model",
+            "providerID": "mock"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "FINAL"
+            }
+          ],
+          "finish": "stop",
+          "rawFinish": "stop",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        },
+        {
+          "id": "msg_1a1d63e49001An7Y8gZe6rPmQe",
+          "time": {
+            "created": 1793716534857
+          },
+          "type": "idle",
+          "outcome": "succeeded"
+        }
+      ],
+      "shells": []
+    },
+    "shell-background": {
+      "events": [
+        {
+          "id": "evt_1a1d63e5d001CPqgI2KYwRvKpt",
+          "created": 1793716534877,
+          "type": "session.created",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "slug": "eager-sailor",
+            "version": "2.2.1",
+            "projectID": "c673d5ccdb3b5766e47ed3570b5904fd96230519",
+            "location": {
+              "directory": "/workspace"
+            },
+            "subpath": "",
+            "title": "shell-background"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 0,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63e63001dmGnxMDyuy7kaP",
+          "created": 1793716534883,
+          "type": "session.inbox.enqueued",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "inboxID": "msg_1a1d63e620010SWWLUQvo8e4dy",
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "item": {
+              "type": "user",
+              "payload": {
+                "text": "SCENARIO:shell-background"
+              },
+              "delivery": "steer"
+            }
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 1,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63e65001NRRM6f2Vv0VP4w",
+          "created": 1793716534885,
+          "type": "session.execution.started",
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 2,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63e68001pNGHmQHMdqnIZE",
+          "created": 1793716534888,
+          "metadata": {
+            "instructions": {
+              "initial": true
+            }
+          },
+          "type": "session.instructions.updated",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "delta": {
+              "core/codemode": "1f1291478accf8b3e4d96a40c150bf844d60557dede4aae56c47ea0043bbdce2",
+              "core/skill-guidance": "8394362d28c82fa4d13c7a9f5568c05680f6687e07db8f426a0e3c92f3027dc9",
+              "core/date": "7df34de0f5e66dd7c4cf433fb9f6dac545e971cc1cc13570f58d41eb4e857c00",
+              "core/environment": "b7e1be42e58cdd1d6060532a203a8cda6a9fbe0341949369dac6dac0bd5de171"
+            }
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 3,
+            "version": 2
+          }
+        },
+        {
+          "id": "evt_1a1d63e69001kPTQTq7wR3Q191",
+          "created": 1793716534889,
+          "type": "session.inbox.delivered",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "inboxID": "msg_1a1d63e620010SWWLUQvo8e4dy"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 4,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63e72001aocjZxwS1cSSWA",
+          "created": 1793716534898,
+          "type": "session.step.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "agent": "build",
+            "model": {
+              "id": "mock-model",
+              "providerID": "mock"
+            },
+            "assistantMessageID": "msg_1a1d63e6c0011NwDFyprKWtPM4",
+            "started": 1793716534895
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 5,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63e73001jAowQD0OBx62de",
+          "created": 1793716534899,
+          "type": "session.tool.input.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "assistantMessageID": "msg_1a1d63e6c0011NwDFyprKWtPM4",
+            "id": "call_1",
+            "name": "shell"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 6,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63e75001UgMmgl3fFtopyD",
+          "created": 1793716534901,
+          "type": "session.tool.input.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "assistantMessageID": "msg_1a1d63e6c0011NwDFyprKWtPM4",
+            "id": "call_1",
+            "text": "{\"command\":\"sleep 1; echo bg-done; exit 4\",\"background\":true}"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 7,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63e7a001huZ056E3epfOFj",
+          "created": 1793716534906,
+          "type": "session.tool.called",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "assistantMessageID": "msg_1a1d63e6c0011NwDFyprKWtPM4",
+            "id": "call_1",
+            "input": {
+              "command": "sleep 1; echo bg-done; exit 4",
+              "background": true
+            },
+            "executed": false
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 8,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63e7b001zsEtI7fXVM0IeG",
+          "created": 1793716534907,
+          "type": "session.step.streamed",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "assistantMessageID": "msg_1a1d63e6c0011NwDFyprKWtPM4"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 9,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63e8b002xz0tHC0EYSt20v",
+          "created": 1793716534923,
+          "type": "session.tool.progress",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "assistantMessageID": "msg_1a1d63e6c0011NwDFyprKWtPM4",
+            "id": "call_1",
+            "metadata": {
+              "shellID": "sh_1a1d63e85001LLV5x6FyMzi1LZ"
+            }
+          }
+        },
+        {
+          "id": "evt_1a1d63e8c001vfXJmz8P4mFaZo",
+          "created": 1793716534924,
+          "type": "session.tool.success",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "assistantMessageID": "msg_1a1d63e6c0011NwDFyprKWtPM4",
+            "id": "call_1",
+            "content": [
+              {
+                "type": "text",
+                "text": "Command moved to the background (shell ID: sh_1a1d63e85001LLV5x6FyMzi1LZ).\nOutput is streaming to: /workspace/.opencode-instance/data/opencode/shell/c673d5ccdb3b5766e47ed3570b5904fd96230519/sh_1a1d63e85001LLV5x6FyMzi1LZ.out"
+              },
+              {
+                "type": "text",
+                "text": "You will be notified automatically when the command finishes. The notification will include the command's output. Unless the user explicitly asks otherwise, DO NOT poll for completion, even if you need the final result to continue. Repeatedly sleeping and reading or searching the output file is polling, not useful work. You may read the current output if it lets you do useful work now, but do not repeatedly check it while waiting for the command to finish. Keep working on anything that does not depend on the result. If you have nothing else to do, end your response; you will be resumed automatically when the command finishes."
+              }
+            ],
+            "metadata": {
+              "status": "running",
+              "truncated": false,
+              "shellID": "sh_1a1d63e85001LLV5x6FyMzi1LZ"
+            },
+            "executed": false
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 10,
+            "version": 2
+          }
+        },
+        {
+          "id": "evt_1a1d63e8d001ych418QfwkFt76",
+          "created": 1793716534925,
+          "type": "session.step.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "assistantMessageID": "msg_1a1d63e6c0011NwDFyprKWtPM4",
+            "finish": "tool-calls",
+            "rawFinish": "tool_calls",
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "cost": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 11,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63e92001DKjDEJFi3EsGK6",
+          "created": 1793716534930,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "evt_1a1d63ea10015FY1t0SZ1wWhvp",
+          "created": 1793716534945,
+          "type": "session.step.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "agent": "build",
+            "model": {
+              "id": "mock-model",
+              "providerID": "mock"
+            },
+            "assistantMessageID": "msg_1a1d63e9a001jY7ISovfo5gO3O",
+            "started": 1793716534941
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 12,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63ea200142gaaGq3VZf7yI",
+          "created": 1793716534946,
+          "type": "session.text.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "assistantMessageID": "msg_1a1d63e9a001jY7ISovfo5gO3O",
+            "ordinal": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 13,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63ea3001rh32iNQOUQEuUn",
+          "created": 1793716534947,
+          "type": "session.text.delta",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "assistantMessageID": "msg_1a1d63e9a001jY7ISovfo5gO3O",
+            "ordinal": 0,
+            "delta": "FINAL"
+          }
+        },
+        {
+          "id": "evt_1a1d63ea3002Lu1pBVurg2yb42",
+          "created": 1793716534947,
+          "type": "session.text.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "assistantMessageID": "msg_1a1d63e9a001jY7ISovfo5gO3O",
+            "ordinal": 0,
+            "text": "FINAL"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 14,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63ea4001QdAMZV9gllsflu",
+          "created": 1793716534948,
+          "type": "session.step.streamed",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "assistantMessageID": "msg_1a1d63e9a001jY7ISovfo5gO3O"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 15,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63ea50011mzksv8cYdJfNv",
+          "created": 1793716534949,
+          "type": "session.step.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "assistantMessageID": "msg_1a1d63e9a001jY7ISovfo5gO3O",
+            "finish": "stop",
+            "rawFinish": "stop",
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "cost": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 16,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d63ea6001aIBg2zeGaugokI",
+          "created": 1793716534950,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "evt_1a1d63ea7001L929EdE1j2Qg1I",
+          "created": 1793716534951,
+          "type": "session.execution.succeeded",
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 17,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d6427f001nprWD9Bv7xbdcn",
+          "created": 1793716535935,
+          "type": "session.inbox.enqueued",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "inboxID": "msg_1a1d63e8b0035jTqRFvoNaHSo3",
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "item": {
+              "type": "synthetic",
+              "payload": {
+                "text": "<shell id=\"sh_1a1d63e85001LLV5x6FyMzi1LZ\" state=\"completed\" command=\"sleep 1; echo bg-done; exit 4\">\nbg-done\n\n\nExited with code 4\n</shell>",
+                "description": "sleep 1; echo bg-done; exit 4",
+                "metadata": {
+                  "source": "shell",
+                  "shellID": "sh_1a1d63e85001LLV5x6FyMzi1LZ",
+                  "jobID": "sh_1a1d63e85001LLV5x6FyMzi1LZ",
+                  "state": "completed",
+                  "truncated": false,
+                  "exit": 4
+                }
+              },
+              "delivery": "steer"
+            }
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 18,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d64281001mGYwxSOomYZ3e0",
+          "created": 1793716535937,
+          "type": "session.execution.started",
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 19,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d64285001u0mNzdhBy9vLdO",
+          "created": 1793716535941,
+          "type": "session.inbox.delivered",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "inboxID": "msg_1a1d63e8b0035jTqRFvoNaHSo3"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 20,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d64292001EXJ6peSWWvyz7U",
+          "created": 1793716535954,
+          "type": "session.step.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "agent": "build",
+            "model": {
+              "id": "mock-model",
+              "providerID": "mock"
+            },
+            "assistantMessageID": "msg_1a1d64289001LcA9yyYPUQ8szw",
+            "started": 1793716535949
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 21,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d64293001F48RIj3KBpui0v",
+          "created": 1793716535955,
+          "type": "session.text.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "assistantMessageID": "msg_1a1d64289001LcA9yyYPUQ8szw",
+            "ordinal": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 22,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d64294001OsKr0tvDIJdws6",
+          "created": 1793716535956,
+          "type": "session.text.delta",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "assistantMessageID": "msg_1a1d64289001LcA9yyYPUQ8szw",
+            "ordinal": 0,
+            "delta": "FINAL"
+          }
+        },
+        {
+          "id": "evt_1a1d64294002R8CubNFGHDy1Nh",
+          "created": 1793716535956,
+          "type": "session.text.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "assistantMessageID": "msg_1a1d64289001LcA9yyYPUQ8szw",
+            "ordinal": 0,
+            "text": "FINAL"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 23,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d64295001A5PAWdYAIrpe04",
+          "created": 1793716535957,
+          "type": "session.step.streamed",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "assistantMessageID": "msg_1a1d64289001LcA9yyYPUQ8szw"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 24,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d64296001qGix9ky4CvN6EP",
+          "created": 1793716535958,
+          "type": "session.step.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "assistantMessageID": "msg_1a1d64289001LcA9yyYPUQ8szw",
+            "finish": "stop",
+            "rawFinish": "stop",
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "cost": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 25,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d64297001MLTMiAtCQrsMo2",
+          "created": 1793716535959,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "evt_1a1d64298001W2o8Um7qr92Q67",
+          "created": 1793716535960,
+          "type": "session.execution.succeeded",
+          "data": {
+            "sessionID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29c1a3ffeiV3QEfkUidXF6b",
+            "seq": 26,
+            "version": 1
+          }
+        }
+      ],
+      "messages": [
+        {
+          "id": "msg_1a1d63e620010SWWLUQvo8e4dy",
+          "time": {
+            "created": 1793716534889
+          },
+          "text": "SCENARIO:shell-background",
+          "type": "user"
+        },
+        {
+          "id": "msg_1a1d63e6c0011NwDFyprKWtPM4",
+          "time": {
+            "created": 1793716534895,
+            "streamed": 1793716534907,
+            "completed": 1793716534925
+          },
+          "type": "assistant",
+          "agent": "build",
+          "model": {
+            "id": "mock-model",
+            "providerID": "mock"
+          },
+          "content": [
+            {
+              "type": "tool",
+              "id": "call_1",
+              "name": "shell",
+              "executed": false,
+              "state": {
+                "status": "completed",
+                "input": {
+                  "command": "sleep 1; echo bg-done; exit 4",
+                  "background": true
+                },
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Command moved to the background (shell ID: sh_1a1d63e85001LLV5x6FyMzi1LZ).\nOutput is streaming to: /workspace/.opencode-instance/data/opencode/shell/c673d5ccdb3b5766e47ed3570b5904fd96230519/sh_1a1d63e85001LLV5x6FyMzi1LZ.out"
+                  },
+                  {
+                    "type": "text",
+                    "text": "You will be notified automatically when the command finishes. The notification will include the command's output. Unless the user explicitly asks otherwise, DO NOT poll for completion, even if you need the final result to continue. Repeatedly sleeping and reading or searching the output file is polling, not useful work. You may read the current output if it lets you do useful work now, but do not repeatedly check it while waiting for the command to finish. Keep working on anything that does not depend on the result. If you have nothing else to do, end your response; you will be resumed automatically when the command finishes."
+                  }
+                ],
+                "metadata": {
+                  "status": "running",
+                  "truncated": false,
+                  "shellID": "sh_1a1d63e85001LLV5x6FyMzi1LZ"
+                }
+              },
+              "time": {
+                "created": 1793716534899,
+                "ran": 1793716534906,
+                "completed": 1793716534924
+              }
+            }
+          ],
+          "finish": "tool-calls",
+          "rawFinish": "tool_calls",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        },
+        {
+          "id": "msg_1a1d63e9a001jY7ISovfo5gO3O",
+          "time": {
+            "created": 1793716534941,
+            "streamed": 1793716534948,
+            "completed": 1793716534949
+          },
+          "type": "assistant",
+          "agent": "build",
+          "model": {
+            "id": "mock-model",
+            "providerID": "mock"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "FINAL"
+            }
+          ],
+          "finish": "stop",
+          "rawFinish": "stop",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        },
+        {
+          "id": "msg_1a1d63ea7001L929EdE1j2Qg1I",
+          "time": {
+            "created": 1793716534951
+          },
+          "type": "idle",
+          "outcome": "succeeded"
+        },
+        {
+          "id": "msg_1a1d63e8b0035jTqRFvoNaHSo3",
+          "metadata": {
+            "source": "shell",
+            "shellID": "sh_1a1d63e85001LLV5x6FyMzi1LZ",
+            "jobID": "sh_1a1d63e85001LLV5x6FyMzi1LZ",
+            "state": "completed",
+            "truncated": false,
+            "exit": 4
+          },
+          "time": {
+            "created": 1793716535941
+          },
+          "text": "<shell id=\"sh_1a1d63e85001LLV5x6FyMzi1LZ\" state=\"completed\" command=\"sleep 1; echo bg-done; exit 4\">\nbg-done\n\n\nExited with code 4\n</shell>",
+          "description": "sleep 1; echo bg-done; exit 4",
+          "type": "synthetic"
+        },
+        {
+          "id": "msg_1a1d64289001LcA9yyYPUQ8szw",
+          "time": {
+            "created": 1793716535949,
+            "streamed": 1793716535957,
+            "completed": 1793716535958
+          },
+          "type": "assistant",
+          "agent": "build",
+          "model": {
+            "id": "mock-model",
+            "providerID": "mock"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "FINAL"
+            }
+          ],
+          "finish": "stop",
+          "rawFinish": "stop",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        },
+        {
+          "id": "msg_1a1d64298001W2o8Um7qr92Q67",
+          "time": {
+            "created": 1793716535960
+          },
+          "type": "idle",
+          "outcome": "succeeded"
+        }
+      ],
+      "shells": []
+    },
+    "custom-bash": {
+      "events": [
+        {
+          "id": "evt_1a1d644320018IwPFRQvwPOEZU",
+          "created": 1793716536370,
+          "type": "session.created",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "slug": "cosmic-cabin",
+            "version": "2.2.1",
+            "projectID": "d281a72182ddc90fed0682ff0ea2c13c0da29c08",
+            "location": {
+              "directory": "/workspace"
+            },
+            "subpath": "",
+            "title": "custom-bash"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "seq": 0,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d64663001tZXJLpLcoHDa95",
+          "created": 1793716536931,
+          "type": "session.inbox.enqueued",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "inboxID": "msg_1a1d6445d001ZRY76PW6HJKHZu",
+            "sessionID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "item": {
+              "type": "user",
+              "payload": {
+                "text": "SCENARIO:custom-bash"
+              },
+              "delivery": "steer"
+            }
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "seq": 1,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d64665001SD1PdrNl13cInN",
+          "created": 1793716536933,
+          "type": "session.execution.started",
+          "data": {
+            "sessionID": "ses_e5e29bbd0ffegvfL86zZP7343f"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "seq": 2,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d6466d001EOOZgt8ysJqwZt",
+          "created": 1793716536941,
+          "metadata": {
+            "instructions": {
+              "initial": true
+            }
+          },
+          "type": "session.instructions.updated",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "delta": {
+              "core/codemode": "1f1291478accf8b3e4d96a40c150bf844d60557dede4aae56c47ea0043bbdce2",
+              "core/skill-guidance": "8394362d28c82fa4d13c7a9f5568c05680f6687e07db8f426a0e3c92f3027dc9",
+              "core/date": "7df34de0f5e66dd7c4cf433fb9f6dac545e971cc1cc13570f58d41eb4e857c00",
+              "core/environment": "85860bc05a2a982fbed56ec5a051376e9a1a7e539d394ccdeee76bb01d56516e"
+            }
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "seq": 3,
+            "version": 2
+          }
+        },
+        {
+          "id": "evt_1a1d6466f001r867Jt8Se7c1Iq",
+          "created": 1793716536943,
+          "type": "session.inbox.delivered",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "inboxID": "msg_1a1d6445d001ZRY76PW6HJKHZu"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "seq": 4,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d64686001BrjxjRafLJZmgy",
+          "created": 1793716536966,
+          "type": "session.step.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "agent": "build",
+            "model": {
+              "id": "mock-model",
+              "providerID": "mock"
+            },
+            "assistantMessageID": "msg_1a1d64675001gmTmOGWW4S135s",
+            "started": 1793716536957
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "seq": 5,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d646880019M1lO2cRPmdy5P",
+          "created": 1793716536968,
+          "type": "session.tool.input.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "assistantMessageID": "msg_1a1d64675001gmTmOGWW4S135s",
+            "id": "call_1",
+            "name": "bash"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "seq": 6,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d6468d001JiJZ5Dqud8uVea",
+          "created": 1793716536973,
+          "type": "session.tool.input.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "assistantMessageID": "msg_1a1d64675001gmTmOGWW4S135s",
+            "id": "call_1",
+            "text": "{\"command\":\"echo custom\"}"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "seq": 7,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d646900010vArOkYcf383NV",
+          "created": 1793716536976,
+          "type": "session.tool.called",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "assistantMessageID": "msg_1a1d64675001gmTmOGWW4S135s",
+            "id": "call_1",
+            "input": {
+              "command": "echo custom"
+            },
+            "executed": false
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "seq": 8,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d64692001ptQdC9ndcsT0nh",
+          "created": 1793716536978,
+          "type": "session.step.streamed",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "assistantMessageID": "msg_1a1d64675001gmTmOGWW4S135s"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "seq": 9,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d64694001do5hlmlkschvMn",
+          "created": 1793716536980,
+          "type": "session.tool.success",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "assistantMessageID": "msg_1a1d64675001gmTmOGWW4S135s",
+            "id": "call_1",
+            "content": [
+              {
+                "type": "text",
+                "text": "custom-bash-ran"
+              }
+            ],
+            "metadata": {
+              "exit": 7,
+              "shellID": "custom-fake",
+              "background": true,
+              "truncated": false
+            },
+            "executed": false
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "seq": 10,
+            "version": 2
+          }
+        },
+        {
+          "id": "evt_1a1d646970018v6dyoT3h3AcZK",
+          "created": 1793716536983,
+          "type": "session.step.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "assistantMessageID": "msg_1a1d64675001gmTmOGWW4S135s",
+            "finish": "tool-calls",
+            "rawFinish": "tool_calls",
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "cost": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "seq": 11,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d6469a001i47cR66eIK2GOC",
+          "created": 1793716536986,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "evt_1a1d646af001AEhg08SsnUF1sd",
+          "created": 1793716537007,
+          "type": "session.step.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "agent": "build",
+            "model": {
+              "id": "mock-model",
+              "providerID": "mock"
+            },
+            "assistantMessageID": "msg_1a1d646a2001jZ0m0DF1s0xv86",
+            "started": 1793716537003
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "seq": 12,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d646b0001Ht2VGehrQhF7ku",
+          "created": 1793716537008,
+          "type": "session.text.started",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "assistantMessageID": "msg_1a1d646a2001jZ0m0DF1s0xv86",
+            "ordinal": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "seq": 13,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d646b3001rB9EhPgeoAR0am",
+          "created": 1793716537011,
+          "type": "session.text.delta",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "assistantMessageID": "msg_1a1d646a2001jZ0m0DF1s0xv86",
+            "ordinal": 0,
+            "delta": "FINAL"
+          }
+        },
+        {
+          "id": "evt_1a1d646b3002LGkuow3xXz5cmE",
+          "created": 1793716537011,
+          "type": "session.text.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "assistantMessageID": "msg_1a1d646a2001jZ0m0DF1s0xv86",
+            "ordinal": 0,
+            "text": "FINAL"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "seq": 14,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d646b5001hJYwToGBXZpW2W",
+          "created": 1793716537013,
+          "type": "session.step.streamed",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "assistantMessageID": "msg_1a1d646a2001jZ0m0DF1s0xv86"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "seq": 15,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d646b6001yJz6TuG02J4HpW",
+          "created": 1793716537014,
+          "type": "session.step.ended",
+          "location": {
+            "directory": "/workspace"
+          },
+          "data": {
+            "sessionID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "assistantMessageID": "msg_1a1d646a2001jZ0m0DF1s0xv86",
+            "finish": "stop",
+            "rawFinish": "stop",
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "cost": 0
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "seq": 16,
+            "version": 1
+          }
+        },
+        {
+          "id": "evt_1a1d646b8001AfsMWclpg7mg1v",
+          "created": 1793716537016,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "evt_1a1d646b9001Wdk77K8hdQcXoB",
+          "created": 1793716537017,
+          "type": "session.execution.succeeded",
+          "data": {
+            "sessionID": "ses_e5e29bbd0ffegvfL86zZP7343f"
+          },
+          "durable": {
+            "aggregateID": "ses_e5e29bbd0ffegvfL86zZP7343f",
+            "seq": 17,
+            "version": 1
+          }
+        }
+      ],
+      "messages": [
+        {
+          "id": "msg_1a1d6445d001ZRY76PW6HJKHZu",
+          "time": {
+            "created": 1793716536943
+          },
+          "text": "SCENARIO:custom-bash",
+          "type": "user"
+        },
+        {
+          "id": "msg_1a1d64675001gmTmOGWW4S135s",
+          "time": {
+            "created": 1793716536957,
+            "streamed": 1793716536978,
+            "completed": 1793716536983
+          },
+          "type": "assistant",
+          "agent": "build",
+          "model": {
+            "id": "mock-model",
+            "providerID": "mock"
+          },
+          "content": [
+            {
+              "type": "tool",
+              "id": "call_1",
+              "name": "bash",
+              "executed": false,
+              "state": {
+                "status": "completed",
+                "input": {
+                  "command": "echo custom"
+                },
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "custom-bash-ran"
+                  }
+                ],
+                "metadata": {
+                  "exit": 7,
+                  "shellID": "custom-fake",
+                  "background": true,
+                  "truncated": false
+                }
+              },
+              "time": {
+                "created": 1793716536968,
+                "ran": 1793716536976,
+                "completed": 1793716536980
+              }
+            }
+          ],
+          "finish": "tool-calls",
+          "rawFinish": "tool_calls",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        },
+        {
+          "id": "msg_1a1d646a2001jZ0m0DF1s0xv86",
+          "time": {
+            "created": 1793716537003,
+            "streamed": 1793716537013,
+            "completed": 1793716537014
+          },
+          "type": "assistant",
+          "agent": "build",
+          "model": {
+            "id": "mock-model",
+            "providerID": "mock"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "FINAL"
+            }
+          ],
+          "finish": "stop",
+          "rawFinish": "stop",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        },
+        {
+          "id": "msg_1a1d646b9001Wdk77K8hdQcXoB",
+          "time": {
+            "created": 1793716537017
+          },
+          "type": "idle",
+          "outcome": "succeeded"
+        }
+      ],
+      "shells": []
+    }
+  }
+}
