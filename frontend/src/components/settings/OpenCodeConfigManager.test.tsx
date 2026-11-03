@@ -146,7 +146,7 @@ describe('OpenCodeConfigManager', () => {
     vi.clearAllMocks()
     healthState.data = { opencode: 'healthy', opencodeRestartPending: false }
     mockGetOpenCodeConfig.mockResolvedValue(defaultConfig)
-    mockGetManagedOpenCodeConfig.mockResolvedValue({ revision: 'rev-1', info: defaultManagedInfo })
+    mockGetManagedOpenCodeConfig.mockResolvedValue({ info: defaultManagedInfo })
     mockPatchOpenCodeConfig.mockResolvedValue({ ...defaultConfig, revision: 'rev-2' })
     mockGetOpenCodeImportStatus.mockResolvedValue({})
     mockGetAgentsMd.mockResolvedValue({ content: '# Agent Instructions' })
@@ -445,7 +445,6 @@ describe('OpenCodeConfigManager', () => {
 
   it('deletes a configured MCP server through an mcp.servers patch', async () => {
     mockGetManagedOpenCodeConfig.mockResolvedValue({
-      revision: 'rev-1',
       info: { mcp: { servers: { filesystem: { type: 'local', command: ['npx', 'server'] } } } },
     })
     mockPatchOpenCodeConfig.mockResolvedValue({ ...defaultConfig, revision: 'rev-2' })
@@ -467,7 +466,6 @@ describe('OpenCodeConfigManager', () => {
 
   it('sends the revision from the previous save on the next structured save', async () => {
     mockGetManagedOpenCodeConfig.mockResolvedValue({
-      revision: 'rev-1',
       info: {
         providers: {
           openai: {
@@ -504,7 +502,7 @@ describe('OpenCodeConfigManager', () => {
   })
 
   it('adds a model to a new API provider through a providers patch', async () => {
-    mockGetManagedOpenCodeConfig.mockResolvedValue({ revision: 'rev-1', info: {} })
+    mockGetManagedOpenCodeConfig.mockResolvedValue({ info: {} })
     mockPatchOpenCodeConfig.mockResolvedValue({ ...defaultConfig, revision: 'rev-2' })
 
     const user = userEvent.setup()
@@ -543,7 +541,6 @@ describe('OpenCodeConfigManager', () => {
 
   it('saves an edited model under providers when the managed response converted a v1 entry', async () => {
     mockGetManagedOpenCodeConfig.mockResolvedValue({
-      revision: 'rev-1',
       info: {
         providers: {
           openai: {
@@ -582,7 +579,6 @@ describe('OpenCodeConfigManager', () => {
 
   it('keeps a converted provider and its sibling models when deleting one model', async () => {
     mockGetManagedOpenCodeConfig.mockResolvedValue({
-      revision: 'rev-1',
       info: {
         providers: {
           p: {
@@ -810,7 +806,6 @@ describe('OpenCodeConfigManager', () => {
 
   it('lists agents and commands from the managed config query', async () => {
     mockGetManagedOpenCodeConfig.mockResolvedValue({
-      revision: 'rev-1',
       info: {
         agents: { reviewer: { system: 'Review code', description: 'Reviews code', mode: 'subagent' } },
         commands: { deploy: { template: 'Deploy it', description: 'Deploys the app' } },
@@ -880,7 +875,6 @@ describe('OpenCodeConfigManager', () => {
 
   it('saves an agent with an entity patch through the managed config endpoint', async () => {
     mockGetManagedOpenCodeConfig.mockResolvedValue({
-      revision: 'rev-1',
       info: { agents: { reviewer: { system: 'Review code', mode: 'subagent' } } },
     })
 
@@ -902,7 +896,6 @@ describe('OpenCodeConfigManager', () => {
 
   it('deletes the previous agent name in the same patch when renaming', async () => {
     mockGetManagedOpenCodeConfig.mockResolvedValue({
-      revision: 'rev-1',
       info: { agents: { reviewer: { system: 'Review code', mode: 'subagent' } } },
     })
 
@@ -929,7 +922,6 @@ describe('OpenCodeConfigManager', () => {
 
   it('sends null for cleared command fields and a disabled subagent', async () => {
     mockGetManagedOpenCodeConfig.mockResolvedValue({
-      revision: 'rev-1',
       info: {
         commands: {
           review: {

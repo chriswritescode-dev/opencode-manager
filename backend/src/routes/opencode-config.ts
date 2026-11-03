@@ -27,6 +27,7 @@ import {
 import { readManagedOpenCodeConfig } from '../services/opencode-config-effective'
 import { applyOpenCodeConfigUpdate, toOpenCodeConfigApplyResponse } from '../services/opencode-config-apply'
 import { redactOpenCodeConfigContent, redactOpenCodeConfigFile } from '../services/opencode-config-redact'
+import { opencodeServerManager } from '../services/opencode-single-server'
 import { logger } from '../utils/logger'
 
 interface OpenCodeConfigRoutesOptions {
@@ -111,7 +112,6 @@ export function createOpenCodeConfigRoutes(
       const snapshot = await withOpenCodeConfigLock(readOpenCodeConfigSnapshot)
       const info = await readManagedOpenCodeConfig(openCodeClient.api, snapshot.sources)
       return c.json({
-        revision: snapshot.revision,
         info: options.redactSecrets
           ? redactOpenCodeConfigContent(info as Record<string, unknown>).content
           : info,
@@ -173,6 +173,12 @@ export function createOpenCodeConfigRoutes(
     const parsed = UpdateOpenCodeConfigPatchRequestSchema.safeParse(body)
     if (!parsed.success) {
       return c.json({ error: 'Invalid config data', details: parsed.error.issues }, 400)
+    }
+
+    if (opencodeServerManager.isRestartPending()) {
+      return c.json({
+        error: 'OpenCode has not loaded the saved configuration yet. Restart OpenCode before editing entries.',
+      }, 409)
     }
 
     return applyUpdate(c, {

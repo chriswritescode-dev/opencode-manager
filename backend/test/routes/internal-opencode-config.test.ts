@@ -558,7 +558,7 @@ describe('internal/opencode-config routes', () => {
 
   it('GET /api/internal/opencode-config/managed merges only Manager source documents and redacts secrets', async () => {
     await writeOpenCodeConfigFile(JSON.stringify({ theme: 'light' }), 'opencode.json')
-    const snapshot = await writeOpenCodeConfigFile(JSON.stringify({ theme: 'dark' }), 'opencode.jsonc')
+    await writeOpenCodeConfigFile(JSON.stringify({ theme: 'dark' }), 'opencode.jsonc')
     configGetMock.mockImplementation(() => Promise.resolve([
       {
         type: 'document',
@@ -585,7 +585,6 @@ describe('internal/opencode-config routes', () => {
 
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({
-      revision: snapshot.revision,
       info: {
         theme: 'dark',
         providers: { example: { apiKey: '<redacted>' } },

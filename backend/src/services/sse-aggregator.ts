@@ -4,6 +4,7 @@ import { type V2Event } from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from './opencode/client'
 import { encodeSSEFrame } from '../utils/sse-frame'
 import {
+  buildSessionStatusReplayEvent,
   collectPendingReplayEvents,
   createReplayEventBuilder,
   planSessionStatusReplay,
@@ -308,7 +309,7 @@ class SSEAggregator {
     let replayed = 0
 
     for (const { sessionID, directory } of plan.idle) {
-      this.deliverEvent(directory, this.buildReplayEvent('session.status', directory, { sessionID, status: { type: 'idle' } }))
+      this.deliverEvent(directory, buildSessionStatusReplayEvent(this.buildReplayEvent, directory, sessionID, 'idle'))
       replayed++
     }
 
@@ -319,7 +320,7 @@ class SSEAggregator {
 
     for (const { sessionID, directory } of runningDirectories) {
       if (!directory) continue
-      this.deliverEvent(directory, this.buildReplayEvent('session.status', directory, { sessionID, status: { type: 'busy' } }))
+      this.deliverEvent(directory, buildSessionStatusReplayEvent(this.buildReplayEvent, directory, sessionID, 'busy'))
       replayed++
     }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { V2Event } from '@opencode-manager/shared/opencode'
-import { createReplayEventBuilder, routeOpenCodeEvent } from '../../src/services/opencode-event-routing'
+import { buildSessionStatusReplayEvent, createReplayEventBuilder, routeOpenCodeEvent } from '../../src/services/opencode-event-routing'
 
 const locatedStatus = {
   id: 'evt_status_located',
@@ -116,5 +116,38 @@ describe('createReplayEventBuilder', () => {
     expect(form.type).toBe('form.created')
     expect(status.type).toBe('session.status')
     expect([permission.id, form.id, status.id]).toEqual(['replay_1', 'replay_2', 'replay_3'])
+  })
+})
+
+describe('buildSessionStatusReplayEvent', () => {
+  it('builds idle and busy session status replays through the hub builder', () => {
+    const buildEvent = createReplayEventBuilder('ocm_replay_')
+
+    const idle = buildSessionStatusReplayEvent(buildEvent, '/work/alpha', 'ses_1', 'idle')
+    const busy = buildSessionStatusReplayEvent(buildEvent, '/work/beta', 'ses_2', 'busy')
+
+    expect(idle).toEqual({
+      id: 'ocm_replay_1',
+      created: expect.any(Number),
+      type: 'session.status',
+      location: { directory: '/work/alpha' },
+      data: { sessionID: 'ses_1', status: { type: 'idle' } },
+    })
+    expect(busy).toEqual({
+      id: 'ocm_replay_2',
+      created: expect.any(Number),
+      type: 'session.status',
+      location: { directory: '/work/beta' },
+      data: { sessionID: 'ses_2', status: { type: 'busy' } },
+    })
+  })
+
+  it('keeps the directory and id prefix owned by the caller', () => {
+    const buildEvent = createReplayEventBuilder('ocm_replay_remote_')
+
+    const event = buildSessionStatusReplayEvent(buildEvent, '', 'ses_1', 'busy')
+
+    expect(event.id).toBe('ocm_replay_remote_1')
+    expect(event.location?.directory).toBe('')
   })
 })

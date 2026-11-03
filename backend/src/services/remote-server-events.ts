@@ -12,6 +12,7 @@ import type {
 } from './opencode-server-registry'
 import {
   applySessionActivity,
+  buildSessionStatusReplayEvent,
   collectPendingReplayEvents,
   createReplayEventBuilder,
   planSessionStatusReplay,
@@ -316,7 +317,7 @@ export class RemoteServerEventHub {
     let replayed = 0
 
     for (const { sessionID, directory } of plan.idle) {
-      const event = this.buildReplayEvent('session.status', directory, { sessionID, status: { type: 'idle' } })
+      const event = buildSessionStatusReplayEvent(this.buildReplayEvent, directory, sessionID, 'idle')
       this.aggregator.deliverRemoteEnvelope(serverId, directory, event)
       stream.busySessions.delete(sessionID)
       replayed++
@@ -324,7 +325,7 @@ export class RemoteServerEventHub {
 
     for (const sessionID of plan.busy) {
       const directory = stream.sessionDirectories.get(sessionID) ?? null
-      const event = this.buildReplayEvent('session.status', directory ?? '', { sessionID, status: { type: 'busy' } })
+      const event = buildSessionStatusReplayEvent(this.buildReplayEvent, directory ?? '', sessionID, 'busy')
       this.aggregator.deliverRemoteEnvelope(serverId, directory, event)
       stream.busySessions.add(sessionID)
       replayed++

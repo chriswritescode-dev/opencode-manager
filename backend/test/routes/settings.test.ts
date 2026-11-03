@@ -476,7 +476,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
 
       expect(res.status).toBe(200)
       expect(await res.json()).toEqual({
-        revision: 'rev-managed',
         info: { theme: 'dark', model: 'a/b' },
       })
       expect(configGet).toHaveBeenCalledWith({ location: { directory: '/tmp/test-workspace' } })
@@ -610,6 +609,21 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         settingsService: expect.anything(),
         openCodeClient: expect.anything(),
       })
+    })
+
+    it('refuses a PATCH entity save with 409 while an OpenCode restart is pending', async () => {
+      vi.mocked(opencodeServerManager.isRestartPending).mockReturnValueOnce(true)
+
+      const res = await settingsApp.fetch(new Request('http://localhost/opencode-config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patch: { agents: { reviewer: { description: 'stale' } } } }),
+      }))
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(409)
+      expect(json.error).toContain('Restart OpenCode')
+      expect(mockApplyOpenCodeConfigUpdate).not.toHaveBeenCalled()
     })
 
     it('returns 400 when the PUT body fails schema validation', async () => {

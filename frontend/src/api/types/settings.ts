@@ -98,7 +98,6 @@ export interface OpenCodeDirectoryFileInfo {
 }
 
 export interface ManagedOpenCodeConfig {
-  revision: string | null
   info: OpenCodeConfigInfo
 }
 

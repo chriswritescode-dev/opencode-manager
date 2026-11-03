@@ -62,6 +62,23 @@ export function planSessionStatusReplay(
 }
 
 /**
+ * Builds a `session.status` replay event restating the activity state of one session.
+ *
+ * @param buildEvent Replay event builder owned by the hub that delivers the event.
+ * @param directory Directory the replayed event belongs to.
+ * @param sessionID Session whose status is replayed.
+ * @param status Activity state to replay.
+ */
+export function buildSessionStatusReplayEvent(
+  buildEvent: ReplayEventBuilder,
+  directory: string,
+  sessionID: string,
+  status: 'idle' | 'busy',
+): ReplayEvent {
+  return buildEvent('session.status', directory, { sessionID, status: { type: status } })
+}
+
+/**
  * Records the activity state an event implies for its session, so that directory-scoped work can be
  * limited to the sessions that are actually running.
  *
