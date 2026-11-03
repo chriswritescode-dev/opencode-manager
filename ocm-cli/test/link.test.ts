@@ -362,10 +362,44 @@ describe('probeOpenCodeServer', () => {
     })
   })
 
+  it('reports unauthorized when the server rejects the credentials with an empty body', async () => {
+    const server = await startProbeServer((_request, response) => {
+      response.writeHead(401, { 'content-type': 'text/plain' })
+      response.end()
+    })
+
+    await expect(probeOpenCodeServer(server.baseUrl, CREDENTIALS, 1000)).resolves.toEqual({
+      status: 'unauthorized',
+    })
+  })
+
+  it('reports unauthorized when the server rejects the credentials with a plain text body', async () => {
+    const server = await startProbeServer((_request, response) => {
+      response.writeHead(401, { 'content-type': 'text/plain' })
+      response.end('unauthorized')
+    })
+
+    await expect(probeOpenCodeServer(server.baseUrl, CREDENTIALS, 1000)).resolves.toEqual({
+      status: 'unauthorized',
+    })
+  })
+
   it('reports unreachable with the HTTP status for an unexpected response', async () => {
     const server = await startProbeServer((_request, response) => {
       response.writeHead(500, { 'content-type': 'application/json' })
       response.end(JSON.stringify({ error: 'boom' }))
+    })
+
+    await expect(probeOpenCodeServer(server.baseUrl, CREDENTIALS, 1000)).resolves.toEqual({
+      status: 'unreachable',
+      message: 'HTTP 500',
+    })
+  })
+
+  it('reports unreachable with the HTTP status for an unexpected plain text response', async () => {
+    const server = await startProbeServer((_request, response) => {
+      response.writeHead(500, { 'content-type': 'text/plain' })
+      response.end('boom')
     })
 
     await expect(probeOpenCodeServer(server.baseUrl, CREDENTIALS, 1000)).resolves.toEqual({

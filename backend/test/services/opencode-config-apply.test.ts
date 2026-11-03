@@ -158,6 +158,34 @@ describe('opencode-config-apply', () => {
     expect(written).not.toContain('secret')
   })
 
+  it('refuses an entity merge patch without writing when the resolved config cannot be read', async () => {
+    const original = '{\n  "providers": { "acme": { "settings": { "apiKey": "{env:ACME_KEY}" } } }\n}\n'
+    await writeFile(sourcePath('opencode.json'), original, 'utf8')
+
+    await expect(applyOpenCodeConfigUpdate({
+      content: { providers: { acme: { name: 'Acme', settings: { apiKey: 'secret' } } } },
+      mode: 'merge',
+      settingsService,
+      openCodeClient,
+    })).rejects.toThrow('OpenCode unavailable')
+
+    expect(await readFile(sourcePath('opencode.json'), 'utf8')).toBe(original)
+  })
+
+  it('saves a merge patch without named entities while OpenCode is unavailable', async () => {
+    await writeFile(sourcePath('opencode.json'), '{"theme":"dark"}', 'utf8')
+
+    await applyOpenCodeConfigUpdate({
+      content: { theme: 'light' },
+      mode: 'merge',
+      settingsService,
+      openCodeClient,
+    })
+
+    expect(configGetMock).not.toHaveBeenCalled()
+    expect(JSON.parse(await readFile(sourcePath('opencode.json'), 'utf8'))).toEqual({ theme: 'light' })
+  })
+
   it('marks a restart pending when the reload fails', async () => {
     await writeFile(sourcePath('opencode.json'), '{"theme":"dark"}', 'utf8')
     locationReloadMock.mockRejectedValue(new Error('OpenCode server unavailable'))

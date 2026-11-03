@@ -611,6 +611,19 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       })
     })
 
+    it('returns 503 from a PATCH entity save when OpenCode cannot be read', async () => {
+      mockApplyOpenCodeConfigUpdate.mockRejectedValueOnce(new ClientError('Transport'))
+
+      const res = await settingsApp.fetch(new Request('http://localhost/opencode-config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patch: { agents: { reviewer: { description: 'new' } } } }),
+      }))
+
+      expect(res.status).toBe(503)
+      expect(await res.json()).toEqual({ error: 'OpenCode server unavailable' })
+    })
+
     it('refuses a PATCH entity save with 409 while an OpenCode restart is pending', async () => {
       vi.mocked(opencodeServerManager.isRestartPending).mockReturnValueOnce(true)
 

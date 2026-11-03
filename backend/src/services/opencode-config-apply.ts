@@ -15,7 +15,7 @@ import {
   withOpenCodeConfigLock,
 } from './opencode-config-file'
 import { readManagedOpenCodeConfig } from './opencode-config-effective'
-import { restoreOpenCodeConfigReferences } from './opencode-config-references'
+import { patchNamesOpenCodeConfigEntities, restoreOpenCodeConfigReferences } from './opencode-config-references'
 import { opencodeServerManager } from './opencode-single-server'
 import { reloadOpenCodeConfig } from './opencode-restart'
 import type { OpenCodeClient } from './opencode/client'
@@ -106,13 +106,9 @@ async function keepOpenCodeConfigReferences(
   snapshot: OpenCodeConfigSnapshot,
   openCodeClient: OpenCodeClient,
 ): Promise<Record<string, unknown>> {
-  try {
-    const resolved = await readManagedOpenCodeConfig(openCodeClient.api, snapshot.sources)
-    return restoreOpenCodeConfigReferences(patch, resolved as Record<string, unknown>, snapshot.content)
-  } catch (error) {
-    logger.warn('Could not read the resolved OpenCode config; saving the patch without reference restoration:', error)
-    return patch
-  }
+  if (!patchNamesOpenCodeConfigEntities(patch)) return patch
+  const resolved = await readManagedOpenCodeConfig(openCodeClient.api, snapshot.sources)
+  return restoreOpenCodeConfigReferences(patch, resolved as Record<string, unknown>, snapshot.content)
 }
 
 export async function applyOpenCodeConfigUpdate(

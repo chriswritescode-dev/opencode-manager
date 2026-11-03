@@ -20,12 +20,49 @@ type ManagedPermissionAction = typeof MANAGED_PERMISSION_ACTIONS[number]
 
 type PermissionEffect = OpenCodePermissionRule['effect']
 
+const isManagedWildcardRule = (rule: OpenCodePermissionRule): boolean =>
+  rule.resource === '*' && MANAGED_PERMISSION_ACTIONS.includes(rule.action as ManagedPermissionAction)
+
+const lastMatchingRule = (
+  permissions: OpenCodePermissionRule[] | undefined,
+  matches: (rule: OpenCodePermissionRule) => boolean,
+): OpenCodePermissionRule | undefined => {
+  let match: OpenCodePermissionRule | undefined
+  for (const rule of permissions ?? []) {
+    if (matches(rule)) {
+      match = rule
+    }
+  }
+  return match
+}
+
 const permissionEffect = (
   permissions: OpenCodePermissionRule[] | undefined,
   action: ManagedPermissionAction,
 ): PermissionEffect => {
-  const rule = permissions?.find((entry) => entry.action === action && entry.resource === '*')
+  const rule = lastMatchingRule(permissions, (entry) => entry.action === action && entry.resource === '*')
   return rule?.effect ?? 'allow'
+}
+
+/**
+ * Applies the form effects to the managed wildcard rules in place, so the rule
+ * order OpenCode resolves with last-match-wins stays unchanged, and prepends a
+ * wildcard fallback for managed actions that have no wildcard rule yet.
+ */
+const withManagedPermissionEffects = (
+  permissions: OpenCodePermissionRule[] | undefined,
+  effects: Record<ManagedPermissionAction, PermissionEffect>,
+): OpenCodePermissionRule[] => {
+  const updated = (permissions ?? []).map((rule) =>
+    isManagedWildcardRule(rule)
+      ? { ...rule, effect: effects[rule.action as ManagedPermissionAction] }
+      : rule,
+  )
+  const actionsWithWildcard = new Set(updated.filter(isManagedWildcardRule).map((rule) => rule.action))
+  const fallbacks = MANAGED_PERMISSION_ACTIONS
+    .filter((action) => !actionsWithWildcard.has(action))
+    .map((action) => ({ action, resource: '*', effect: effects[action] }))
+  return [...fallbacks, ...updated]
 }
 
 const requestBodyNumber = (agent: OpenCodeAgentConfig | undefined, key: string): number | undefined => {
@@ -87,9 +124,6 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
 
   const handleSubmit = (values: AgentFormValues) => {
     const previous = editingAgent?.agent
-    const preservedPermissions = (previous?.permissions ?? []).filter(
-      (rule) => rule.resource !== '*' || !MANAGED_PERMISSION_ACTIONS.includes(rule.action as ManagedPermissionAction),
-    )
     const agent: OpenCodeAgentPatch = {
       ...previous,
       system: values.prompt,
@@ -97,12 +131,11 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
       mode: values.mode,
       model: values.model?.trim() || null,
       disabled: values.disable,
-      permissions: [
-        ...preservedPermissions,
-        { action: 'edit', resource: '*', effect: values.editPermission },
-        { action: 'shell', resource: '*', effect: values.shellPermission },
-        { action: 'webfetch', resource: '*', effect: values.webfetchPermission },
-      ],
+      permissions: withManagedPermissionEffects(previous?.permissions, {
+        edit: values.editPermission,
+        shell: values.shellPermission,
+        webfetch: values.webfetchPermission,
+      }),
       request: {
         ...previous?.request,
         body: {

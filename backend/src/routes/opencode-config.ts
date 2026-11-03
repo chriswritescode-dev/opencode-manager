@@ -233,6 +233,6 @@ async function applyUpdate(
     if (error instanceof SyntaxError) {
       return c.json({ error: 'Invalid config data', details: error.message }, 400)
     }
-    return c.json({ error: 'Failed to update OpenCode config' }, 500)
+    return toClientReadErrorResponse(c, error, 'Failed to update OpenCode config')
   }
 }

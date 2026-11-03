@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AgentDialog } from './AgentDialog'
@@ -29,7 +29,14 @@ const providers: Provider[] = [
   },
 ]
 
-describe('AgentDialog model field', () => {
+describe('AgentDialog', () => {
+  beforeAll(() => {
+    Element.prototype.hasPointerCapture ??= () => false
+    Element.prototype.setPointerCapture ??= () => {}
+    Element.prototype.releasePointerCapture ??= () => {}
+    Element.prototype.scrollIntoView ??= () => {}
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.useProviders.mockReturnValue({ data: { providers, models: [] } })
@@ -198,13 +205,116 @@ describe('AgentDialog model field', () => {
       body: { temperature: 0.2, top_p: 0.5, reasoning_effort: 'high' },
     })
     expect(agent.permissions).toEqual([
-      { action: 'edit', resource: 'src/**', effect: 'ask' },
       { action: 'edit', resource: '*', effect: 'allow' },
       { action: 'shell', resource: '*', effect: 'deny' },
+      { action: 'edit', resource: 'src/**', effect: 'ask' },
       { action: 'webfetch', resource: '*', effect: 'allow' },
     ])
     expect(agent.hidden).toBe(true)
     expect(agent.color).toBe('#fff')
     expect(agent.steps).toBe(7)
+  })
+
+  it('keeps a wildcard rule before a specific rule and writes the form effect in place', async () => {
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <AgentDialog
+        open
+        onOpenChange={vi.fn()}
+        onSubmit={onSubmit}
+        editingAgent={{
+          name: 'reviewer',
+          agent: {
+            system: 'Review code',
+            permissions: [
+              { action: 'edit', resource: '*', effect: 'deny' },
+              { action: 'edit', resource: 'src/**', effect: 'allow' },
+            ],
+          },
+        }}
+      />,
+    )
+
+    await user.click(screen.getByRole('combobox', { name: 'Edit' }))
+    await user.click(screen.getByRole('option', { name: 'Ask' }))
+    await user.click(screen.getByRole('button', { name: 'Update' }))
+
+    const agent = onSubmit.mock.calls[0][1]
+    expect(agent.permissions).toEqual([
+      { action: 'shell', resource: '*', effect: 'allow' },
+      { action: 'webfetch', resource: '*', effect: 'allow' },
+      { action: 'edit', resource: '*', effect: 'ask' },
+      { action: 'edit', resource: 'src/**', effect: 'allow' },
+    ])
+  })
+
+  it('prepends wildcard rules for managed actions that have none', async () => {
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <AgentDialog
+        open
+        onOpenChange={vi.fn()}
+        onSubmit={onSubmit}
+        editingAgent={{
+          name: 'reviewer',
+          agent: {
+            system: 'Review code',
+            permissions: [
+              { action: 'edit', resource: 'src/**', effect: 'deny' },
+              { action: 'shell', resource: 'git status', effect: 'ask' },
+            ],
+          },
+        }}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Update' }))
+
+    const agent = onSubmit.mock.calls[0][1]
+    expect(agent.permissions).toEqual([
+      { action: 'edit', resource: '*', effect: 'allow' },
+      { action: 'shell', resource: '*', effect: 'allow' },
+      { action: 'webfetch', resource: '*', effect: 'allow' },
+      { action: 'edit', resource: 'src/**', effect: 'deny' },
+      { action: 'shell', resource: 'git status', effect: 'ask' },
+    ])
+  })
+
+  it('shows the last matching wildcard effect and applies the form effect to every occurrence', async () => {
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <AgentDialog
+        open
+        onOpenChange={vi.fn()}
+        onSubmit={onSubmit}
+        editingAgent={{
+          name: 'reviewer',
+          agent: {
+            system: 'Review code',
+            permissions: [
+              { action: 'edit', resource: '*', effect: 'allow' },
+              { action: 'edit', resource: '*', effect: 'deny' },
+            ],
+          },
+        }}
+      />,
+    )
+
+    expect(screen.getByRole('combobox', { name: 'Edit' })).toHaveTextContent('Deny')
+
+    await user.click(screen.getByRole('combobox', { name: 'Edit' }))
+    await user.click(screen.getByRole('option', { name: 'Ask' }))
+    await user.click(screen.getByRole('button', { name: 'Update' }))
+
+    const agent = onSubmit.mock.calls[0][1]
+    expect(agent.permissions).toEqual([
+      { action: 'shell', resource: '*', effect: 'allow' },
+      { action: 'webfetch', resource: '*', effect: 'allow' },
+      { action: 'edit', resource: '*', effect: 'ask' },
+      { action: 'edit', resource: '*', effect: 'ask' },
+    ])
   })
 })

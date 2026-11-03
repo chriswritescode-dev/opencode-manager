@@ -5,7 +5,6 @@ import { homedir, networkInterfaces, type NetworkInterfaceInfo } from 'node:os'
 import { join } from 'node:path'
 import { renderUnicodeCompact } from 'uqr'
 import {
-  ClientError,
   buildOpenCodeBasicAuth,
   createOpenCodeApi,
   encryptOpenCodePairingCredentials,
@@ -187,20 +186,27 @@ export async function probeOpenCodeServer(
   credentials: PairingCredentials,
   timeoutMs = 3000,
 ): Promise<OpenCodeServerProbe> {
+  let responseStatus: number | undefined
   const api = createOpenCodeApi({
     baseUrl: trimUrlTrailingSlashes(baseUrl),
     headers: { authorization: buildOpenCodeBasicAuth(credentials.password, credentials.username) },
+    fetch: Object.assign(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const response = await fetch(input, init)
+        responseStatus = response.status
+        return response
+      },
+      { preconnect: fetch.preconnect },
+    ),
   })
 
   try {
     const info = await api.server.info({ signal: AbortSignal.timeout(timeoutMs) })
     return { status: 'ok', version: info.version ?? null }
   } catch (error) {
-    if (openCodeErrorStatus(error) === 401) return { status: 'unauthorized' }
+    if (responseStatus === 401 || openCodeErrorStatus(error) === 401) return { status: 'unauthorized' }
 
-    const status = error instanceof ClientError
-      ? (error.cause as { status?: number } | undefined)?.status
-      : undefined
+    const status = responseStatus !== undefined && responseStatus >= 400 ? responseStatus : undefined
     return {
       status: 'unreachable',
       message: status === undefined ? messageOf(error) : `HTTP ${status}`,

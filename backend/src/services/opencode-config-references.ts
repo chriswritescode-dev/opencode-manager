@@ -136,6 +136,11 @@ function setValueAtPath(target: Record<string, unknown>, path: readonly string[]
   }
 }
 
+/** Whether a merge patch names an agent, command, provider or MCP server, the only places references are restored. */
+export function patchNamesOpenCodeConfigEntities(patch: Record<string, unknown>): boolean {
+  return V1_ENTITY_PATHS.some((mapping) => mapping.named && isRecord(readConfigValueAtPath(patch, mapping.v2Path)))
+}
+
 /**
  * Keeps `{env:…}` and `{file:…}` references in a merge patch of named config entities.
  *

@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { restoreOpenCodeConfigReferences } from '../../src/services/opencode-config-references'
+import { patchNamesOpenCodeConfigEntities, restoreOpenCodeConfigReferences } from '../../src/services/opencode-config-references'
+
+describe('patchNamesOpenCodeConfigEntities', () => {
+  it('is true only when a patch names agents, commands, providers or MCP servers', () => {
+    expect(patchNamesOpenCodeConfigEntities({ agents: { reviewer: { description: 'x' } } })).toBe(true)
+    expect(patchNamesOpenCodeConfigEntities({ mcp: { servers: { docs: null } } })).toBe(true)
+    expect(patchNamesOpenCodeConfigEntities({ theme: 'dark', permissions: [] })).toBe(false)
+    expect(patchNamesOpenCodeConfigEntities({ mcp: { timeout: 5 } })).toBe(false)
+  })
+})
 
 describe('restoreOpenCodeConfigReferences', () => {
   it('keeps unchanged references of a v2 entity and writes edited values', () => {
