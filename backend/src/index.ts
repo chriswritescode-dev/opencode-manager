@@ -360,6 +360,8 @@ if (ENV.VAPID.PUBLIC_KEY && ENV.VAPID.PRIVATE_KEY) {
 }
 
 sseAggregator.setOpenCodeClient(openCodeClient)
+sseAggregator.setResyncGate(() => opencodeServerManager.isLifecycleInitialized())
+opencodeServerManager.onLifecycleInitialized(() => sseAggregator.releasePendingResync())
 sseAggregator.onServerConnected((serverId) => {
   void sessionPermissionModeService.acceptPendingRequestsForActiveSessions(serverId).catch((err) => {
     logger.error(`Failed to accept pending permission requests for server ${serverId}:`, err)

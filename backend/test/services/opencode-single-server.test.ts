@@ -3242,6 +3242,24 @@ describe('OpenCodeServerManager - server auth', () => {
     expect(manager.isRestartPending()).toBe(false)
   })
 
+  it('notifies lifecycle listeners only when the gate opens', async () => {
+    const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
+    const manager = OpenCodeServerManager.getInstance()
+    const listener = vi.fn()
+    const unsubscribe = manager.onLifecycleInitialized(listener)
+
+    manager.setLifecycleInitialized(false)
+    manager.setLifecycleInitialized(true)
+    manager.setLifecycleInitialized(true)
+    manager.setLifecycleInitialized(false)
+    manager.setLifecycleInitialized(true)
+    unsubscribe()
+    manager.setLifecycleInitialized(false)
+    manager.setLifecycleInitialized(true)
+
+    expect(listener).toHaveBeenCalledTimes(2)
+  })
+
   function setOpenCodeEnv(values: { host: string; password: string }) {
     Object.defineProperty(ENV.OPENCODE, 'HOST', { value: values.host, configurable: true, writable: true })
     Object.defineProperty(ENV.OPENCODE, 'SERVER_PASSWORD', { value: values.password, configurable: true, writable: true })

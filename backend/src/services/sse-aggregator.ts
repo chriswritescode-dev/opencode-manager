@@ -65,6 +65,8 @@ class SSEAggregator {
   private openCodeClient: Pick<OpenCodeClient, 'api'> | null = null
   private scheduledSessionsResolver: (() => ScheduledSessionRef[]) | null = null
   private remoteReplayHandler: RemoteReplayHandler | null = null
+  private isResyncGateOpen: () => boolean = () => true
+  private resyncPending = false
   private readonly buildReplayEvent: ReplayEventBuilder = createReplayEventBuilder('ocm_replay_')
 
   private constructor() {}
@@ -79,6 +81,22 @@ class SSEAggregator {
 
   setRemoteReplayHandler(handler: RemoteReplayHandler | null): void {
     this.remoteReplayHandler = handler
+  }
+
+  /**
+   * Holds the upstream `resync` while the gate is closed, so clients do not re-read OpenCode
+   * state through the proxy before it accepts requests. Call {@link releasePendingResync} when
+   * the gate opens.
+   */
+  setResyncGate(isOpen: () => boolean): void {
+    this.isResyncGateOpen = isOpen
+  }
+
+  /** Broadcasts a `resync` held by the gate while the upstream stream is still connected. */
+  releasePendingResync(): void {
+    if (!this.resyncPending || !this.upstreamConnected) return
+    this.resyncPending = false
+    this.broadcastResync()
   }
 
   reconnect(): void {
@@ -113,6 +131,7 @@ class SSEAggregator {
       },
       onDisconnect: (error) => {
         this.upstreamConnected = false
+        this.resyncPending = false
         logger.warn(`SSE upstream disconnected: ${String(error)}`)
       },
     })
@@ -357,7 +376,11 @@ class SSEAggregator {
     this.upstreamConnected = true
     this.everConnected = true
     this.notifyUpstreamConnected()
-    this.broadcastResync()
+    if (this.isResyncGateOpen()) {
+      this.broadcastResync()
+    } else {
+      this.resyncPending = true
+    }
     if (wasConnectedBefore) {
       void this.replaySessionStatusesForTrackedDirectories()
     }
@@ -675,6 +698,7 @@ class SSEAggregator {
     this.subscription?.close()
     this.subscription = null
     this.upstreamConnected = false
+    this.resyncPending = false
 
     this.activeSessions.clear()
     this.sessionDirectories.clear()

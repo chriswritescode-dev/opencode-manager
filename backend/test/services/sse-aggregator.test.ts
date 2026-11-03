@@ -553,6 +553,32 @@ describe('SSEAggregator upstream resynchronization signal', () => {
     sseAggregator.shutdown()
     sseAggregator.setOpenCodeClient(null)
     sseAggregator.setScheduledSessionsResolver(() => [])
+    sseAggregator.setResyncGate(() => true)
+  })
+
+  it('holds the resync while the gate is closed and broadcasts it once when released', () => {
+    let gateOpen = false
+    sseAggregator.setResyncGate(() => gateOpen)
+    const client = createCapturingClient()
+    sseAggregator.addClient('resync-gate', client.callback, client.writeFrame, ['/repo/a'])
+    const resyncCount = () => client.events.filter(event => event.event === 'resync').length
+
+    ;(sseAggregator as unknown as { handleUpstreamOpen(wasConnectedBefore: boolean): void }).handleUpstreamOpen(true)
+    expect(resyncCount()).toBe(0)
+
+    gateOpen = true
+    sseAggregator.releasePendingResync()
+    sseAggregator.releasePendingResync()
+    expect(resyncCount()).toBe(1)
+  })
+
+  it('does not broadcast on release when no resync is held', () => {
+    const client = createCapturingClient()
+    sseAggregator.addClient('resync-none', client.callback, client.writeFrame, ['/repo/a'])
+
+    sseAggregator.releasePendingResync()
+
+    expect(client.events.filter(event => event.event === 'resync')).toHaveLength(0)
   })
 
   it('broadcasts a resync control event on the first and every later upstream connect', () => {
