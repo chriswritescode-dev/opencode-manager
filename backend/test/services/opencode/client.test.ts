@@ -46,7 +46,7 @@ describe('OpenCodeClient', () => {
   const basicAuth = 'Basic dXNlcjpwYXNz'
 
   describe('forwardRaw', () => {
-    it('should strip /api/opencode prefix from path, preserve search string, and strip host/connection/authorization headers', async () => {
+    it('should strip /api/opencode prefix from path, preserve search string, and strip host/connection/authorization/cookie headers', async () => {
       const mockResponse = new Response(JSON.stringify({}), { status: 200 })
       let capturedUrl: URL | undefined
       let capturedInit: RequestInit | undefined
@@ -63,6 +63,7 @@ describe('OpenCodeClient', () => {
           'Host': 'localhost:5003',
           'Connection': 'keep-alive',
           'Authorization': 'Bearer token',
+          'Cookie': 'session=manager',
           'X-Custom-Header': 'value',
         },
       })
@@ -78,6 +79,7 @@ describe('OpenCodeClient', () => {
       expect((capturedInit?.headers as Record<string, string>)['host']).toBeUndefined()
       expect((capturedInit?.headers as Record<string, string>)['connection']).toBeUndefined()
       expect((capturedInit?.headers as Record<string, string>)['authorization']).toBeUndefined()
+      expect((capturedInit?.headers as Record<string, string>)['cookie']).toBeUndefined()
       expect((capturedInit?.headers as Record<string, string>)['x-opencode-directory']).toBe(encodeURIComponent('/test/workspace'))
     })
 

@@ -6,6 +6,8 @@ import { forwardProxyRequest } from '../../utils/proxy-forward'
 import { getOpenCodeBasicAuthHeader, type OpenCodePasswordResolver } from './auth'
 import { getOpenCodeUpstreamBaseUrl, withDefaultOpenCodeDirectory } from './upstream'
 
+const FORWARD_EXCLUDED_HEADERS: ReadonlySet<string> = new Set(['cookie'])
+
 export interface OpenCodeClient {
   readonly api: OpenCodeApi
   forwardRaw(request: Request): Promise<Response>
@@ -65,7 +67,7 @@ export class FetchOpenCodeClient implements OpenCodeClient {
   async forwardRaw(request: Request): Promise<Response> {
     const url = new URL(request.url)
     const path = url.pathname.replace(/^\/api\/opencode/, '') + url.search
-    const headers = this.withDirectoryHeader(filterProxyHeaders(request.headers))
+    const headers = this.withDirectoryHeader(filterProxyHeaders(request.headers, FORWARD_EXCLUDED_HEADERS))
     const basicAuth = await this.getBasicAuth()
 
     if (basicAuth) {

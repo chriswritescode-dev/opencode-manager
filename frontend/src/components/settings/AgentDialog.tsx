@@ -18,7 +18,7 @@ const MANAGED_PERMISSION_ACTIONS = ['edit', 'shell', 'webfetch'] as const
 
 type ManagedPermissionAction = typeof MANAGED_PERMISSION_ACTIONS[number]
 
-type PermissionEffect = OpenCodePermissionRule['effect']
+type PermissionEffect = OpenCodePermissionRule['effect'] | 'inherit'
 
 const isManagedWildcardRule = (rule: OpenCodePermissionRule): boolean =>
   rule.resource === '*' && MANAGED_PERMISSION_ACTIONS.includes(rule.action as ManagedPermissionAction)
@@ -41,29 +41,29 @@ const permissionEffect = (
   action: ManagedPermissionAction,
 ): PermissionEffect => {
   const rule = lastMatchingRule(permissions, (entry) => entry.action === action && entry.resource === '*')
-  return rule?.effect ?? 'allow'
+  return rule?.effect ?? 'inherit'
 }
 
 /**
  * Applies the form effects to the managed wildcard rules in place, so the rule
- * order OpenCode resolves with last-match-wins stays unchanged, and prepends a
- * wildcard fallback only for changed actions that have no wildcard rule yet, so
- * an untouched action keeps inheriting the global permission.
+ * order OpenCode resolves with last-match-wins stays unchanged. An `inherit`
+ * effect removes the action's wildcard rules so the global permission applies;
+ * any other effect prepends a wildcard rule when the action has none yet.
  */
 const withManagedPermissionEffects = (
   permissions: OpenCodePermissionRule[] | undefined,
   effects: Record<ManagedPermissionAction, PermissionEffect>,
-  changedActions: readonly ManagedPermissionAction[],
 ): OpenCodePermissionRule[] => {
-  const updated = (permissions ?? []).map((rule) =>
-    isManagedWildcardRule(rule)
-      ? { ...rule, effect: effects[rule.action as ManagedPermissionAction] }
-      : rule,
-  )
+  const updated = (permissions ?? []).flatMap((rule) => {
+    if (!isManagedWildcardRule(rule)) return [rule]
+    const effect = effects[rule.action as ManagedPermissionAction]
+    return effect === 'inherit' ? [] : [{ ...rule, effect }]
+  })
   const actionsWithWildcard = new Set(updated.filter(isManagedWildcardRule).map((rule) => rule.action))
-  const fallbacks = changedActions
-    .filter((action) => !actionsWithWildcard.has(action))
-    .map((action) => ({ action, resource: '*', effect: effects[action] }))
+  const fallbacks = MANAGED_PERMISSION_ACTIONS.flatMap((action) => {
+    const effect = effects[action]
+    return effect === 'inherit' || actionsWithWildcard.has(action) ? [] : [{ action, resource: '*', effect }]
+  })
   return [...fallbacks, ...updated]
 }
 
@@ -80,9 +80,9 @@ const agentFormSchema = z.object({
   temperature: z.number().min(0).max(2),
   topP: z.number().min(0).max(1),
   model: z.string().optional(),
-  editPermission: z.enum(['ask', 'allow', 'deny']),
-  shellPermission: z.enum(['ask', 'allow', 'deny']),
-  webfetchPermission: z.enum(['ask', 'allow', 'deny']),
+  editPermission: z.enum(['inherit', 'ask', 'allow', 'deny']),
+  shellPermission: z.enum(['inherit', 'ask', 'allow', 'deny']),
+  webfetchPermission: z.enum(['inherit', 'ask', 'allow', 'deny']),
   disable: z.boolean(),
 })
 
@@ -132,10 +132,7 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
 
   const handleSubmit = (values: AgentFormValues) => {
     const previous = editingAgent?.agent
-    const effects = formPermissionEffects(values)
-    const loadedEffects = formPermissionEffects(getDefaultValues(editingAgent))
-    const changedActions = MANAGED_PERMISSION_ACTIONS.filter((action) => effects[action] !== loadedEffects[action])
-    const permissions = withManagedPermissionEffects(previous?.permissions, effects, changedActions)
+    const permissions = withManagedPermissionEffects(previous?.permissions, formPermissionEffects(values))
     const agent: OpenCodeAgentPatch = {
       ...previous,
       system: values.prompt,
@@ -340,6 +337,7 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
+                            <SelectItem value="inherit">Default</SelectItem>
                             <SelectItem value="ask">Ask</SelectItem>
                             <SelectItem value="allow">Allow</SelectItem>
                             <SelectItem value="deny">Deny</SelectItem>
@@ -363,6 +361,7 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
+                            <SelectItem value="inherit">Default</SelectItem>
                             <SelectItem value="ask">Ask</SelectItem>
                             <SelectItem value="allow">Allow</SelectItem>
                             <SelectItem value="deny">Deny</SelectItem>
@@ -386,6 +385,7 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
+                            <SelectItem value="inherit">Default</SelectItem>
                             <SelectItem value="ask">Ask</SelectItem>
                             <SelectItem value="allow">Allow</SelectItem>
                             <SelectItem value="deny">Deny</SelectItem>

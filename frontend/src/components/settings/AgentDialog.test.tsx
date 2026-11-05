@@ -276,7 +276,7 @@ describe('AgentDialog', () => {
     ])
   })
 
-  it('prepends a wildcard rule only for a changed action that has none', async () => {
+  it('prepends a wildcard rule only for an action set away from Default', async () => {
     const onSubmit = vi.fn()
     const user = userEvent.setup()
     render(
@@ -302,6 +302,42 @@ describe('AgentDialog', () => {
     expect(agent.permissions).toEqual([
       { action: 'shell', resource: '*', effect: 'deny' },
       { action: 'shell', resource: 'git status', effect: 'ask' },
+    ])
+  })
+
+  it('writes an explicit Allow over an inherited permission and removes the wildcard rule for Default', async () => {
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <AgentDialog
+        open
+        onOpenChange={vi.fn()}
+        onSubmit={onSubmit}
+        editingAgent={{
+          name: 'reviewer',
+          agent: {
+            system: 'Review code',
+            permissions: [
+              { action: 'edit', resource: '*', effect: 'deny' },
+              { action: 'edit', resource: 'src/**', effect: 'allow' },
+            ],
+          },
+        }}
+      />,
+    )
+
+    expect(screen.getByRole('combobox', { name: 'Shell' })).toHaveTextContent('Default')
+
+    await user.click(screen.getByRole('combobox', { name: 'Shell' }))
+    await user.click(screen.getByRole('option', { name: 'Allow' }))
+    await user.click(screen.getByRole('combobox', { name: 'Edit' }))
+    await user.click(screen.getByRole('option', { name: 'Default' }))
+    await user.click(screen.getByRole('button', { name: 'Update' }))
+
+    const agent = onSubmit.mock.calls[0][1]
+    expect(agent.permissions).toEqual([
+      { action: 'shell', resource: '*', effect: 'allow' },
+      { action: 'edit', resource: 'src/**', effect: 'allow' },
     ])
   })
 
