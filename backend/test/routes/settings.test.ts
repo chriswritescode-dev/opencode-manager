@@ -639,6 +639,22 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(mockApplyOpenCodeConfigUpdate).not.toHaveBeenCalled()
     })
 
+    it('applies a PATCH that names no entity while an OpenCode restart is pending', async () => {
+      vi.mocked(opencodeServerManager.isRestartPending).mockReturnValueOnce(true)
+      mockApplyOpenCodeConfigUpdate.mockResolvedValueOnce({ status: 'applied', config: { revision: 'r2' } })
+
+      const res = await settingsApp.fetch(new Request('http://localhost/opencode-config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patch: { theme: 'dark' } }),
+      }))
+
+      expect(res.status).toBe(200)
+      expect(mockApplyOpenCodeConfigUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ content: { theme: 'dark' }, mode: 'merge' }),
+      )
+    })
+
     it('returns 400 when the PUT body fails schema validation', async () => {
       const res = await settingsApp.fetch(new Request('http://localhost/opencode-config', {
         method: 'PUT',

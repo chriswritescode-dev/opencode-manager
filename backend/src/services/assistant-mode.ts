@@ -791,7 +791,7 @@ Read the merged persisted global configuration and its source files. Returns \`4
 
 Change only the paths the user asked for. Send a nested \`patch\` object naming those paths and the values to set; a path you do not name keeps its current value, and a \`null\` value removes a path. Naming a v2 entity (\`agents.<name>\`, \`commands.<name>\`, \`providers.<id>\`, \`mcp.servers.<name>\`, or \`permissions\`) also deletes its v1 counterpart (\`agent.<name>\`, \`command.<name>\`, \`provider.<id>\`, \`mcp.<name>\`, or \`permission\`) in the same edit. \`{env:…}\` and \`{file:…}\` references in fields whose value is sent back unchanged are kept. Only changed fields are patched into the preferred existing source: JSONC, then JSON. New installations use opencode.jsonc. Unchanged inherited values and comments are preserved.
 
-Send \`expectedRevision\` from a read. A \`409\` means either \`expectedRevision\` is stale or the v1 entry to remove exists only in a lower-priority config source (the \`OpenCodeConfigShadowedRemovalError\` case): read again and reconcile rather than retrying stale content.
+Send \`expectedRevision\` from a read. A \`409\` with \`expectedRevision\` and \`actualRevision\` means the revision is stale, and a \`409\` with \`paths\` means the v1 entry to remove exists only in a lower-priority config source (the \`OpenCodeConfigShadowedRemovalError\` case): read again and reconcile rather than retrying stale content. A \`409\` with neither field means OpenCode has not loaded the saved configuration since a failed reload, so a patch naming an agent, command, provider or MCP server is refused: do not retry, and tell the user to restart the OpenCode server from Settings. Patches that name no such entity still apply.
 
 **Request Body:**
 \`\`\`ts
@@ -823,7 +823,7 @@ Returns the refreshed merged configuration and source files, with secrets redact
 
 The response adds \`restartRequired: true\` only when the automatic reload failed, for example because the OpenCode server is unavailable.
 
-Returns \`400\` for invalid configuration or a \`<redacted>\` value (\`paths\` lists them), and \`409\` when \`expectedRevision\` is stale or the v1 entry to remove exists only in a lower-priority config source.
+Returns \`400\` for invalid configuration or a \`<redacted>\` value (\`paths\` lists them), and \`409\` when \`expectedRevision\` is stale, the v1 entry to remove exists only in a lower-priority config source, or an entity patch arrives while an OpenCode restart is pending.
 
 ### GET /opencode-config/mcp
 

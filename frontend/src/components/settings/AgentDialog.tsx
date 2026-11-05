@@ -47,11 +47,13 @@ const permissionEffect = (
 /**
  * Applies the form effects to the managed wildcard rules in place, so the rule
  * order OpenCode resolves with last-match-wins stays unchanged, and prepends a
- * wildcard fallback for managed actions that have no wildcard rule yet.
+ * wildcard fallback only for changed actions that have no wildcard rule yet, so
+ * an untouched action keeps inheriting the global permission.
  */
 const withManagedPermissionEffects = (
   permissions: OpenCodePermissionRule[] | undefined,
   effects: Record<ManagedPermissionAction, PermissionEffect>,
+  changedActions: readonly ManagedPermissionAction[],
 ): OpenCodePermissionRule[] => {
   const updated = (permissions ?? []).map((rule) =>
     isManagedWildcardRule(rule)
@@ -59,7 +61,7 @@ const withManagedPermissionEffects = (
       : rule,
   )
   const actionsWithWildcard = new Set(updated.filter(isManagedWildcardRule).map((rule) => rule.action))
-  const fallbacks = MANAGED_PERMISSION_ACTIONS
+  const fallbacks = changedActions
     .filter((action) => !actionsWithWildcard.has(action))
     .map((action) => ({ action, resource: '*', effect: effects[action] }))
   return [...fallbacks, ...updated]
@@ -85,6 +87,12 @@ const agentFormSchema = z.object({
 })
 
 type AgentFormValues = z.infer<typeof agentFormSchema>
+
+const formPermissionEffects = (values: AgentFormValues): Record<ManagedPermissionAction, PermissionEffect> => ({
+  edit: values.editPermission,
+  shell: values.shellPermission,
+  webfetch: values.webfetchPermission,
+})
 
 interface AgentDialogProps {
   open: boolean
@@ -124,6 +132,10 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
 
   const handleSubmit = (values: AgentFormValues) => {
     const previous = editingAgent?.agent
+    const effects = formPermissionEffects(values)
+    const loadedEffects = formPermissionEffects(getDefaultValues(editingAgent))
+    const changedActions = MANAGED_PERMISSION_ACTIONS.filter((action) => effects[action] !== loadedEffects[action])
+    const permissions = withManagedPermissionEffects(previous?.permissions, effects, changedActions)
     const agent: OpenCodeAgentPatch = {
       ...previous,
       system: values.prompt,
@@ -131,11 +143,7 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
       mode: values.mode,
       model: values.model?.trim() || null,
       disabled: values.disable,
-      permissions: withManagedPermissionEffects(previous?.permissions, {
-        edit: values.editPermission,
-        shell: values.shellPermission,
-        webfetch: values.webfetchPermission,
-      }),
+      ...(permissions.length > 0 || previous?.permissions ? { permissions } : {}),
       request: {
         ...previous?.request,
         body: {

@@ -27,6 +27,7 @@ import {
 import { readManagedOpenCodeConfig } from '../services/opencode-config-effective'
 import { applyOpenCodeConfigUpdate, toOpenCodeConfigApplyResponse } from '../services/opencode-config-apply'
 import { redactOpenCodeConfigContent, redactOpenCodeConfigFile } from '../services/opencode-config-redact'
+import { patchNamesOpenCodeConfigEntities } from '../services/opencode-config-references'
 import { opencodeServerManager } from '../services/opencode-single-server'
 import { logger } from '../utils/logger'
 
@@ -175,7 +176,7 @@ export function createOpenCodeConfigRoutes(
       return c.json({ error: 'Invalid config data', details: parsed.error.issues }, 400)
     }
 
-    if (opencodeServerManager.isRestartPending()) {
+    if (opencodeServerManager.isRestartPending() && patchNamesOpenCodeConfigEntities(parsed.data.patch)) {
       return c.json({
         error: 'OpenCode has not loaded the saved configuration yet. Restart OpenCode before editing entries.',
       }, 409)

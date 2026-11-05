@@ -205,7 +205,6 @@ describe('AgentDialog', () => {
       body: { temperature: 0.2, top_p: 0.5, reasoning_effort: 'high' },
     })
     expect(agent.permissions).toEqual([
-      { action: 'edit', resource: '*', effect: 'allow' },
       { action: 'shell', resource: '*', effect: 'deny' },
       { action: 'edit', resource: 'src/**', effect: 'ask' },
       { action: 'webfetch', resource: '*', effect: 'allow' },
@@ -242,14 +241,12 @@ describe('AgentDialog', () => {
 
     const agent = onSubmit.mock.calls[0][1]
     expect(agent.permissions).toEqual([
-      { action: 'shell', resource: '*', effect: 'allow' },
-      { action: 'webfetch', resource: '*', effect: 'allow' },
       { action: 'edit', resource: '*', effect: 'ask' },
       { action: 'edit', resource: 'src/**', effect: 'allow' },
     ])
   })
 
-  it('prepends wildcard rules for managed actions that have none', async () => {
+  it('adds no wildcard rule for an unchanged action so it keeps inheriting the global permission', async () => {
     const onSubmit = vi.fn()
     const user = userEvent.setup()
     render(
@@ -274,12 +271,58 @@ describe('AgentDialog', () => {
 
     const agent = onSubmit.mock.calls[0][1]
     expect(agent.permissions).toEqual([
-      { action: 'edit', resource: '*', effect: 'allow' },
-      { action: 'shell', resource: '*', effect: 'allow' },
-      { action: 'webfetch', resource: '*', effect: 'allow' },
       { action: 'edit', resource: 'src/**', effect: 'deny' },
       { action: 'shell', resource: 'git status', effect: 'ask' },
     ])
+  })
+
+  it('prepends a wildcard rule only for a changed action that has none', async () => {
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <AgentDialog
+        open
+        onOpenChange={vi.fn()}
+        onSubmit={onSubmit}
+        editingAgent={{
+          name: 'reviewer',
+          agent: {
+            system: 'Review code',
+            permissions: [{ action: 'shell', resource: 'git status', effect: 'ask' }],
+          },
+        }}
+      />,
+    )
+
+    await user.click(screen.getByRole('combobox', { name: 'Shell' }))
+    await user.click(screen.getByRole('option', { name: 'Deny' }))
+    await user.click(screen.getByRole('button', { name: 'Update' }))
+
+    const agent = onSubmit.mock.calls[0][1]
+    expect(agent.permissions).toEqual([
+      { action: 'shell', resource: '*', effect: 'deny' },
+      { action: 'shell', resource: 'git status', effect: 'ask' },
+    ])
+  })
+
+  it('writes no permissions for a prompt-only save of an agent without permission rules', async () => {
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <AgentDialog
+        open
+        onOpenChange={vi.fn()}
+        onSubmit={onSubmit}
+        editingAgent={{ name: 'reviewer', agent: { system: 'Review code' } }}
+      />,
+    )
+
+    await user.type(screen.getByLabelText('Prompt'), ' carefully')
+    await user.click(screen.getByRole('button', { name: 'Update' }))
+
+    const agent = onSubmit.mock.calls[0][1]
+    expect(agent.system).toBe('Review code carefully')
+    expect(agent).not.toHaveProperty('permissions')
   })
 
   it('shows the last matching wildcard effect and applies the form effect to every occurrence', async () => {
@@ -311,8 +354,6 @@ describe('AgentDialog', () => {
 
     const agent = onSubmit.mock.calls[0][1]
     expect(agent.permissions).toEqual([
-      { action: 'shell', resource: '*', effect: 'allow' },
-      { action: 'webfetch', resource: '*', effect: 'allow' },
       { action: 'edit', resource: '*', effect: 'ask' },
       { action: 'edit', resource: '*', effect: 'ask' },
     ])
