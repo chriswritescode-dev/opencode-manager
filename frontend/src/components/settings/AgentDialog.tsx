@@ -67,9 +67,36 @@ const withManagedPermissionEffects = (
   return [...fallbacks, ...updated]
 }
 
+const optionalNumber = (value: string): number | undefined => {
+  const parsed = parseFloat(value)
+  return Number.isNaN(parsed) ? undefined : parsed
+}
+
 const requestBodyNumber = (agent: OpenCodeAgentConfig | undefined, key: string): number | undefined => {
   const value = agent?.request?.body?.[key]
   return typeof value === 'number' ? value : undefined
+}
+
+/**
+ * Writes each sampling value the form sets into `request.body`. A cleared value
+ * is removed with a merge-patch `null` when the agent stored it and omitted
+ * otherwise, so the provider default applies.
+ */
+const withSamplingValues = (
+  previous: OpenCodeAgentConfig | undefined,
+  values: Record<'temperature' | 'top_p', number | undefined>,
+): Pick<OpenCodeAgentPatch, 'request'> => {
+  const previousBody = previous?.request?.body ?? {}
+  const body: NonNullable<NonNullable<OpenCodeAgentConfig['request']>['body']> = { ...previousBody }
+  for (const [key, value] of Object.entries(values)) {
+    if (value !== undefined) {
+      body[key] = value
+    } else if (key in previousBody) {
+      body[key] = null
+    }
+  }
+  if (!previous?.request && Object.keys(body).length === 0) return {}
+  return { request: { ...previous?.request, body } }
 }
 
 const agentFormSchema = z.object({
@@ -77,8 +104,8 @@ const agentFormSchema = z.object({
   description: z.string().optional(),
   prompt: z.string().min(1, 'Prompt is required'),
   mode: z.enum(['subagent', 'primary', 'all']),
-  temperature: z.number().min(0).max(2),
-  topP: z.number().min(0).max(1),
+  temperature: z.number().min(0).max(2).optional(),
+  topP: z.number().min(0).max(1).optional(),
   model: z.string().optional(),
   editPermission: z.enum(['inherit', 'ask', 'allow', 'deny']),
   shellPermission: z.enum(['inherit', 'ask', 'allow', 'deny']),
@@ -109,8 +136,8 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
       description: agent?.agent.description || '',
       prompt: agent?.agent.system || '',
       mode: agent?.agent.mode || 'subagent',
-      temperature: requestBodyNumber(agent?.agent, 'temperature') ?? 0.7,
-      topP: requestBodyNumber(agent?.agent, 'top_p') ?? 1,
+      temperature: requestBodyNumber(agent?.agent, 'temperature'),
+      topP: requestBodyNumber(agent?.agent, 'top_p'),
       model: modelRef ? formatOpenCodeModelRef(modelRef) : '',
       editPermission: permissionEffect(agent?.agent.permissions, 'edit'),
       shellPermission: permissionEffect(agent?.agent.permissions, 'shell'),
@@ -141,14 +168,7 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
       model: values.model?.trim() || null,
       disabled: values.disable,
       ...(permissions.length > 0 || previous?.permissions ? { permissions } : {}),
-      request: {
-        ...previous?.request,
-        body: {
-          ...previous?.request?.body,
-          temperature: values.temperature,
-          top_p: values.topP,
-        },
-      },
+      ...withSamplingValues(previous, { temperature: values.temperature, top_p: values.topP }),
     }
 
     onSubmit(values.name, agent)
@@ -268,7 +288,9 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
                           min="0"
                           max="2"
                           step="0.1"
-                          onChange={(e) => field.onChange(parseFloat(e.target.value))}
+                          placeholder="Default"
+                          value={field.value ?? ''}
+                          onChange={(e) => field.onChange(optionalNumber(e.target.value))}
                         />
                       </FormControl>
                       <FormMessage />
@@ -289,7 +311,9 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
                           min="0"
                           max="1"
                           step="0.1"
-                          onChange={(e) => field.onChange(parseFloat(e.target.value))}
+                          placeholder="Default"
+                          value={field.value ?? ''}
+                          onChange={(e) => field.onChange(optionalNumber(e.target.value))}
                         />
                       </FormControl>
                       <FormMessage />

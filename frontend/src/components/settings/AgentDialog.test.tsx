@@ -359,6 +359,31 @@ describe('AgentDialog', () => {
     const agent = onSubmit.mock.calls[0][1]
     expect(agent.system).toBe('Review code carefully')
     expect(agent).not.toHaveProperty('permissions')
+    expect(agent).not.toHaveProperty('request')
+  })
+
+  it('leaves sampling values unset by default and removes a cleared stored value', async () => {
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <AgentDialog
+        open
+        onOpenChange={vi.fn()}
+        onSubmit={onSubmit}
+        editingAgent={{
+          name: 'reviewer',
+          agent: { system: 'Review code', request: { body: { temperature: 0.2, reasoning_effort: 'high' } } },
+        }}
+      />,
+    )
+
+    expect(screen.getByLabelText('Top P')).toHaveValue(null)
+
+    await user.clear(screen.getByLabelText('Temperature'))
+    await user.click(screen.getByRole('button', { name: 'Update' }))
+
+    const agent = onSubmit.mock.calls[0][1]
+    expect(agent.request).toEqual({ body: { temperature: null, reasoning_effort: 'high' } })
   })
 
   it('shows the last matching wildcard effect and applies the form effect to every occurrence', async () => {
