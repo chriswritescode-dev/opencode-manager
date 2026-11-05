@@ -99,12 +99,20 @@ class SSEAggregator {
     this.broadcastResync()
   }
 
+  /**
+   * Forces the upstream event subscription to reconnect, used after credentials change. No-op while the
+   * aggregator is not started.
+   */
   reconnect(): void {
     if (!this.started) return
     logger.info('SSE forcing upstream reconnect (auth changed)')
     this.subscription?.reconnect()
   }
 
+  /**
+   * Returns the process-wide aggregator, creating it on first call. All events and client registrations
+   * flow through this single instance.
+   */
   static getInstance(): SSEAggregator {
     if (!SSEAggregator.instance) {
       SSEAggregator.instance = new SSEAggregator()
@@ -112,6 +120,10 @@ class SSEAggregator {
     return SSEAggregator.instance
   }
 
+  /**
+   * Subscribes to local OpenCode events once per process, wiring the open, event, and disconnect handlers.
+   * Without a registered OpenCode client it logs a warning and stays stopped.
+   */
   start(): void {
     if (this.started) return
     const client = this.openCodeClient
@@ -253,6 +265,10 @@ class SSEAggregator {
     }
   }
 
+  /**
+   * Runs the remote replay handler for one server directory, catching and logging failures so that a
+   * directory that cannot replay does not reject the caller.
+   */
   private async replayRemoteDirectory(
     clientId: string,
     serverId: string,
@@ -266,6 +282,10 @@ class SSEAggregator {
     }
   }
 
+  /**
+   * Replays pending permission and form events for each of the client's directories, settling every
+   * directory independently so one failed lookup does not block the rest.
+   */
   private async replayPendingActionsForClient(clientId: string, directories: string[]): Promise<void> {
     const client = this.openCodeClient
     if (!client) return
@@ -292,6 +312,10 @@ class SSEAggregator {
     this.emitReplayEventsToClient(clientId, directory, events.forms)
   }
 
+  /**
+   * Writes replayed events to a client only while it is still registered and subscribed to the directory;
+   * delivery stops at the first write error, leaving the remaining events unsent.
+   */
   private emitReplayEventsToClient(clientId: string, directory: string, events: V2Event[]): void {
     if (events.length === 0) return
 
@@ -310,6 +334,11 @@ class SSEAggregator {
     logger.info(`replay: sent ${events.length} pending action(s) for ${directory} to client ${clientId}`)
   }
 
+  /**
+   * Re-emits idle and busy status events for sessions the aggregator already tracks, so clients recover
+   * transitions missed while disconnected. Busy sessions with an unknown directory are resolved through
+   * the API and skipped when that lookup fails.
+   */
   private async replaySessionStatusesForTrackedDirectories(): Promise<void> {
     const client = this.openCodeClient
     if (!client) return
@@ -348,6 +377,10 @@ class SSEAggregator {
     }
   }
 
+  /**
+   * Collects every session currently active or scheduled, keyed by session id, and records the owning
+   * directory for each so a later replay can address it.
+   */
   private getTrackedSessions(): Map<string, string> {
     const tracked = new Map<string, string>()
     this.activeSessions.forEach((sessionIDs, directory) => {
@@ -360,6 +393,10 @@ class SSEAggregator {
     return tracked
   }
 
+  /**
+   * Resolves a session's directory through the API and caches it for later event routing, returning
+   * `null` and logging a warning when the lookup fails.
+   */
   private async resolveSessionDirectory(client: Pick<OpenCodeClient, 'api'>, sessionID: string): Promise<string | null> {
     try {
       const session = await client.api.session.get({ sessionID })
@@ -371,6 +408,11 @@ class SSEAggregator {
     }
   }
 
+  /**
+   * Handles a (re)connected upstream stream: broadcasts a resync, or defers it as pending while the resync
+   * gate is closed, and replays tracked session statuses only on a reconnection rather than the first
+   * connect.
+   */
   private handleUpstreamOpen(wasConnectedBefore: boolean): void {
     logger.info('SSE global stream connected')
     this.upstreamConnected = true
@@ -386,6 +428,10 @@ class SSEAggregator {
     }
   }
 
+  /**
+   * Announces a fresh upstream connection to the connected-listeners and to clients subscribed to the
+   * local OpenCode server, isolating any listener that throws.
+   */
   private notifyUpstreamConnected(): void {
     this.upstreamConnectedListeners.forEach(listener => {
       try { listener() } catch { /* ignore listener errors */ }
@@ -417,12 +463,20 @@ class SSEAggregator {
     return () => { this.serverConnectedListeners.delete(listener) }
   }
 
+  /**
+   * Fans an event out to every server-event listener, isolating each listener so a throwing one cannot
+   * block the others or the dispatch caller.
+   */
   notifyServerEvent(serverId: string, directory: string | null, event: SSEEvent): void {
     this.serverEventListeners.forEach(listener => {
       try { listener(serverId, directory, event) } catch { /* ignore listener errors */ }
     })
   }
 
+  /**
+   * Notifies server-connected listeners that a server's stream is available, swallowing per-listener
+   * errors so one failure does not interrupt the notification of the rest.
+   */
   notifyServerConnected(serverId: string): void {
     this.serverConnectedListeners.forEach(listener => {
       try { listener(serverId) } catch { /* ignore listener errors */ }
@@ -433,6 +487,11 @@ class SSEAggregator {
     this.remoteSubagentResolver = resolver
   }
 
+  /**
+   * Dispatches one local upstream event: directory-scoped events go to that directory's subscribers,
+   * catalog updates go to every client, and events without a resolvable directory go to all listeners
+   * unscoped.
+   */
   private handleUpstreamEvent(event: V2Event): void {
     const { directory, resolvedDirectory } = routeOpenCodeEvent(event, this.sessionDirectories)
 
@@ -454,6 +513,10 @@ class SSEAggregator {
     this.writeEnvelopeToClients(this.clients.keys(), null, event)
   }
 
+  /**
+   * Delivers an event to listeners and to the clients subscribed to its directory, writing no client
+   * frames when no client watches that directory.
+   */
   private deliverEvent(directory: string, event: SSEEvent): void {
     this.notifyEvent(directory, event)
 
@@ -473,6 +536,10 @@ class SSEAggregator {
     this.notifyListeners(directory, event)
   }
 
+  /**
+   * Fans an event out to local listeners with its directory scope and reports it as a local-server event,
+   * swallowing individual listener failures.
+   */
   private notifyListeners(directory: string | null, event: SSEEvent): void {
     this.eventListeners.forEach(listener => {
       try { listener(directory, event) } catch { /* ignore listener errors */ }
@@ -495,6 +562,10 @@ class SSEAggregator {
     }
   }
 
+  /**
+   * Writes one already-encoded frame to a client, logging the labeled error instead of propagating a
+   * failure so one broken connection cannot interrupt a broadcast.
+   */
   private writeFrame(client: SSEClient, frame: Uint8Array, errorLabel: string): void {
     try {
       client.writeFrame(frame)
@@ -511,6 +582,10 @@ class SSEAggregator {
     this.writeEnvelopeToClients(this.clients.keys(), directory, event, serverId)
   }
 
+  /**
+   * Sends a remote server event to a single client, but only when that client is subscribed to the
+   * server and directory the event belongs to.
+   */
   deliverRemoteEnvelopeToClient(clientId: string, serverId: string, directory: string, event: SSEEvent): void {
     if (!this.hasClientDirectory(clientId, buildServerDirectoryKey(serverId, directory))) return
     const client = this.clients.get(clientId)
@@ -530,6 +605,10 @@ class SSEAggregator {
     }
   }
 
+  /**
+   * Collects the IDs of clients subscribed to at least one directory of the given server, each client
+   * listed once regardless of how many of its directories match.
+   */
   private clientIdsForServer(serverId: string): string[] {
     const clientIds: string[] = []
     for (const client of this.clients.values()) {
@@ -543,6 +622,11 @@ class SSEAggregator {
     return clientIds
   }
 
+  /**
+   * Updates active-session and subagent bookkeeping from local events before any listener sees them, so
+   * status queries reflect the event being dispatched: status and execution events move sessions between
+   * active and idle, deleted sessions are dropped, and sessions with a parent are marked as subagents.
+   */
   private handleEvent(directory: string, event: SSEEvent): void {
     switch (event.type) {
       case 'session.status': {
@@ -612,6 +696,10 @@ class SSEAggregator {
     logger.info(`Session active: ${sessionID} in ${directory} (${sessions.size} active)`)
   }
 
+  /**
+   * Drops a session from the active set of its directory, forgetting the directory once it has no
+   * active sessions left.
+   */
   private markSessionIdle(directory: string, sessionID: string): void {
     const sessions = this.activeSessions.get(directory)
     if (sessions) {
@@ -633,6 +721,11 @@ class SSEAggregator {
     return this.clients.size
   }
 
+  /**
+   * Records whether a client is in the foreground and which session and server it is viewing, clearing
+   * both view fields when it is not visible and defaulting the server to the local one. Returns false
+   * when the client is unknown, leaving stored visibility untouched.
+   */
   setClientVisibility(
     id: string,
     visible: boolean,
@@ -675,6 +768,10 @@ class SSEAggregator {
     return new Set(this.getScheduledSessions().map(ref => ref.sessionID))
   }
 
+  /**
+   * Reads scheduled session references from the resolver installed by the scheduler, yielding an empty
+   * list when no resolver is set.
+   */
   private getScheduledSessions(): ScheduledSessionRef[] {
     return this.scheduledSessionsResolver?.() ?? []
   }

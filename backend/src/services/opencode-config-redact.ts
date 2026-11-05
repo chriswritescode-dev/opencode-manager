@@ -53,6 +53,10 @@ function isSecretKey(key: string): boolean {
   return SECRET_KEYS.has(normalizeSecretKey(key))
 }
 
+/**
+ * Reports whether a config path points at a map of user-chosen names (`providers`, `agents`,
+ * `commands`, `mcp.servers`), so its keys are treated as names rather than secret keys.
+ */
 function keysAreNames(path: string[]): boolean {
   const [head] = path
   if (head === 'providers') {
@@ -81,6 +85,10 @@ function redactOpaqueValue(value: unknown, path: string[], redactedPaths: string
   )
 }
 
+/**
+ * Recursively copies a config value with secret-named strings and the contents of `headers` and
+ * `environment` replaced by the redaction placeholder, appending each redacted path to `redactedPaths`.
+ */
 function redactValue(value: unknown, path: string[], redactedPaths: string[]): unknown {
   if (Array.isArray(value)) {
     return value.map((item, index) => redactValue(item, [...path, String(index)], redactedPaths))

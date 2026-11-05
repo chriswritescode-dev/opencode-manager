@@ -57,6 +57,10 @@ function mergeMcpServerStatus(views: McpServerView[], status: McpStatusMap) {
   })
 }
 
+/**
+ * Maps a config read failure to a JSON error response: 503 when the OpenCode server is unreachable,
+ * 502 for other client errors, and 500 otherwise, using `message` as the client-facing text.
+ */
 function toClientReadErrorResponse(c: Context, error: unknown, message: string) {
   if (error instanceof ClientError) {
     if (error.reason === 'Transport') {
@@ -67,6 +71,12 @@ function toClientReadErrorResponse(c: Context, error: unknown, message: string) 
   return c.json({ error: message }, 500)
 }
 
+/**
+ * Serves the OpenCode config read routes (`/`, `/effective`, `/managed`, `/mcp`) and the `PUT` and
+ * `PATCH` write routes. Reads and writes take the shared config file lock, `redactSecrets` masks
+ * secret values in every response, and a `PATCH` that names config entities is rejected with 409
+ * while OpenCode has not yet loaded the saved configuration.
+ */
 export function createOpenCodeConfigRoutes(
   settingsService: SettingsService,
   openCodeClient: OpenCodeClient,
@@ -195,6 +205,11 @@ export function createOpenCodeConfigRoutes(
   return app
 }
 
+/**
+ * Applies a validated config update and maps the outcome to a JSON response, redacting secrets when
+ * `redactSecrets` is set and translating conflict, invalid-source, shadowed-removal, redacted-value
+ * and schema-validation failures into their matching status codes.
+ */
 async function applyUpdate(
   c: Context,
   input: Parameters<typeof applyOpenCodeConfigUpdate>[0],

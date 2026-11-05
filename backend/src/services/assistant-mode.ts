@@ -1134,6 +1134,11 @@ Fork a session, optionally before a specific message. Omit \`beforeMessageId\` t
 `
 }
 
+/**
+ * Builds the canonical Assistant `opencode.json` document: the assistant agent as default agent, its
+ * allowed permissions, and a `primary` agent entry. The result is schema-validated, and an invalid
+ * result throws rather than returning a config OpenCode would reject.
+ */
 export function buildAssistantOpenCodeConfig(): OpenCodeConfigInfo {
   const permission = buildAssistantAgentPermission()
   const config: OpenCodeConfigInfo = {
@@ -1158,6 +1163,12 @@ export function buildAssistantOpenCodeConfig(): OpenCodeConfigInfo {
   return config
 }
 
+/**
+ * Creates or repairs the Assistant workspace for `repo`: writes AGENTS.md, the assistant OpenCode
+ * config, the bundled skills and the default agent file, updating the config under a file lock and
+ * preserving customized content unless the matching `overwrite*` option is set. Returns the
+ * resulting status, including warnings for instruction updates it declined to apply.
+ */
 export async function ensureAssistantMode(
   repo: Repo,
   options?: AssistantModeInitRequest,
@@ -1352,6 +1363,10 @@ export async function ensureAssistantMode(
   }
 }
 
+/**
+ * Parses JSONC config text into a config object, returning `undefined` when the text is malformed or
+ * its root is not an object.
+ */
 function parseAssistantOpenCodeConfig(rawContent: string): Record<string, unknown> | undefined {
   try {
     const parsed = parseJsonc(rawContent)
@@ -1377,12 +1392,21 @@ function resolveV1EntityPath(v2Path: readonly string[]): string[] {
 const ASSISTANT_V1_AGENT_PATH = resolveV1EntityPath(['agents'])
 const ASSISTANT_V1_PERMISSION_PATH = resolveV1EntityPath(['permissions'])
 
+/**
+ * Reports whether the config still carries v1 keys, which mark a file that has not been converted to
+ * the v2 shape yet.
+ */
 function hasAssistantV1OpenCodeConfig(config: Record<string, unknown>): boolean {
   if (readConfigValueAtPath(config, ASSISTANT_V1_PERMISSION_PATH) !== undefined) return true
   const v1Agents = readConfigValueAtPath(config, ASSISTANT_V1_AGENT_PATH)
   return isRecord(v1Agents) && isRecord(v1Agents[ASSISTANT_DEFAULT_AGENT_NAME])
 }
 
+/**
+ * Reports whether an existing Assistant config lacks what `ensureAssistantMode` requires: the
+ * assistant as default agent, an enabled agent entry with a valid mode, and no generated persona left
+ * inline.
+ */
 function assistantOpenCodeConfigNeedsRepair(config: OpenCodeConfigInfo): boolean {
   if (config.default_agent !== ASSISTANT_DEFAULT_AGENT_NAME) return true
   const agents = config.agents
@@ -1399,6 +1423,7 @@ function assistantOpenCodeConfigHasGeneratedAgentPersona(config: OpenCodeConfigI
   return normalizeAssistantAgent(config.agents?.[ASSISTANT_DEFAULT_AGENT_NAME]) !== undefined
 }
 
+/** Returns the agent's `mode` when it is `primary` or `all`, otherwise falling back to `primary`. */
 function resolveValidAssistantMode(agent: unknown): 'primary' | 'all' {
   const mode = (agent as { mode?: unknown } | undefined)?.mode
   return mode === 'primary' || mode === 'all' ? mode : 'primary'
@@ -1412,6 +1437,10 @@ function normalizeAssistantAgent(agent: unknown): OpenCodeAgentConfig | undefine
   return { mode: resolveValidAssistantMode(agent) }
 }
 
+/**
+ * Rewrites the assistant agent entry to a mode-only value, dropping a generated `system` prompt so it
+ * comes from the agent markdown file rather than opaque config text.
+ */
 function stripGeneratedAssistantAgentPersona(config: OpenCodeConfigInfo): OpenCodeConfigInfo {
   const existingAssistantAgent = config.agents?.[ASSISTANT_DEFAULT_AGENT_NAME]
 
@@ -1426,6 +1455,10 @@ function stripGeneratedAssistantAgentPersona(config: OpenCodeConfigInfo): OpenCo
   }
 }
 
+/**
+ * Merges an existing Assistant config over a freshly generated one, keeping user settings and extra
+ * agents while forcing the assistant as default agent and re-enabling its entry.
+ */
 function mergeAssistantOpenCodeConfig(existing?: OpenCodeConfigInfo): OpenCodeConfigInfo {
   const generated = buildAssistantOpenCodeConfig()
   const existingAssistantAgent = existing?.agents?.[ASSISTANT_DEFAULT_AGENT_NAME]
@@ -1448,6 +1481,11 @@ function mergeAssistantOpenCodeConfig(existing?: OpenCodeConfigInfo): OpenCodeCo
   }
 }
 
+/**
+ * Lists the v1 paths to delete after a conversion: the assistant agent entry, widened to the whole v1
+ * `agents` container when that container held nothing else, plus `permissions` when a v2 counterpart
+ * has just been written.
+ */
 function buildAssistantV1ConfigRemovalPaths(
   config: Record<string, unknown>,
   convertedPermissions: unknown,
@@ -1466,6 +1504,10 @@ function buildAssistantV1ConfigRemovalPaths(
   return paths
 }
 
+/**
+ * Picks the assistant agent written back to the converted file, preferring OpenCode's converted entry,
+ * then the agent passed in, then a mode derived from the v1 definition.
+ */
 function resolveConvertedAssistantAgent(
   agent: OpenCodeAgentConfig | undefined,
   v1Agent: unknown,
@@ -1473,6 +1515,10 @@ function resolveConvertedAssistantAgent(
   return normalizeAssistantAgent(agent) ?? agent ?? { mode: resolveValidAssistantMode(v1Agent) }
 }
 
+/**
+ * Puts the raw `{env:…}` and `{file:…}` references from the original file back into the converted
+ * assistant agent, returning the agent unchanged when no restored entry can be read.
+ */
 function restoreAssistantAgentReferences(
   agent: OpenCodeAgentConfig,
   resolved: OpenCodeConfigInfo,
@@ -1503,6 +1549,11 @@ export async function convertAssistantOpenCodeConfigToV2(api: OpenCodeApi): Prom
   }
 }
 
+/**
+ * Converts one Assistant `opencode.json` in place when it still holds v1 keys, writing OpenCode's
+ * converted agent and permissions while preserving comments. Returns `false` without writing when the
+ * file is absent, already v2, unreadable by OpenCode, or the rewritten text fails validation.
+ */
 async function convertAssistantOpenCodeConfigFile(
   api: OpenCodeApi,
   assistantDir: string,

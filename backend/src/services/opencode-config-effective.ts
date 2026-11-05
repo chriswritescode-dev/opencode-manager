@@ -30,6 +30,11 @@ export async function readOpenCodeConfigDocuments(
   return infoByPath
 }
 
+/**
+ * Merges the OpenCode config documents the server reports for the workspace, keeping only the given
+ * managed sources. Documents OpenCode did not load are skipped, so the result reflects only values
+ * the server actually resolved.
+ */
 export async function readManagedOpenCodeConfig(
   api: OpenCodeApi,
   sources: ReadonlyArray<ManagedConfigSource>,

@@ -80,6 +80,11 @@ function isWithinUpstreamApiPath(basePath: string, pathname: string): boolean {
   return pathname.startsWith(`${basePath}/api/`)
 }
 
+/**
+ * Serves `/:serverId/*` behind `requireAuth`, proxying each request to the registry-resolved remote
+ * OpenCode server while keeping the normalized upstream pathname inside that connection's own `/api/`
+ * space. Maps an upstream header timeout to 504 and an unreachable server to 502.
+ */
 export function createOpenCodeServerProxyRoutes(
   registry: OpenCodeServerRegistry,
   requireAuth: MiddlewareHandler,

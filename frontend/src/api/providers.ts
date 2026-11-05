@@ -163,6 +163,10 @@ export async function toggleOpenCodeFavoriteModel(model: ModelSelection): Promis
   });
 }
 
+/**
+ * Returns the model's display name, falling back to its ID when the catalog
+ * provides no name.
+ */
 export function formatModelName(model: Model): string {
   return model.name || model.modelID;
 }

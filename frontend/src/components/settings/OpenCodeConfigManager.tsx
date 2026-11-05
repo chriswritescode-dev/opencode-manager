@@ -46,6 +46,11 @@ interface ManagedConfigSectionFallbackProps {
   errorMessage: string | null
 }
 
+/**
+ * Renders the placeholder for a managed config section while its data is loading or unavailable,
+ * prioritising the loading state, then a 503 message, then a generic error. Returns `null` when
+ * none of the conditions apply.
+ */
 function ManagedConfigSectionFallback({ isLoading, unavailableMessage, errorMessage }: ManagedConfigSectionFallbackProps) {
   if (isLoading) {
     return (
@@ -72,6 +77,12 @@ function ManagedConfigSectionFallback({ isLoading, unavailableMessage, errorMess
   return null
 }
 
+/**
+ * Renders the OpenCode settings panel whose collapsible sections manage
+ * AGENTS.md, commands, agents, skills, MCP servers, provider models, and host
+ * import. Config patches are revision-guarded, and a server restart is offered
+ * whenever saved changes require one.
+ */
 export function OpenCodeConfigManager() {
   const sectionIdPrefix = useId()
   const agentsMdContentId = `${sectionIdPrefix}-agents-md`
@@ -167,6 +178,10 @@ export function OpenCodeConfigManager() {
 
   const getApiErrorMessage = getOpenCodeApiErrorMessage
 
+  /**
+   * Returns the detail of a protected-host import failure, or the standard API
+   * error text with an import-specific fallback for other errors.
+   */
   const getOpenCodeImportErrorMessage = (error: unknown): string => {
     if (error instanceof FetchError && error.code === 'OPENCODE_IMPORT_PROTECTED') {
       return error.detail || error.message
@@ -180,12 +195,20 @@ export function OpenCodeConfigManager() {
     ? getApiErrorMessage(managedConfigError, 'Failed to load the OpenCode configuration')
     : null
 
+  /**
+   * Builds the section meta label for a managed config collection, substituting loading and
+   * unavailable states for the configured item count.
+   */
   const getManagedConfigCountLabel = (count: number): string => {
     if (isManagedConfigLoading) return 'Loading...'
     if (managedConfigError) return 'Unavailable'
     return `${count} configured`
   }
 
+  /**
+   * Returns the section content when managed config is settled, otherwise the shared loading or
+   * error fallback; the 503 message is only surfaced when the error is an unavailable response.
+   */
   const renderManagedConfigSection = (unavailableMessage: string, content: React.ReactNode) =>
     isManagedConfigPending ? (
       <ManagedConfigSectionFallback
@@ -220,6 +243,11 @@ export function OpenCodeConfigManager() {
     })
   }
 
+  /**
+   * Persists an agent or command entry under `name`; when a rename occurred it also nulls the
+   * previous key so the old entry is removed in the same patch. Fire-and-forget, surfacing failures
+   * as a toast.
+   */
   const saveManagedEntity = (
     key: 'agents' | 'commands',
     name: string,

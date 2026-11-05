@@ -64,6 +64,11 @@ interface SessionListPage {
   nextParam?: SessionListPageParam
 }
 
+/**
+ * Paginated session list merged across the given directories, or a single global stream when
+ * `allDirectories` is set, returning flattened items plus infinite-scroll controls. Only the
+ * unfiltered list is restored from disk, so only it keeps the extended `gcTime`.
+ */
 export const useSessionsAcrossDirectories = (
   directories: string[],
   options?: UseSessionsAcrossDirectoriesOptions,

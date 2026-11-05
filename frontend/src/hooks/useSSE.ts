@@ -22,6 +22,10 @@ import type { EventStreamSubscription } from '@/lib/opencode-event-stream'
 import { serverScopedKey } from '@/lib/serverScope'
 import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 
+/**
+ * Narrows a stream event to its directory, returning `undefined` when the payload carries no
+ * string directory rather than coercing another type.
+ */
 const getEventDirectory = (event: OpenCodeStreamEvent): string | undefined => {
   return typeof event.directory === 'string' ? event.directory : undefined
 }
@@ -47,6 +51,11 @@ const patchSessionIfCached = (
   )
 }
 
+/**
+ * Subscribes the view to the global event stream for one or more directories, projecting session,
+ * shell, and status events into the React Query cache. Returns connection state plus the current
+ * error text for reconnection UI; it also reports exposure and visibility to the backend.
+ */
 export const useSSE = (directory?: string | string[], currentSessionId?: string) => {
   const serverId = useOpenCodeServerId()
   const directoriesList = useMemo(() => {
@@ -210,6 +219,10 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
       }
     }
 
+    /**
+     * Drops cached session and shell data for this server and re-reads the current session after
+     * the stream reports missed events. Resyncs for a different server are ignored.
+     */
     const handleResync = (_subscribedDirectories: string[], resyncServerId?: string) => {
       if (!mountedRef.current) return
       if ((resyncServerId ?? LOCAL_OPENCODE_SERVER_ID) !== serverId) return

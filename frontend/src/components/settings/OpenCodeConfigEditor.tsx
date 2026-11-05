@@ -34,6 +34,12 @@ interface OpenCodeConfigEditorProps {
   onUpdate: (request: { content: string; source: OpenCodeConfigSourceName; expectedRevision?: string }) => Promise<void>
 }
 
+/**
+ * Renders the raw OpenCode config editor dialog for the chosen config source,
+ * with find-in-text, inline validation issues, and save feedback. Closing with
+ * unsaved edits prompts for discard, and the source cannot be switched while
+ * the draft is dirty or saving.
+ */
 export function OpenCodeConfigEditor({
   config,
   isOpen,
@@ -121,6 +127,11 @@ export function OpenCodeConfigEditor({
 
   const getIssueText = (issue: ValidationIssue) => `${issue.path}: ${issue.message}`
 
+  /**
+   * Maps API validation issues to display entries, substituting a readable path
+   * for empty or dotted ones and resolving each to a best-effort source line in
+   * the current draft.
+   */
   const resolveIssues = (
     issues: OpenCodeConfigValidationIssue[],
   ): ValidationIssue[] =>
@@ -135,6 +146,12 @@ export function OpenCodeConfigEditor({
       }
     })
 
+  /**
+   * Validates the draft as JSONC and saves it through `onUpdate` with the draft
+   * source and revision, closing the editor on success. Syntax errors,
+   * validation issues, and revision conflicts are shown in place without
+   * closing.
+   */
   const updateConfig = async () => {
     if (!config || !draftSource) return
 

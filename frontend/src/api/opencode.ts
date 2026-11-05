@@ -191,6 +191,10 @@ function buildPromptFields(input: PromptFields) {
   }
 }
 
+/**
+ * Fetches one page of sessions for the given list options and normalizes the
+ * server cursor so the end of the list is `undefined` rather than null.
+ */
 export async function listSessionPage(input: SessionPageInput, serverId?: string): Promise<SessionPage> {
   const { data, cursor } = await callOpenCode((api) => api.session.list(input), serverId)
   return { items: data, nextCursor: cursor.next ?? undefined }
@@ -519,6 +523,10 @@ export async function listPendingPermissions(
   return data
 }
 
+/**
+ * Replies to a pending permission request with the user's decision, sending the
+ * optional message only when one is supplied.
+ */
 export async function replyPermission(
   sessionID: string,
   requestID: string,

@@ -64,6 +64,10 @@ export class FetchOpenCodeClient implements OpenCodeClient {
     return this.fetchFn(input, { ...init, headers })
   }
 
+  /**
+   * Proxies a raw request to the OpenCode server, dropping the `/api/opencode` prefix and applying the
+   * directory header and basic auth. Upstream failures become a `502` JSON response instead of a throw.
+   */
   async forwardRaw(request: Request): Promise<Response> {
     const url = new URL(request.url)
     const path = url.pathname.replace(/^\/api\/opencode/, '') + url.search

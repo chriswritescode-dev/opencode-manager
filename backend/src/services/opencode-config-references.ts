@@ -44,10 +44,15 @@ export function readConfigValueAtPath(value: unknown, path: readonly string[]): 
   return current
 }
 
+/** Whether `path` begins with every segment of `prefix`, used to match field-alias prefixes. */
 function startsWithPath(path: readonly string[], prefix: readonly string[]): boolean {
   return prefix.length <= path.length && prefix.every((segment, index) => path[index] === segment)
 }
 
+/**
+ * Finds the raw `{env:…}` or `{file:…}` reference stored for `path` in any candidate entity,
+ * also checking each alias-mapped path. Returns undefined when no candidate holds a reference there.
+ */
 function readRawReference(candidates: readonly RawEntityCandidate[], path: readonly string[]): string | undefined {
   for (const candidate of candidates) {
     const paths = [
@@ -64,6 +69,11 @@ function readRawReference(candidates: readonly RawEntityCandidate[], path: reado
   return undefined
 }
 
+/**
+ * Walks a patch value and swaps each string that still equals its resolved counterpart for the raw
+ * config reference at the same path. Returns a new value; edited strings and strings without a
+ * stored reference are kept as given.
+ */
 function restoreEntityReferences(
   next: unknown,
   path: readonly string[],
@@ -85,6 +95,10 @@ function restoreEntityReferences(
   return next
 }
 
+/**
+ * Returns the single entity name the patch removes but the resolved container still contains, or
+ * undefined when the patch removes zero or several names.
+ */
 function findRenameSource(
   patchContainer: Record<string, unknown>,
   resolvedContainer: Record<string, unknown>,
@@ -95,6 +109,11 @@ function findRenameSource(
   return removed.length === 1 ? removed[0] : undefined
 }
 
+/**
+ * Restores references for every named entity in a patch container, resolving the source entity from
+ * the resolved container or from a single rename within the same patch. Returns the patch container
+ * unchanged when the resolved container is not an object.
+ */
 function restoreContainerReferences(
   mapping: OpenCodeConfigV1EntityPath,
   patchContainer: Record<string, unknown>,
@@ -126,6 +145,10 @@ function restoreContainerReferences(
   )
 }
 
+/**
+ * Returns a copy of `target` with `value` written at `path`, creating intermediate plain objects
+ * where they are missing. An empty path returns `target` itself.
+ */
 function setValueAtPath(target: Record<string, unknown>, path: readonly string[], value: unknown): Record<string, unknown> {
   const [head, ...rest] = path
   if (head === undefined) return target

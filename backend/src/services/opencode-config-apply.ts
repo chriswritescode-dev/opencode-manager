@@ -101,6 +101,11 @@ function requiresOpenCodeReload(previous: OpenCodeConfigFile | null, next: OpenC
   return listChangedTopLevelKeys(previous?.content ?? {}, next.content).length > 0
 }
 
+/**
+ * Replaces substituted values in a merge patch with the `{env:…}` or `{file:…}` references held by
+ * the raw config, reading the resolved config from the OpenCode server. Returns the patch unchanged
+ * when it does not name any config entity.
+ */
 async function keepOpenCodeConfigReferences(
   patch: Record<string, unknown>,
   snapshot: OpenCodeConfigSnapshot,
@@ -111,6 +116,11 @@ async function keepOpenCodeConfigReferences(
   return restoreOpenCodeConfigReferences(patch, resolved as Record<string, unknown>, snapshot.content)
 }
 
+/**
+ * Applies config content or a merge patch under the shared config file lock, saving the previous
+ * valid config as last-known-good and restoring it if that save fails. OpenCode is reloaded only when
+ * top-level keys changed, and a failed reload is reported as `restart_pending`.
+ */
 export async function applyOpenCodeConfigUpdate(
   input: ApplyOpenCodeConfigOptions,
 ): Promise<ApplyOpenCodeConfigResult> {

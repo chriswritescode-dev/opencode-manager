@@ -322,6 +322,11 @@ export function selectActiveSessionDirectoriesKey(
 
 const EventContext = createContext<EventContextValue | null>(null)
 
+/**
+ * Provides stream-derived state to the page tree — SSH host key prompts, permission and form
+ * queues, stream health, and session-to-repo lookup — and routes stream events, status changes,
+ * and resyncs into React Query, session status, and running-shell state.
+ */
 export function EventProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -1050,6 +1055,11 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isAuthenticated) return
 
+    /**
+     * Routes one stream event by type into the session status, permission, form, shell and cache
+     * stores. Goal events are offered to `applySessionGoalEvent` first and skip the switch when it
+     * consumes them.
+     */
     const handleSSEMessage = (event: OpenCodeStreamEvent) => {
       const serverId = event.serverId ?? LOCAL_OPENCODE_SERVER_ID
 
@@ -1258,6 +1268,11 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
+    /**
+     * Repairs caches after the stream reports missed events: a remote server reconciles its own
+     * directory activity and list caches, while the local server also refreshes session statuses,
+     * running shells, and pending actions.
+     */
     const handleResync = (subscribedDirectories: string[], serverId?: string) => {
       queryClient.invalidateQueries({ queryKey: [SESSION_GOAL_QUERY_ROOT] })
       if (serverId && !isLocalOpenCodeServer(serverId)) {

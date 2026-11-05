@@ -75,6 +75,10 @@ const clearOptimisticActiveTimer = (sessionID: string): void => {
   optimisticActiveTimers.delete(sessionID)
 }
 
+/**
+ * Hash used to skip redundant status writes: the status type alone, except for retry states,
+ * which include their attempt metadata so changed retry details still propagate.
+ */
 const getStatusHash = (status: SessionStatusType): string => {
   if (status.type === 'retry') {
     return JSON.stringify(status)

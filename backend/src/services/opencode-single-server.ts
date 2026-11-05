@@ -1037,6 +1037,10 @@ class OpenCodeServerManager {
     return this.sandboxEnforced
   }
 
+  /**
+   * Sets the lifecycle gate and, when it transitions from closed to open, notifies the registered
+   * listeners that the proxy is now serving requests. Listener failures are logged, not propagated.
+   */
   setLifecycleInitialized(initialized: boolean): void {
     const opened = initialized && !this.lifecycleInitialized
     this.lifecycleInitialized = initialized

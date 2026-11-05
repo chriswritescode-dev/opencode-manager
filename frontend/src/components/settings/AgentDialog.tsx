@@ -20,9 +20,18 @@ type ManagedPermissionAction = typeof MANAGED_PERMISSION_ACTIONS[number]
 
 type PermissionEffect = OpenCodePermissionRule['effect'] | 'inherit'
 
+/**
+ * Reports whether a rule is a wildcard (`*` resource) rule for one of the
+ * managed actions (`edit`, `shell`, `webfetch`), which are the only rules the
+ * dialog's permission controls own.
+ */
 const isManagedWildcardRule = (rule: OpenCodePermissionRule): boolean =>
   rule.resource === '*' && MANAGED_PERMISSION_ACTIONS.includes(rule.action as ManagedPermissionAction)
 
+/**
+ * Returns the final rule accepted by `matches`, mirroring OpenCode's
+ * last-match-wins resolution, or `undefined` when no rule matches.
+ */
 const lastMatchingRule = (
   permissions: OpenCodePermissionRule[] | undefined,
   matches: (rule: OpenCodePermissionRule) => boolean,
@@ -36,6 +45,10 @@ const lastMatchingRule = (
   return match
 }
 
+/**
+ * Resolves the effect of an action's wildcard rule from stored permissions,
+ * returning `inherit` when the action has no such rule.
+ */
 const permissionEffect = (
   permissions: OpenCodePermissionRule[] | undefined,
   action: ManagedPermissionAction,
@@ -72,11 +85,19 @@ const withManagedPermissionEffects = (
   return [...updated.slice(0, fallbackIndex), ...fallbacks, ...updated.slice(fallbackIndex)]
 }
 
+/**
+ * Parses a text input into a number, yielding `undefined` for blank or
+ * unparsable input so a cleared form field stays unset.
+ */
 const optionalNumber = (value: string): number | undefined => {
   const parsed = parseFloat(value)
   return Number.isNaN(parsed) ? undefined : parsed
 }
 
+/**
+ * Reads a numeric sampling value from the agent's raw `request.body`, returning
+ * `undefined` when the key is absent or holds a non-number.
+ */
 const requestBodyNumber = (agent: OpenCodeAgentConfig | undefined, key: string): number | undefined => {
   const value = agent?.request?.body?.[key]
   return typeof value === 'number' ? value : undefined
@@ -133,7 +154,17 @@ interface AgentDialogProps {
   editingAgent?: { name: string; agent: OpenCodeAgentConfig } | null
 }
 
+/**
+ * Renders the create/edit agent dialog with identity, prompt, mode, model,
+ * permission, sampling, and disabled fields, locking the name while editing an
+ * existing agent. Submitting merges the form into the stored agent so managed
+ * permission and sampling settings survive the patch.
+ */
 export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: AgentDialogProps) {
+  /**
+   * Builds the form's initial values for an existing agent, or empty defaults
+   * when none is supplied, mapping permissions to their winning wildcard rule.
+   */
   const getDefaultValues = (agent?: { name: string; agent: OpenCodeAgentConfig } | null): AgentFormValues => {
     const modelRef = configModelRef(agent?.agent.model)
     return {

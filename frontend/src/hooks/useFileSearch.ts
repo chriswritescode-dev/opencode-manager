@@ -11,6 +11,11 @@ export interface FileSearchResult {
   error: Error | null
 }
 
+/**
+ * Debounced, server-scoped file search returning matching paths with loading and error state.
+ * Results are cached per settled query for a minute, and nothing is requested while `enabled`
+ * is false or the query is still empty.
+ */
 export function useFileSearch(
   query: string,
   enabled: boolean = true,

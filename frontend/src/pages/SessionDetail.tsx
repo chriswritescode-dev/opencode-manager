@@ -121,6 +121,11 @@ function isSessionNotFoundError(error: unknown): boolean {
   return error instanceof FetchError && (error.statusCode === 400 || error.statusCode === 404)
 }
 
+/**
+ * Renders one session: a header with its title and parent link, the transcript with its composer,
+ * and the collapsible tool panels. Redirects home for an unknown session and shows a not-found
+ * state when the repository does not exist.
+ */
 export function SessionDetail() {
   const serverId = useOpenCodeServerId();
   const isRemoteServer = !isLocalOpenCodeServer(serverId);

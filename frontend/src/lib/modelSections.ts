@@ -43,6 +43,11 @@ function createOption(provider: Provider, model: Model, value: string): ModelOpt
   }
 }
 
+/**
+ * Groups the models of every provider into the Default, Favorites, Recent, and per-provider
+ * sections of the model picker. A model pinned as the default or a favorite is removed from its
+ * provider section, and sections left empty are dropped.
+ */
 export function buildModelSections(
   providers: Provider[],
   modelState: OpenCodeModelState | undefined,

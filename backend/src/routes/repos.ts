@@ -41,6 +41,11 @@ function withRepoSettings(database: Database, repo: Repo): Repo {
   }
 }
 
+/**
+ * Mounts the repo git, terminal, project-config, schedule and secret/variable sub-routers, and serves
+ * repo CRUD with discovery, ordering, access, credential, identity, workspace, pull/branch, download
+ * and assistant-mode routes. Handler failures are mapped to their status codes with a JSON message.
+ */
 export function createRepoRoutes(
   database: Database,
   gitAuthService: GitAuthService,

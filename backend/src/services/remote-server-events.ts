@@ -155,6 +155,10 @@ export class RemoteServerEventHub {
     return false
   }
 
+  /**
+   * Delivers already-built replay events to one client through the aggregator, which drops them unless
+   * the client still subscribes to that server and directory.
+   */
   private emitReplayEventsToClient(
     clientId: string,
     serverId: string,
@@ -181,6 +185,11 @@ export class RemoteServerEventHub {
     }
   }
 
+  /**
+   * Replaces the server's event subscription with a fresh one, recording a stream error instead when the
+   * registry cannot provide a connection. Does nothing until the hub has started, so stale callbacks from
+   * the prior subscription are ignored rather than applied.
+   */
   private connectServer(serverId: string): void {
     if (!this.started) return
     this.closeStream(serverId)
@@ -210,6 +219,10 @@ export class RemoteServerEventHub {
     logger.info(`Remote event stream connecting: ${serverId}`)
   }
 
+  /**
+   * Marks the server's stream connected, announces it to the aggregator, and starts version probing
+   * and session status replay. A callback from a superseded subscription is ignored.
+   */
   private handleOpen(serverId: string, subscription: OpenCodeEventSubscription): void {
     const stream = this.streams.get(serverId)
     if (!stream || stream.subscription !== subscription) return
@@ -223,6 +236,10 @@ export class RemoteServerEventHub {
     void this.replaySessionStatuses(serverId, subscription)
   }
 
+  /**
+   * Records a disconnect on the server's stream and clears its connected flag, leaving the
+   * subscription itself to keep reconnecting.
+   */
   private handleStreamError(serverId: string, error: unknown): void {
     const stream = this.streams.get(serverId)
     if (!stream) return
@@ -232,6 +249,10 @@ export class RemoteServerEventHub {
     logger.warn(`Remote event stream error for ${serverId}: ${stream.error}`)
   }
 
+  /**
+   * Routes one upstream event to the aggregator while maintaining the hub's per-stream bookkeeping:
+   * busy-session activity, subagent session ids, and the directory the event resolves to.
+   */
   private handleMessage(serverId: string, event: V2Event): void {
     const stream = this.streams.get(serverId)
     if (!stream) return
@@ -249,6 +270,11 @@ export class RemoteServerEventHub {
     this.aggregator.deliverRemoteEnvelope(serverId, resolvedDirectory ?? null, event)
   }
 
+  /**
+   * Keeps streams aligned with the server registry: deleted, unreadable, or disabled servers have their
+   * stream forgotten, while added and updated servers get their cached version state cleared and are
+   * reconnected.
+   */
   private handleRegistryChange(change: OpenCodeServerChange): void {
     if (!this.started) return
 
@@ -280,6 +306,10 @@ export class RemoteServerEventHub {
     this.connectServer(change.serverId)
   }
 
+  /**
+   * Reports whether the subscription still owns the server's live stream, so async work started under
+   * it does not act on a stream that has since been replaced or disconnected.
+   */
   private isStreamCurrent(
     serverId: string,
     stream: RemoteServerStream,
@@ -288,6 +318,11 @@ export class RemoteServerEventHub {
     return this.streams.get(serverId) === stream && stream.subscription === subscription && stream.connected
   }
 
+  /**
+   * Re-emits idle and busy status events for the server's active sessions after a reconnect, so
+   * clients that missed updates while disconnected resync. Stops quietly at any await once the stream
+   * is no longer current.
+   */
   private async replaySessionStatuses(serverId: string, subscription: OpenCodeEventSubscription): Promise<void> {
     const stream = this.streams.get(serverId)
     if (!stream || !this.isStreamCurrent(serverId, stream, subscription)) return
@@ -336,6 +371,11 @@ export class RemoteServerEventHub {
     }
   }
 
+  /**
+   * Looks up the working directory of active sessions the stream has not mapped yet, caching each result
+   * in `sessionDirectories`. Sessions are fetched concurrently and left unresolved when their lookup
+   * fails, so replay proceeds with whatever directories are known.
+   */
   private async resolveActiveSessionDirectories(
     api: OpenCodeApi,
     serverId: string,
@@ -356,6 +396,11 @@ export class RemoteServerEventHub {
     }))
   }
 
+  /**
+   * Probes the server's OpenCode version, skipping when a probe is already pending or the version is
+   * known. Results are applied only when the probe token still matches the current stream, and a failed
+   * probe reopens the request flag so a later reconnect can retry it.
+   */
   private async refreshVersion(serverId: string): Promise<void> {
     const stream = this.streams.get(serverId)
     if (!stream || stream.versionRequested) return
@@ -382,6 +427,10 @@ export class RemoteServerEventHub {
     current.versionRequested = false
   }
 
+  /**
+   * Returns the server's stream bookkeeping record, creating an empty one on first use so callers can
+   * record state before a subscription exists.
+   */
   private ensureStream(serverId: string): RemoteServerStream {
     const existing = this.streams.get(serverId)
     if (existing) return existing
@@ -407,6 +456,9 @@ export class RemoteServerEventHub {
     stream.error = error
   }
 
+  /**
+   * Closes the stream's subscription and clears the handle, keeping the stream entry itself.
+   */
   private closeSubscription(stream: RemoteServerStream): void {
     if (!stream.subscription) return
     stream.subscription.close()

@@ -52,6 +52,9 @@ export function subscribeOpenCodeEvents(options: OpenCodeEventSubscriptionOption
   let delayTimer: ReturnType<typeof setTimeout> | null = null
   let resolveDelay: (() => void) | null = null
 
+  /**
+   * Clears the watchdog and aborts the in-flight attempt so its stream iterator ends.
+   */
   const stopAttempt = (): void => {
     const attempt = currentAttempt
     currentAttempt = null
@@ -63,6 +66,10 @@ export function subscribeOpenCodeEvents(options: OpenCodeEventSubscriptionOption
     attempt.controller.abort()
   }
 
+  /**
+   * Cancels a pending reconnect wait and resolves it at once, letting the loop observe that it has
+   * been closed or superseded.
+   */
   const stopDelay = (): void => {
     if (delayTimer) {
       clearTimeout(delayTimer)
@@ -82,6 +89,11 @@ export function subscribeOpenCodeEvents(options: OpenCodeEventSubscriptionOption
     }, delayMs)
   })
 
+  /**
+   * Runs the reconnect loop for one loop token, opening a fresh attempt per iteration, aborting it
+   * when the stall watchdog fires, and waiting a doubling backoff before retrying. Returns once the
+   * subscription is closed or `token` is superseded by a newer loop.
+   */
   const run = async (token: number): Promise<void> => {
     while (!closed && token === loopToken) {
       const attempt: SubscriptionAttempt = { controller: new AbortController(), watchdog: null }

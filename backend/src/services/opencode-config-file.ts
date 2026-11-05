@@ -212,6 +212,11 @@ interface ReadOpenCodeConfigPathOptions {
   nullAncestorCountsAsFound?: boolean
 }
 
+/**
+ * Resolves a JSON path against parsed config content, walking objects by key and arrays by index.
+ * Returns whether the path exists plus its value; an absent path yields `found: false`, and
+ * `nullAncestorCountsAsFound` treats a null intermediate value as terminal instead of missing.
+ */
 function readOpenCodeConfigPath(
   content: Record<string, unknown>,
   jsonPath: JSONPath,
@@ -283,6 +288,11 @@ interface MergeOpenCodeConfigValuesOptions {
   deleteNullValues?: boolean
 }
 
+/**
+ * Deep-merges `source` into `target` and returns a new object, recursing into plain-object values.
+ * With `deleteNullValues`, a null source value removes the key and nested nulls are stripped from
+ * replaced values.
+ */
 export function mergeOpenCodeConfigValues(
   target: Record<string, unknown>,
   source: Record<string, unknown>,
@@ -316,11 +326,19 @@ export function withOpenCodeConfigLock<T>(fn: () => Promise<T>): Promise<T> {
   return withFileLock(getOpenCodeConfigDirectory(), fn)
 }
 
+/**
+ * Validates parsed config content against the OpenCode config schema and throws
+ * OpenCodeConfigValidationError carrying the reported issues when it fails.
+ */
 function assertValidOpenCodeConfig(value: unknown): void {
   const result = validateOpenCodeConfig(value)
   if (!result.success) throw new OpenCodeConfigValidationError(result.issues)
 }
 
+/**
+ * Parses JSONC config text and validates it against the OpenCode config schema, returning the parsed
+ * object (empty when parsing fails) with `isValid` and any validation issues instead of throwing.
+ */
 export function parseOpenCodeConfigContent(rawContent: string): OpenCodeConfigParseResult {
   let parsed: unknown
   try {
@@ -418,6 +436,11 @@ export async function readOpenCodeConfigSnapshot(): Promise<OpenCodeConfigSnapsh
   }
 }
 
+/**
+ * Projects an internal snapshot, which tracks validation per source, onto the API response shape.
+ * Per-source validation issues are flattened into one list that is omitted when empty, and the file is
+ * valid only when every source is valid.
+ */
 function toOpenCodeConfigFile(snapshot: OpenCodeConfigSnapshot): OpenCodeConfigFile {
   const validationIssues = snapshot.sources.flatMap((source) => source.validationIssues ?? [])
   return {
@@ -458,6 +481,11 @@ export async function writeOpenCodeConfigFile(
   return toOpenCodeConfigFile(await readOpenCodeConfigSnapshot())
 }
 
+/**
+ * Computes the JSON-path operations that turn `current` into `next`, recursing into plain objects on
+ * both sides. Merge mode treats `null` as a deletion and strips null members from merged values,
+ * replace mode additionally removes keys absent from `next`.
+ */
 function collectOpenCodeConfigPathOperations(
   next: Record<string, unknown>,
   current: Record<string, unknown>,
@@ -495,6 +523,11 @@ function collectOpenCodeConfigPathOperations(
   return operations
 }
 
+/**
+ * Returns the v1 entity paths a v2 merge patch removes, since OpenCode still reads v1 containers.
+ * Container-wide removals carry no `container`, while named removals record their v1 container so
+ * it can be pruned once left empty.
+ */
 function collectOpenCodeConfigV1EntityRemovals(
   patch: Record<string, unknown>,
 ): OpenCodeConfigV1EntityRemoval[] {
@@ -515,6 +548,10 @@ function collectOpenCodeConfigV1EntityRemovals(
   return removals
 }
 
+/**
+ * Returns the offset of the first comma in `rawContent` between `start` and `end`, skipping line
+ * and block comments, or -1 when none exists or a comment runs past `end`.
+ */
 function findOpenCodeConfigSeparatorComma(rawContent: string, start: number, end: number): number {
   let index = start
   while (index < end) {
@@ -536,6 +573,10 @@ function findOpenCodeConfigSeparatorComma(rawContent: string, start: number, end
   return -1
 }
 
+/**
+ * Returns the offset just past the line break that follows `offset`, ignoring intervening spaces
+ * and tabs, or null when the line has more content after them.
+ */
 function findOpenCodeConfigLineEnd(rawContent: string, offset: number): number | null {
   let index = offset
   while (index < rawContent.length && (rawContent[index] === ' ' || rawContent[index] === '\t')) {
@@ -546,6 +587,12 @@ function findOpenCodeConfigLineEnd(rawContent: string, offset: number): number |
   return null
 }
 
+/**
+ * Builds JSONC text edits that delete the property at `jsonPath` while leaving surrounding comments
+ * intact. Returns null when the node, its container, or a required separator comma cannot be
+ * located; a comment between the property and the next member makes the property and the comma be
+ * removed by separate edits so the comment survives.
+ */
 function buildOpenCodeConfigCommentPreservingRemovalEdits(
   rawContent: string,
   jsonPath: JSONPath,
@@ -603,6 +650,10 @@ export function removeOpenCodeConfigProperty(rawContent: string, jsonPath: JSONP
   return applyEdits(rawContent, edits)
 }
 
+/**
+ * Returns the distinct containers named by `removals` that remain empty objects in the updated raw
+ * config text, so they can be pruned. Yields nothing when the parsed root is not an object.
+ */
 function collectEmptyOpenCodeConfigContainers(
   rawContent: string,
   removals: OpenCodeConfigV1EntityRemoval[],
@@ -642,6 +693,10 @@ export function applyOpenCodeConfigEdits(
   return text
 }
 
+/**
+ * Throws OpenCodeConfigShadowedRemovalError when a planned removal targets a path the target source
+ * does not define but another config source does, listing the shadowed paths and their sources.
+ */
 function assertNoShadowedOpenCodeConfigRemovals(
   operations: OpenCodeConfigPathOperation[],
   targetSource: OpenCodeConfigSourceFile | undefined,
@@ -668,6 +723,11 @@ function assertNoShadowedOpenCodeConfigRemovals(
   }
 }
 
+/**
+ * Writes new config text, or applies object content/patch, to the requested source or the preferred
+ * writable one. Enforces `expectedRevision`, rejects redacted values and invalid sibling sources,
+ * preserves JSONC comments and formatting, and returns the refreshed config snapshot.
+ */
 export async function updateOpenCodeConfigFile(
   content: Record<string, unknown> | string,
   options: UpdateOpenCodeConfigOptions = {},
@@ -874,6 +934,12 @@ async function applyOpenCodeConfigSourceFileStates(
   }
 }
 
+/**
+ * Restores the config source files from a serialized snapshot: sources present in the snapshot are
+ * written, sources absent from it but currently on disk are removed, and the legacy config.json source
+ * is folded afterwards. All writes roll back together on failure, and the refreshed file view is
+ * returned, or null when no sources remain.
+ */
 export async function restoreOpenCodeConfigSnapshot(snapshot: string): Promise<OpenCodeConfigFile | null> {
   const desired = parseOpenCodeConfigSnapshot(snapshot)
   const current = await readOpenCodeConfigSnapshot()
@@ -906,6 +972,11 @@ async function archiveLegacyConfigJsonSource(rawContent: string): Promise<string
   return archivePath
 }
 
+/**
+ * Migrates a legacy `config.json` into the lowest-precedence config source, archiving the original
+ * first and deleting it only after a successful merge. Returns false when the legacy file is missing
+ * or cannot be folded.
+ */
 export async function foldLegacyConfigJsonSource(): Promise<boolean> {
   const legacyPath = getOpenCodeConfigSourcePath(LEGACY_OPENCODE_CONFIG_SOURCE_NAME)
 

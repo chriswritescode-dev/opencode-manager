@@ -105,6 +105,11 @@ export function applySessionActivity(busySessions: Set<string>, event: V2Event):
   }
 }
 
+/**
+ * Returns a builder that stamps each replayed permission, form or session-status event with the
+ * current time and a monotonically increasing `${idPrefix}${count}` id, so replayed events stay
+ * ordered and distinct from live ones.
+ */
 export function createReplayEventBuilder(idPrefix: string): ReplayEventBuilder {
   let count = 0
   return (...args) => {

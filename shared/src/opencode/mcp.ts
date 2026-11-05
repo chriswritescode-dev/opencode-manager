@@ -35,6 +35,10 @@ export interface McpServerView {
   enabled: boolean
 }
 
+/**
+ * Maps a config server to its UI-facing view, exposing `command` for local servers and `url` for
+ * remote ones so the view never carries both. `enabled` reflects the absence of `disabled: true`.
+ */
 function toMcpServerView(name: string, config: McpServerConfig, enabled: boolean): McpServerView {
   return {
     name,

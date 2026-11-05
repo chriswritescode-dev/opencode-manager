@@ -271,6 +271,10 @@ export class OpenCodeEventStream {
     }
   }
 
+  /**
+   * Parses one raw stream frame, marks the connection active, and broadcasts the unwrapped event
+   * to every subscriber. Frames that fail to parse still count as activity.
+   */
   private handleMessage(data: string): void {
     try {
       this.markActivity()
@@ -421,6 +425,10 @@ export class OpenCodeEventStream {
     })
   }
 
+  /**
+   * Acknowledges a resync request by marking the stream active and notifying each subscriber with the
+   * directories it tracks and the server the resync belongs to.
+   */
   private handleResync(data?: string): void {
     this.markActivity()
     const directories = Array.from(this.directoryRefCounts.keys())
@@ -434,6 +442,10 @@ export class OpenCodeEventStream {
     })
   }
 
+  /**
+   * Delivers an event to every subscriber, isolating each callback so a throwing subscriber cannot
+   * prevent the remaining subscribers from receiving it.
+   */
   private broadcast(event: OpenCodeStreamEvent): void {
     this.subscribers.forEach((subscriber) => {
       try {
@@ -499,6 +511,10 @@ export class OpenCodeEventStream {
   }
 }
 
+/**
+ * Reads the optional `serverId` from a resync frame, returning `undefined` when the payload is
+ * absent, malformed, or carries no string id.
+ */
 function parseResyncServerId(data?: string): string | undefined {
   if (!data) return undefined
   try {
@@ -509,10 +525,17 @@ function parseResyncServerId(data?: string): string | undefined {
   }
 }
 
+/**
+ * Type guard for a decoded stream payload, requiring an object with a string `type` discriminator.
+ */
 function isEventPayload(value: unknown): value is V2Event | SSHHostKeyRequestEvent {
   return isRecord(value) && typeof value.type === 'string'
 }
 
+/**
+ * Unwraps a transport envelope into the stream event consumers expect, copying `directory` and
+ * `serverId` onto it when present. Returns `null` when the envelope or its payload is malformed.
+ */
 function flattenEventEnvelope(parsed: unknown): OpenCodeStreamEvent | null {
   if (!isRecord(parsed) || !isEventPayload(parsed.payload)) return null
 

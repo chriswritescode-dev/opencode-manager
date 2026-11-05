@@ -214,6 +214,10 @@ export async function probeOpenCodeServer(
   }
 }
 
+/**
+ * Extracts a human-readable message from an unknown thrown value, falling back to `String(error)`
+ * for non-`Error` values.
+ */
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }

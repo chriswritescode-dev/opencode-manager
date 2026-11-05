@@ -23,6 +23,10 @@ interface McpManagerProps {
   onDelete: (serverId: string) => Promise<void>
 }
 
+/**
+ * Renders the MCP server list, unioning servers from the config with those known only to the live
+ * server status, and hosts the add, delete, OAuth and remove-auth dialogs.
+ */
 export function McpManager({ mcp, onSave, onDelete }: McpManagerProps) {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [deleteConfirmServer, setDeleteConfirmServer] = useState<{ id: string; name: string } | null>(null)

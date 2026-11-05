@@ -33,6 +33,10 @@ const handledModelKeys = new Set([
 
 type JsonObject = Record<string, unknown>
 
+/**
+ * Parses JSON text, returning `null` instead of throwing when the input is
+ * malformed.
+ */
 function parseJson(value: string): unknown {
   try {
     return JSON.parse(value) as unknown
@@ -41,6 +45,10 @@ function parseJson(value: string): unknown {
   }
 }
 
+/**
+ * Parses JSON text and returns it only when it is a plain object, so arrays,
+ * primitives, and malformed input all yield `null`.
+ */
 function parseJsonObject(value: string): JsonObject | null {
   const parsed = parseJson(value)
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -49,6 +57,10 @@ function parseJsonObject(value: string): JsonObject | null {
   return null
 }
 
+/**
+ * Parses JSON text into an object or array, returning `null` for primitives and
+ * malformed input; callers that need one container kind narrow the result.
+ */
 function parseJsonContainer(value: string): JsonObject | unknown[] | null {
   const parsed = parseJson(value)
   if (Array.isArray(parsed)) return parsed
@@ -56,11 +68,19 @@ function parseJsonContainer(value: string): JsonObject | unknown[] | null {
   return null
 }
 
+/**
+ * Parses JSON text and returns it only when it is an array, so object-shaped or
+ * malformed input yields `null`.
+ */
 function parseJsonArray(value: string): unknown[] | null {
   const parsed = parseJson(value)
   return Array.isArray(parsed) ? parsed : null
 }
 
+/**
+ * Serializes a value as indented JSON for an editable text field, returning an
+ * empty string for nullish input and for objects with no keys.
+ */
 function stringifyJson(value: unknown): string {
   if (!value || (typeof value === 'object' && !Array.isArray(value) && Object.keys(value as JsonObject).length === 0)) {
     return ''
@@ -69,16 +89,28 @@ function stringifyJson(value: unknown): string {
   return JSON.stringify(value, null, 2)
 }
 
+/**
+ * Parses an optional JSON object field, treating blank input as absent and
+ * mapping invalid or non-object values to `undefined` so the patch omits them.
+ */
 function parseOptionalJsonField(value: string): JsonObject | undefined {
   if (!value.trim()) return undefined
   return parseJsonObject(value) ?? undefined
 }
 
+/**
+ * Parses an optional field holding either a JSON object or array, returning
+ * `undefined` for blank, primitive, or malformed input.
+ */
 function parseOptionalJsonContainerField(value: string): JsonObject | unknown[] | undefined {
   if (!value.trim()) return undefined
   return parseJsonContainer(value) ?? undefined
 }
 
+/**
+ * Parses an optional JSON array field, returning `undefined` when the field is
+ * blank or does not hold an array.
+ */
 function parseOptionalJsonArrayField(value: string): unknown[] | undefined {
   if (!value.trim()) return undefined
   return parseJsonArray(value) ?? undefined
@@ -90,6 +122,11 @@ function parseOptionalNumber(value: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined
 }
 
+/**
+ * Recursively diffs the previously stored model config against the next one and
+ * replaces each dropped key with a merge-patch `null` so the server removes it.
+ * Values are returned untouched unless both sides are objects.
+ */
 function withRemovedKeysAsNull(previous: unknown, next: unknown): unknown {
   if (!isRecord(previous) || !isRecord(next)) return next
 
@@ -115,6 +152,11 @@ function prettifyModelName(modelId: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+/**
+ * Builds a schema field for optional JSON object text: blank input passes, and
+ * any other value must parse as a plain object or an issue named after `label`
+ * is reported.
+ */
 function jsonObjectField(label: string) {
   return z.string().superRefine((value, ctx) => {
     if (!value.trim()) return
@@ -127,6 +169,10 @@ function jsonObjectField(label: string) {
   })
 }
 
+/**
+ * Builds a form schema field that accepts blank input but rejects any non-blank
+ * value that is not a JSON object or array.
+ */
 function jsonContainerField(label: string) {
   return z.string().superRefine((value, ctx) => {
     if (!value.trim()) return
@@ -139,6 +185,10 @@ function jsonContainerField(label: string) {
   })
 }
 
+/**
+ * Builds a form schema field that accepts blank input but rejects any non-blank
+ * value that is not a valid JSON array.
+ */
 function jsonArrayField(label: string) {
   return z.string().superRefine((value, ctx) => {
     if (!value.trim()) return
@@ -229,6 +279,12 @@ interface OpenCodeModelDialogProps {
   }
 }
 
+/**
+ * Renders the create/edit model dialog for a provider, including provider
+ * selection or new-provider fields, debounced model discovery from the provider
+ * base URL, limits, and free-form JSON fields for the remaining model settings.
+ * Values reset whenever the dialog opens for a different target.
+ */
 export function OpenCodeModelDialog({
   open,
   onOpenChange,
@@ -391,6 +447,11 @@ export function OpenCodeModelDialog({
     }
   }, [open, resetKey, form, getDefaultValues])
 
+  /**
+   * Converts the validated form values into a model patch, parsing optional JSON
+   * and numeric fields and nulling keys cleared while editing, then passes the
+   * patch and any new provider config to `onSubmit` before resetting and closing.
+   */
   const handleSubmit = (values: ModelFormValues) => {
     const extra = parseOptionalJsonField(values.extraJson)
     const settings = parseOptionalJsonField(values.settingsJson)
