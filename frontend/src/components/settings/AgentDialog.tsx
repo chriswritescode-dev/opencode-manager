@@ -106,7 +106,8 @@ const requestBodyNumber = (agent: OpenCodeAgentConfig | undefined, key: string):
 /**
  * Writes each sampling value the form sets into `request.body`. A cleared value
  * is removed with a merge-patch `null` when the agent stored it and omitted
- * otherwise, so the provider default applies.
+ * otherwise, so the provider default applies. A request left with no fields is
+ * deleted instead of being saved as an empty object.
  */
 const withSamplingValues = (
   previous: OpenCodeAgentConfig | undefined,
@@ -121,8 +122,13 @@ const withSamplingValues = (
       body[key] = null
     }
   }
-  if (!previous?.request && Object.keys(body).length === 0) return {}
-  return { request: { ...previous?.request, body } }
+  const request = { ...previous?.request, body }
+  const bodyHasValues = Object.values(body).some((value) => value !== null && value !== undefined)
+  const requestHasOtherFields = Object.entries(request).some(
+    ([key, value]) => key !== 'body' && value !== undefined && value !== null,
+  )
+  if (bodyHasValues || requestHasOtherFields) return { request }
+  return previous?.request ? { request: null } : {}
 }
 
 const agentFormSchema = z.object({
@@ -203,7 +209,7 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
       mode: values.mode,
       model: values.model?.trim() || null,
       disabled: values.disable,
-      ...(permissions.length > 0 || previous?.permissions ? { permissions } : {}),
+      ...(permissions.length > 0 ? { permissions } : previous?.permissions ? { permissions: null } : {}),
       ...withSamplingValues(previous, { temperature: values.temperature, top_p: values.topP }),
     }
 

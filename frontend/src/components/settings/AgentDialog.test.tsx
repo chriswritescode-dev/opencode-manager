@@ -374,6 +374,54 @@ describe('AgentDialog', () => {
     ])
   })
 
+  it('deletes the permissions key when every action returns to Default', async () => {
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <AgentDialog
+        open
+        onOpenChange={vi.fn()}
+        onSubmit={onSubmit}
+        editingAgent={{
+          name: 'reviewer',
+          agent: {
+            system: 'Review code',
+            permissions: [{ action: 'shell', resource: '*', effect: 'deny' }],
+          },
+        }}
+      />,
+    )
+
+    await user.click(screen.getByRole('combobox', { name: 'Shell' }))
+    await user.click(screen.getByRole('option', { name: 'Default' }))
+    await user.click(screen.getByRole('button', { name: 'Update' }))
+
+    const agent = onSubmit.mock.calls[0][1]
+    expect(agent.permissions).toBeNull()
+  })
+
+  it('deletes the request key when the last sampling value is cleared', async () => {
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <AgentDialog
+        open
+        onOpenChange={vi.fn()}
+        onSubmit={onSubmit}
+        editingAgent={{
+          name: 'reviewer',
+          agent: { system: 'Review code', request: { body: { temperature: 0.2 } } },
+        }}
+      />,
+    )
+
+    await user.clear(screen.getByLabelText('Temperature'))
+    await user.click(screen.getByRole('button', { name: 'Update' }))
+
+    const agent = onSubmit.mock.calls[0][1]
+    expect(agent.request).toBeNull()
+  })
+
   it('writes no permissions for a prompt-only save of an agent without permission rules', async () => {
     const onSubmit = vi.fn()
     const user = userEvent.setup()
