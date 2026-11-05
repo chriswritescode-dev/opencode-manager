@@ -1183,8 +1183,6 @@ export async function ensureAssistantMode(
   const assistantAgentPath = getAssistantDefaultAgentPath(assistantDir)
 
   const agentsMdExists = await fileExists(agentsMdPath)
-  const opencodeJsonExists = await fileExists(opencodeJsonPath)
-
   const overwriteOpenCodeConfig = options?.overwriteOpenCodeConfig ?? false
 
   const overwriteAgentsMd = options?.overwriteAgentsMd ?? false
@@ -1212,6 +1210,7 @@ export async function ensureAssistantMode(
   }
 
   const opencodeJsonUpdated = await withFileLock(opencodeJsonPath, async () => {
+    const opencodeJsonExists = await fileExists(opencodeJsonPath)
     const existingOpenCodeJsonContent = opencodeJsonExists ? await readFileContent(opencodeJsonPath) : undefined
     const parsedOpenCodeConfig = existingOpenCodeJsonContent === undefined
       ? undefined

@@ -534,10 +534,12 @@ function isEventPayload(value: unknown): value is V2Event | SSHHostKeyRequestEve
 
 /**
  * Unwraps a transport envelope into the stream event consumers expect, copying `directory` and
- * `serverId` onto it when present. Returns `null` when the envelope or its payload is malformed.
+ * `serverId` onto it when present. A bare event without an envelope is passed through unchanged;
+ * anything else returns `null`.
  */
 function flattenEventEnvelope(parsed: unknown): OpenCodeStreamEvent | null {
-  if (!isRecord(parsed) || !isEventPayload(parsed.payload)) return null
+  if (!isRecord(parsed)) return null
+  if (!isEventPayload(parsed.payload)) return isEventPayload(parsed) ? { ...parsed } : null
 
   const { payload, directory, serverId } = parsed
   const event: OpenCodeStreamEvent = { ...payload }
