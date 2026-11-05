@@ -9,8 +9,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import type { PermissionResponse } from '@/api/types'
-import type { PermissionRequest } from '@opencode-manager/shared/opencode'
+import type { PermissionReply, PermissionRequest } from '@opencode-manager/shared/opencode'
 import {
   getPermissionLabel,
   getPermissionPhrase,
@@ -30,13 +29,19 @@ interface PermissionRequestDialogProps {
   onRespond: (
     permissionID: string,
     sessionID: string,
-    response: PermissionResponse,
+    response: PermissionReply,
     message?: string,
   ) => Promise<void>
   open?: boolean
   onOpenChange?: (open: boolean) => void
 }
 
+/**
+ * Renders a modal prompt for the current pending permission request with
+ * allow-once, always-allow, and reject actions plus a count of further queued
+ * requests. Focus starts on allow-once, and the rejection reason resets
+ * whenever the request changes.
+ */
 export function PermissionRequestDialog({
   permission,
   pendingCount,
@@ -49,7 +54,7 @@ export function PermissionRequestDialog({
   onOpenChange,
 }: PermissionRequestDialogProps) {
   const [isLoading, setIsLoading] = useState(false)
-  const [loadingAction, setLoadingAction] = useState<PermissionResponse | null>(null)
+  const [loadingAction, setLoadingAction] = useState<PermissionReply | null>(null)
   const [rejectReason, setRejectReason] = useState('')
   const reasonInputId = useId()
   const allowOnceRef = useRef<HTMLButtonElement>(null)
@@ -61,7 +66,11 @@ export function PermissionRequestDialog({
   if (!permission) return null
   if (parentOpen === false) return null
 
-  const handleResponse = async (response: PermissionResponse) => {
+  /**
+   * Sends the user's reply for the current permission request, passing the trimmed rejection reason
+   * only for rejections, and reports failures as a toast while clearing the pending action state.
+   */
+  const handleResponse = async (response: PermissionReply) => {
     setIsLoading(true)
     setLoadingAction(response)
     const message = response === 'reject' ? rejectReason.trim() : ''

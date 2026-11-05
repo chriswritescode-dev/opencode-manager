@@ -25,7 +25,7 @@ const providers: Provider[] = [
     id: 'anthropic',
     name: 'Anthropic',
     models: [
-      { id: 'claude-sonnet-4', key: 'claude-sonnet-4', name: 'Claude Sonnet 4', released: 0, free: false },
+      { id: 'claude-sonnet-4', modelID: 'claude-sonnet-4', name: 'Claude Sonnet 4', released: 0, free: false },
     ],
   },
 ]

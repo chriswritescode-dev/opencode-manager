@@ -3,6 +3,8 @@ import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { serverScopedKey } from '@/lib/serverScope'
 import type { GitStatusResponse } from '@/types/git'
 
+export const OPEN_CODE_MANAGED_CONFIG_QUERY_KEY = ['opencode-config', 'managed'] as const
+
 export function sessionTranscriptQueryKey(sessionID: string | null | undefined) {
   return ['opencode', 'transcript', sessionID]
 }

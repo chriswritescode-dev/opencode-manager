@@ -55,7 +55,7 @@ const providers: Provider[] = [
   {
     id: 'openai',
     name: 'OpenAI',
-    models: [{ id: 'gpt-5', key: 'gpt-5', name: 'GPT-5', released: 0, free: false }],
+    models: [{ id: 'gpt-5', modelID: 'gpt-5', name: 'GPT-5', released: 0, free: false }],
   },
 ]
 
@@ -206,8 +206,8 @@ describe('ScheduleJobDialog — model fallback', () => {
           id: 'openai',
           name: 'OpenAI',
           models: [
-            { id: 'gpt-5', key: 'gpt-5', name: 'GPT-5', released: 0, free: false },
-            { id: 'gpt-4o', key: 'gpt-4o', name: 'GPT-4o', released: 0, free: false },
+            { id: 'gpt-5', modelID: 'gpt-5', name: 'GPT-5', released: 0, free: false },
+            { id: 'gpt-4o', modelID: 'gpt-4o', name: 'GPT-4o', released: 0, free: false },
           ],
         },
       ],

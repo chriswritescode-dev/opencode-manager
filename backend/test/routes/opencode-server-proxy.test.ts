@@ -236,6 +236,23 @@ describe('opencode server proxy routes', () => {
     expect(receivedSignal?.aborted).toBe(false)
   })
 
+  it('does not time out a bodyless POST that takes longer than the headers timeout', async () => {
+    let receivedSignal: AbortSignal | null | undefined
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      receivedSignal = init.signal
+      await new Promise((resolve) => setTimeout(resolve, 40))
+      return new Response('ok', { status: 200 })
+    })
+    const app = buildApp(fetchMock as unknown as typeof fetch, passThroughAuth, 10)
+
+    const res = await app.request('/api/opencode/servers/srv_1/api/session/ses_1/abort', {
+      method: 'POST',
+    })
+
+    expect(res.status).toBe(200)
+    expect(receivedSignal?.aborted).toBe(false)
+  })
+
   it('keeps streaming the upstream body after headers arrive', async () => {
     const encoder = new TextEncoder()
     let receivedSignal: AbortSignal | null | undefined

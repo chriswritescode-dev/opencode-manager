@@ -90,6 +90,7 @@ function providerFixture(id: string, name: string, modelCount: number): Provider
     name,
     models: Array.from({ length: modelCount }, (_, index) => ({
       id: `model-${index}`,
+      modelID: `model-${index}`,
       name: `model-${index}`,
       released: 0,
       free: false,

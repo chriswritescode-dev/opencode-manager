@@ -303,6 +303,7 @@ class OpenCodeServerManager {
   private openCodeClient: OpenCodeClient | null = null
   private sandboxEnforced: boolean = false
   private lifecycleInitialized: boolean = false
+  private readonly lifecycleOpenedListeners = new Set<() => void>()
   private markerRefreshTimer: ReturnType<typeof setInterval> | null = null
   private processGeneration = 0
   private intentionalStop: { pid: number; generation: number } | null = null
@@ -1036,8 +1037,27 @@ class OpenCodeServerManager {
     return this.sandboxEnforced
   }
 
+  /**
+   * Sets the lifecycle gate and, when it transitions from closed to open, notifies the registered
+   * listeners that the proxy is now serving requests. Listener failures are logged, not propagated.
+   */
   setLifecycleInitialized(initialized: boolean): void {
+    const opened = initialized && !this.lifecycleInitialized
     this.lifecycleInitialized = initialized
+    if (!opened) return
+    this.lifecycleOpenedListeners.forEach((listener) => {
+      try {
+        listener()
+      } catch (error) {
+        logger.error('OpenCode lifecycle listener failed:', error)
+      }
+    })
+  }
+
+  /** Calls `listener` each time the lifecycle gate opens, i.e. the proxy starts accepting requests. */
+  onLifecycleInitialized(listener: () => void): () => void {
+    this.lifecycleOpenedListeners.add(listener)
+    return () => { this.lifecycleOpenedListeners.delete(listener) }
   }
 
   isLifecycleInitialized(): boolean {

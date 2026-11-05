@@ -4,11 +4,11 @@ import {
   SettingsResponseSchema,
   UpdateSettingsRequestSchema,
   CustomCommandSchema,
-  OpenCodeConfigSchema,
   OpenCodeConfigFileSchema,
   OpenCodeConfigSourceFileSchema,
   OpenCodeConfigValidationIssueSchema,
   UpdateOpenCodeConfigRequestSchema,
+  UpdateOpenCodeConfigPatchRequestSchema,
   ServerEnvVarSchema,
 } from '../schemas/settings'
 import {
@@ -50,10 +50,6 @@ import {
   FilePatchRequestSchema,
 } from '../schemas/files'
 import {
-  SessionSchema,
-  MessageSchema,
-} from '../schemas/opencode'
-import {
   DirectoryEntrySchema,
   BrowseDirectoryResponseSchema,
   BrowseDirectoryRequestSchema,
@@ -80,8 +76,8 @@ export type OpenCodeConfigFile = z.infer<typeof OpenCodeConfigFileSchema>
 export type { OpenCodeConfigSourceName } from '../config/defaults'
 export type OpenCodeConfigSourceFile = z.infer<typeof OpenCodeConfigSourceFileSchema>
 export type OpenCodeConfigValidationIssue = z.infer<typeof OpenCodeConfigValidationIssueSchema>
-export type OpenCodeConfigInput = z.infer<typeof OpenCodeConfigSchema>
 export type UpdateOpenCodeConfigRequest = z.infer<typeof UpdateOpenCodeConfigRequestSchema>
+export type UpdateOpenCodeConfigPatchRequest = z.infer<typeof UpdateOpenCodeConfigPatchRequestSchema>
 
 export type Repo = z.infer<typeof RepoSchema>
 export type InternalRepoListResponse = z.infer<typeof InternalRepoListResponseSchema>
@@ -118,9 +114,6 @@ export type FileRangeRequest = z.infer<typeof FileRangeRequestSchema>
 export type PatchOperation = z.infer<typeof PatchOperationSchema>
 export type FilePatchRequest = z.infer<typeof FilePatchRequestSchema>
 
-export type Session = z.infer<typeof SessionSchema>
-export type Message = z.infer<typeof MessageSchema>
-
 export type DirectoryEntry = z.infer<typeof DirectoryEntrySchema>
 export type BrowseDirectoryResponse = z.infer<typeof BrowseDirectoryResponseSchema>
 export type BrowseDirectoryRequest = z.infer<typeof BrowseDirectoryRequestSchema>
@@ -145,12 +138,6 @@ export interface SuccessResponse {
 
 export type { SSHHostKeyRequest, SSHHostKeyResponse, TrustedSSHHost } from '../schemas/ssh'
 export type { GitCredential, GitIdentityProfile } from '../schemas/settings'
-export type {
-  ProviderApiConfig,
-  ModelConfig,
-  ProviderConfig,
-  ProviderSource,
-} from '../schemas/settings'
 
 export type {
   ScheduleMode,

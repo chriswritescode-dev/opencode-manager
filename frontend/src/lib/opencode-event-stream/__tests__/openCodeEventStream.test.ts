@@ -67,6 +67,21 @@ describe('OpenCodeEventStream', () => {
     expect(onEvent).toHaveBeenNthCalledWith(2, { type: 'credential.updated', data: {} })
   })
 
+  it('passes through a bare event without an envelope and drops frames without a type', () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+    const onEvent = vi.fn()
+
+    stream.subscribeGlobalMonitor({ directories: ['/repo'], onEvent })
+    transport.openConnection()
+    transport.connected()
+    transport.message({ type: 'ssh.host-key-request', properties: { requestId: 'r1' } })
+    transport.message({ payload: { data: {} } })
+
+    expect(onEvent).toHaveBeenCalledTimes(1)
+    expect(onEvent).toHaveBeenCalledWith({ type: 'ssh.host-key-request', properties: { requestId: 'r1' } })
+  })
+
   it('copies the envelope server id onto remote events only', () => {
     const transport = new TestEventStreamTransport()
     const stream = new OpenCodeEventStream({ transport })

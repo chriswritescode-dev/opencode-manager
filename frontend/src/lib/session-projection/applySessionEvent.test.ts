@@ -38,6 +38,12 @@ function applyAll(events: V2Event[]): SessionTranscript {
   return events.reduce(applySessionEvent, emptySessionTranscript)
 }
 
+function eventAt(events: V2Event[], index: number): V2Event {
+  const event = events[index]
+  if (!event) throw new Error(`Missing event at index ${index}`)
+  return event
+}
+
 function assistantMessage(transcript: SessionTranscript): SessionMessageAssistant {
   const message = transcript.messages.at(-1)
   if (message?.type !== 'assistant') throw new Error('expected an assistant message')
@@ -299,7 +305,7 @@ describe('applySessionEvent', () => {
 
   it('ends only the running compaction and appends when none is running', () => {
     const failed = applyAll(failedCompactionSequence)
-    const ended = applySessionEvent(failed, compactionSequence[2] as V2Event)
+    const ended = applySessionEvent(failed, eventAt(compactionSequence, 2))
 
     expect(ended.messages).toHaveLength(2)
     expect(ended.messages).toMatchObject([
@@ -550,7 +556,7 @@ describe('applySessionEvent', () => {
 })
 
 describe('sessionEventRequiresResync', () => {
-  const executionEnded = executionSequence[1] as V2Event
+  const executionEnded = eventAt(executionSequence, 1)
 
   it('requires a resync when execution ends while a tool is still running', () => {
     const transcript = applyAll(promptSequence.slice(0, 15))
@@ -573,7 +579,7 @@ describe('sessionEventRequiresResync', () => {
   it('does not require a resync for events other than execution end', () => {
     const transcript = applyAll(promptSequence.slice(0, 15))
 
-    expect(sessionEventRequiresResync(transcript, promptSequence[14] as V2Event)).toBe(false)
+    expect(sessionEventRequiresResync(transcript, eventAt(promptSequence, 14))).toBe(false)
   })
 
   it('requires a resync when assistant message content is updated', () => {
@@ -641,14 +647,14 @@ describe('applySessionEvents', () => {
 
   it('reports requiresResync for a flush that ends execution with an unsettled tool', () => {
     const running = applyAll(promptSequence.slice(0, 15))
-    const batch = applySessionEvents(running, [executionSequence[1] as V2Event])
+    const batch = applySessionEvents(running, [eventAt(executionSequence, 1)])
 
     expect(batch.requiresResync).toBe(true)
   })
 
   it('does not report requiresResync for a settled flush', () => {
     const settled = applyAll(promptSequence)
-    const batch = applySessionEvents(settled, [executionSequence[1] as V2Event])
+    const batch = applySessionEvents(settled, [eventAt(executionSequence, 1)])
 
     expect(batch.requiresResync).toBe(false)
   })
@@ -666,7 +672,7 @@ describe('applySessionEvents', () => {
 
   it('returns the base transcript when no event changes it', () => {
     const base = applyAll(promptSequence)
-    const batch = applySessionEvents(base, [promptSequence[13] as V2Event])
+    const batch = applySessionEvents(base, [eventAt(promptSequence, 13)])
 
     expect(batch.transcript).toBe(base)
   })

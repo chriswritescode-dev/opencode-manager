@@ -1,13 +1,22 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { tmpdir, type NetworkInterfaceInfo } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, it, expect, vi } from 'vitest'
 import {
+  buildOpenCodeBasicAuth,
   createOpenCodePairingNonce,
   createOpenCodePairingProof,
   decryptOpenCodePairingCredentials,
 } from '@opencode-manager/shared/opencode'
-import { discoverOpenCodeService, generatePairingCode, resolveDefaultBaseUrl, resolveLanIPv4, startPairingServer } from '../src/link'
+import {
+  discoverOpenCodeService,
+  generatePairingCode,
+  probeOpenCodeServer,
+  resolveDefaultBaseUrl,
+  resolveLanIPv4,
+  startPairingServer,
+} from '../src/link'
 import type { PairingServerOptions } from '../src/link'
 import { buildOpenCodeServerLink, parseOpenCodeServerLink } from '@opencode-manager/shared/schemas'
 
@@ -36,8 +45,11 @@ interface ServiceHome {
 
 const tempDirs: string[] = []
 
-afterEach(() => {
+const probeServers: ProbeServer[] = []
+
+afterEach(async () => {
   for (const directory of tempDirs.splice(0)) rmSync(directory, { recursive: true, force: true })
+  await Promise.all(probeServers.splice(0).map((server) => server.close()))
 })
 
 function createServiceHome(): ServiceHome {
@@ -107,6 +119,37 @@ function redeem(url: string, body: unknown, init: RequestInit = {}): Promise<Res
 async function createChallenge(code = CODE): Promise<{ nonce: string; proof: string }> {
   const nonce = createOpenCodePairingNonce()
   return { nonce, proof: await createOpenCodePairingProof(code, nonce) }
+}
+
+interface ProbeServer {
+  baseUrl: string
+  requests: Array<{ url: string | undefined; authorization: string | undefined }>
+  close: () => Promise<void>
+}
+
+async function startProbeServer(
+  respond: (request: IncomingMessage, response: ServerResponse) => void,
+): Promise<ProbeServer> {
+  const requests: ProbeServer['requests'] = []
+  const server = createServer((request, response) => {
+    requests.push({ url: request.url, authorization: request.headers.authorization })
+    respond(request, response)
+  })
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  const address = server.address()
+  const port = typeof address === 'object' && address !== null ? address.port : 0
+  const handle: ProbeServer = {
+    baseUrl: `http://127.0.0.1:${port}`,
+    requests,
+    close: () => new Promise<void>((resolve) => {
+      server.closeAllConnections()
+      server.close(() => resolve())
+    }),
+  }
+  probeServers.push(handle)
+  return handle
 }
 
 describe('generatePairingCode', () => {
@@ -286,6 +329,94 @@ describe('discoverOpenCodeService', () => {
         loopbackOnly: true,
       })
     }
+  })
+})
+
+describe('probeOpenCodeServer', () => {
+  it('reports ok with the server version from an authenticated info request', async () => {
+    const server = await startProbeServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ version: '2.0.32' }))
+    })
+
+    await expect(probeOpenCodeServer(`${server.baseUrl}/`, CREDENTIALS, 1000)).resolves.toEqual({
+      status: 'ok',
+      version: '2.0.32',
+    })
+    expect(server.requests).toEqual([
+      {
+        url: '/api/info',
+        authorization: buildOpenCodeBasicAuth(CREDENTIALS.password, CREDENTIALS.username),
+      },
+    ])
+  })
+
+  it('reports unauthorized when the server rejects the credentials', async () => {
+    const server = await startProbeServer((_request, response) => {
+      response.writeHead(401, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ _tag: 'UnauthorizedError', message: 'unauthorized' }))
+    })
+
+    await expect(probeOpenCodeServer(server.baseUrl, CREDENTIALS, 1000)).resolves.toEqual({
+      status: 'unauthorized',
+    })
+  })
+
+  it('reports unauthorized when the server rejects the credentials with an empty body', async () => {
+    const server = await startProbeServer((_request, response) => {
+      response.writeHead(401, { 'content-type': 'text/plain' })
+      response.end()
+    })
+
+    await expect(probeOpenCodeServer(server.baseUrl, CREDENTIALS, 1000)).resolves.toEqual({
+      status: 'unauthorized',
+    })
+  })
+
+  it('reports unauthorized when the server rejects the credentials with a plain text body', async () => {
+    const server = await startProbeServer((_request, response) => {
+      response.writeHead(401, { 'content-type': 'text/plain' })
+      response.end('unauthorized')
+    })
+
+    await expect(probeOpenCodeServer(server.baseUrl, CREDENTIALS, 1000)).resolves.toEqual({
+      status: 'unauthorized',
+    })
+  })
+
+  it('reports unreachable with the HTTP status for an unexpected response', async () => {
+    const server = await startProbeServer((_request, response) => {
+      response.writeHead(500, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ error: 'boom' }))
+    })
+
+    await expect(probeOpenCodeServer(server.baseUrl, CREDENTIALS, 1000)).resolves.toEqual({
+      status: 'unreachable',
+      message: 'HTTP 500',
+    })
+  })
+
+  it('reports unreachable with the HTTP status for an unexpected plain text response', async () => {
+    const server = await startProbeServer((_request, response) => {
+      response.writeHead(500, { 'content-type': 'text/plain' })
+      response.end('boom')
+    })
+
+    await expect(probeOpenCodeServer(server.baseUrl, CREDENTIALS, 1000)).resolves.toEqual({
+      status: 'unreachable',
+      message: 'HTTP 500',
+    })
+  })
+
+  it('reports unreachable when the server refuses the connection', async () => {
+    const server = await startProbeServer(() => {})
+    const baseUrl = server.baseUrl
+    await server.close()
+
+    const probe = await probeOpenCodeServer(baseUrl, CREDENTIALS, 1000)
+
+    expect(probe.status).toBe('unreachable')
+    expect(probe).toMatchObject({ message: expect.stringContaining('Transport') })
   })
 })
 

@@ -87,8 +87,8 @@ describe('getProviders', () => {
     expect(result.providers[0]).toMatchObject({ id: 'anthropic', name: 'Anthropic' })
     expect(result.providers[0].models).toHaveLength(1)
     expect(result.providers[0].models[0]).toMatchObject({
-      key: 'claude-sonnet-4',
-      id: 'claude-sonnet-4-20250514',
+      id: 'claude-sonnet-4',
+      modelID: 'claude-sonnet-4-20250514',
       name: 'Claude Sonnet 4',
       limit: { context: 200000, output: 64000 },
       released: Date.UTC(2025, 4, 22),
@@ -132,7 +132,7 @@ describe('getProviders', () => {
     const result = await getProviders('/repo')
 
     expect(result.providers.map((provider) => provider.id)).toEqual(['anthropic'])
-    expect(result.providers[0].models.map((model) => model.key)).toEqual(['claude-sonnet-4'])
+    expect(result.providers[0].models.map((model) => model.id)).toEqual(['claude-sonnet-4'])
   })
 
   it('sorts providers and models in the TUI order', async () => {
@@ -288,14 +288,8 @@ describe('saveOpenCodeModelVariant', () => {
 })
 
 describe('providerModelRef', () => {
-  it('prefers the catalog key over the backing model id', () => {
-    expect(providerModelRef({ id: 'anthropic' }, { id: 'claude-sonnet-4-20250514', key: 'claude-sonnet-4' })).toBe(
-      'anthropic/claude-sonnet-4'
-    )
-  })
-
-  it('falls back to the model id when no key is present', () => {
-    expect(providerModelRef({ id: 'openai' }, { id: 'gpt-4o' })).toBe('openai/gpt-4o')
+  it('formats the provider and catalog model id as an OpenCode model ref', () => {
+    expect(providerModelRef({ id: 'anthropic' }, { id: 'claude-sonnet-4' })).toBe('anthropic/claude-sonnet-4')
   })
 })
 

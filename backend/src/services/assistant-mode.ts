@@ -4,7 +4,6 @@ import type { Repo } from '@opencode-manager/shared/types'
 import type {
   AssistantModeStatus,
   AssistantModeInitRequest,
-  OpenCodeConfigInput,
 } from '@opencode-manager/shared/types'
 import {
   readFileContent,
@@ -12,12 +11,19 @@ import {
   fileExists,
   ensureDirectoryExists,
 } from './file-operations'
-import { ASSISTANT_NOTIFICATION_LIMITS, AssistantSettingsPatchSchema, OpenCodeConfigSchema, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_LEADER_KEY, MANAGER_TOOL_NAME } from '@opencode-manager/shared/schemas'
+import { ASSISTANT_NOTIFICATION_LIMITS, AssistantSettingsPatchSchema, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_LEADER_KEY, MANAGER_TOOL_NAME } from '@opencode-manager/shared/schemas'
 import { MANAGER_COLOR_THEME_ID, OPENCODE_THEMES } from '@opencode-manager/shared/themes'
-import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH, ASSISTANT_OPENCODE_DIR_NAME } from '@opencode-manager/shared/utils'
+import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH, ASSISTANT_OPENCODE_DIR_NAME, isRecord, parseJsonc } from '@opencode-manager/shared/utils'
 import { getAssistantModePath, getReposPath } from '@opencode-manager/shared/config/env'
+import type { OpenCodeAgentConfig, OpenCodeApi, OpenCodeConfigInfo } from '@opencode-manager/shared/opencode'
+import { validateOpenCodeConfig } from '@opencode-manager/shared/opencode/config-validation'
 import type { Database } from 'bun:sqlite'
 import { ensureAssistantRepo } from '../db/queries'
+import { applyOpenCodeConfigEdits, removeOpenCodeConfigProperty, V1_ENTITY_PATHS, type OpenCodeConfigPathOperation } from './opencode-config-file'
+import { readConfigValueAtPath, restoreOpenCodeConfigReferences } from './opencode-config-references'
+import { readOpenCodeConfigDocuments } from './opencode-config-effective'
+import { logger } from '../utils/logger'
+import { withFileLock } from '../utils/atomic-json'
 
 
 const ASSISTANT_MODE_DIR = ASSISTANT_REPO_PATH
@@ -784,9 +790,9 @@ Read the merged persisted global configuration and its source files. Returns \`4
 
 ### PATCH /opencode-config
 
-Change only the paths the user asked for. Send a nested \`patch\` object naming those paths and the values to set; every path you do not name is left untouched, and a \`null\` value removes a path. Only changed fields are patched into the preferred existing source: JSONC, then JSON. New installations use opencode.jsonc. Unchanged inherited values and comments are preserved.
+Change only the paths the user asked for. Send a nested \`patch\` object naming those paths and the values to set; a path you do not name keeps its current value, and a \`null\` value removes a path. Naming a v2 entity (\`agents.<name>\`, \`commands.<name>\`, \`providers.<id>\`, \`mcp.servers.<name>\`, or \`permissions\`) also deletes its v1 counterpart (\`agent.<name>\`, \`command.<name>\`, \`provider.<id>\`, \`mcp.<name>\`, or \`permission\`) in the same edit. \`{env:…}\` and \`{file:…}\` references in fields whose value is sent back unchanged are kept. Only changed fields are patched into the preferred existing source: JSONC, then JSON. New installations use opencode.jsonc. Unchanged inherited values and comments are preserved.
 
-Send \`expectedRevision\` from a read. A \`409\` means the source files changed: read again and reconcile rather than retrying stale content.
+Send \`expectedRevision\` from a read. A \`409\` with \`expectedRevision\` and \`actualRevision\` means the revision is stale, and a \`409\` with \`paths\` means the v1 entry to remove exists only in a lower-priority config source (the \`OpenCodeConfigShadowedRemovalError\` case): read again and reconcile rather than retrying stale content. A \`409\` with neither field means OpenCode has not loaded the saved configuration since a failed reload, so a patch naming an agent, command, provider or MCP server is refused: do not retry, and tell the user to restart the OpenCode server from Settings. Patches that name no such entity still apply.
 
 **Request Body:**
 \`\`\`ts
@@ -814,34 +820,35 @@ Send \`expectedRevision\` from a read. A \`409\` means the source files changed:
 \`\`\`
 
 **Response:**
-Returns the refreshed merged configuration and source files, with secrets redacted. A semantic change is applied automatically: the Manager reloads OpenCode without restarting the server, so agents, permissions, providers, models, and plugins take effect on the next message and running sessions keep running. An \`mcp\` change is applied the same way, and only the servers whose configuration changed reconnect. Comment-only changes do nothing. Saving never silently drops unsupported fields.
+Returns the refreshed merged configuration and source files, with secrets redacted. A semantic change is applied automatically: the Manager reloads OpenCode without restarting the server, so agents, permissions, providers, models, and plugins take effect on the next message and running sessions keep running. An \`mcp\` change is applied the same way, and only the servers whose configuration changed reconnect. Comment-only changes do nothing.
 
 The response adds \`restartRequired: true\` only when the automatic reload failed, for example because the OpenCode server is unavailable.
 
-Returns \`400\` for invalid configuration or a \`<redacted>\` value (\`paths\` lists them), and \`409\` for a stale revision.
+Returns \`400\` for invalid configuration or a \`<redacted>\` value (\`paths\` lists them), and \`409\` when \`expectedRevision\` is stale, the v1 entry to remove exists only in a lower-priority config source, or an entity patch arrives while an OpenCode restart is pending.
 
 ### GET /opencode-config/mcp
 
-List the configured MCP servers with their stored shape, enabled state, and live connection status. Use this to answer questions about MCP servers instead of reading the whole configuration. Header and environment values are never returned.
+List the configured MCP servers with their enabled state and live connection status. Use this to answer questions about MCP servers instead of reading the whole configuration. Header and environment values are never returned.
 
-\`type\` is \`local\` or \`remote\`, and \`command\` or \`url\` is included for the matching type. \`enabled\` reflects the stored flag. \`shape\` is \`servers\` for a native \`mcp.servers.<name>\` entry or \`legacy\` for a flat \`mcp.<name>\` entry, so you can address the entry by the path it actually uses. \`status\` is the live OpenCode status (\`connected\`, \`pending\`, \`disabled\`, \`failed\`, or \`needs_auth\`) when the server is reachable, and \`error\` carries the failure reason.
+\`type\` is \`local\` or \`remote\`, and \`command\` or \`url\` is included for the matching type. \`enabled\` reflects the stored flag. Every entry comes from a native \`mcp.servers.<name>\` entry, so address it by that path; saving \`mcp.servers.<name>\` replaces a flat \`mcp.<name>\` entry left by an older config. \`status\` is the live OpenCode status (\`connected\`, \`pending\`, \`disabled\`, \`failed\`, or \`needs_auth\`) when the server is reachable, and \`error\` carries the failure reason.
 
 **Response:**
 \`\`\`ts
 {
-  revision: string | null
+  revision: string
   servers: Array<{
     name: string
     type: 'local' | 'remote'
     command?: string[]
     url?: string
     enabled: boolean
-    shape: 'servers' | 'legacy'
     status?: 'connected' | 'pending' | 'disabled' | 'failed' | 'needs_auth'
     error?: string
   }>
 }
 \`\`\`
+
+GET /opencode-config/mcp returns \`503\` when the OpenCode server is unreachable.
 
 When the response contains \`restartRequired: true\`, tell the user to restart the OpenCode server from Settings. Never attempt the restart yourself: it would terminate your own session.
 
@@ -850,7 +857,7 @@ Only changes to how the OpenCode process is launched need a user restart from Se
 ## Safety
 
 - The settings PATCH endpoint rejects any attempt to modify credentials, API keys, or other sensitive settings; guide the user to the full UI for Git, TTS, and STT credentials
-- PATCH /opencode-config patches only the paths you name, including \`plugin\`, \`mcp\`, and \`provider\` entries; change only the keys the user explicitly asked for and never add plugins, MCP servers, or provider credentials the user did not request
+- PATCH /opencode-config patches only the paths you name, including \`plugins\`, \`mcp.servers\`, and \`providers\` entries; change only the keys the user explicitly asked for and never add plugins, MCP servers, or provider credentials the user did not request
 - GET /opencode-config redacts secrets; never reconstruct a secret you did not read, and never send a \`<redacted>\` value back
 - The settings PATCH endpoint does NOT trigger an OpenCode reload or restart
 `
@@ -1127,23 +1134,41 @@ Fork a session, optionally before a specific message. Omit \`beforeMessageId\` t
 `
 }
 
-export function buildAssistantOpenCodeConfig(): OpenCodeConfigInput {
-  const config: OpenCodeConfigInput = {
+/**
+ * Builds the canonical Assistant `opencode.json` document: the assistant agent as default agent, its
+ * allowed permissions, and a `primary` agent entry. The result is schema-validated, and an invalid
+ * result throws rather than returning a config OpenCode would reject.
+ */
+export function buildAssistantOpenCodeConfig(): OpenCodeConfigInfo {
+  const permission = buildAssistantAgentPermission()
+  const config: OpenCodeConfigInfo = {
     default_agent: ASSISTANT_DEFAULT_AGENT_NAME,
-    permission: buildAssistantAgentPermission(),
-    agent: {
+    permissions: Object.entries(permission).map(([action, effect]) => ({
+      action,
+      resource: '*',
+      effect,
+    })),
+    agents: {
       [ASSISTANT_DEFAULT_AGENT_NAME]: { mode: 'primary' },
     },
   }
 
-  const result = OpenCodeConfigSchema.safeParse(config)
+  const result = validateOpenCodeConfig(config)
   if (!result.success) {
-    throw new Error(`Generated OpenCode config is invalid: ${result.error.message}`)
+    throw new Error(
+      `Generated OpenCode config is invalid: ${result.issues.map((issue) => `${issue.path}: ${issue.message}`).join(', ')}`,
+    )
   }
 
   return config
 }
 
+/**
+ * Creates or repairs the Assistant workspace for `repo`: writes AGENTS.md, the assistant OpenCode
+ * config, the bundled skills and the default agent file, updating the config under a file lock and
+ * preserving customized content unless the matching `overwrite*` option is set. Returns the
+ * resulting status, including warnings for instruction updates it declined to apply.
+ */
 export async function ensureAssistantMode(
   repo: Repo,
   options?: AssistantModeInitRequest,
@@ -1158,8 +1183,6 @@ export async function ensureAssistantMode(
   const assistantAgentPath = getAssistantDefaultAgentPath(assistantDir)
 
   const agentsMdExists = await fileExists(agentsMdPath)
-  const opencodeJsonExists = await fileExists(opencodeJsonPath)
-
   const overwriteOpenCodeConfig = options?.overwriteOpenCodeConfig ?? false
 
   const overwriteAgentsMd = options?.overwriteAgentsMd ?? false
@@ -1186,47 +1209,36 @@ export async function ensureAssistantMode(
     await writeFileContent(agentsMdPath, agentsMdContent)
   }
 
-  const hasLegacyOpenCodeConfig = opencodeJsonExists && await isLegacyAssistantOpenCodeConfig(opencodeJsonPath)
+  const opencodeJsonUpdated = await withFileLock(opencodeJsonPath, async () => {
+    const opencodeJsonExists = await fileExists(opencodeJsonPath)
+    const existingOpenCodeJsonContent = opencodeJsonExists ? await readFileContent(opencodeJsonPath) : undefined
+    const parsedOpenCodeConfig = existingOpenCodeJsonContent === undefined
+      ? undefined
+      : parseAssistantOpenCodeConfig(existingOpenCodeJsonContent)
+    const hasV1OpenCodeConfig = parsedOpenCodeConfig !== undefined && hasAssistantV1OpenCodeConfig(parsedOpenCodeConfig)
+    const existingOpenCodeConfig = parsedOpenCodeConfig as OpenCodeConfigInfo | undefined
 
-  let opencodeJsonUpdated = false
-  if (!opencodeJsonExists || overwriteOpenCodeConfig || hasLegacyOpenCodeConfig) {
-    const config = hasLegacyOpenCodeConfig && opencodeJsonExists
-      ? await (async () => {
-          try {
-            const existingContent = await readFileContent(opencodeJsonPath)
-            const existingConfig = JSON.parse(existingContent) as OpenCodeConfigInput
-            const mergedConfig = mergeAssistantOpenCodeConfig(existingConfig)
-            return assistantOpenCodeConfigHasGeneratedAgentPersona(mergedConfig)
-              ? stripGeneratedAssistantAgentPersona(mergedConfig)
-              : mergedConfig
-          } catch {
-            return buildAssistantOpenCodeConfig()
-          }
-        })()
-      : buildAssistantOpenCodeConfig()
-    await writeFileContent(opencodeJsonPath, JSON.stringify(config, null, 2))
-    opencodeJsonUpdated = true
-  } else if (opencodeJsonExists) {
-    try {
-      const existingContent = await readFileContent(opencodeJsonPath)
-      const existingConfig = JSON.parse(existingContent) as OpenCodeConfigInput
-      const repairedConfig = assistantOpenCodeConfigNeedsRepair(existingConfig)
-        ? mergeAssistantOpenCodeConfig(existingConfig)
-        : existingConfig
-      const updatedConfig = assistantOpenCodeConfigHasGeneratedAgentPersona(repairedConfig)
-        ? stripGeneratedAssistantAgentPersona(repairedConfig)
-        : repairedConfig
-
-      if (updatedConfig !== existingConfig) {
-        await writeFileContent(opencodeJsonPath, JSON.stringify(updatedConfig, null, 2))
-        opencodeJsonUpdated = true
-      }
-    } catch {
-      const config = buildAssistantOpenCodeConfig()
-      await writeFileContent(opencodeJsonPath, JSON.stringify(config, null, 2))
-      opencodeJsonUpdated = true
+    if (!opencodeJsonExists || overwriteOpenCodeConfig) {
+      await writeFileContent(opencodeJsonPath, JSON.stringify(buildAssistantOpenCodeConfig(), null, 2))
+      return true
     }
-  }
+    if (hasV1OpenCodeConfig) return false
+    if (existingOpenCodeConfig === undefined) {
+      await writeFileContent(opencodeJsonPath, JSON.stringify(buildAssistantOpenCodeConfig(), null, 2))
+      return true
+    }
+
+    const repairedConfig = assistantOpenCodeConfigNeedsRepair(existingOpenCodeConfig)
+      ? mergeAssistantOpenCodeConfig(existingOpenCodeConfig)
+      : existingOpenCodeConfig
+    const updatedConfig = assistantOpenCodeConfigHasGeneratedAgentPersona(repairedConfig)
+      ? stripGeneratedAssistantAgentPersona(repairedConfig)
+      : repairedConfig
+    if (updatedConfig === existingOpenCodeConfig) return false
+
+    await writeFileContent(opencodeJsonPath, JSON.stringify(updatedConfig, null, 2))
+    return true
+  })
 
   await ensureDirectoryExists(path.join(assistantDir, ASSISTANT_OPENCODE_DIR))
   await ensureDirectoryExists(path.join(assistantDir, ASSISTANT_OPENCODE_DIR, ASSISTANT_AGENTS_DIR))
@@ -1350,89 +1362,248 @@ export async function ensureAssistantMode(
   }
 }
 
-function assistantOpenCodeConfigNeedsRepair(config: OpenCodeConfigInput): boolean {
+/**
+ * Parses JSONC config text into a config object, returning `undefined` when the text is malformed or
+ * its root is not an object.
+ */
+function parseAssistantOpenCodeConfig(rawContent: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = parseJsonc(rawContent)
+    return isRecord(parsed) ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Resolves the v1 container that OpenCode converts into the given v2 container.
+ */
+function resolveV1EntityPath(v2Path: readonly string[]): string[] {
+  const mapping = V1_ENTITY_PATHS.find(
+    (entry) => entry.v2Path.length === v2Path.length && entry.v2Path.every((segment, index) => segment === v2Path[index]),
+  )
+  if (mapping === undefined) {
+    throw new Error(`No v1 config path is defined for ${v2Path.join('.')}`)
+  }
+  return [...mapping.v1Path]
+}
+
+const ASSISTANT_V1_AGENT_PATH = resolveV1EntityPath(['agents'])
+const ASSISTANT_V1_PERMISSION_PATH = resolveV1EntityPath(['permissions'])
+
+/**
+ * Reports whether the config still carries v1 keys, which mark a file that has not been converted to
+ * the v2 shape yet.
+ */
+function hasAssistantV1OpenCodeConfig(config: Record<string, unknown>): boolean {
+  if (readConfigValueAtPath(config, ASSISTANT_V1_PERMISSION_PATH) !== undefined) return true
+  const v1Agents = readConfigValueAtPath(config, ASSISTANT_V1_AGENT_PATH)
+  return isRecord(v1Agents) && isRecord(v1Agents[ASSISTANT_DEFAULT_AGENT_NAME])
+}
+
+/**
+ * Reports whether an existing Assistant config lacks what `ensureAssistantMode` requires: the
+ * assistant as default agent, an enabled agent entry with a valid mode, and no generated persona left
+ * inline.
+ */
+function assistantOpenCodeConfigNeedsRepair(config: OpenCodeConfigInfo): boolean {
   if (config.default_agent !== ASSISTANT_DEFAULT_AGENT_NAME) return true
-  if (!config.agent || typeof config.agent !== 'object') return true
-  const assistantAgent = config.agent[ASSISTANT_DEFAULT_AGENT_NAME]
+  const agents = config.agents
+  if (!agents || typeof agents !== 'object') return true
+  const assistantAgent = agents[ASSISTANT_DEFAULT_AGENT_NAME]
   if (!assistantAgent || typeof assistantAgent !== 'object') return true
-  const mode = (assistantAgent as { mode?: unknown }).mode
-  if (mode !== 'primary' && mode !== 'all') return true
-  if ((assistantAgent as { disable?: unknown }).disable === true) return true
+  if (assistantAgent.mode !== 'primary' && assistantAgent.mode !== 'all') return true
+  if (assistantAgent.disabled === true) return true
   if (assistantOpenCodeConfigHasGeneratedAgentPersona(config)) return true
   return false
 }
 
-function assistantOpenCodeConfigHasGeneratedAgentPersona(config: OpenCodeConfigInput): boolean {
-  const agent = config.agent?.[ASSISTANT_DEFAULT_AGENT_NAME]
-  if (typeof agent !== 'object' || agent === null) return false
-  const prompt = (agent as { prompt?: unknown }).prompt
-  return matchesGeneratedAssistantAgentPrompt(prompt)
+function assistantOpenCodeConfigHasGeneratedAgentPersona(config: OpenCodeConfigInfo): boolean {
+  return normalizeAssistantAgent(config.agents?.[ASSISTANT_DEFAULT_AGENT_NAME]) !== undefined
 }
 
+/** Returns the agent's `mode` when it is `primary` or `all`, otherwise falling back to `primary`. */
 function resolveValidAssistantMode(agent: unknown): 'primary' | 'all' {
   const mode = (agent as { mode?: unknown } | undefined)?.mode
   return mode === 'primary' || mode === 'all' ? mode : 'primary'
 }
 
-function stripGeneratedAssistantAgentPersona(config: OpenCodeConfigInput): OpenCodeConfigInput {
-  const existingAssistantAgent = config.agent?.[ASSISTANT_DEFAULT_AGENT_NAME]
-  const validMode = resolveValidAssistantMode(existingAssistantAgent)
+/**
+ * Reduces a generated assistant persona to a mode-only agent, leaving a customized persona to the caller.
+ */
+function normalizeAssistantAgent(agent: unknown): OpenCodeAgentConfig | undefined {
+  if (!isRecord(agent) || !matchesGeneratedAssistantAgentPrompt(agent.system)) return undefined
+  return { mode: resolveValidAssistantMode(agent) }
+}
+
+/**
+ * Rewrites the assistant agent entry to a mode-only value, dropping a generated `system` prompt so it
+ * comes from the agent markdown file rather than opaque config text.
+ */
+function stripGeneratedAssistantAgentPersona(config: OpenCodeConfigInfo): OpenCodeConfigInfo {
+  const existingAssistantAgent = config.agents?.[ASSISTANT_DEFAULT_AGENT_NAME]
 
   return {
     ...config,
-    agent: {
-      ...(config.agent ?? {}),
-      [ASSISTANT_DEFAULT_AGENT_NAME]: { mode: validMode },
+    agents: {
+      ...(config.agents ?? {}),
+      [ASSISTANT_DEFAULT_AGENT_NAME]: normalizeAssistantAgent(existingAssistantAgent) ?? {
+        mode: resolveValidAssistantMode(existingAssistantAgent),
+      },
     },
   }
 }
 
-function mergeAssistantOpenCodeConfig(existing?: OpenCodeConfigInput): OpenCodeConfigInput {
+/**
+ * Merges an existing Assistant config over a freshly generated one, keeping user settings and extra
+ * agents while forcing the assistant as default agent and re-enabling its entry.
+ */
+function mergeAssistantOpenCodeConfig(existing?: OpenCodeConfigInfo): OpenCodeConfigInfo {
   const generated = buildAssistantOpenCodeConfig()
-  const existingAssistantAgent = existing?.agent?.[ASSISTANT_DEFAULT_AGENT_NAME]
+  const existingAssistantAgent = existing?.agents?.[ASSISTANT_DEFAULT_AGENT_NAME]
   const validMode = resolveValidAssistantMode(existingAssistantAgent)
-
-  const existingIsGenerated = existingAssistantAgent != null &&
-    typeof existingAssistantAgent === 'object' &&
-    matchesGeneratedAssistantAgentPrompt(
-      (existingAssistantAgent as { prompt?: unknown }).prompt,
-    )
-
-  let mergedAssistantAgent: Record<string, unknown>
-  if (existingIsGenerated) {
-    mergedAssistantAgent = { mode: validMode }
-  } else {
-    mergedAssistantAgent = {
-      ...(typeof existingAssistantAgent === 'object' && existingAssistantAgent !== null ? existingAssistantAgent : {}),
-      mode: validMode,
-      disable: false,
-    }
+  const mergedAssistantAgent: OpenCodeAgentConfig = normalizeAssistantAgent(existingAssistantAgent) ?? {
+    ...(existingAssistantAgent ?? {}),
+    mode: validMode,
+    disabled: false,
   }
 
   return {
     ...generated,
     ...existing,
     default_agent: ASSISTANT_DEFAULT_AGENT_NAME,
-    instructions: existing?.instructions ?? generated.instructions,
-    permission: existing?.permission ?? generated.permission,
-    agent: {
-      ...(existing?.agent ?? {}),
+    permissions: existing?.permissions ?? generated.permissions,
+    agents: {
+      ...(existing?.agents ?? {}),
       [ASSISTANT_DEFAULT_AGENT_NAME]: mergedAssistantAgent,
     },
   }
 }
 
-async function isLegacyAssistantOpenCodeConfig(opencodeJsonPath: string): Promise<boolean> {
+/**
+ * Lists the v1 paths to delete after a conversion: the assistant agent entry, widened to the whole v1
+ * `agents` container when that container held nothing else, plus `permissions` when a v2 counterpart
+ * has just been written.
+ */
+function buildAssistantV1ConfigRemovalPaths(
+  config: Record<string, unknown>,
+  convertedPermissions: unknown,
+): string[][] {
+  const v1Agent = readConfigValueAtPath(config, ASSISTANT_V1_AGENT_PATH)
+  const removeWholeAgent = isRecord(v1Agent) &&
+    Object.keys(v1Agent).length === 1 &&
+    isRecord(v1Agent[ASSISTANT_DEFAULT_AGENT_NAME])
+
+  const paths: string[][] = [
+    removeWholeAgent ? ASSISTANT_V1_AGENT_PATH : [...ASSISTANT_V1_AGENT_PATH, ASSISTANT_DEFAULT_AGENT_NAME],
+  ]
+  if (convertedPermissions !== undefined && readConfigValueAtPath(config, ASSISTANT_V1_PERMISSION_PATH) !== undefined) {
+    paths.push(ASSISTANT_V1_PERMISSION_PATH)
+  }
+  return paths
+}
+
+/**
+ * Picks the assistant agent written back to the converted file, preferring OpenCode's converted entry,
+ * then the agent passed in, then a mode derived from the v1 definition.
+ */
+function resolveConvertedAssistantAgent(
+  agent: OpenCodeAgentConfig | undefined,
+  v1Agent: unknown,
+): OpenCodeAgentConfig {
+  return normalizeAssistantAgent(agent) ?? agent ?? { mode: resolveValidAssistantMode(v1Agent) }
+}
+
+/**
+ * Puts the raw `{env:…}` and `{file:…}` references from the original file back into the converted
+ * assistant agent, returning the agent unchanged when no restored entry can be read.
+ */
+function restoreAssistantAgentReferences(
+  agent: OpenCodeAgentConfig,
+  resolved: OpenCodeConfigInfo,
+  raw: Record<string, unknown>,
+): OpenCodeAgentConfig {
+  const restored = restoreOpenCodeConfigReferences(
+    { agents: { [ASSISTANT_DEFAULT_AGENT_NAME]: agent } },
+    resolved as Record<string, unknown>,
+    raw,
+  )
+  const restoredAgent = readConfigValueAtPath(restored, ['agents', ASSISTANT_DEFAULT_AGENT_NAME])
+  if (typeof restoredAgent !== 'object' || restoredAgent === null) return agent
+  return restoredAgent as OpenCodeAgentConfig
+}
+
+/**
+ * Rewrites a v1 Assistant `opencode.json` to the v2 shape using OpenCode's own conversion,
+ * keeping comments and formatting. The file is left untouched when OpenCode is unreachable.
+ */
+export async function convertAssistantOpenCodeConfigToV2(api: OpenCodeApi): Promise<boolean> {
+  const assistantDir = getAssistantModeDirectory()
+  const opencodeJsonPath = path.join(assistantDir, ASSISTANT_OPENCODE_CONFIG_FILENAME)
   try {
-    const content = await readFileContent(opencodeJsonPath)
-    const config = JSON.parse(content) as {
-      permission?: { allow?: unknown; ask?: unknown }
-    }
-    if (Array.isArray(config.permission?.allow) || Array.isArray(config.permission?.ask)) return true
-    return false
-  } catch {
+    return await withFileLock(opencodeJsonPath, () => convertAssistantOpenCodeConfigFile(api, assistantDir, opencodeJsonPath))
+  } catch (error) {
+    logger.warn('Skipped the Assistant OpenCode config conversion:', error)
     return false
   }
+}
+
+/**
+ * Converts one Assistant `opencode.json` in place when it still holds v1 keys, writing OpenCode's
+ * converted agent and permissions while preserving comments. Returns `false` without writing when the
+ * file is absent, already v2, unreadable by OpenCode, or the rewritten text fails validation.
+ */
+async function convertAssistantOpenCodeConfigFile(
+  api: OpenCodeApi,
+  assistantDir: string,
+  opencodeJsonPath: string,
+): Promise<boolean> {
+  if (!await fileExists(opencodeJsonPath)) return false
+
+  const rawContent = await readFileContent(opencodeJsonPath)
+  const rawConfig = parseAssistantOpenCodeConfig(rawContent)
+  if (rawConfig === undefined || !hasAssistantV1OpenCodeConfig(rawConfig)) return false
+
+  const documents = await readOpenCodeConfigDocuments(api, assistantDir)
+  const documentInfo = documents.get(path.resolve(opencodeJsonPath))
+  if (documentInfo === undefined) return false
+
+  const v1Assistants = readConfigValueAtPath(rawConfig, ASSISTANT_V1_AGENT_PATH)
+  const v1AssistantAgent = isRecord(v1Assistants) ? v1Assistants[ASSISTANT_DEFAULT_AGENT_NAME] : undefined
+  if (isRecord(v1AssistantAgent) && documentInfo.agents?.[ASSISTANT_DEFAULT_AGENT_NAME] === undefined) {
+    logger.warn('Skipped the Assistant OpenCode config conversion: OpenCode returned no converted assistant agent')
+    return false
+  }
+  const setOperations: OpenCodeConfigPathOperation[] = [
+    {
+      path: ['agents', ASSISTANT_DEFAULT_AGENT_NAME],
+      value: restoreAssistantAgentReferences(
+        resolveConvertedAssistantAgent(
+          documentInfo.agents?.[ASSISTANT_DEFAULT_AGENT_NAME],
+          v1AssistantAgent,
+        ),
+        documentInfo,
+        rawConfig,
+      ),
+    },
+  ]
+  if (documentInfo.permissions !== undefined) {
+    setOperations.push({ path: ['permissions'], value: documentInfo.permissions })
+  }
+
+  let updatedText = applyOpenCodeConfigEdits(rawContent, setOperations)
+  for (const removalPath of buildAssistantV1ConfigRemovalPaths(rawConfig, documentInfo.permissions)) {
+    updatedText = removeOpenCodeConfigProperty(updatedText, removalPath)
+  }
+
+  const validation = validateOpenCodeConfig(parseJsonc(updatedText))
+  if (!validation.success) {
+    logger.warn('Skipped the Assistant OpenCode config conversion: the converted config is invalid', validation.issues)
+    return false
+  }
+
+  await writeFileContent(opencodeJsonPath, updatedText)
+  return true
 }
 
 export async function getAssistantModeStatus(repo: Repo): Promise<AssistantModeStatus> {

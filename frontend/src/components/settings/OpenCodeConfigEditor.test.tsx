@@ -155,9 +155,14 @@ describe('OpenCodeConfigEditor', () => {
     expect(scrollTopSets).toBeGreaterThanOrEqual(2)
   })
 
-  it('lists schema validation issues as line jumps', async () => {
+  it('lists backend validation issues as line jumps', async () => {
+    const onUpdate = vi.fn().mockRejectedValue(
+      new FetchError('Invalid config data', 400, undefined, undefined, {
+        validationIssues: [{ path: 'theme', message: 'Expected string' }],
+      }),
+    )
+    renderEditor({ onUpdate })
     const user = userEvent.setup()
-    renderEditor()
     const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
     setContent(textarea, '{\n  "theme": 42\n}')
     await user.click(screen.getByRole('button', { name: 'Update' }))
@@ -169,16 +174,22 @@ describe('OpenCodeConfigEditor', () => {
     expect(row).toHaveAttribute('data-line', '2')
   })
 
-  it('does not call onUpdate when local validation fails', async () => {
-    const { onUpdate } = renderEditor()
+  it('sends content the browser cannot validate to the backend instead of rejecting it locally', async () => {
+    const onUpdate = vi.fn().mockRejectedValue(
+      new FetchError('Invalid config data', 400, undefined, undefined, {
+        validationIssues: [{ path: 'theme', message: 'Expected string' }],
+      }),
+    )
+    renderEditor({ onUpdate })
     const user = userEvent.setup()
     const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
-    setContent(textarea, '{\n  "theme": 42\n}')
+    const invalid = '{\n  "theme": 42\n}'
+    setContent(textarea, invalid)
     await user.click(screen.getByRole('button', { name: 'Update' }))
     await waitFor(() => {
-      expect(screen.getByText(/Configuration validation failed/)).toBeInTheDocument()
+      expect(onUpdate).toHaveBeenCalledWith({ content: invalid, source: 'opencode.json', expectedRevision: 'rev-1' })
     })
-    expect(onUpdate).not.toHaveBeenCalled()
+    expect(await screen.findByText(/theme: Expected string/)).toBeInTheDocument()
   })
 
   it('saves the raw text including comments', async () => {
@@ -348,14 +359,19 @@ describe('OpenCodeConfigEditor', () => {
     expect(onUpdate).toHaveBeenCalledWith({ content: RAW, source: 'opencode.json', expectedRevision: 'rev-1' })
   })
 
-  it('resolves a validation issue under a dotted provider key to its line', async () => {
+  it('resolves a nested backend validation issue to its line', async () => {
+    const onUpdate = vi.fn().mockRejectedValue(
+      new FetchError('Invalid config data', 400, undefined, undefined, {
+        validationIssues: [{ path: 'agents.assistant.mode', message: 'Expected a known mode' }],
+      }),
+    )
+    renderEditor({ onUpdate })
     const user = userEvent.setup()
-    renderEditor()
     const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
-    const dotted = '{\n  "provider": {\n    "api.example.com": {\n      "key": 123\n    }\n  }\n}'
-    setContent(textarea, dotted)
+    const nested = '{\n  "agents": {\n    "assistant": {\n      "mode": 42\n    }\n  }\n}'
+    setContent(textarea, nested)
     await user.click(screen.getByRole('button', { name: 'Update' }))
-    const issueButton = await screen.findByRole('button', { name: /api\.example\.com/i })
+    const issueButton = await screen.findByRole('button', { name: /agents\.assistant\.mode/i })
     expect(issueButton).toBeInTheDocument()
     await user.click(issueButton)
     const activeLine = document.body.querySelector('[data-active-line]')

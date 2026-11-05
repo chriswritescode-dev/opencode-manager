@@ -52,10 +52,6 @@ vi.mock('@opencode-manager/shared/config', () => ({
   },
 }))
 
-vi.mock('eventsource', () => ({
-  EventSource: vi.fn(),
-}))
-
 const getRepoByIdMock = db.getRepoById as MockedFunction<typeof db.getRepoById>
 
 describe('Repo Git Routes', () => {

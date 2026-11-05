@@ -125,8 +125,9 @@ const sseAggregatorMock = vi.hoisted(() => ({
   onServerEvent: vi.fn(),
   onUpstreamConnected: vi.fn(),
   onServerConnected: vi.fn(),
-  setPendingActionsFetcher: vi.fn(),
-  setPasswordResolver: vi.fn(),
+  setOpenCodeClient: vi.fn(),
+  setResyncGate: vi.fn(),
+  releasePendingResync: vi.fn(),
   setScheduledSessionsResolver: vi.fn(),
   setRemoteReplayHandler: vi.fn(),
   setRemoteSubagentResolver: vi.fn(),
@@ -154,6 +155,8 @@ const serverManagerMock = vi.hoisted(() => ({
   isRestartPending: vi.fn().mockReturnValue(false),
   restart: vi.fn().mockResolvedValue(undefined),
   checkHealth: vi.fn().mockResolvedValue(true),
+  isLifecycleInitialized: vi.fn().mockReturnValue(false),
+  onLifecycleInitialized: vi.fn(),
 }))
 
 vi.mock('../src/services/opencode-single-server', async (importOriginal) => {
@@ -275,6 +278,18 @@ describe('backend entrypoint', () => {
     await import('../src/index')
 
     expect(seedOpenCodeConfigFileMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('holds the upstream resync until the OpenCode lifecycle gate opens', async () => {
+    await import('../src/index')
+
+    const isGateOpen = sseAggregatorMock.setResyncGate.mock.calls[0]![0] as () => boolean
+    serverManagerMock.isLifecycleInitialized.mockReturnValueOnce(true)
+    expect(isGateOpen()).toBe(true)
+
+    const onGateOpen = serverManagerMock.onLifecycleInitialized.mock.calls[0]![0] as () => void
+    onGateOpen()
+    expect(sseAggregatorMock.releasePendingResync).toHaveBeenCalledTimes(1)
   })
 
   it('answers the root route with service metadata outside production', async () => {

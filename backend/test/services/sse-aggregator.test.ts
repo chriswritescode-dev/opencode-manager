@@ -4,6 +4,7 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
   ENV: {
     OPENCODE: { PORT: 5551, HOST: '127.0.0.1' },
   },
+  getWorkspacePath: () => '/workspace',
 }))
 
 vi.mock('../../src/utils/logger', () => ({
@@ -14,9 +15,11 @@ vi.mock('../../src/utils/logger', () => ({
   },
 }))
 
-import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
-import { sessionIDFromEvent } from '@opencode-manager/shared/opencode'
-import { sseAggregator, type PendingActionsFetcher } from '../../src/services/sse-aggregator'
+import type { OpenCodeApi, V2Event } from '@opencode-manager/shared/opencode'
+import { buildOpenCodeBasicAuth, sessionIDFromEvent } from '@opencode-manager/shared/opencode'
+import { sseAggregator } from '../../src/services/sse-aggregator'
+import { FetchOpenCodeClient } from '../../src/services/opencode/client'
+import { getOpenCodeUpstreamBaseUrl } from '../../src/services/opencode/upstream'
 
 interface CapturedEvent {
   event: string
@@ -36,7 +39,7 @@ function createCapturingClient() {
   return { callback, writeFrame, events, frames }
 }
 
-interface RawEventInput {
+interface EventInput {
   id?: string
   created?: number
   type: string
@@ -44,14 +47,14 @@ interface RawEventInput {
   data?: unknown
 }
 
-function rawEvent(input: RawEventInput): string {
-  return JSON.stringify({
+function eventOf(input: EventInput): V2Event {
+  return {
     id: input.id ?? 'evt_1',
     created: input.created ?? 1,
     type: input.type,
     ...(input.location ? { location: input.location } : {}),
     data: input.data ?? {},
-  })
+  } as unknown as V2Event
 }
 
 function parseFrame(frame: string): { directory: string | null; payload: { id?: string; type: string; data: Record<string, unknown> } } {
@@ -94,12 +97,12 @@ function makeApi(fixture: ApiFixture = {}): OpenCodeApi {
   } as unknown as OpenCodeApi
 }
 
-function makeFetcher(fixture: ApiFixture = {}): PendingActionsFetcher {
+function makeClient(fixture: ApiFixture = {}): { api: OpenCodeApi } {
   return { api: makeApi(fixture) }
 }
 
-function emitRawEvent(input: RawEventInput): void {
-  ;(sseAggregator as unknown as { handleUpstreamMessage(data: string): void }).handleUpstreamMessage(rawEvent(input))
+function emitEvent(input: EventInput): void {
+  ;(sseAggregator as unknown as { handleUpstreamEvent(event: V2Event): void }).handleUpstreamEvent(eventOf(input))
 }
 
 async function flushReplay(): Promise<void> {
@@ -108,20 +111,20 @@ async function flushReplay(): Promise<void> {
   }
 }
 
-describe('SSEAggregator raw V2 event handling', () => {
+describe('SSEAggregator V2 event handling', () => {
   beforeEach(() => {
     sseAggregator.shutdown()
-    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setOpenCodeClient(null)
     sseAggregator.setScheduledSessionsResolver(() => [])
   })
 
-  it('marks a session active from a raw V2 session.status busy event and routes it only to subscribed clients', () => {
+  it('marks a session active from a V2 session.status busy event and routes it only to subscribed clients', () => {
     const clientA = createCapturingClient()
     const clientB = createCapturingClient()
     sseAggregator.addClient('active-a', clientA.callback, clientA.writeFrame, ['/r'])
     sseAggregator.addClient('active-b', clientB.callback, clientB.writeFrame, ['/other'])
 
-    emitRawEvent({
+    emitEvent({
       id: 'evt_1',
       type: 'session.status',
       location: { directory: '/r' },
@@ -149,7 +152,7 @@ describe('SSEAggregator raw V2 event handling', () => {
     sseAggregator.addClient('global-a', subscribed.callback, subscribed.writeFrame, ['/r'])
     sseAggregator.addClient('global-b', unsubscribed.callback, unsubscribed.writeFrame, [])
 
-    emitRawEvent({ id: 'evt_global', type: 'server.connected', data: {} })
+    emitEvent({ id: 'evt_global', type: 'server.connected', data: {} })
 
     const expected = {
       directory: null,
@@ -160,56 +163,61 @@ describe('SSEAggregator raw V2 event handling', () => {
     expect(sseAggregator.getActiveSessions()).toEqual({})
   })
 
-  it('embeds the raw upstream payload in the client envelope without re-serializing it', () => {
+  it('delivers the parsed event payload in a single data line', () => {
     const client = createCapturingClient()
-    sseAggregator.addClient('raw-a', client.callback, client.writeFrame, ['/r'])
-    const raw = '{"type":"session.idle","id":"evt_raw","created":7,"location":{"directory":"/r"},"data":{"sessionID":"ses_1","extra":{"b":2,"a":1}}}'
+    sseAggregator.addClient('payload-a', client.callback, client.writeFrame, ['/r'])
+    const event = eventOf({
+      id: 'evt_raw',
+      created: 7,
+      type: 'session.idle',
+      location: { directory: '/r' },
+      data: { sessionID: 'ses_1', extra: { b: 2, a: 1 } },
+    })
 
-    ;(sseAggregator as unknown as { handleUpstreamMessage(data: string): void }).handleUpstreamMessage(raw)
+    ;(sseAggregator as unknown as { handleUpstreamEvent(event: V2Event): void }).handleUpstreamEvent(event)
 
-    expect(client.frames).toEqual([`event: message\ndata: {"directory":"/r","payload":${raw}}\n\n`])
-    expect(parseFrame(client.frames[0]!)).toEqual({ directory: '/r', payload: JSON.parse(raw) })
-  })
-
-  it('re-serializes a multi-line upstream payload so the client frame stays a single data line', () => {
-    const client = createCapturingClient()
-    sseAggregator.addClient('raw-b', client.callback, client.writeFrame, ['/r'])
-    const event = { type: 'session.idle', id: 'evt_ml', created: 3, location: { directory: '/r' }, data: { sessionID: 'ses_1' } }
-
-    ;(sseAggregator as unknown as { handleUpstreamMessage(data: string): void }).handleUpstreamMessage(JSON.stringify(event, null, 2))
-
-    expect(client.frames).toHaveLength(1)
-    expect(client.frames[0]!.split('\n').filter(line => line.startsWith('data: '))).toHaveLength(1)
+    expect(client.frames).toEqual([`event: message\ndata: {"directory":"/r","payload":${JSON.stringify(event)}}\n\n`])
     expect(parseFrame(client.frames[0]!)).toEqual({ directory: '/r', payload: event })
+    expect(client.frames[0]!.split('\n').filter(line => line.startsWith('data: '))).toHaveLength(1)
   })
 
   it('marks a session idle on session.idle and on terminal execution events', () => {
-    emitRawEvent({ type: 'session.status', location: { directory: '/r' }, data: { sessionID: 'ses_1', status: { type: 'busy' } } })
-    emitRawEvent({ type: 'session.execution.started', location: { directory: '/r' }, data: { sessionID: 'ses_2' } })
+    emitEvent({ type: 'session.status', location: { directory: '/r' }, data: { sessionID: 'ses_1', status: { type: 'busy' } } })
+    emitEvent({ type: 'session.execution.started', location: { directory: '/r' }, data: { sessionID: 'ses_2' } })
 
     expect(sseAggregator.getActiveSessions()).toEqual({ '/r': ['ses_1', 'ses_2'] })
 
-    emitRawEvent({ type: 'session.execution.succeeded', location: { directory: '/r' }, data: { sessionID: 'ses_1' } })
+    emitEvent({ type: 'session.execution.succeeded', location: { directory: '/r' }, data: { sessionID: 'ses_1' } })
     expect(sseAggregator.getActiveSessions()).toEqual({ '/r': ['ses_2'] })
 
-    emitRawEvent({ type: 'session.execution.failed', location: { directory: '/r' }, data: { sessionID: 'ses_2', error: { type: 'unknown', message: 'boom' } } })
-    emitRawEvent({ type: 'session.status', location: { directory: '/r' }, data: { sessionID: 'ses_3', status: { type: 'retry', attempt: 1, message: 'retrying', next: 1 } } })
+    emitEvent({ type: 'session.execution.failed', location: { directory: '/r' }, data: { sessionID: 'ses_2', error: { type: 'unknown', message: 'boom' } } })
+    emitEvent({ type: 'session.status', location: { directory: '/r' }, data: { sessionID: 'ses_3', status: { type: 'retry', attempt: 1, message: 'retrying', next: 1 } } })
 
     expect(sseAggregator.getActiveSessions()).toEqual({ '/r': ['ses_3'] })
 
-    emitRawEvent({ type: 'session.idle', location: { directory: '/r' }, data: { sessionID: 'ses_3' } })
+    emitEvent({ type: 'session.idle', location: { directory: '/r' }, data: { sessionID: 'ses_3' } })
     expect(sseAggregator.getActiveSessions()).toEqual({})
   })
 
   it('marks a session idle on session.execution.interrupted', () => {
-    emitRawEvent({ type: 'session.execution.started', location: { directory: '/r' }, data: { sessionID: 'ses_1' } })
-    emitRawEvent({ type: 'session.execution.interrupted', location: { directory: '/r' }, data: { sessionID: 'ses_1', reason: 'shutdown' } })
+    emitEvent({ type: 'session.execution.started', location: { directory: '/r' }, data: { sessionID: 'ses_1' } })
+    emitEvent({ type: 'session.execution.interrupted', location: { directory: '/r' }, data: { sessionID: 'ses_1', reason: 'shutdown' } })
+
+    expect(sseAggregator.getActiveSessions()).toEqual({})
+  })
+
+  it('clears a busy session from the active set when it is deleted without going idle', () => {
+    emitEvent({ type: 'session.status', location: { directory: '/r' }, data: { sessionID: 'ses_deleted', status: { type: 'busy' } } })
+
+    expect(sseAggregator.getActiveSessions()).toEqual({ '/r': ['ses_deleted'] })
+
+    emitEvent({ type: 'session.deleted', location: { directory: '/r' }, data: { sessionID: 'ses_deleted' } })
 
     expect(sseAggregator.getActiveSessions()).toEqual({})
   })
 
   it('records subagent sessions from session.created parentID and forgets deleted ones', () => {
-    emitRawEvent({
+    emitEvent({
       type: 'session.created',
       location: { directory: '/r' },
       data: { sessionID: 'ses_sub', parentID: 'ses_root', projectID: 'p', location: { directory: '/r' }, slug: 'sub', version: '2.0.15' },
@@ -217,35 +225,21 @@ describe('SSEAggregator raw V2 event handling', () => {
 
     expect(sseAggregator.isSubagentSession('ses_sub')).toBe(true)
 
-    emitRawEvent({ type: 'session.deleted', location: { directory: '/r' }, data: { sessionID: 'ses_sub' } })
+    emitEvent({ type: 'session.deleted', location: { directory: '/r' }, data: { sessionID: 'ses_sub' } })
 
     expect(sseAggregator.isSubagentSession('ses_sub')).toBe(false)
-  })
-
-  it('ignores malformed upstream payloads', () => {
-    const client = createCapturingClient()
-    sseAggregator.addClient('malformed-a', client.callback, client.writeFrame, ['/r'])
-
-    ;(sseAggregator as unknown as { handleUpstreamMessage(data: string): void }).handleUpstreamMessage('not-json')
-    ;(sseAggregator as unknown as { handleUpstreamMessage(data: string): void }).handleUpstreamMessage(rawEvent({
-      type: 'session.status',
-      location: { directory: '/r' },
-      data: null,
-    }))
-
-    expect(client.frames).toHaveLength(0)
   })
 })
 
 describe('SSEAggregator pending replay on connect', () => {
   beforeEach(() => {
     sseAggregator.shutdown()
-    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setOpenCodeClient(null)
     sseAggregator.setScheduledSessionsResolver(() => [])
   })
 
   it('replays pending permissions and forms from the V2 api per subscribed directory', async () => {
-    sseAggregator.setPendingActionsFetcher(makeFetcher({
+    sseAggregator.setOpenCodeClient(makeClient({
       permissions: {
         '/repo/a': [
           { id: 'perm-1', sessionID: 'ses-a', action: 'shell', resources: ['rm -rf node_modules'] },
@@ -301,7 +295,7 @@ describe('SSEAggregator pending replay on connect', () => {
   })
 
   it('does not replay to other clients', async () => {
-    sseAggregator.setPendingActionsFetcher(makeFetcher({
+    sseAggregator.setOpenCodeClient(makeClient({
       permissions: { '/repo/a': [{ id: 'perm-1', sessionID: 'ses-a', action: 'shell', resources: ['ls'] }] },
     }))
 
@@ -318,7 +312,7 @@ describe('SSEAggregator pending replay on connect', () => {
   })
 
   it('replays only newly added directories on addDirectories', async () => {
-    sseAggregator.setPendingActionsFetcher(makeFetcher({
+    sseAggregator.setOpenCodeClient(makeClient({
       permissions: {
         '/repo/a': [{ id: 'perm-1', sessionID: 'ses-a', action: 'shell', resources: ['ls'] }],
         '/repo/b': [{ id: 'perm-2', sessionID: 'ses-b', action: 'shell', resources: ['ls'] }],
@@ -353,7 +347,7 @@ describe('SSEAggregator pending replay on connect', () => {
       if (input?.location?.directory === '/repo/broken') throw new Error('upstream down')
       return { location: { directory: input?.location?.directory ?? '' }, data: [{ id: 'perm-ok', sessionID: 'ses-ok', action: 'shell', resources: ['ls'] }] }
     })
-    sseAggregator.setPendingActionsFetcher({ api })
+    sseAggregator.setOpenCodeClient({ api })
 
     const { callback, writeFrame, events } = createCapturingClient()
     sseAggregator.addClient('client-4', callback, writeFrame, ['/repo/broken', '/repo/ok'])
@@ -372,7 +366,7 @@ describe('SSEAggregator pending replay on connect', () => {
     vi.mocked(list).mockImplementation(() => new Promise((resolve) => {
       resolvePermissions = resolve as (value: { location: { directory: string }; data: unknown[] }) => void
     }))
-    sseAggregator.setPendingActionsFetcher({ api })
+    sseAggregator.setOpenCodeClient({ api })
 
     const { callback, writeFrame, events } = createCapturingClient()
     sseAggregator.addClient('client-5', callback, writeFrame, ['/repo/a'])
@@ -389,7 +383,7 @@ describe('SSEAggregator pending replay on connect', () => {
 describe('SSEAggregator session status replay on upstream reconnect', () => {
   beforeEach(() => {
     sseAggregator.shutdown()
-    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setOpenCodeClient(null)
     sseAggregator.setScheduledSessionsResolver(() => [])
   })
 
@@ -397,9 +391,9 @@ describe('SSEAggregator session status replay on upstream reconnect', () => {
     const client = createCapturingClient()
     sseAggregator.addClient('status-1', client.callback, client.writeFrame, ['/repo/a'])
 
-    emitRawEvent({ type: 'session.status', location: { directory: '/repo/a' }, data: { sessionID: 'ses-1', status: { type: 'busy' } } })
+    emitEvent({ type: 'session.status', location: { directory: '/repo/a' }, data: { sessionID: 'ses-1', status: { type: 'busy' } } })
 
-    sseAggregator.setPendingActionsFetcher(makeFetcher({ active: { 'ses-1': { type: 'running' } } }))
+    sseAggregator.setOpenCodeClient(makeClient({ active: { 'ses-1': { type: 'running' } } }))
 
     await (sseAggregator as unknown as { replaySessionStatusesForTrackedDirectories(): Promise<void> }).replaySessionStatusesForTrackedDirectories()
     await flushReplay()
@@ -413,9 +407,9 @@ describe('SSEAggregator session status replay on upstream reconnect', () => {
     const client = createCapturingClient()
     sseAggregator.addClient('status-2', client.callback, client.writeFrame, ['/repo/a'])
 
-    emitRawEvent({ type: 'session.status', location: { directory: '/repo/a' }, data: { sessionID: 'ses-9', status: { type: 'busy' } } })
+    emitEvent({ type: 'session.status', location: { directory: '/repo/a' }, data: { sessionID: 'ses-9', status: { type: 'busy' } } })
 
-    sseAggregator.setPendingActionsFetcher(makeFetcher({ active: {} }))
+    sseAggregator.setOpenCodeClient(makeClient({ active: {} }))
 
     await (sseAggregator as unknown as { replaySessionStatusesForTrackedDirectories(): Promise<void> }).replaySessionStatusesForTrackedDirectories()
     await flushReplay()
@@ -431,7 +425,7 @@ describe('SSEAggregator session status replay on upstream reconnect', () => {
       active: { 'ses-new': { type: 'running' } },
       sessions: { 'ses-new': { directory: '/repo/new' } },
     })
-    sseAggregator.setPendingActionsFetcher({ api })
+    sseAggregator.setOpenCodeClient({ api })
 
     const client = createCapturingClient()
     sseAggregator.addClient('status-3', client.callback, client.writeFrame, ['/repo/new'])
@@ -453,7 +447,7 @@ describe('SSEAggregator session status replay on upstream reconnect', () => {
       const sessionID = (input as { sessionID: string }).sessionID
       pending.push(() => resolve({ location: { directory: `/repo/${sessionID}` } } as unknown as Awaited<ReturnType<OpenCodeApi['session']['get']>>))
     }))
-    sseAggregator.setPendingActionsFetcher({ api })
+    sseAggregator.setOpenCodeClient({ api })
 
     const client = createCapturingClient()
     sseAggregator.addClient('status-5', client.callback, client.writeFrame, ['/repo/ses-x', '/repo/ses-y'])
@@ -469,10 +463,10 @@ describe('SSEAggregator session status replay on upstream reconnect', () => {
   })
 
   it('does not replay pending actions to already connected clients on upstream reconnect', async () => {
-    const fetcher = makeFetcher({
+    const fetcher = makeClient({
       permissions: { '/repo/a': [{ id: 'perm-1', sessionID: 'ses-a', action: 'shell', resources: ['ls'] }] },
     })
-    sseAggregator.setPendingActionsFetcher(fetcher)
+    sseAggregator.setOpenCodeClient(fetcher)
     const client = createCapturingClient()
     sseAggregator.addClient('status-6', client.callback, client.writeFrame, ['/repo/a'])
     await flushReplay()
@@ -503,12 +497,12 @@ describe('SSEAggregator session status replay on upstream reconnect', () => {
 describe('SSEAggregator scheduled session replay without a connected client', () => {
   beforeEach(() => {
     sseAggregator.shutdown()
-    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setOpenCodeClient(null)
     sseAggregator.setScheduledSessionsResolver(() => [])
   })
 
   it('replays a scheduled directory that no browser client is subscribed to', async () => {
-    sseAggregator.setPendingActionsFetcher(makeFetcher({
+    sseAggregator.setOpenCodeClient(makeClient({
       active: { 'ses-sched': { type: 'running' } },
     }))
     sseAggregator.setScheduledSessionsResolver(() => [
@@ -535,7 +529,7 @@ describe('SSEAggregator scheduled session replay without a connected client', ()
   })
 
   it('emits idle for a scheduled session that finished while the stream was down and was never marked active', async () => {
-    sseAggregator.setPendingActionsFetcher(makeFetcher({ active: {} }))
+    sseAggregator.setOpenCodeClient(makeClient({ active: {} }))
     sseAggregator.setScheduledSessionsResolver(() => [
       { sessionID: 'ses-finished', directory: '/worktrees/run-2' },
     ])
@@ -557,8 +551,34 @@ describe('SSEAggregator scheduled session replay without a connected client', ()
 describe('SSEAggregator upstream resynchronization signal', () => {
   beforeEach(() => {
     sseAggregator.shutdown()
-    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setOpenCodeClient(null)
     sseAggregator.setScheduledSessionsResolver(() => [])
+    sseAggregator.setResyncGate(() => true)
+  })
+
+  it('holds the resync while the gate is closed and broadcasts it once when released', () => {
+    let gateOpen = false
+    sseAggregator.setResyncGate(() => gateOpen)
+    const client = createCapturingClient()
+    sseAggregator.addClient('resync-gate', client.callback, client.writeFrame, ['/repo/a'])
+    const resyncCount = () => client.events.filter(event => event.event === 'resync').length
+
+    ;(sseAggregator as unknown as { handleUpstreamOpen(wasConnectedBefore: boolean): void }).handleUpstreamOpen(true)
+    expect(resyncCount()).toBe(0)
+
+    gateOpen = true
+    sseAggregator.releasePendingResync()
+    sseAggregator.releasePendingResync()
+    expect(resyncCount()).toBe(1)
+  })
+
+  it('does not broadcast on release when no resync is held', () => {
+    const client = createCapturingClient()
+    sseAggregator.addClient('resync-none', client.callback, client.writeFrame, ['/repo/a'])
+
+    sseAggregator.releasePendingResync()
+
+    expect(client.events.filter(event => event.event === 'resync')).toHaveLength(0)
   })
 
   it('broadcasts a resync control event on the first and every later upstream connect', () => {
@@ -616,7 +636,7 @@ describe('SSEAggregator upstream resynchronization signal', () => {
 describe('SSEAggregator directory-indexed broadcast', () => {
   beforeEach(() => {
     sseAggregator.shutdown()
-    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setOpenCodeClient(null)
     sseAggregator.setScheduledSessionsResolver(() => [])
   })
 
@@ -626,7 +646,7 @@ describe('SSEAggregator directory-indexed broadcast', () => {
     sseAggregator.addClient('index-a', clientA.callback, clientA.writeFrame, ['/a'])
     sseAggregator.addClient('index-b', clientB.callback, clientB.writeFrame, ['/b'])
 
-    emitRawEvent({ type: 'session.idle', location: { directory: '/a' }, data: { sessionID: 'ses-1' } })
+    emitEvent({ type: 'session.idle', location: { directory: '/a' }, data: { sessionID: 'ses-1' } })
 
     expect(clientA.frames).toHaveLength(1)
     expect(clientB.frames).toHaveLength(0)
@@ -636,7 +656,7 @@ describe('SSEAggregator directory-indexed broadcast', () => {
     const clientA = createCapturingClient()
     sseAggregator.addClient('index-c', clientA.callback, clientA.writeFrame, ['/a'])
 
-    emitRawEvent({ type: 'session.idle', location: { directory: '/z' }, data: { sessionID: 'ses-1' } })
+    emitEvent({ type: 'session.idle', location: { directory: '/z' }, data: { sessionID: 'ses-1' } })
 
     expect(clientA.frames).toHaveLength(0)
   })
@@ -646,7 +666,7 @@ describe('SSEAggregator directory-indexed broadcast', () => {
     sseAggregator.addClient('index-d', clientA.callback, clientA.writeFrame, ['/a'])
     sseAggregator.removeClient('index-d')
 
-    emitRawEvent({ type: 'session.idle', location: { directory: '/a' }, data: { sessionID: 'ses-1' } })
+    emitEvent({ type: 'session.idle', location: { directory: '/a' }, data: { sessionID: 'ses-1' } })
 
     expect(clientA.frames).toHaveLength(0)
   })
@@ -656,7 +676,7 @@ describe('SSEAggregator directory-indexed broadcast', () => {
     sseAggregator.addClient('index-e', clientA.callback, clientA.writeFrame, [])
     sseAggregator.addDirectories('index-e', ['/a'])
 
-    emitRawEvent({ type: 'session.idle', location: { directory: '/a' }, data: { sessionID: 'ses-1' } })
+    emitEvent({ type: 'session.idle', location: { directory: '/a' }, data: { sessionID: 'ses-1' } })
 
     expect(clientA.frames).toHaveLength(1)
   })
@@ -668,11 +688,11 @@ describe('SSEAggregator directory-indexed broadcast', () => {
     sseAggregator.addClient('index-f', clientA.callback, clientA.writeFrame, ['/a'])
     sseAggregator.addClient('index-f', clientB.callback, clientB.writeFrame, ['/b'])
 
-    emitRawEvent({ type: 'session.idle', location: { directory: '/a' }, data: { sessionID: 'ses-1' } })
+    emitEvent({ type: 'session.idle', location: { directory: '/a' }, data: { sessionID: 'ses-1' } })
     expect(clientA.frames).toHaveLength(0)
     expect(clientB.frames).toHaveLength(0)
 
-    emitRawEvent({ type: 'session.idle', location: { directory: '/b' }, data: { sessionID: 'ses-1' } })
+    emitEvent({ type: 'session.idle', location: { directory: '/b' }, data: { sessionID: 'ses-1' } })
     expect(clientB.frames).toHaveLength(1)
   })
 })
@@ -680,7 +700,7 @@ describe('SSEAggregator directory-indexed broadcast', () => {
 describe('SSEAggregator directory-less session event routing', () => {
   beforeEach(() => {
     sseAggregator.shutdown()
-    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setOpenCodeClient(null)
     sseAggregator.setScheduledSessionsResolver(() => [])
   })
 
@@ -695,10 +715,10 @@ describe('SSEAggregator directory-less session event routing', () => {
       seen.push({ directory, type: event.type, sessionID: sessionIDFromEvent(event) ?? '' })
     })
 
-    emitRawEvent({ type: 'session.execution.started', location: { directory: '/r' }, data: { sessionID: 'ses_1' } })
+    emitEvent({ type: 'session.execution.started', location: { directory: '/r' }, data: { sessionID: 'ses_1' } })
     expect(sseAggregator.getActiveSessions()).toEqual({ '/r': ['ses_1'] })
 
-    emitRawEvent({ type: 'session.execution.succeeded', data: { sessionID: 'ses_1' } })
+    emitEvent({ type: 'session.execution.succeeded', data: { sessionID: 'ses_1' } })
 
     expect(seen).toEqual([
       { directory: '/r', type: 'session.execution.started', sessionID: 'ses_1' },
@@ -731,7 +751,7 @@ describe('SSEAggregator directory-less session event routing', () => {
     const seen: Array<{ directory: string | null; type: string }> = []
     sseAggregator.onEvent((directory, event) => { seen.push({ directory, type: event.type }) })
 
-    emitRawEvent({ type: 'session.execution.succeeded', data: { sessionID: 'ses_unknown' } })
+    emitEvent({ type: 'session.execution.succeeded', data: { sessionID: 'ses_unknown' } })
 
     expect(seen).toEqual([{ directory: null, type: 'session.execution.succeeded' }])
     expect(sseAggregator.getActiveSessions()).toEqual({})
@@ -752,7 +772,7 @@ describe('SSEAggregator directory-less session event routing', () => {
       seen.push({ directory, type: event.type, sessionID: sessionIDFromEvent(event) ?? '' })
     })
 
-    emitRawEvent({ type: 'session.deleted', data: { sessionID: 'ses_unknown' } })
+    emitEvent({ type: 'session.deleted', data: { sessionID: 'ses_unknown' } })
 
     expect(seen).toEqual([{ directory: null, type: 'session.deleted', sessionID: 'ses_unknown' }])
     expect(client.frames.map(parseFrame)).toEqual([
@@ -770,7 +790,7 @@ describe('SSEAggregator directory-less session event routing', () => {
     const seen: Array<{ directory: string | null; type: string }> = []
     sseAggregator.onEvent((directory, event) => { seen.push({ directory, type: event.type }) })
 
-    emitRawEvent({ type: 'session.deleted', location: { directory: '/r' }, data: { sessionID: 'ses_located' } })
+    emitEvent({ type: 'session.deleted', location: { directory: '/r' }, data: { sessionID: 'ses_located' } })
 
     expect(seen).toEqual([{ directory: '/r', type: 'session.deleted' }])
     expect(client.frames.map(parseFrame)).toEqual([
@@ -788,11 +808,11 @@ describe('SSEAggregator directory-less session event routing', () => {
     const seen: Array<string | null> = []
     sseAggregator.onEvent((directory) => { seen.push(directory) })
 
-    emitRawEvent({ type: 'session.created', location: { directory: '/r' }, data: { sessionID: 'ses_del' } })
-    emitRawEvent({ type: 'session.deleted', data: { sessionID: 'ses_del' } })
+    emitEvent({ type: 'session.created', location: { directory: '/r' }, data: { sessionID: 'ses_del' } })
+    emitEvent({ type: 'session.deleted', data: { sessionID: 'ses_del' } })
 
     seen.length = 0
-    emitRawEvent({ type: 'session.execution.succeeded', data: { sessionID: 'ses_del' } })
+    emitEvent({ type: 'session.execution.succeeded', data: { sessionID: 'ses_del' } })
 
     expect(seen).toEqual([null])
     expect(sseAggregator.getActiveSessions()).toEqual({})
@@ -813,10 +833,10 @@ describe('SSEAggregator directory-less session event routing', () => {
       seen.push({ directory, type: event.type, sessionID: sessionIDFromEvent(event) ?? '' })
     })
 
-    emitRawEvent({ type: 'session.created', location: { directory: '/r' }, data: { sessionID: 'ses_source' } })
+    emitEvent({ type: 'session.created', location: { directory: '/r' }, data: { sessionID: 'ses_source' } })
     seen.length = 0
 
-    emitRawEvent({ type: 'session.forked', data: { sessionID: 'ses_fork', parentID: 'ses_source', boundary: { messageID: 'msg_1' } } })
+    emitEvent({ type: 'session.forked', data: { sessionID: 'ses_fork', parentID: 'ses_source', boundary: { messageID: 'msg_1' } } })
 
     expect(seen).toEqual([{ directory: '/r', type: 'session.forked', sessionID: 'ses_fork' }])
 
@@ -830,7 +850,7 @@ describe('SSEAggregator directory-less session event routing', () => {
     expect(global.frames.map(parseFrame).at(-1)).toEqual({ directory: null, payload: forkPayload })
 
     seen.length = 0
-    emitRawEvent({ type: 'session.execution.succeeded', data: { sessionID: 'ses_fork' } })
+    emitEvent({ type: 'session.execution.succeeded', data: { sessionID: 'ses_fork' } })
 
     expect(seen).toEqual([{ directory: '/r', type: 'session.execution.succeeded', sessionID: 'ses_fork' }])
   })
@@ -839,7 +859,7 @@ describe('SSEAggregator directory-less session event routing', () => {
 describe('SSEAggregator server-aware event feed', () => {
   beforeEach(() => {
     sseAggregator.shutdown()
-    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setOpenCodeClient(null)
     sseAggregator.setScheduledSessionsResolver(() => [])
   })
 
@@ -849,8 +869,8 @@ describe('SSEAggregator server-aware event feed', () => {
       seen.push({ serverId, directory, type: event.type })
     })
 
-    emitRawEvent({ type: 'session.created', location: { directory: '/r' }, data: { sessionID: 'ses_1' } })
-    emitRawEvent({ type: 'session.execution.succeeded', data: { sessionID: 'ses_1' } })
+    emitEvent({ type: 'session.created', location: { directory: '/r' }, data: { sessionID: 'ses_1' } })
+    emitEvent({ type: 'session.execution.succeeded', data: { sessionID: 'ses_1' } })
 
     expect(seen).toEqual([
       { serverId: 'local', directory: '/r', type: 'session.created' },
@@ -929,7 +949,7 @@ describe('SSEAggregator server-aware event feed', () => {
 describe('SSEAggregator location-scoped catalog event broadcast', () => {
   beforeEach(() => {
     sseAggregator.shutdown()
-    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setOpenCodeClient(null)
     sseAggregator.setScheduledSessionsResolver(() => [])
   })
 
@@ -946,7 +966,7 @@ describe('SSEAggregator location-scoped catalog event broadcast', () => {
         seen.push({ directory, type: event.type })
       })
 
-      emitRawEvent({ id: 'evt_catalog', type, location: { directory: '/repo-c' }, data: {} })
+      emitEvent({ id: 'evt_catalog', type, location: { directory: '/repo-c' }, data: {} })
 
       const expected = {
         directory: null,
@@ -956,7 +976,7 @@ describe('SSEAggregator location-scoped catalog event broadcast', () => {
       expect(unsubscribed.frames.map(parseFrame)).toEqual([expected])
       expect(seen).toEqual([{ directory: '/repo-c', type }])
 
-      emitRawEvent({
+      emitEvent({
         id: 'evt_status',
         type: 'session.status',
         location: { directory: '/repo-c' },
@@ -967,4 +987,174 @@ describe('SSEAggregator location-scoped catalog event broadcast', () => {
       expect(unsubscribed.frames).toHaveLength(1)
     },
   )
+})
+
+interface ControlledEventStream {
+  iterable: AsyncIterable<V2Event>
+  signal: AbortSignal
+  push: (event: V2Event) => void
+  end: () => void
+}
+
+function createControlledEventStream(): ControlledEventStream {
+  const queue: V2Event[] = []
+  let finished = false
+  let signal: AbortSignal
+  let notify: (() => void) | null = null
+
+  const wake = (): void => {
+    const current = notify
+    notify = null
+    current?.()
+  }
+
+  const iterable: AsyncIterable<V2Event> = {
+    [Symbol.asyncIterator]: () => ({
+      async next() {
+        for (;;) {
+          if (queue.length > 0) return { value: queue.shift()!, done: false }
+          if (finished) return { value: undefined, done: true }
+          await new Promise<void>((resolve) => {
+            notify = resolve
+          })
+        }
+      },
+    }),
+  }
+
+  return {
+    iterable,
+    get signal() {
+      return signal
+    },
+    set signal(next: AbortSignal) {
+      signal = next
+      next.addEventListener('abort', wake, { once: true })
+    },
+    push: (event) => {
+      queue.push(event)
+      wake()
+    },
+    end: () => {
+      finished = true
+      wake()
+    },
+  } as ControlledEventStream
+}
+
+function makeStreamingApi(active: Record<string, { type: 'running' }> = {}) {
+  const subscriptions: ControlledEventStream[] = []
+  const api = {
+    ...makeApi({ active }),
+    event: {
+      subscribe: (options: { signal?: AbortSignal }) => {
+        const stream = createControlledEventStream()
+        stream.signal = options.signal!
+        subscriptions.push(stream)
+        return stream.iterable
+      },
+    },
+  } as unknown as OpenCodeApi
+  return { api, subscriptions }
+}
+
+describe('SSEAggregator upstream transport', () => {
+  beforeEach(() => {
+    sseAggregator.shutdown()
+    sseAggregator.setOpenCodeClient(null)
+    sseAggregator.setScheduledSessionsResolver(() => [])
+  })
+
+  it('streams through the OpenCode client host override and resolved password', async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null
+    const fetchFn = vi.fn(async () => new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          streamController = controller
+        },
+      }),
+      { headers: { 'content-type': 'text/event-stream' } },
+    ))
+    const client = new FetchOpenCodeClient({
+      baseUrl: getOpenCodeUpstreamBaseUrl('10.20.30.40'),
+      basicAuth: null,
+      passwordResolver: () => 'resolved-secret',
+      fetchFn: fetchFn as unknown as typeof fetch,
+    })
+
+    const captured = createCapturingClient()
+    sseAggregator.addClient('transport-a', captured.callback, captured.writeFrame, ['/repo'])
+    sseAggregator.setOpenCodeClient(client)
+    sseAggregator.start()
+    await flushReplay()
+
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchFn.mock.calls[0] as unknown as [URL, RequestInit]
+    expect(String(url)).toBe('http://10.20.30.40:5551/api/event')
+    expect(new Headers(init.headers).get('Authorization')).toBe(buildOpenCodeBasicAuth('resolved-secret'))
+
+    const encoder = new TextEncoder()
+    streamController!.enqueue(encoder.encode(`data: ${JSON.stringify(eventOf({ type: 'server.connected', data: {} }))}\n\n`))
+    const busy = eventOf({
+      type: 'session.status',
+      location: { directory: '/repo' },
+      data: { sessionID: 'ses-1', status: { type: 'busy' } },
+    })
+    streamController!.enqueue(encoder.encode(`data: ${JSON.stringify(busy)}\n\n`))
+    await flushReplay()
+
+    expect(captured.events.filter(event => event.event === 'resync')).toHaveLength(1)
+    expect(captured.frames.map(parseFrame).filter(frame => frame.payload.type === 'session.status')).toEqual([
+      { directory: '/repo', payload: busy },
+    ])
+
+    streamController!.close()
+    sseAggregator.shutdown()
+  })
+})
+
+describe('SSEAggregator upstream reconnection', () => {
+  beforeEach(() => {
+    sseAggregator.shutdown()
+    sseAggregator.setOpenCodeClient(null)
+    sseAggregator.setScheduledSessionsResolver(() => [])
+  })
+
+  it('reconnects after the stream ends, broadcasting resync and replaying tracked statuses', async () => {
+    vi.useFakeTimers()
+    try {
+      const { api, subscriptions } = makeStreamingApi({ 'ses-1': { type: 'running' } })
+      const client = createCapturingClient()
+      sseAggregator.addClient('reconnect-a', client.callback, client.writeFrame, ['/repo/a'])
+      sseAggregator.setOpenCodeClient({ api })
+      sseAggregator.start()
+
+      expect(subscriptions).toHaveLength(1)
+      subscriptions[0]!.push(eventOf({ type: 'server.connected', data: {} }))
+      subscriptions[0]!.push(eventOf({
+        type: 'session.status',
+        location: { directory: '/repo/a' },
+        data: { sessionID: 'ses-1', status: { type: 'busy' } },
+      }))
+      await flushReplay()
+
+      expect(client.events.filter(event => event.event === 'resync')).toHaveLength(1)
+      expect(sseAggregator.getActiveSessions()).toEqual({ '/repo/a': ['ses-1'] })
+
+      subscriptions[0]!.end()
+      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(1000)
+
+      expect(subscriptions).toHaveLength(2)
+      subscriptions[1]!.push(eventOf({ type: 'server.connected', data: {} }))
+      await flushReplay()
+
+      expect(client.events.filter(event => event.event === 'resync')).toHaveLength(2)
+      expect(api.session.active).toHaveBeenCalledTimes(1)
+      const statuses = client.frames.map(parseFrame).filter(frame => frame.payload.type === 'session.status')
+      expect(statuses.at(-1)?.payload.data).toEqual({ sessionID: 'ses-1', status: { type: 'busy' } })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

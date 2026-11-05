@@ -121,6 +121,11 @@ function isSessionNotFoundError(error: unknown): boolean {
   return error instanceof FetchError && (error.statusCode === 400 || error.statusCode === 404)
 }
 
+/**
+ * Renders one session: a header with its title and parent link, the transcript with its composer,
+ * and the collapsible tool panels. Redirects home for an unknown session and shows a not-found
+ * state when the repository does not exist.
+ */
 export function SessionDetail() {
   const serverId = useOpenCodeServerId();
   const isRemoteServer = !isLocalOpenCodeServer(serverId);
@@ -331,7 +336,8 @@ export function SessionDetail() {
     [sessionId, session?.agent, session?.model],
   );
   const { modelRef } = useModelSelection(sessionDirectory, modelSelectionSession);
-  const setSessionStatus = useSessionStatus((state) => state.setStatus);
+  const beginCompaction = useSessionStatus((state) => state.beginCompaction);
+  const endCompaction = useSessionStatus((state) => state.endCompaction);
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
   const { isEnabled: ttsEnabled } = useTTS();
   const { syncForSession: syncPermissionsForSession } = usePermissions();
@@ -466,16 +472,16 @@ export function SessionDetail() {
 
     const toastId = `compact-${sessionId}`;
     showToast.loading('Compacting session...', { id: toastId });
-    setSessionStatus(sessionId, { type: 'compact' });
+    beginCompaction(sessionId);
 
     try {
       await compactSession(sessionId, serverId);
       showToast.success('Compaction requested', { id: toastId });
     } catch (error) {
       showToast.error(`Compact failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { id: toastId });
-      setSessionStatus(sessionId, { type: 'idle' });
+      endCompaction(sessionId);
     }
-  }, [sessionId, serverId, setSessionStatus]);
+  }, [sessionId, serverId, beginCompaction, endCompaction]);
 
   const handleUndo = useCallback(async () => {
     if (!sessionId) return;

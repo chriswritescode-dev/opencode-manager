@@ -11,7 +11,7 @@ import { AgentsEditor } from './AgentsEditor'
 import { AgentsMdEditor } from './AgentsMdEditor'
 import { McpManager } from './McpManager'
 import { SkillsEditor } from './SkillsEditor'
-import { OpenCodeModelsEditor, type ConfigProvider } from './OpenCodeModelsEditor'
+import { OpenCodeModelsEditor } from './OpenCodeModelsEditor'
 import { scrollSectionIntoView } from '@/lib/settingsScroll'
 import { VersionSelectDialog } from './VersionSelectDialog'
 import { settingsApi } from '@/api/settings'
@@ -19,41 +19,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useServerHealth } from '@/hooks/useServerHealth'
 import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 import { useOpenCodeConfigFile, OPEN_CODE_CONFIG_QUERY_KEY } from '@/hooks/useOpenCodeConfigFile'
+import { useOpenCodeManagedConfig } from '@/hooks/useOpenCodeManagedConfig'
 import { useOpenCodeApplyFeedback } from '@/hooks/useOpenCodeApplyFeedback'
 import { showToast } from '@/lib/toast'
-import { invalidateConfigCaches } from '@/lib/queryInvalidation'
+import { invalidateConfigCaches, OPEN_CODE_MANAGED_CONFIG_QUERY_KEY } from '@/lib/queryInvalidation'
 import { getOpenCodeApiErrorMessage } from '@/lib/opencode-errors'
 import { mcpServersFromConfig } from '@opencode-manager/shared/opencode'
 import { FetchError } from '@/api/fetchWrapper'
 import { getPreferredOpenCodeConfigSource, downloadOpenCodeConfigSource } from '@/api/types/settings'
-import type { OpenCodeConfigFile, OpenCodeConfigSaveResponse, OpenCodeImportStatus } from '@/api/types/settings'
-
-interface Command {
-  template: string
-  description?: string
-  agent?: string
-  model?: string
-  subtask?: boolean
-  topP?: number
-}
-
-interface Agent {
-  prompt?: string
-  description?: string
-  mode?: 'subagent' | 'primary' | 'all'
-  temperature?: number
-  topP?: number
-  top_p?: number
-  model?: string
-  tools?: Record<string, boolean>
-  permission?: {
-    edit?: 'ask' | 'allow' | 'deny'
-    bash?: 'ask' | 'allow' | 'deny' | Record<string, 'ask' | 'allow' | 'deny'>
-    webfetch?: 'ask' | 'allow' | 'deny'
-  }
-  disable?: boolean
-  [key: string]: unknown
-}
+import type { OpenCodeConfigFile, OpenCodeConfigSaveResponse, OpenCodeImportStatus, OpenCodeAgentPatch, OpenCodeCommandPatch } from '@/api/types/settings'
 
 type ConfigSectionKey = 'agentsMd' | 'commands' | 'agents' | 'skills' | 'mcp' | 'models' | 'hostImport'
 
@@ -66,6 +40,49 @@ const SECTION_META_CLASS = 'text-xs text-muted-foreground'
 
 const getConfigFileName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path
 
+interface ManagedConfigSectionFallbackProps {
+  isLoading: boolean
+  unavailableMessage: string | null
+  errorMessage: string | null
+}
+
+/**
+ * Renders the placeholder for a managed config section while its data is loading or unavailable,
+ * prioritising the loading state, then a 503 message, then a generic error. Returns `null` when
+ * none of the conditions apply.
+ */
+function ManagedConfigSectionFallback({ isLoading, unavailableMessage, errorMessage }: ManagedConfigSectionFallbackProps) {
+  if (isLoading) {
+    return (
+      <p className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading configuration...
+      </p>
+    )
+  }
+
+  if (unavailableMessage) {
+    return <p className="py-4 text-sm text-muted-foreground">{unavailableMessage}</p>
+  }
+
+  if (errorMessage) {
+    return (
+      <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+        <p className="font-medium text-destructive">OpenCode configuration unavailable</p>
+        <p className="mt-1 text-sm text-destructive/90">{errorMessage}</p>
+      </div>
+    )
+  }
+
+  return null
+}
+
+/**
+ * Renders the OpenCode settings panel whose collapsible sections manage
+ * AGENTS.md, commands, agents, skills, MCP servers, provider models, and host
+ * import. Config patches are revision-guarded, and a server restart is offered
+ * whenever saved changes require one.
+ */
 export function OpenCodeConfigManager() {
   const sectionIdPrefix = useId()
   const agentsMdContentId = `${sectionIdPrefix}-agents-md`
@@ -108,6 +125,16 @@ export function OpenCodeConfigManager() {
   const hostImportRef = useRef<HTMLButtonElement>(null)
   
   const { data: config, isLoading } = useOpenCodeConfigFile()
+  const {
+    data: managedConfig,
+    error: managedConfigError,
+    isLoading: isManagedConfigLoading,
+  } = useOpenCodeManagedConfig()
+  const managedAgents = managedConfig?.info.agents ?? {}
+  const managedCommands = managedConfig?.info.commands ?? {}
+  const managedProviders = managedConfig?.info.providers ?? {}
+  const managedMcpServers = mcpServersFromConfig(managedConfig?.info.mcp)
+  const isManagedConfigUnavailable = managedConfigError instanceof FetchError && managedConfigError.statusCode === 503
 
   const { data: managedSkills = [] } = useQuery({
     queryKey: ['managed-skills'],
@@ -151,6 +178,10 @@ export function OpenCodeConfigManager() {
 
   const getApiErrorMessage = getOpenCodeApiErrorMessage
 
+  /**
+   * Returns the detail of a protected-host import failure, or the standard API
+   * error text with an import-specific fallback for other errors.
+   */
   const getOpenCodeImportErrorMessage = (error: unknown): string => {
     if (error instanceof FetchError && error.code === 'OPENCODE_IMPORT_PROTECTED') {
       return error.detail || error.message
@@ -159,29 +190,79 @@ export function OpenCodeConfigManager() {
     return getApiErrorMessage(error, 'Failed to import existing OpenCode host data')
   }
 
+  const isManagedConfigPending = isManagedConfigLoading || Boolean(managedConfigError)
+  const managedConfigErrorMessage = managedConfigError && !isManagedConfigUnavailable
+    ? getApiErrorMessage(managedConfigError, 'Failed to load the OpenCode configuration')
+    : null
+
+  /**
+   * Builds the section meta label for a managed config collection, substituting loading and
+   * unavailable states for the configured item count.
+   */
+  const getManagedConfigCountLabel = (count: number): string => {
+    if (isManagedConfigLoading) return 'Loading...'
+    if (managedConfigError) return 'Unavailable'
+    return `${count} configured`
+  }
+
+  /**
+   * Returns the section content when managed config is settled, otherwise the shared loading or
+   * error fallback; the 503 message is only surfaced when the error is an unavailable response.
+   */
+  const renderManagedConfigSection = (unavailableMessage: string, content: React.ReactNode) =>
+    isManagedConfigPending ? (
+      <ManagedConfigSectionFallback
+        isLoading={isManagedConfigLoading}
+        unavailableMessage={isManagedConfigUnavailable ? unavailableMessage : null}
+        errorMessage={managedConfigErrorMessage}
+      />
+    ) : (
+      content
+    )
+
   const applyOpenCodeConfigSave = (result: OpenCodeConfigSaveResponse) => {
     queryClient.setQueryData<OpenCodeConfigFile>(OPEN_CODE_CONFIG_QUERY_KEY, result)
+    queryClient.invalidateQueries({ queryKey: OPEN_CODE_MANAGED_CONFIG_QUERY_KEY })
     applyOpenCodeSaveFeedback({
       appliedMessage: 'Configuration updated',
       restartRequired: result.restartRequired,
     })
   }
 
-  const updateConfigContent = async (newContent: Record<string, unknown>) => {
+  const patchManagedConfig = async (patch: Record<string, unknown>) => {
     const expectedRevision = queryClient.getQueryData<OpenCodeConfigFile>(
       OPEN_CODE_CONFIG_QUERY_KEY,
     )?.revision
-    const result = await settingsApi.updateOpenCodeConfig({
-      content: newContent,
-      expectedRevision,
-    })
+    const result = await settingsApi.patchOpenCodeConfig({ patch, expectedRevision })
     applyOpenCodeConfigSave(result)
   }
 
-  const updateConfigContentSafely = (newContent: Record<string, unknown>) => {
-    void updateConfigContent(newContent).catch((error) => {
+  const patchManagedConfigSafely = (patch: Record<string, unknown>) => {
+    void patchManagedConfig(patch).catch((error) => {
       showToast.error(getApiErrorMessage(error, 'Failed to update config'))
     })
+  }
+
+  /**
+   * Persists an agent or command entry under `name`; when a rename occurred it also nulls the
+   * previous key so the old entry is removed in the same patch. Fire-and-forget, surfacing failures
+   * as a toast.
+   */
+  const saveManagedEntity = (
+    key: 'agents' | 'commands',
+    name: string,
+    value: OpenCodeAgentPatch | OpenCodeCommandPatch,
+    previousName?: string,
+  ) => {
+    const entries: Record<string, unknown> = { [name]: value }
+    if (previousName && previousName !== name) {
+      entries[previousName] = null
+    }
+    patchManagedConfigSafely({ [key]: entries })
+  }
+
+  const deleteManagedEntity = (key: 'agents' | 'commands', name: string) => {
+    patchManagedConfigSafely({ [key]: { [name]: null } })
   }
 
   const downloadConfig = (config: OpenCodeConfigFile) => {
@@ -365,7 +446,7 @@ export function OpenCodeConfigManager() {
                 <div className="flex min-w-0 items-center gap-3">
                   <h4 className={SECTION_TITLE_CLASS}>Commands</h4>
                   <span className={SECTION_META_CLASS}>
-                    {Object.keys((config.content.command as Record<string, Command> | undefined) ?? {}).length + directoryCommands.length} configured
+                    {getManagedConfigCountLabel(Object.keys(managedCommands).length + directoryCommands.length)}
                   </span>
                 </div>
                 <ChevronDown className={cn(SECTION_CHEVRON_CLASS, expandedSections.commands && 'rotate-180')} />
@@ -374,16 +455,15 @@ export function OpenCodeConfigManager() {
                 id={commandsContentId}
                 className={cn(SECTION_CONTENT_CLASS, expandedSections.commands ? 'block' : 'hidden')}
               >
-                <CommandsEditor
-                  commands={(config.content.command as Record<string, Command> | undefined) ?? {}}
-                  directoryCommands={directoryCommands}
-                  onChange={(commands) => {
-                    updateConfigContentSafely({
-                      ...config.content,
-                      command: commands
-                    })
-                  }}
-                />
+                {renderManagedConfigSection(
+                  'OpenCode is not running, so the configured commands cannot be listed. Use Edit to change the config file directly.',
+                  <CommandsEditor
+                    commands={managedCommands}
+                    directoryCommands={directoryCommands}
+                    onSave={(name, command, previousName) => saveManagedEntity('commands', name, command, previousName)}
+                    onDelete={(name) => deleteManagedEntity('commands', name)}
+                  />,
+                )}
               </div>
             </div>
 
@@ -399,7 +479,7 @@ export function OpenCodeConfigManager() {
                 <div className="flex min-w-0 items-center gap-3">
                   <h4 className={SECTION_TITLE_CLASS}>Agents</h4>
                   <span className={SECTION_META_CLASS}>
-                    {Object.keys((config.content.agent as Record<string, Agent> | undefined) ?? {}).length + directoryAgents.length} configured
+                    {getManagedConfigCountLabel(Object.keys(managedAgents).length + directoryAgents.length)}
                   </span>
                 </div>
                 <ChevronDown className={cn(SECTION_CHEVRON_CLASS, expandedSections.agents && 'rotate-180')} />
@@ -408,16 +488,15 @@ export function OpenCodeConfigManager() {
                 id={agentsContentId}
                 className={cn(SECTION_CONTENT_CLASS, expandedSections.agents ? 'block' : 'hidden')}
               >
-                <AgentsEditor
-                  agents={(config.content.agent as Record<string, Agent> | undefined) ?? {}}
-                  directoryAgents={directoryAgents}
-                  onChange={(agents) => {
-                    updateConfigContentSafely({
-                      ...config.content,
-                      agent: agents
-                    })
-                  }}
-                />
+                {renderManagedConfigSection(
+                  'OpenCode is not running, so the configured agents cannot be listed. Use Edit to change the config file directly.',
+                  <AgentsEditor
+                    agents={managedAgents}
+                    directoryAgents={directoryAgents}
+                    onSave={(name, agent, previousName) => saveManagedEntity('agents', name, agent, previousName)}
+                    onDelete={(name) => deleteManagedEntity('agents', name)}
+                  />,
+                )}
               </div>
             </div>
 
@@ -460,7 +539,7 @@ export function OpenCodeConfigManager() {
                 <div className="flex min-w-0 items-center gap-3">
                   <h4 className={SECTION_TITLE_CLASS}>MCP Servers</h4>
                   <span className={SECTION_META_CLASS}>
-                    {Object.keys(mcpServersFromConfig(config.content.mcp)).length} configured
+                    {getManagedConfigCountLabel(Object.keys(managedMcpServers).length)}
                   </span>
                 </div>
                 <ChevronDown className={cn(SECTION_CHEVRON_CLASS, expandedSections.mcp && 'rotate-180')} />
@@ -469,10 +548,14 @@ export function OpenCodeConfigManager() {
                 id={mcpContentId}
                 className={cn(SECTION_CONTENT_CLASS, expandedSections.mcp ? 'block' : 'hidden')}
               >
-                <McpManager
-                  config={config}
-                  onUpdate={updateConfigContent}
-                />
+                {renderManagedConfigSection(
+                  'OpenCode is not running, so the configured MCP servers cannot be listed. Use Edit to change the config file directly.',
+                  <McpManager
+                    mcp={managedConfig?.info.mcp}
+                    onSave={(serverId, server) => patchManagedConfig({ mcp: { servers: { [serverId]: server } } })}
+                    onDelete={(serverId) => patchManagedConfig({ mcp: { servers: { [serverId]: null } } })}
+                  />,
+                )}
               </div>
             </div>
 
@@ -488,14 +571,12 @@ export function OpenCodeConfigManager() {
                 <div className="flex min-w-0 items-center gap-3">
                   <h4 className={SECTION_TITLE_CLASS}>Models</h4>
                   <span className={SECTION_META_CLASS}>
-                    {(() => {
-                      const provider = config.content.provider as Record<string, unknown> | undefined
-                      if (!provider) return 0
-                      return Object.values(provider).reduce<number>((acc, p) => {
-                        const models = (p as { models?: Record<string, unknown> })?.models
-                        return acc + (models ? Object.keys(models).length : 0)
-                      }, 0)
-                    })()} configured
+                    {getManagedConfigCountLabel(
+                      Object.values(managedProviders).reduce<number>(
+                        (acc, provider) => acc + Object.keys(provider.models ?? {}).length,
+                        0,
+                      ),
+                    )}
                   </span>
                 </div>
                 <ChevronDown className={cn(SECTION_CHEVRON_CLASS, expandedSections.models && 'rotate-180')} />
@@ -504,15 +585,13 @@ export function OpenCodeConfigManager() {
                 id={modelsContentId}
                 className={cn(SECTION_CONTENT_CLASS, expandedSections.models ? 'block' : 'hidden')}
               >
-                <OpenCodeModelsEditor
-                  providers={(config.content.provider as Record<string, ConfigProvider> | undefined) ?? {}}
-                  onChange={(providers) => {
-                    updateConfigContentSafely({
-                      ...config.content,
-                      provider: providers
-                    })
-                  }}
-                />
+                {renderManagedConfigSection(
+                  'OpenCode is not running, so the configured models cannot be listed. Use Edit to change the config file directly.',
+                  <OpenCodeModelsEditor
+                    providers={managedProviders}
+                    onSave={(providers) => patchManagedConfigSafely({ providers })}
+                  />,
+                )}
               </div>
             </div>
           </>

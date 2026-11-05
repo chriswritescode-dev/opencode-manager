@@ -84,7 +84,7 @@ import { RepoWorkspaceService } from './services/repo-workspace'
 import { createGitService } from './services/git/GitService'
 import { ScheduleWorktreeManager } from './services/schedule-worktree'
 import { migrateGlobalSkills } from './services/skills'
-import { installAssistantWorkspace } from './services/assistant-mode'
+import { installAssistantWorkspace, convertAssistantOpenCodeConfigToV2 } from './services/assistant-mode'
 import { detectSandboxCapability } from './services/sandbox/capability'
 import { SandboxRuntimeService, stopSandboxesOnShutdown } from './services/sandbox/runtime'
 import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode-import'
@@ -359,12 +359,18 @@ if (ENV.VAPID.PUBLIC_KEY && ENV.VAPID.PRIVATE_KEY) {
   })
 }
 
-sseAggregator.setPendingActionsFetcher(openCodeClient)
-sseAggregator.setPasswordResolver(() => new SettingsService(db).getOpenCodeServerPassword())
+sseAggregator.setOpenCodeClient(openCodeClient)
+sseAggregator.setResyncGate(() => opencodeServerManager.isLifecycleInitialized())
+opencodeServerManager.onLifecycleInitialized(() => sseAggregator.releasePendingResync())
 sseAggregator.onServerConnected((serverId) => {
   void sessionPermissionModeService.acceptPendingRequestsForActiveSessions(serverId).catch((err) => {
     logger.error(`Failed to accept pending permission requests for server ${serverId}:`, err)
   })
+  if (serverId === LOCAL_OPENCODE_SERVER_ID) {
+    void convertAssistantOpenCodeConfigToV2(openCodeClient.api).catch((err) => {
+      logger.error('Failed to convert the Assistant OpenCode config to v2:', err)
+    })
+  }
 })
 sseAggregator.start()
 

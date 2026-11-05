@@ -2,12 +2,7 @@ import type { ModelInfo, ModelRef } from '@opencode-manager/shared/opencode'
 import { findModelInfo, formatOpenCodeModelRef, openCodeLocation, parseOpenCodeModelRef, selectConfiguredModelRef, selectEffectiveModelRef } from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from './opencode/client'
 
-export interface ResolvedOpenCodeModel {
-  providerID: string
-  id: string
-  variant?: string
-  model: string
-}
+export type ResolvedOpenCodeModel = ModelRef & { model: string }
 
 export interface ResolveOpenCodeModelOptions {
   preferredModel?: string | null

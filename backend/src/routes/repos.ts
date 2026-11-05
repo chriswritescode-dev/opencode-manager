@@ -27,7 +27,7 @@ import type { SecretsService } from '../services/secrets'
 import type { RepoWorkspaceService } from '../services/repo-workspace'
 import { createGitService } from '../services/git/GitService'
 import { ScheduleService } from '../services/schedules'
-import { ensureAssistantMode, getAssistantModeStatus } from '../services/assistant-mode'
+import { ensureAssistantMode, getAssistantModeStatus, convertAssistantOpenCodeConfigToV2 } from '../services/assistant-mode'
 import path from 'path'
 
 const DeleteWorkspaceRequestSchema = z.object({
@@ -41,6 +41,11 @@ function withRepoSettings(database: Database, repo: Repo): Repo {
   }
 }
 
+/**
+ * Mounts the repo git, terminal, project-config, schedule and secret/variable sub-routers, and serves
+ * repo CRUD with discovery, ordering, access, credential, identity, workspace, pull/branch, download
+ * and assistant-mode routes. Handler failures are mapped to their status codes with a JSON message.
+ */
 export function createRepoRoutes(
   database: Database,
   gitAuthService: GitAuthService,
@@ -614,6 +619,7 @@ app.get('/', async (c) => {
       const options = AssistantModeInitRequestSchema.parse(body)
 
       const status = await ensureAssistantMode(repo, options)
+      await convertAssistantOpenCodeConfigToV2(openCodeClient.api)
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to initialize assistant mode:', error)

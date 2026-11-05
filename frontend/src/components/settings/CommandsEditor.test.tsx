@@ -54,16 +54,14 @@ describe('CommandsEditor', () => {
   })
 
   it('renders empty state when no commands configured', () => {
-    const onChange = vi.fn()
-    render(<CommandsEditor commands={{}} onChange={onChange} />, { wrapper: createWrapper() })
+    render(<CommandsEditor commands={{}} onSave={vi.fn()} onDelete={vi.fn()} />, { wrapper: createWrapper() })
 
     expect(screen.getByText('No commands configured')).toBeInTheDocument()
     expect(screen.getByText('Add your first command to get started.')).toBeInTheDocument()
   })
 
   it('renders command names without a leading slash', () => {
-    const onChange = vi.fn()
-    render(<CommandsEditor commands={mockCommands} onChange={onChange} />, { wrapper: createWrapper() })
+    render(<CommandsEditor commands={mockCommands} onSave={vi.fn()} onDelete={vi.fn()} />, { wrapper: createWrapper() })
 
     expect(screen.getByText('review')).toBeInTheDocument()
     expect(screen.getByText('build')).toBeInTheDocument()
@@ -71,12 +69,12 @@ describe('CommandsEditor', () => {
   })
 
   it('renders uploaded directory command files', () => {
-    const onChange = vi.fn()
     render(
       <CommandsEditor
         commands={{}}
         directoryCommands={[{ kind: 'commands', name: 'deploy', relativePath: 'project/deploy.md' }]}
-        onChange={onChange}
+        onSave={vi.fn()}
+        onDelete={vi.fn()}
       />,
       { wrapper: createWrapper() },
     )
@@ -89,8 +87,7 @@ describe('CommandsEditor', () => {
 
   it('opens CommandDialog when clicking Edit on a row', async () => {
     const user = userEvent.setup()
-    const onChange = vi.fn()
-    render(<CommandsEditor commands={mockCommands} onChange={onChange} />, { wrapper: createWrapper() })
+    render(<CommandsEditor commands={mockCommands} onSave={vi.fn()} onDelete={vi.fn()} />, { wrapper: createWrapper() })
 
     const editButtons = screen.getAllByText('Edit')
     await user.click(editButtons[0])
@@ -101,8 +98,7 @@ describe('CommandsEditor', () => {
 
   it('opens CommandDialog when clicking row body', async () => {
     const user = userEvent.setup()
-    const onChange = vi.fn()
-    render(<CommandsEditor commands={mockCommands} onChange={onChange} />, { wrapper: createWrapper() })
+    render(<CommandsEditor commands={mockCommands} onSave={vi.fn()} onDelete={vi.fn()} />, { wrapper: createWrapper() })
 
     await user.click(screen.getByText('review'))
 
@@ -111,8 +107,7 @@ describe('CommandsEditor', () => {
 
   it('opens CommandDialog and displays Create Command text when clicking Add Command button', async () => {
     const user = userEvent.setup()
-    const onChange = vi.fn()
-    render(<CommandsEditor commands={{}} onChange={onChange} />, { wrapper: createWrapper() })
+    render(<CommandsEditor commands={{}} onSave={vi.fn()} onDelete={vi.fn()} />, { wrapper: createWrapper() })
 
     await user.click(screen.getByText('Add Command'))
 
@@ -120,33 +115,31 @@ describe('CommandsEditor', () => {
     expect(screen.getByText('Create Command')).toBeInTheDocument()
   })
 
-  it('calls onChange with command removed when Delete is clicked from overflow menu', async () => {
+  it('calls onDelete with the command name when Delete is clicked from overflow menu', async () => {
     const user = userEvent.setup()
-    const onChange = vi.fn()
-    render(<CommandsEditor commands={mockCommands} onChange={onChange} />, { wrapper: createWrapper() })
+    const onDelete = vi.fn()
+    render(<CommandsEditor commands={mockCommands} onSave={vi.fn()} onDelete={onDelete} />, { wrapper: createWrapper() })
 
     await user.click(screen.getByLabelText('Actions for review'))
     await user.click(screen.getByText('Delete'))
 
-    expect(onChange).toHaveBeenCalledTimes(1)
-    expect(onChange).toHaveBeenCalledWith({ build: mockCommands.build })
+    expect(onDelete).toHaveBeenCalledTimes(1)
+    expect(onDelete).toHaveBeenCalledWith('review')
   })
 
   it('renders agent badge when command has agent', () => {
-    const onChange = vi.fn()
-    render(<CommandsEditor commands={mockCommands} onChange={onChange} />, { wrapper: createWrapper() })
+    render(<CommandsEditor commands={mockCommands} onSave={vi.fn()} onDelete={vi.fn()} />, { wrapper: createWrapper() })
 
     expect(screen.getByText('code-reviewer')).toBeInTheDocument()
   })
 
   it('uploads only markdown files from a selected commands folder', async () => {
-    const onChange = vi.fn()
     const markdownFile = new File(['commit body'], 'commit.md', { type: 'text/markdown' })
     const systemFile = new File(['metadata'], '.DS_Store')
     Object.defineProperty(markdownFile, 'webkitRelativePath', { value: 'commands/git/commit.md' })
     Object.defineProperty(systemFile, 'webkitRelativePath', { value: 'commands/.DS_Store' })
 
-    const { container } = render(<CommandsEditor commands={{}} onChange={onChange} />, { wrapper: createWrapper() })
+    const { container } = render(<CommandsEditor commands={{}} onSave={vi.fn()} onDelete={vi.fn()} />, { wrapper: createWrapper() })
     const input = container.querySelector('input[type="file"]') as HTMLInputElement
 
     fireEvent.change(input, { target: { files: [markdownFile, systemFile] } })
@@ -158,11 +151,10 @@ describe('CommandsEditor', () => {
   })
 
   it('shows an error when a selected commands folder has no markdown files', async () => {
-    const onChange = vi.fn()
     const systemFile = new File(['metadata'], '.DS_Store')
     Object.defineProperty(systemFile, 'webkitRelativePath', { value: 'commands/.DS_Store' })
 
-    const { container } = render(<CommandsEditor commands={{}} onChange={onChange} />, { wrapper: createWrapper() })
+    const { container } = render(<CommandsEditor commands={{}} onSave={vi.fn()} onDelete={vi.fn()} />, { wrapper: createWrapper() })
     const input = container.querySelector('input[type="file"]') as HTMLInputElement
 
     fireEvent.change(input, { target: { files: [systemFile] } })

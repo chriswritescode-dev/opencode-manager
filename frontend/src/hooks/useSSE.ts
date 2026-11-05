@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { buildServerDirectoryKey, LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
-import type { SessionInfo, V2Event } from '@opencode-manager/shared/opencode'
+import {
+  buildServerDirectoryKey,
+  LOCAL_OPENCODE_SERVER_ID,
+  type OpenCodeStreamEvent,
+} from '@opencode-manager/shared/schemas'
+import type { SessionInfo } from '@opencode-manager/shared/opencode'
 import { invalidateSessionListCaches, invalidateShellCaches, shellsQueryKey } from '@/lib/queryInvalidation'
 import {
   applyShellExit,
@@ -18,9 +22,11 @@ import type { EventStreamSubscription } from '@/lib/opencode-event-stream'
 import { serverScopedKey } from '@/lib/serverScope'
 import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 
-type V2StreamEvent = V2Event & { directory?: string; serverId?: string }
-
-const getEventDirectory = (event: V2StreamEvent): string | undefined => {
+/**
+ * Narrows a stream event to its directory, returning `undefined` when the payload carries no
+ * string directory rather than coercing another type.
+ */
+const getEventDirectory = (event: OpenCodeStreamEvent): string | undefined => {
   return typeof event.directory === 'string' ? event.directory : undefined
 }
 
@@ -45,6 +51,11 @@ const patchSessionIfCached = (
   )
 }
 
+/**
+ * Subscribes the view to the global event stream for one or more directories, projecting session,
+ * shell, and status events into the React Query cache. Returns connection state plus the current
+ * error text for reconnection UI; it also reports exposure and visibility to the backend.
+ */
 export const useSSE = (directory?: string | string[], currentSessionId?: string) => {
   const serverId = useOpenCodeServerId()
   const directoriesList = useMemo(() => {
@@ -73,7 +84,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
     [directorySet, primaryDirectory],
   )
 
-  const handleSSEEvent = useCallback((event: V2StreamEvent) => {
+  const handleSSEEvent = useCallback((event: OpenCodeStreamEvent) => {
     if ((event.serverId ?? LOCAL_OPENCODE_SERVER_ID) !== serverId) return
     const eventDirectory = getEventDirectory(event)
     const cacheDirectory = resolveCacheDirectory(eventDirectory)
@@ -193,12 +204,6 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
       return
     }
 
-    const handleMessage = (data: unknown) => {
-      if (data && typeof data === 'object' && 'type' in data) {
-        handleSSEEvent(data as V2StreamEvent)
-      }
-    }
-
     const handleStatusChange = (connected: boolean) => {
       if (!mountedRef.current) return
       setIsConnected(connected)
@@ -214,6 +219,10 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
       }
     }
 
+    /**
+     * Drops cached session and shell data for this server and re-reads the current session after
+     * the stream reports missed events. Resyncs for a different server are ignored.
+     */
     const handleResync = (_subscribedDirectories: string[], resyncServerId?: string) => {
       if (!mountedRef.current) return
       if ((resyncServerId ?? LOCAL_OPENCODE_SERVER_ID) !== serverId) return
@@ -224,7 +233,7 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
 
     const subscription = openCodeEventStream.subscribeGlobalMonitor({
       directories: directoriesList.map((entry) => buildServerDirectoryKey(serverId, entry)),
-      onEvent: handleMessage,
+      onEvent: handleSSEEvent,
       onStatusChange: handleStatusChange,
       onResync: handleResync,
     })

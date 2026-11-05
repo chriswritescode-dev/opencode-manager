@@ -52,7 +52,7 @@ const modelInfo = (variants: string[]): ModelInfo => ({
 const provider = (): Provider => ({
   id: PROVIDER_ID,
   name: 'Anthropic',
-  models: [{ id: MODEL_ID, key: MODEL_ID, name: MODEL_ID, released: 0, free: false }],
+  models: [{ id: MODEL_ID, modelID: MODEL_ID, name: MODEL_ID, released: 0, free: false }],
 })
 
 const emptyState = () => ({ recent: [], favorite: [], variant: {} })

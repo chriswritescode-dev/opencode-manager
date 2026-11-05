@@ -1,5 +1,3 @@
-import { EventSource } from 'eventsource'
-import { DEFAULTS } from '@opencode-manager/shared/config'
 import {
   buildServerDirectoryKey,
   LOCAL_OPENCODE_SERVER_ID,
@@ -10,26 +8,23 @@ import { sessionIDFromEvent, type OpenCodeApi, type V2Event } from '@opencode-ma
 import { logger } from '../utils/logger'
 import type {
   OpenCodeServerChange,
-  OpenCodeServerConnection,
   OpenCodeServerRegistry,
 } from './opencode-server-registry'
 import {
   applySessionActivity,
+  buildSessionStatusReplayEvent,
   collectPendingReplayEvents,
-  createAuthorizedEventSourceInit,
   createReplayEventBuilder,
-  nextBackoffDelay,
-  parseOpenCodeEvent,
   planSessionStatusReplay,
+  routeOpenCodeEvent,
   type ReplayEventBuilder,
 } from './opencode-event-routing'
+import { subscribeOpenCodeEvents, type OpenCodeEventSubscription } from './opencode-event-subscription'
 import type { RemoteReplayHandler } from './sse-aggregator'
 
-const { RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS } = DEFAULTS.SSE
-
 export interface RemoteEventAggregator {
-  deliverRemoteEnvelope(serverId: string, directory: string | null, payloadJson: string): void
-  deliverRemoteEnvelopeToClient(clientId: string, serverId: string, directory: string, payloadJson: string): void
+  deliverRemoteEnvelope(serverId: string, directory: string | null, event: V2Event): void
+  deliverRemoteEnvelopeToClient(clientId: string, serverId: string, directory: string, event: V2Event): void
   sendRemoteResync(serverId: string): void
   hasClientDirectory(clientId: string, key: string): boolean
   setRemoteReplayHandler(handler: RemoteReplayHandler | null): void
@@ -38,26 +33,13 @@ export interface RemoteEventAggregator {
   setRemoteSubagentResolver(resolver: ((serverId: string, sessionId: string) => boolean) | null): void
 }
 
-export interface RemoteEventSource {
-  onopen: ((event: unknown) => void) | null
-  onerror: ((event: unknown) => void) | null
-  onmessage: ((event: { data: string }) => void) | null
-  close(): void
-}
-
-export type RemoteEventSourceInit = ConstructorParameters<typeof EventSource>[1]
-export type RemoteEventSourceFactory = (url: string, init?: RemoteEventSourceInit) => RemoteEventSource
-
 export interface RemoteServerEventHubOptions {
-  eventSourceFactory?: RemoteEventSourceFactory
   reconnectDelayMs?: number
   maxReconnectDelayMs?: number
 }
 
 interface RemoteServerStream {
-  source: RemoteEventSource | null
-  reconnectTimeout: ReturnType<typeof setTimeout> | null
-  reconnectDelay: number
+  subscription: OpenCodeEventSubscription | null
   connected: boolean
   error: string | null
   version: string | null
@@ -66,10 +48,6 @@ interface RemoteServerStream {
   sessionDirectories: Map<string, string>
   busySessions: Set<string>
   subagentSessions: Set<string>
-}
-
-function createDefaultEventSource(url: string, init?: RemoteEventSourceInit): RemoteEventSource {
-  return new EventSource(url, init) as unknown as RemoteEventSource
 }
 
 function describeStreamError(error: unknown): string {
@@ -85,9 +63,6 @@ function describeStreamError(error: unknown): string {
 
 export class RemoteServerEventHub {
   private readonly streams = new Map<string, RemoteServerStream>()
-  private readonly eventSourceFactory: RemoteEventSourceFactory
-  private readonly reconnectDelayMs: number
-  private readonly maxReconnectDelayMs: number
   private unsubscribeRegistry: (() => void) | null = null
   private started = false
   private versionProbeSequence = 0
@@ -96,12 +71,8 @@ export class RemoteServerEventHub {
   constructor(
     private readonly registry: OpenCodeServerRegistry,
     private readonly aggregator: RemoteEventAggregator,
-    options: RemoteServerEventHubOptions = {},
-  ) {
-    this.eventSourceFactory = options.eventSourceFactory ?? createDefaultEventSource
-    this.reconnectDelayMs = options.reconnectDelayMs ?? RECONNECT_DELAY_MS
-    this.maxReconnectDelayMs = options.maxReconnectDelayMs ?? MAX_RECONNECT_DELAY_MS
-  }
+    private readonly options: RemoteServerEventHubOptions = {},
+  ) {}
 
   start(): void {
     if (this.started) return
@@ -184,6 +155,10 @@ export class RemoteServerEventHub {
     return false
   }
 
+  /**
+   * Delivers already-built replay events to one client through the aggregator, which drops them unless
+   * the client still subscribes to that server and directory.
+   */
   private emitReplayEventsToClient(
     clientId: string,
     serverId: string,
@@ -191,7 +166,7 @@ export class RemoteServerEventHub {
     events: V2Event[],
   ): void {
     for (const event of events) {
-      this.aggregator.deliverRemoteEnvelopeToClient(clientId, serverId, directory, JSON.stringify(event))
+      this.aggregator.deliverRemoteEnvelopeToClient(clientId, serverId, directory, event)
     }
   }
 
@@ -210,103 +185,96 @@ export class RemoteServerEventHub {
     }
   }
 
+  /**
+   * Replaces the server's event subscription with a fresh one, recording a stream error instead when the
+   * registry cannot provide a connection. Does nothing until the hub has started, so stale callbacks from
+   * the prior subscription are ignored rather than applied.
+   */
   private connectServer(serverId: string): void {
     if (!this.started) return
     this.closeStream(serverId)
 
-    let connection: OpenCodeServerConnection
     try {
-      connection = this.registry.getConnection(serverId)
+      this.registry.getConnection(serverId)
     } catch (error) {
       this.recordError(serverId, describeStreamError(error))
       logger.warn(`Remote event stream unavailable for ${serverId}: ${describeStreamError(error)}`)
       return
     }
 
-    const authorization = connection.authorization
-    const init: RemoteEventSourceInit = createAuthorizedEventSourceInit(authorization)
-
     const stream = this.ensureStream(serverId)
-    let source: RemoteEventSource
-    try {
-      source = this.eventSourceFactory(`${connection.baseUrl}/api/event`, init)
-    } catch (error) {
-      this.recordError(serverId, describeStreamError(error))
-      this.scheduleReconnect(serverId)
-      return
-    }
-
-    stream.source = source
     stream.error = null
-    source.onopen = () => this.handleOpen(serverId, source)
-    source.onerror = (event) => this.handleStreamError(serverId, source, event)
-    source.onmessage = (event) => this.handleMessage(serverId, event.data)
+
+    const subscription = subscribeOpenCodeEvents({
+      api: () => this.registry.getClient(serverId).api,
+      label: serverId,
+      onOpen: () => this.handleOpen(serverId, subscription),
+      onEvent: (event) => this.handleMessage(serverId, event),
+      onDisconnect: (error) => this.handleStreamError(serverId, error),
+      reconnectDelayMs: this.options.reconnectDelayMs,
+      maxReconnectDelayMs: this.options.maxReconnectDelayMs,
+    })
+
+    stream.subscription = subscription
     logger.info(`Remote event stream connecting: ${serverId}`)
   }
 
-  private handleOpen(serverId: string, source: RemoteEventSource): void {
+  /**
+   * Marks the server's stream connected, announces it to the aggregator, and starts version probing
+   * and session status replay. A callback from a superseded subscription is ignored.
+   */
+  private handleOpen(serverId: string, subscription: OpenCodeEventSubscription): void {
     const stream = this.streams.get(serverId)
-    if (!stream || stream.source !== source) return
+    if (!stream || stream.subscription !== subscription) return
 
     stream.connected = true
     stream.error = null
-    stream.reconnectDelay = this.reconnectDelayMs
     logger.info(`Remote event stream connected: ${serverId}`)
     this.aggregator.notifyServerConnected(serverId)
     this.aggregator.sendRemoteResync(serverId)
     void this.refreshVersion(serverId)
-    void this.replaySessionStatuses(serverId, source)
+    void this.replaySessionStatuses(serverId, subscription)
   }
 
-  private handleStreamError(serverId: string, source: RemoteEventSource, error: unknown): void {
+  /**
+   * Records a disconnect on the server's stream and clears its connected flag, leaving the
+   * subscription itself to keep reconnecting.
+   */
+  private handleStreamError(serverId: string, error: unknown): void {
     const stream = this.streams.get(serverId)
-    if (!stream || stream.source !== source) return
+    if (!stream) return
 
     stream.connected = false
     stream.error = describeStreamError(error)
     logger.warn(`Remote event stream error for ${serverId}: ${stream.error}`)
-    this.closeSource(stream)
-    this.scheduleReconnect(serverId)
   }
 
-  private scheduleReconnect(serverId: string): void {
-    const stream = this.streams.get(serverId)
-    if (!this.started || !stream || stream.reconnectTimeout) return
-
-    const delay = stream.reconnectDelay
-    stream.reconnectTimeout = setTimeout(() => {
-      const current = this.streams.get(serverId)
-      if (!current) return
-      current.reconnectTimeout = null
-      current.reconnectDelay = nextBackoffDelay(current.reconnectDelay, this.maxReconnectDelayMs)
-      this.connectServer(serverId)
-    }, delay)
-  }
-
-  private handleMessage(serverId: string, data: string): void {
+  /**
+   * Routes one upstream event to the aggregator while maintaining the hub's per-stream bookkeeping:
+   * busy-session activity, subagent session ids, and the directory the event resolves to.
+   */
+  private handleMessage(serverId: string, event: V2Event): void {
     const stream = this.streams.get(serverId)
     if (!stream) return
 
-    const routed = parseOpenCodeEvent(data, stream.sessionDirectories)
-    if (!routed) return
-
-    try {
-      const { event, resolvedDirectory, payloadJson } = routed
-      const sessionID = sessionIDFromEvent(event)
-      if (sessionID) applySessionActivity(stream.busySessions, event)
-      if (sessionID && event.type === 'session.deleted') {
-        stream.subagentSessions.delete(sessionID)
-      } else if (event.type === 'session.created' && event.data.parentID) {
-        stream.subagentSessions.add(event.data.sessionID)
-      }
-
-      this.aggregator.notifyServerEvent(serverId, resolvedDirectory ?? null, event)
-      this.aggregator.deliverRemoteEnvelope(serverId, resolvedDirectory ?? null, payloadJson)
-    } catch (error) {
-      logger.error(`Remote event stream failed to handle ${routed.event.type} for ${serverId}:`, error)
+    const { resolvedDirectory } = routeOpenCodeEvent(event, stream.sessionDirectories)
+    const sessionID = sessionIDFromEvent(event)
+    if (sessionID) applySessionActivity(stream.busySessions, event)
+    if (sessionID && event.type === 'session.deleted') {
+      stream.subagentSessions.delete(sessionID)
+    } else if (event.type === 'session.created' && event.data.parentID) {
+      stream.subagentSessions.add(event.data.sessionID)
     }
+
+    this.aggregator.notifyServerEvent(serverId, resolvedDirectory ?? null, event)
+    this.aggregator.deliverRemoteEnvelope(serverId, resolvedDirectory ?? null, event)
   }
 
+  /**
+   * Keeps streams aligned with the server registry: deleted, unreadable, or disabled servers have their
+   * stream forgotten, while added and updated servers get their cached version state cleared and are
+   * reconnected.
+   */
   private handleRegistryChange(change: OpenCodeServerChange): void {
     if (!this.started) return
 
@@ -331,7 +299,6 @@ export class RemoteServerEventHub {
 
     const stream = this.streams.get(change.serverId)
     if (stream) {
-      stream.reconnectDelay = this.reconnectDelayMs
       stream.version = null
       stream.versionRequested = false
       stream.versionProbeToken = 0
@@ -339,13 +306,26 @@ export class RemoteServerEventHub {
     this.connectServer(change.serverId)
   }
 
-  private isStreamCurrent(serverId: string, stream: RemoteServerStream, source: RemoteEventSource): boolean {
-    return this.streams.get(serverId) === stream && stream.source === source && stream.connected
+  /**
+   * Reports whether the subscription still owns the server's live stream, so async work started under
+   * it does not act on a stream that has since been replaced or disconnected.
+   */
+  private isStreamCurrent(
+    serverId: string,
+    stream: RemoteServerStream,
+    subscription: OpenCodeEventSubscription,
+  ): boolean {
+    return this.streams.get(serverId) === stream && stream.subscription === subscription && stream.connected
   }
 
-  private async replaySessionStatuses(serverId: string, source: RemoteEventSource): Promise<void> {
+  /**
+   * Re-emits idle and busy status events for the server's active sessions after a reconnect, so
+   * clients that missed updates while disconnected resync. Stops quietly at any await once the stream
+   * is no longer current.
+   */
+  private async replaySessionStatuses(serverId: string, subscription: OpenCodeEventSubscription): Promise<void> {
     const stream = this.streams.get(serverId)
-    if (!stream || !this.isStreamCurrent(serverId, stream, source)) return
+    if (!stream || !this.isStreamCurrent(serverId, stream, subscription)) return
 
     let api: OpenCodeApi
     try {
@@ -363,25 +343,25 @@ export class RemoteServerEventHub {
       return
     }
 
-    if (!this.isStreamCurrent(serverId, stream, source)) return
+    if (!this.isStreamCurrent(serverId, stream, subscription)) return
 
     await this.resolveActiveSessionDirectories(api, serverId, stream, Object.keys(active ?? {}))
-    if (!this.isStreamCurrent(serverId, stream, source)) return
+    if (!this.isStreamCurrent(serverId, stream, subscription)) return
 
     const plan = planSessionStatusReplay(active, stream.sessionDirectories)
     let replayed = 0
 
     for (const { sessionID, directory } of plan.idle) {
-      const event = this.buildReplayEvent('session.status', directory, { sessionID, status: { type: 'idle' } })
-      this.aggregator.deliverRemoteEnvelope(serverId, directory, JSON.stringify(event))
+      const event = buildSessionStatusReplayEvent(this.buildReplayEvent, directory, sessionID, 'idle')
+      this.aggregator.deliverRemoteEnvelope(serverId, directory, event)
       stream.busySessions.delete(sessionID)
       replayed++
     }
 
     for (const sessionID of plan.busy) {
       const directory = stream.sessionDirectories.get(sessionID) ?? null
-      const event = this.buildReplayEvent('session.status', directory ?? '', { sessionID, status: { type: 'busy' } })
-      this.aggregator.deliverRemoteEnvelope(serverId, directory, JSON.stringify(event))
+      const event = buildSessionStatusReplayEvent(this.buildReplayEvent, directory ?? '', sessionID, 'busy')
+      this.aggregator.deliverRemoteEnvelope(serverId, directory, event)
       stream.busySessions.add(sessionID)
       replayed++
     }
@@ -391,6 +371,11 @@ export class RemoteServerEventHub {
     }
   }
 
+  /**
+   * Looks up the working directory of active sessions the stream has not mapped yet, caching each result
+   * in `sessionDirectories`. Sessions are fetched concurrently and left unresolved when their lookup
+   * fails, so replay proceeds with whatever directories are known.
+   */
   private async resolveActiveSessionDirectories(
     api: OpenCodeApi,
     serverId: string,
@@ -411,6 +396,11 @@ export class RemoteServerEventHub {
     }))
   }
 
+  /**
+   * Probes the server's OpenCode version, skipping when a probe is already pending or the version is
+   * known. Results are applied only when the probe token still matches the current stream, and a failed
+   * probe reopens the request flag so a later reconnect can retry it.
+   */
   private async refreshVersion(serverId: string): Promise<void> {
     const stream = this.streams.get(serverId)
     if (!stream || stream.versionRequested) return
@@ -437,14 +427,16 @@ export class RemoteServerEventHub {
     current.versionRequested = false
   }
 
+  /**
+   * Returns the server's stream bookkeeping record, creating an empty one on first use so callers can
+   * record state before a subscription exists.
+   */
   private ensureStream(serverId: string): RemoteServerStream {
     const existing = this.streams.get(serverId)
     if (existing) return existing
 
     const stream: RemoteServerStream = {
-      source: null,
-      reconnectTimeout: null,
-      reconnectDelay: this.reconnectDelayMs,
+      subscription: null,
       connected: false,
       error: null,
       version: null,
@@ -464,20 +456,19 @@ export class RemoteServerEventHub {
     stream.error = error
   }
 
-  private closeSource(stream: RemoteServerStream): void {
-    if (!stream.source) return
-    stream.source.close()
-    stream.source = null
+  /**
+   * Closes the stream's subscription and clears the handle, keeping the stream entry itself.
+   */
+  private closeSubscription(stream: RemoteServerStream): void {
+    if (!stream.subscription) return
+    stream.subscription.close()
+    stream.subscription = null
   }
 
   private closeStream(serverId: string): void {
     const stream = this.streams.get(serverId)
     if (!stream) return
-    if (stream.reconnectTimeout) {
-      clearTimeout(stream.reconnectTimeout)
-      stream.reconnectTimeout = null
-    }
-    this.closeSource(stream)
+    this.closeSubscription(stream)
     stream.connected = false
   }
 

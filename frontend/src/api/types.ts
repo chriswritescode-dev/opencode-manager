@@ -22,7 +22,6 @@ export interface Repo {
 }
 
 export type Session = SessionInfo
-export type PermissionResponse = 'once' | 'always' | 'reject'
 
 export interface FileAttachmentInfo {
   path: string
@@ -35,16 +34,4 @@ export interface ImageAttachment {
   filename: string
   mime: string
   dataUrl: string
-}
-
-export interface SSHHostKeyRequest {
-  id: string
-  requestId: string
-  host: string
-  ip?: string
-  keyType: string
-  fingerprint: string
-  isKeyChanged?: boolean
-  timestamp: number
-  action: 'verify'
 }

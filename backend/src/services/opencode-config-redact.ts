@@ -1,5 +1,5 @@
+import { isRecord } from '@opencode-manager/shared/utils'
 import type { OpenCodeConfigFile } from '../types/settings'
-import { isRecord } from './opencode/enforcement-config'
 import { OPENCODE_CONFIG_REDACTED_VALUE } from './opencode-config-file'
 
 const SECRET_KEYS = new Set([
@@ -53,22 +53,22 @@ function isSecretKey(key: string): boolean {
   return SECRET_KEYS.has(normalizeSecretKey(key))
 }
 
+/**
+ * Reports whether a config path points at a map of user-chosen names (`providers`, `agents`,
+ * `commands`, `mcp.servers`), so its keys are treated as names rather than secret keys.
+ */
 function keysAreNames(path: string[]): boolean {
   const [head] = path
-  if (head === 'provider') {
+  if (head === 'providers') {
     return path.length === 1 || (path.length === 3 && path[2] === 'models')
   }
-  if (head === 'agent') {
+  if (head === 'agents' || head === 'commands') {
     return path.length === 1
   }
   if (head === 'mcp') {
-    return path.length === 1 || (path.length === 2 && path[1] === 'servers')
+    return path.length === 2 && path[1] === 'servers'
   }
   return false
-}
-
-function isNameMapException(key: string): boolean {
-  return key === 'servers' || key === 'timeout'
 }
 
 function redactOpaqueValue(value: unknown, path: string[], redactedPaths: string[]): unknown {
@@ -85,6 +85,10 @@ function redactOpaqueValue(value: unknown, path: string[], redactedPaths: string
   )
 }
 
+/**
+ * Recursively copies a config value with secret-named strings and the contents of `headers` and
+ * `environment` replaced by the redaction placeholder, appending each redacted path to `redactedPaths`.
+ */
 function redactValue(value: unknown, path: string[], redactedPaths: string[]): unknown {
   if (Array.isArray(value)) {
     return value.map((item, index) => redactValue(item, [...path, String(index)], redactedPaths))
@@ -95,7 +99,7 @@ function redactValue(value: unknown, path: string[], redactedPaths: string[]): u
   return Object.fromEntries(
     Object.entries(value).map(([key, child]) => {
       const childPath = [...path, key]
-      if (names && !isNameMapException(key)) {
+      if (names) {
         return [key, redactValue(child, childPath, redactedPaths)]
       }
       if (OPAQUE_VALUE_KEYS.has(key)) {

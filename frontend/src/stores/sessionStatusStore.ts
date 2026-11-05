@@ -1,13 +1,9 @@
 import { create } from 'zustand'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
-import type { SessionInfo } from '@opencode-manager/shared/opencode'
+import type { SessionInfo, SessionStatus } from '@opencode-manager/shared/opencode'
 import { childLifecycle, type BackgroundTaskLifecycle, type ChildOutcome } from '@/lib/backgroundWork'
 
-export type SessionStatusType = 
-  | { type: 'idle' }
-  | { type: 'busy' }
-  | { type: 'compact' }
-  | { type: 'retry'; attempt: number; message: string; next: number }
+export type SessionStatusType = SessionStatus | { type: 'compact' }
 
 interface StatusSnapshotToken {
   revision: number
@@ -41,6 +37,8 @@ interface SessionStatusStore {
   setOutcome: (sessionID: string, outcome: ChildOutcome) => void
   clearOutcome: (sessionID: string) => void
   setOptimisticActive: (sessionID: string, timeoutMs?: number) => void
+  beginCompaction: (sessionID: string) => void
+  endCompaction: (sessionID: string) => void
   replaceStatuses: (statuses: Record<string, SessionStatusType>, token: StatusSnapshotToken) => void
   replaceServerStatuses: (serverId: string, statuses: Record<string, SessionStatusType>, token: StatusSnapshotToken) => void
   applySessionSnapshot: (sessionID: string, session: SessionInfo, token: StatusSnapshotToken) => void
@@ -62,6 +60,7 @@ interface SessionStatusStore {
 const DEFAULT_STATUS: SessionStatusType = { type: 'idle' }
 const OPTIMISTIC_ACTIVE_TIMEOUT_MS = 120_000
 const optimisticActiveTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const preCompactionStatuses = new Map<string, SessionStatusType>()
 const inFlightSnapshots = new Map<number, number>()
 let snapshotOrderCounter = 0
 let lastAppliedSnapshotOrder = 0
@@ -76,9 +75,13 @@ const clearOptimisticActiveTimer = (sessionID: string): void => {
   optimisticActiveTimers.delete(sessionID)
 }
 
+/**
+ * Hash used to skip redundant status writes: the status type alone, except for retry states,
+ * which include their attempt metadata so changed retry details still propagate.
+ */
 const getStatusHash = (status: SessionStatusType): string => {
   if (status.type === 'retry') {
-    return `${status.type}:${status.attempt}:${status.message}:${status.next}`
+    return JSON.stringify(status)
   }
   return status.type
 }
@@ -429,6 +432,22 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
       set((state) => applyStatusPatch(state, sessionID, { type: 'busy' }))
     },
 
+    beginCompaction: (sessionID: string) => {
+      const currentStatus = get().getStatus(sessionID)
+      if (currentStatus.type !== 'compact') {
+        preCompactionStatuses.set(sessionID, currentStatus)
+      }
+      get().setStatus(sessionID, { type: 'compact' })
+    },
+
+    endCompaction: (sessionID: string) => {
+      const previousStatus = preCompactionStatuses.get(sessionID)
+      if (previousStatus === undefined) return
+      preCompactionStatuses.delete(sessionID)
+      if (get().getStatus(sessionID).type !== 'compact') return
+      get().setStatus(sessionID, previousStatus)
+    },
+
     replaceStatuses: (statuses: Record<string, SessionStatusType>, token: StatusSnapshotToken) => {
       releaseSnapshot(token)
 
@@ -624,6 +643,7 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
 
     forgetSession: (sessionID: string) => {
       clearOptimisticActiveTimer(sessionID)
+      preCompactionStatuses.delete(sessionID)
       const current = get()
       const ownsShell = Array.from(current.runningShells.values()).some((shell) => shell.sessionID === sessionID)
       const hasSession =

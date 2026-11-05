@@ -153,7 +153,7 @@ describe('useActiveWork', () => {
 
     await waitFor(() => expect(recentIDs(result.current.groups)).toContain('root2'))
 
-    expect(mocks.listSessionPage).toHaveBeenCalledWith({ cursor: 'page2', includeChildren: true }, 'local')
+    expect(mocks.listSessionPage).toHaveBeenCalledWith({ cursor: 'page2' }, 'local')
   })
 
   it('does not request another page when the oldest loaded session is outside the window', async () => {
@@ -333,7 +333,7 @@ describe('useActiveWork', () => {
     expect(row.repo).toBeNull()
     expect(row.path).toBe('/servers/srv_kitchen/sessions/ses_remote_recent')
     expect(mocks.listRemoteSessionPage).toHaveBeenCalledWith(
-      { limit: 50, order: 'desc', includeChildren: true },
+      { limit: 50, order: 'desc' },
       'srv_kitchen',
     )
     expect(result.current.isError).toBe(false)

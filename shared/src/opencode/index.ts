@@ -22,6 +22,7 @@ export type {
   ModelInfo,
   ModelRef,
   PermissionRequest,
+  PermissionReply,
   PromptAgentAttachment,
   PromptFileAttachment,
   PromptMention,
@@ -50,6 +51,15 @@ export type {
 export { ClientError, isIntegrationNotFoundError, isMcpServerNotFoundError, isSessionNotFoundError, isWorktreeError } from '@opencode/client'
 
 export { assistantText, sessionIDFromEvent, toolContentText } from './content'
+
+export type {
+  OpenCodeAgentConfig,
+  OpenCodeCommandConfig,
+  OpenCodeConfigInfo,
+  OpenCodePermissionRule,
+  OpenCodeProviderConfig,
+  OpenCodeProviderModelConfig,
+} from './config'
 
 export {
   GOAL_CHANGED_EVENT_TYPE,

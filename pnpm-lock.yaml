@@ -47,9 +47,6 @@ importers:
       croner:
         specifier: ^10.0.1
         version: 10.0.1
-      eventsource:
-        specifier: ^4.1.0
-        version: 4.1.0
       hono:
         specifier: ^4.13.13
         version: 4.13.13
@@ -78,9 +75,6 @@ importers:
       '@types/bun':
         specifier: latest
         version: 1.3.10
-      '@types/eventsource':
-        specifier: ^3.0.0
-        version: 3.0.0
       '@types/web-push':
         specifier: ^3.6.4
         version: 3.6.4
@@ -358,6 +352,9 @@ importers:
       '@opencode/schema':
         specifier: 2.2.1
         version: 2.2.1
+      effect:
+        specifier: 4.0.1
+        version: 4.0.1
       jsonc-parser:
         specifier: ^3.3.1
         version: 3.3.1
@@ -2474,10 +2471,6 @@ packages:
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
 
-  '@types/eventsource@3.0.0':
-    resolution: {integrity: sha512-yEhFj31FTD29DtNeqePu+A+lD6loRef6YOM5XfN1kUwBHyy2DySGlA3jJU+FbQSkrfmlBVluf2Dub/OyReFGKA==}
-    deprecated: This is a stub types definition. eventsource provides its own type definitions, so you do not need this installed.
-
   '@types/geojson@7946.0.16':
     resolution: {integrity: sha512-6C8nqWur3j98U6+lXDfTUWIfgvZU+EumvpHKcYjujKH7woYyLj2sUmff0tRhrqM7BohUw7Pz3ZB1jj2gW9Fvmg==}
 
@@ -3492,14 +3485,6 @@ packages:
   events@3.3.0:
     resolution: {integrity: sha512-mQw+2fkQbALzQ7V0MY0IqdnXNOeTtP4r0lN9z7AAawCXgqea7bDii20AYrIBrFd/Hx0M2Ocz6S111CaFkUcb0Q==}
     engines: {node: '>=0.8.x'}
-
-  eventsource-parser@3.0.6:
-    resolution: {integrity: sha512-Vo1ab+QXPzZ4tCa8SwIHJFaSzy4R6SHf7BY79rFBDf0idraZWAkYrDjDj8uWaSm3S2TK+hJ7/t1CEmZ7jXw+pg==}
-    engines: {node: '>=18.0.0'}
-
-  eventsource@4.1.0:
-    resolution: {integrity: sha512-2GuF51iuHX6A9xdTccMTsNb7VO0lHZihApxhvQzJB5A03DvHDd2FQepodbMaztPBmBcE/ox7o2gqaxGhYB9LhQ==}
-    engines: {node: '>=20.0.0'}
 
   expand-template@2.0.3:
     resolution: {integrity: sha512-XYfuKMvj4O35f/pOXLObndIRvyQ+/+6AhODh+OKWj9S9498pHHn/IMszH+gt0fBCRWMNfk1ZSp5x3AifmnI2vg==}
@@ -7905,10 +7890,6 @@ snapshots:
 
   '@types/estree@1.0.8': {}
 
-  '@types/eventsource@3.0.0':
-    dependencies:
-      eventsource: 4.1.0
-
   '@types/geojson@7946.0.16': {}
 
   '@types/hast@3.0.4':
@@ -9000,12 +8981,6 @@ snapshots:
       - bare-abort-controller
 
   events@3.3.0: {}
-
-  eventsource-parser@3.0.6: {}
-
-  eventsource@4.1.0:
-    dependencies:
-      eventsource-parser: 3.0.6
 
   expand-template@2.0.3: {}
 

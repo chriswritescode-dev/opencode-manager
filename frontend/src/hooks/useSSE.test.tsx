@@ -51,7 +51,8 @@ class MockEventSource {
   close() {}
 
   emit(type: string, data: unknown) {
-    const event = { data: JSON.stringify(data) } as MessageEvent
+    const message = type === 'message' ? { payload: data } : data
+    const event = { data: JSON.stringify(message) } as MessageEvent
     this.listeners.get(type)?.forEach((listener) => listener(event))
     if (type === 'message' && this.onmessage) {
       this.onmessage(event)

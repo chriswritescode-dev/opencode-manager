@@ -1,8 +1,6 @@
-export type EnforcementRemovedSections = Record<string, unknown>
+import { isRecord } from '@opencode-manager/shared/utils'
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
+export type EnforcementRemovedSections = Record<string, unknown>
 
 function mergeRecordSections(target: Record<string, unknown>, key: string, value: Record<string, unknown>): void {
   const current = isRecord(target[key]) ? { ...(target[key] as Record<string, unknown>) } : {}
