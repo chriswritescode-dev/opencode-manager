@@ -199,6 +199,7 @@ export function OpenCodeConfigManager() {
 
   const applyOpenCodeConfigSave = (result: OpenCodeConfigSaveResponse) => {
     queryClient.setQueryData<OpenCodeConfigFile>(OPEN_CODE_CONFIG_QUERY_KEY, result)
+    queryClient.invalidateQueries({ queryKey: OPEN_CODE_MANAGED_CONFIG_QUERY_KEY })
     applyOpenCodeSaveFeedback({
       appliedMessage: 'Configuration updated',
       restartRequired: result.restartRequired,
@@ -211,7 +212,6 @@ export function OpenCodeConfigManager() {
     )?.revision
     const result = await settingsApi.patchOpenCodeConfig({ patch, expectedRevision })
     applyOpenCodeConfigSave(result)
-    queryClient.invalidateQueries({ queryKey: OPEN_CODE_MANAGED_CONFIG_QUERY_KEY })
   }
 
   const patchManagedConfigSafely = (patch: Record<string, unknown>) => {

@@ -320,6 +320,7 @@ describe('OpenCodeConfigManager', () => {
     const editIcon = container.querySelector('.lucide-square-pen') as SVGElement
     const editButton = editIcon.closest('button') as HTMLButtonElement
     await user.click(editButton)
+    const managedReadsBeforeSave = mockGetManagedOpenCodeConfig.mock.calls.length
 
     const textarea = await screen.findByLabelText('Config content') as HTMLTextAreaElement
     const next = configWithRaw.rawContent + ' '
@@ -336,6 +337,7 @@ describe('OpenCodeConfigManager', () => {
     const cached = queryClient.getQueryData<OpenCodeConfigFile>(['opencode-config', 'file'])
     expect(cached?.revision).toBe('rev-2')
     expect(cached?.rawContent).toBe('{\n  "theme": "dark"\n}')
+    await waitFor(() => expect(mockGetManagedOpenCodeConfig.mock.calls.length).toBeGreaterThan(managedReadsBeforeSave))
     await waitFor(() => expect(screen.queryByText('Edit opencode.json')).not.toBeInTheDocument())
   })
 
