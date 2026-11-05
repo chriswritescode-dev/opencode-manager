@@ -48,7 +48,8 @@ const permissionEffect = (
  * Applies the form effects to the managed wildcard rules in place, so the rule
  * order OpenCode resolves with last-match-wins stays unchanged. An `inherit`
  * effect removes the action's wildcard rules so the global permission applies;
- * any other effect prepends a wildcard rule when the action has none yet.
+ * any other effect adds a wildcard rule when the action has none yet, placed
+ * after the last catch-all `* *` rule so that rule cannot override it.
  */
 const withManagedPermissionEffects = (
   permissions: OpenCodePermissionRule[] | undefined,
@@ -64,7 +65,11 @@ const withManagedPermissionEffects = (
     const effect = effects[action]
     return effect === 'inherit' || actionsWithWildcard.has(action) ? [] : [{ action, resource: '*', effect }]
   })
-  return [...fallbacks, ...updated]
+  const fallbackIndex = updated.reduce(
+    (index, rule, currentIndex) => (rule.action === '*' && rule.resource === '*' ? currentIndex + 1 : index),
+    0,
+  )
+  return [...updated.slice(0, fallbackIndex), ...fallbacks, ...updated.slice(fallbackIndex)]
 }
 
 const optionalNumber = (value: string): number | undefined => {

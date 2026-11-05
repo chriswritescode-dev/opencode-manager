@@ -106,6 +106,7 @@ export function subscribeOpenCodeEvents(options: OpenCodeEventSubscriptionOption
         })
 
         for await (const event of stream) {
+          lastActivityAt = Date.now()
           if (closed || token !== loopToken) break
           if (!opened && event.type === 'server.connected') {
             opened = true

@@ -951,6 +951,40 @@ describe('convertAssistantOpenCodeConfigToV2', () => {
     expect(await convertAssistantOpenCodeConfigToV2(api)).toBe(false)
     expect(calls).toBe(0)
   })
+
+  it('leaves a customized v1 assistant untouched when OpenCode returns no converted agent', async () => {
+    await ensureAssistantMode(mockRepo)
+    const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
+    await writeFile(opencodeJsonPath, v1Config)
+
+    const api = createConfigApi((assistantDir) => [{
+      type: 'document',
+      path: path.join(assistantDir, 'opencode.json'),
+      info: { default_agent: 'assistant', permissions: convertedPermissions },
+    }])
+
+    expect(await convertAssistantOpenCodeConfigToV2(api)).toBe(false)
+    expect(await readFile(opencodeJsonPath, 'utf8')).toBe(v1Config)
+  })
+
+  it('leaves the file untouched when the converted config is invalid', async () => {
+    await ensureAssistantMode(mockRepo)
+    const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
+    await writeFile(opencodeJsonPath, v1Config)
+
+    const api = createConfigApi((assistantDir) => [{
+      type: 'document',
+      path: path.join(assistantDir, 'opencode.json'),
+      info: {
+        default_agent: 'assistant',
+        permissions: [{ action: 'shell', resource: '*', effect: 'sometimes' }],
+        agents: { assistant: { mode: 'primary', system: 'Converted prompt' } },
+      },
+    }])
+
+    expect(await convertAssistantOpenCodeConfigToV2(api)).toBe(false)
+    expect(await readFile(opencodeJsonPath, 'utf8')).toBe(v1Config)
+  })
 })
 
 describe('assistant-mode end-to-end', () => {

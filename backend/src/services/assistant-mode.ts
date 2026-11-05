@@ -23,6 +23,7 @@ import { applyOpenCodeConfigEdits, removeOpenCodeConfigProperty, V1_ENTITY_PATHS
 import { readConfigValueAtPath, restoreOpenCodeConfigReferences } from './opencode-config-references'
 import { readOpenCodeConfigDocuments } from './opencode-config-effective'
 import { logger } from '../utils/logger'
+import { withFileLock } from '../utils/atomic-json'
 
 
 const ASSISTANT_MODE_DIR = ASSISTANT_REPO_PATH
@@ -1199,35 +1200,35 @@ export async function ensureAssistantMode(
     await writeFileContent(agentsMdPath, agentsMdContent)
   }
 
-  const existingOpenCodeJsonContent = opencodeJsonExists ? await readFileContent(opencodeJsonPath) : undefined
-  const parsedOpenCodeConfig = existingOpenCodeJsonContent === undefined
-    ? undefined
-    : parseAssistantOpenCodeConfig(existingOpenCodeJsonContent)
-  const hasV1OpenCodeConfig = parsedOpenCodeConfig !== undefined && hasAssistantV1OpenCodeConfig(parsedOpenCodeConfig)
-  const existingOpenCodeConfig = parsedOpenCodeConfig as OpenCodeConfigInfo | undefined
+  const opencodeJsonUpdated = await withFileLock(opencodeJsonPath, async () => {
+    const existingOpenCodeJsonContent = opencodeJsonExists ? await readFileContent(opencodeJsonPath) : undefined
+    const parsedOpenCodeConfig = existingOpenCodeJsonContent === undefined
+      ? undefined
+      : parseAssistantOpenCodeConfig(existingOpenCodeJsonContent)
+    const hasV1OpenCodeConfig = parsedOpenCodeConfig !== undefined && hasAssistantV1OpenCodeConfig(parsedOpenCodeConfig)
+    const existingOpenCodeConfig = parsedOpenCodeConfig as OpenCodeConfigInfo | undefined
 
-  let opencodeJsonUpdated = false
-  if (!opencodeJsonExists || overwriteOpenCodeConfig) {
-    await writeFileContent(opencodeJsonPath, JSON.stringify(buildAssistantOpenCodeConfig(), null, 2))
-    opencodeJsonUpdated = true
-  } else if (!hasV1OpenCodeConfig) {
-    if (existingOpenCodeConfig !== undefined) {
-      const repairedConfig = assistantOpenCodeConfigNeedsRepair(existingOpenCodeConfig)
-        ? mergeAssistantOpenCodeConfig(existingOpenCodeConfig)
-        : existingOpenCodeConfig
-      const updatedConfig = assistantOpenCodeConfigHasGeneratedAgentPersona(repairedConfig)
-        ? stripGeneratedAssistantAgentPersona(repairedConfig)
-        : repairedConfig
-
-      if (updatedConfig !== existingOpenCodeConfig) {
-        await writeFileContent(opencodeJsonPath, JSON.stringify(updatedConfig, null, 2))
-        opencodeJsonUpdated = true
-      }
-    } else {
+    if (!opencodeJsonExists || overwriteOpenCodeConfig) {
       await writeFileContent(opencodeJsonPath, JSON.stringify(buildAssistantOpenCodeConfig(), null, 2))
-      opencodeJsonUpdated = true
+      return true
     }
-  }
+    if (hasV1OpenCodeConfig) return false
+    if (existingOpenCodeConfig === undefined) {
+      await writeFileContent(opencodeJsonPath, JSON.stringify(buildAssistantOpenCodeConfig(), null, 2))
+      return true
+    }
+
+    const repairedConfig = assistantOpenCodeConfigNeedsRepair(existingOpenCodeConfig)
+      ? mergeAssistantOpenCodeConfig(existingOpenCodeConfig)
+      : existingOpenCodeConfig
+    const updatedConfig = assistantOpenCodeConfigHasGeneratedAgentPersona(repairedConfig)
+      ? stripGeneratedAssistantAgentPersona(repairedConfig)
+      : repairedConfig
+    if (updatedConfig === existingOpenCodeConfig) return false
+
+    await writeFileContent(opencodeJsonPath, JSON.stringify(updatedConfig, null, 2))
+    return true
+  })
 
   await ensureDirectoryExists(path.join(assistantDir, ASSISTANT_OPENCODE_DIR))
   await ensureDirectoryExists(path.join(assistantDir, ASSISTANT_OPENCODE_DIR, ASSISTANT_AGENTS_DIR))
@@ -1492,50 +1493,67 @@ function restoreAssistantAgentReferences(
  * keeping comments and formatting. The file is left untouched when OpenCode is unreachable.
  */
 export async function convertAssistantOpenCodeConfigToV2(api: OpenCodeApi): Promise<boolean> {
+  const assistantDir = getAssistantModeDirectory()
+  const opencodeJsonPath = path.join(assistantDir, ASSISTANT_OPENCODE_CONFIG_FILENAME)
   try {
-    const assistantDir = getAssistantModeDirectory()
-    const opencodeJsonPath = path.join(assistantDir, ASSISTANT_OPENCODE_CONFIG_FILENAME)
-
-    if (!await fileExists(opencodeJsonPath)) return false
-
-    const rawContent = await readFileContent(opencodeJsonPath)
-    const rawConfig = parseAssistantOpenCodeConfig(rawContent)
-    if (rawConfig === undefined || !hasAssistantV1OpenCodeConfig(rawConfig)) return false
-
-    const documents = await readOpenCodeConfigDocuments(api, assistantDir)
-    const documentInfo = documents.get(path.resolve(opencodeJsonPath))
-    if (documentInfo === undefined) return false
-
-    const v1Assistants = readConfigValueAtPath(rawConfig, ASSISTANT_V1_AGENT_PATH)
-    const v1AssistantAgent = isRecord(v1Assistants) ? v1Assistants[ASSISTANT_DEFAULT_AGENT_NAME] : undefined
-    const setOperations: OpenCodeConfigPathOperation[] = [
-      {
-        path: ['agents', ASSISTANT_DEFAULT_AGENT_NAME],
-        value: restoreAssistantAgentReferences(
-          resolveConvertedAssistantAgent(
-            documentInfo.agents?.[ASSISTANT_DEFAULT_AGENT_NAME],
-            v1AssistantAgent,
-          ),
-          documentInfo,
-          rawConfig,
-        ),
-      },
-    ]
-    if (documentInfo.permissions !== undefined) {
-      setOperations.push({ path: ['permissions'], value: documentInfo.permissions })
-    }
-
-    let updatedText = applyOpenCodeConfigEdits(rawContent, setOperations)
-    for (const removalPath of buildAssistantV1ConfigRemovalPaths(rawConfig, documentInfo.permissions)) {
-      updatedText = removeOpenCodeConfigProperty(updatedText, removalPath)
-    }
-
-    await writeFileContent(opencodeJsonPath, updatedText)
-    return true
+    return await withFileLock(opencodeJsonPath, () => convertAssistantOpenCodeConfigFile(api, assistantDir, opencodeJsonPath))
   } catch (error) {
     logger.warn('Skipped the Assistant OpenCode config conversion:', error)
     return false
   }
+}
+
+async function convertAssistantOpenCodeConfigFile(
+  api: OpenCodeApi,
+  assistantDir: string,
+  opencodeJsonPath: string,
+): Promise<boolean> {
+  if (!await fileExists(opencodeJsonPath)) return false
+
+  const rawContent = await readFileContent(opencodeJsonPath)
+  const rawConfig = parseAssistantOpenCodeConfig(rawContent)
+  if (rawConfig === undefined || !hasAssistantV1OpenCodeConfig(rawConfig)) return false
+
+  const documents = await readOpenCodeConfigDocuments(api, assistantDir)
+  const documentInfo = documents.get(path.resolve(opencodeJsonPath))
+  if (documentInfo === undefined) return false
+
+  const v1Assistants = readConfigValueAtPath(rawConfig, ASSISTANT_V1_AGENT_PATH)
+  const v1AssistantAgent = isRecord(v1Assistants) ? v1Assistants[ASSISTANT_DEFAULT_AGENT_NAME] : undefined
+  if (isRecord(v1AssistantAgent) && documentInfo.agents?.[ASSISTANT_DEFAULT_AGENT_NAME] === undefined) {
+    logger.warn('Skipped the Assistant OpenCode config conversion: OpenCode returned no converted assistant agent')
+    return false
+  }
+  const setOperations: OpenCodeConfigPathOperation[] = [
+    {
+      path: ['agents', ASSISTANT_DEFAULT_AGENT_NAME],
+      value: restoreAssistantAgentReferences(
+        resolveConvertedAssistantAgent(
+          documentInfo.agents?.[ASSISTANT_DEFAULT_AGENT_NAME],
+          v1AssistantAgent,
+        ),
+        documentInfo,
+        rawConfig,
+      ),
+    },
+  ]
+  if (documentInfo.permissions !== undefined) {
+    setOperations.push({ path: ['permissions'], value: documentInfo.permissions })
+  }
+
+  let updatedText = applyOpenCodeConfigEdits(rawContent, setOperations)
+  for (const removalPath of buildAssistantV1ConfigRemovalPaths(rawConfig, documentInfo.permissions)) {
+    updatedText = removeOpenCodeConfigProperty(updatedText, removalPath)
+  }
+
+  const validation = validateOpenCodeConfig(parseJsonc(updatedText))
+  if (!validation.success) {
+    logger.warn('Skipped the Assistant OpenCode config conversion: the converted config is invalid', validation.issues)
+    return false
+  }
+
+  await writeFileContent(opencodeJsonPath, updatedText)
+  return true
 }
 
 export async function getAssistantModeStatus(repo: Repo): Promise<AssistantModeStatus> {

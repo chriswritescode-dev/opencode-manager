@@ -341,6 +341,39 @@ describe('AgentDialog', () => {
     ])
   })
 
+  it('places a new wildcard rule after a catch-all rule and before later exceptions', async () => {
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <AgentDialog
+        open
+        onOpenChange={vi.fn()}
+        onSubmit={onSubmit}
+        editingAgent={{
+          name: 'reviewer',
+          agent: {
+            system: 'Review code',
+            permissions: [
+              { action: '*', resource: '*', effect: 'allow' },
+              { action: 'shell', resource: 'git status', effect: 'allow' },
+            ],
+          },
+        }}
+      />,
+    )
+
+    await user.click(screen.getByRole('combobox', { name: 'Shell' }))
+    await user.click(screen.getByRole('option', { name: 'Deny' }))
+    await user.click(screen.getByRole('button', { name: 'Update' }))
+
+    const agent = onSubmit.mock.calls[0][1]
+    expect(agent.permissions).toEqual([
+      { action: '*', resource: '*', effect: 'allow' },
+      { action: 'shell', resource: '*', effect: 'deny' },
+      { action: 'shell', resource: 'git status', effect: 'allow' },
+    ])
+  })
+
   it('writes no permissions for a prompt-only save of an agent without permission rules', async () => {
     const onSubmit = vi.fn()
     const user = userEvent.setup()
