@@ -1,8 +1,20 @@
 {
   "name": "@opencode-manager/shared",
   "version": "1.1.0",
+  "description": "Shared schemas, types, OpenCode helpers and Manager API contracts for OpenCode Manager clients.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chriswritescode-dev/opencode-manager.git",
+    "directory": "shared"
+  },
   "type": "module",
-  "private": true,
+  "files": [
+    "src"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {

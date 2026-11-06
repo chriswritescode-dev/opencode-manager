@@ -1,4 +1,4 @@
-name: Publish ocm-cli
+name: Publish npm packages
 
 on:
   release:
@@ -11,8 +11,12 @@ permissions:
 
 jobs:
   publish:
-    name: Build and publish @opencode-manager/ocm-cli
+    name: Publish ${{ matrix.package }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [ocm-cli, shared]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -39,7 +43,7 @@ jobs:
 
       - name: Read package version
         id: pkg
-        working-directory: ocm-cli
+        working-directory: ${{ matrix.package }}
         run: |
           VERSION=$(node -p "require('./package.json').version")
           NAME=$(node -p "require('./package.json').name")
@@ -58,11 +62,11 @@ jobs:
           fi
 
       - name: Build
-        if: steps.check.outputs.already_published == 'false'
-        working-directory: ocm-cli
+        if: steps.check.outputs.already_published == 'false' && matrix.package == 'ocm-cli'
+        working-directory: ${{ matrix.package }}
         run: bun scripts/build.ts
 
       - name: Publish to npm
         if: steps.check.outputs.already_published == 'false'
-        working-directory: ocm-cli
+        working-directory: ${{ matrix.package }}
         run: pnpm publish --access public --no-git-checks
