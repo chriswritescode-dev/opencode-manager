@@ -2,6 +2,7 @@ import { API_BASE_URL } from "@/config"
 import type { FormAnswer, IntegrationInfo, IntegrationMethod } from "@opencode-manager/shared/opencode"
 import type { OAuthAttemptStatus, OAuthAuthorizeResponse } from "@opencode-manager/shared/schemas"
 import { fetchWrapper, fetchWrapperVoid } from "./fetchWrapper"
+import { callOpenCode } from "./opencodeApi"
 
 export type {
   FormAnswer,
@@ -48,9 +49,7 @@ export const oauthApi = {
   },
 
   getIntegrations: async (): Promise<IntegrationInfo[]> => {
-    const { integrations } = await fetchWrapper<{ integrations: IntegrationInfo[] }>(
-      `${API_BASE_URL}/api/oauth/integrations`
-    )
-    return integrations
+    const { data } = await callOpenCode((api) => api.integration.list())
+    return data
   },
 }

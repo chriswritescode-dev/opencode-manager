@@ -81,7 +81,6 @@ function buildProviderEntries(
         !seen.has(integration.id) &&
         (supportsSettingsAuthentication(integration.methods) || hasCredentialConnection(integration)),
     )
-    .sort((a, b) => a.name.localeCompare(b.name))
     .map((integration): ProviderEntry => ({
       id: integration.id,
       name: integration.name || integration.id,
@@ -90,6 +89,7 @@ function buildProviderEntries(
       connected: hasCredentialConnection(integration),
       keyConnected: hasKeyConnection(integration),
     }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 
   return [...entries, ...integrationOnly]
 }
@@ -117,10 +117,11 @@ export function ProviderSettings() {
     isLoading: integrationsLoading,
     isError: integrationsError,
   } = useProviderIntegrations()
+  const integrationsUnavailable = integrationsError && !integrations
 
   const providerEntries = useMemo(
-    () => integrationsError ? [] : buildProviderEntries(providers, integrations),
-    [providers, integrations, integrationsError],
+    () => buildProviderEntries(providers, integrations),
+    [providers, integrations],
   )
 
   const deleteCredentialMutation = useMutation({
@@ -225,7 +226,7 @@ export function ProviderSettings() {
     }
   }, [])
 
-  if (integrationsError) {
+  if (integrationsUnavailable) {
     return (
       <div role="alert" className="rounded-md border border-destructive/50 bg-card p-4">
         <p className="text-sm font-medium text-foreground">Unable to load provider integrations.</p>
@@ -310,10 +311,10 @@ export function ProviderSettings() {
                         size="sm"
                         variant={keyConnected ? 'outline' : 'secondary'}
                         onClick={() => keyConnected ? handleEditApiKey(provider) : handleAddApiKey(provider)}
-                        aria-label={`Add API key for ${provider.name || provider.id}`}
+                        aria-label={`${keyConnected ? 'Edit' : 'Add'} API key for ${provider.name || provider.id}`}
                       >
                         <Key className="h-4 w-4 mr-1" />
-                        Add API key
+                        {keyConnected ? 'Edit API key' : 'Add API key'}
                       </Button>
                     )}
                     {isConnected && (

@@ -12,7 +12,6 @@ import type { ReactNode } from 'react'
 vi.mock('@/api/providers', () => ({
   getProviders: vi.fn(),
   providerCredentialsApi: {
-    list: vi.fn(),
     getStatus: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
@@ -343,8 +342,9 @@ describe('ProviderSettings', () => {
     renderSettings()
 
     await screen.findByText('Anthropic Integration')
-    expect(screen.getByText('2 models')).toBeInTheDocument()
-    expect(screen.getByText('Connected')).toBeInTheDocument()
+    const row = screen.getByText('Anthropic Integration').closest('.py-3') as HTMLElement
+    expect(within(row).getByText('2 models')).toBeInTheDocument()
+    expect(within(row).getByText('Connected')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Reconnect' }))
     expect(screen.getByTestId('oauth-authorize-dialog')).toHaveTextContent('anthropic')
@@ -395,7 +395,7 @@ describe('ProviderSettings', () => {
     expect(screen.getByTestId('api-key-dialog')).toHaveAttribute('data-mode', 'add')
   })
 
-  it('labels an existing API key action as Add API key without changing its handling', async () => {
+  it('labels an existing API key action as Edit API key and opens the dialog in edit mode', async () => {
     vi.mocked(getProviders).mockResolvedValue({
       providers: [providerFixture('anthropic', 'Anthropic', 2)],
       models: [],
@@ -409,10 +409,10 @@ describe('ProviderSettings', () => {
     await screen.findByText('Anthropic')
     const row = screen.getByText('Anthropic').closest('.py-3') as HTMLElement
 
-    const addKeyButton = within(row).getByRole('button', { name: 'Add API key for Anthropic' })
-    expect(addKeyButton).toHaveTextContent('Add API key')
+    const editKeyButton = within(row).getByRole('button', { name: 'Edit API key for Anthropic' })
+    expect(editKeyButton).toHaveTextContent('Edit API key')
 
-    await user.click(addKeyButton)
+    await user.click(editKeyButton)
     expect(screen.getByTestId('api-key-dialog')).toHaveAttribute('data-mode', 'edit')
   })
 
@@ -496,5 +496,24 @@ describe('ProviderSettings', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load provider integrations.')
     expect(screen.queryByText('Anthropic')).not.toBeInTheDocument()
     expect(screen.queryByText('No OAuth-capable providers available.')).not.toBeInTheDocument()
+  })
+
+  it('keeps the loaded providers when an integration refetch fails', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProviderSettings />
+      </QueryClientProvider>,
+    )
+    await screen.findByText('Anthropic')
+
+    vi.mocked(oauthApi.getIntegrations).mockRejectedValue(new Error('Server unavailable'))
+    await queryClient.refetchQueries({ queryKey: ['provider-integrations'] })
+
+    await waitFor(() => expect(queryClient.getQueryState(['provider-integrations'])?.status).toBe('error'))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByText('Anthropic')).toBeInTheDocument()
   })
 })

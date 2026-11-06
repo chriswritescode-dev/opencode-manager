@@ -118,7 +118,7 @@ describe('isPersistedQueryKey', () => {
   it.each([
     ['repo git status', ['reposGitStatus', [1, 2]]],
     ['settings', ['settings', 'user-1']],
-    ['provider credentials', ['provider-credentials']],
+    ['provider integrations', ['provider-integrations']],
     ['provider auth methods', ['provider-auth-methods']],
     ['passkeys', ['passkeys']],
     ['schedules', ['schedules', '/work/repo']],
@@ -165,7 +165,7 @@ describe('shouldPersistQuery', () => {
     const queryClient = createClient()
 
     expect(shouldPersistQuery(buildQuery(queryClient, ['settings', 'user-1']))).toBe(false)
-    expect(shouldPersistQuery(buildQuery(queryClient, ['provider-credentials']))).toBe(false)
+    expect(shouldPersistQuery(buildQuery(queryClient, ['provider-integrations']))).toBe(false)
     expect(shouldPersistQuery(buildQuery(queryClient, ['passkeys']))).toBe(false)
   })
 
@@ -201,7 +201,7 @@ describe('PERSISTED_QUERY_RULES', () => {
     const roots = PERSISTED_QUERY_RULES.map((rule) => rule.prefix.join('.'))
     const excluded = [
       'settings',
-      'provider-credentials',
+      'provider-integrations',
       'provider-auth-methods',
       'passkeys',
       'schedules',

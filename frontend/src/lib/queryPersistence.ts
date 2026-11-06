@@ -39,7 +39,7 @@ export interface QueryCachePersister extends Persister {
  *
  * Every rule is a list or roster key whose shape is stable across reloads of the same account.
  * Excluded on purpose: `settings` (contains the OpenCode server auth token and API keys),
- * `provider-credentials`, `passkeys`, `provider-auth-methods`, the `opencode` transcript kinds
+ * `provider-integrations`, `passkeys`, `provider-auth-methods`, the `opencode` transcript kinds
  * (large, and rewritten on every streamed token), `schedules` and `all-schedules` (a schedule or
  * MCP config can carry `client_secret`), `reposGitStatus` (a `Map` that JSON turns into `{}`), and
  * every root not listed here.

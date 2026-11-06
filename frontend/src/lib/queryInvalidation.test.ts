@@ -130,7 +130,6 @@ describe('invalidateProviderCaches', () => {
 
     invalidateProviderCaches(queryClient)
 
-    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['provider-credentials'] })
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['provider-auth-methods'] })
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['provider-integrations'] })
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'providers'] })
@@ -157,7 +156,7 @@ describe('invalidateProviderCachesDebounced', () => {
 
     vi.advanceTimersByTime(200)
 
-    expect(invalidateQueries).toHaveBeenCalledTimes(4)
+    expect(invalidateQueries).toHaveBeenCalledTimes(3)
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'providers'] })
   })
 })

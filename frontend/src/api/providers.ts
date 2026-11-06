@@ -16,7 +16,7 @@ import {
   type ModelPreferenceModel,
   type ModelRef,
 } from "@opencode-manager/shared/opencode";
-import type { CredentialListResponse, CredentialStatusResponse } from "@opencode-manager/shared/schemas";
+import type { CredentialStatusResponse } from "@opencode-manager/shared/schemas";
 
 export type Model = Pick<ModelInfo, 'id' | 'modelID' | 'name'> & {
   limit?: {
@@ -186,11 +186,6 @@ export function formatProviderName(provider: Provider): string {
 }
 
 export const providerCredentialsApi = {
-  list: async (): Promise<string[]> => {
-    const { providers } = await fetchWrapper<CredentialListResponse>(`${API_BASE_URL}/api/providers/credentials`);
-    return providers;
-  },
-
   getStatus: async (providerId: string): Promise<boolean> => {
     const { hasCredentials } = await fetchWrapper<CredentialStatusResponse>(
       `${API_BASE_URL}/api/providers/${providerId}/credentials/status`
