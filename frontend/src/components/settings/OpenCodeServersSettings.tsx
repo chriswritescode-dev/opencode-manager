@@ -12,7 +12,7 @@ import { Switch } from '@/components/ui/switch'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { showToast } from '@/lib/toast'
 import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
-import { OpenCodeServerDialog, type OpenCodeServerFormValues } from './OpenCodeServerDialog'
+import { OpenCodeServerDialog, OpenCodeVersionBadge, type OpenCodeServerFormValues } from './OpenCodeServerDialog'
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
@@ -31,11 +31,7 @@ function ServerTestResult({ result }: { result: OpenCodeServerTestResult }) {
     <div className="flex flex-wrap items-center gap-2 text-sm">
       <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
       <span>OpenCode {result.version ?? 'unknown version'}</span>
-      {result.versionSupported ? (
-        <Badge variant="secondary">Supported</Badge>
-      ) : (
-        <Badge variant="destructive">Unsupported version</Badge>
-      )}
+      <OpenCodeVersionBadge result={result} />
     </div>
   )
 }

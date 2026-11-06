@@ -1,6 +1,10 @@
 import { compareParsedSemver, compareSemver, normalizeSemver, parseSemver, type Semver } from '../utils/semver'
 
-export const OPENCODE_PINNED_VERSION = '2.2.1'
+/** The OpenCode release Manager is built against and bundles; matches the `@opencode/*` pnpm catalog entries. */
+export const OPENCODE_PINNED_VERSION = '2.2.5'
+
+/** The oldest OpenCode release Manager supports; any later release of the same major is accepted. */
+export const OPENCODE_MIN_VERSION = '2.2.5'
 
 const OPENCODE_RELEASE_BASE_URL = 'https://opencode.ai/files/bin'
 
@@ -47,20 +51,25 @@ export function compareOpenCodeVersions(left: string, right: string): number {
   return compareSemver(left, right)
 }
 
-function parsePinnedOpenCodeVersion(): OpenCodeVersion {
-  const pinned = parseOpenCodeVersion(OPENCODE_PINNED_VERSION)
-  if (!pinned) throw new Error(`OPENCODE_PINNED_VERSION is not a valid version: ${OPENCODE_PINNED_VERSION}`)
-  return pinned
+function parseMinOpenCodeVersion(): OpenCodeVersion {
+  const min = parseOpenCodeVersion(OPENCODE_MIN_VERSION)
+  if (!min) throw new Error(`OPENCODE_MIN_VERSION is not a valid version: ${OPENCODE_MIN_VERSION}`)
+  return min
 }
 
-const OPENCODE_PINNED = parsePinnedOpenCodeVersion()
+const OPENCODE_MIN = parseMinOpenCodeVersion()
 
-export const OPENCODE_SUPPORTED_VERSION_RANGE = `>=${OPENCODE_PINNED_VERSION} <${OPENCODE_PINNED.major + 1}.0.0`
+export const OPENCODE_SUPPORTED_VERSION_RANGE = `>=${OPENCODE_MIN_VERSION} <${OPENCODE_MIN.major + 1}.0.0`
 
 export function isSupportedOpenCodeVersion(version: string): boolean {
   const parsed = parseOpenCodeVersion(version)
   if (!parsed) return false
-  return parsed.major === OPENCODE_PINNED.major && compareParsedSemver(parsed, OPENCODE_PINNED) >= 0
+  return parsed.major === OPENCODE_MIN.major && compareParsedSemver(parsed, OPENCODE_MIN) >= 0
+}
+
+/** Reports whether a server version shares Manager's OpenCode major, so the V2 client can still talk to it. */
+export function isSameOpenCodeMajor(version: string): boolean {
+  return parseOpenCodeVersion(version)?.major === OPENCODE_MIN.major
 }
 
 export function describeUnsupportedOpenCodeVersion(version: string): string {

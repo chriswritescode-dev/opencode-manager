@@ -38,7 +38,7 @@ fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$REPO_ROOT/scripts/lib/opencode-release.sh"
-OPENCODE_SUPPORTED_FLOOR="$(sed -n 's/^ARG OPENCODE_VERSION=//p' "$REPO_ROOT/Dockerfile" | head -1)"
+OPENCODE_SUPPORTED_FLOOR="$(sed -n 's/^ARG OPENCODE_MIN_VERSION=//p' "$REPO_ROOT/Dockerfile" | head -1)"
 OPENCODE_VERSION_OUTPUT="$(opencode --version 2>&1)" || OPENCODE_VERSION_OUTPUT=""
 OPENCODE_VERSION="$(parse_opencode_version_output "$OPENCODE_VERSION_OUTPUT")"
 

@@ -12,6 +12,7 @@ import {
   type OpenCodeServerLink,
   type OpenCodeServerTestResult,
 } from '@opencode-manager/shared/schemas'
+import { isSameOpenCodeMajor } from '@opencode-manager/shared/opencode'
 import { haveSameUrlOrigin, isPublicPlainHttpUrl, parseHttpUrl } from '@opencode-manager/shared/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -99,6 +100,15 @@ function buildDefaultValues(server?: OpenCodeServer | null): ServerFormValues {
   }
 }
 
+/** Labels a reachable server's version: supported, same major but different, or an incompatible major. */
+export function OpenCodeVersionBadge({ result }: { result: OpenCodeServerTestResult }) {
+  if (result.versionSupported) return <Badge variant="secondary">Supported</Badge>
+  if (result.version && isSameOpenCodeMajor(result.version)) {
+    return <Badge variant="outline">Different version: some features may not work</Badge>
+  }
+  return <Badge variant="destructive">Unsupported version</Badge>
+}
+
 function TestResultSummary({ result }: { result: OpenCodeServerTestResult }) {
   if (!result.ok) {
     return (
@@ -112,11 +122,7 @@ function TestResultSummary({ result }: { result: OpenCodeServerTestResult }) {
     <div role="status" className="flex flex-wrap items-center gap-2 rounded-md border border-border p-2 text-sm">
       <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
       <span>Connected — OpenCode {result.version ?? 'unknown version'}</span>
-      {result.versionSupported ? (
-        <Badge variant="secondary">Supported</Badge>
-      ) : (
-        <Badge variant="destructive">Unsupported version</Badge>
-      )}
+      <OpenCodeVersionBadge result={result} />
     </div>
   )
 }

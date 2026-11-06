@@ -60,7 +60,7 @@ ensure_auth_secret() {
   export AUTH_SECRET
 }
 
-OPENCODE_SUPPORTED_FLOOR="${OPENCODE_BUNDLED_VERSION:-}"
+OPENCODE_SUPPORTED_FLOOR="${OPENCODE_MIN_VERSION:-${OPENCODE_BUNDLED_VERSION:-}}"
 
 read_opencode_version() {
   local binary output
@@ -93,7 +93,7 @@ reconcile_persisted_opencode() {
     return 0
   fi
   if ! is_supported_opencode_version "$persisted_version"; then
-    echo "Persisted OpenCode $persisted_version is outside the supported range $(supported_opencode_range); removing it so the bundled OpenCode $OPENCODE_SUPPORTED_FLOOR binary is used"
+    echo "Persisted OpenCode $persisted_version is outside the supported range $(supported_opencode_range); removing it so the bundled OpenCode ${OPENCODE_BUNDLED_VERSION:-} binary is used"
     rm -f "$persisted_path"
     return 0
   fi
