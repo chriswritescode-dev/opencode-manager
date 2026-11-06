@@ -59,7 +59,7 @@ export function formatEventModifiers(e: KeyboardEvent): string {
  * Formats a keydown event as a canonical shortcut string such as `Cmd+Shift+Z`, or null for a lone modifier key.
  */
 export function formatShortcutEvent(e: KeyboardEvent): string | null {
-  if (isModifierOnlyEvent(e)) return null
+  if (!e.key || isModifierOnlyEvent(e)) return null
   return [...eventModifiers(e), eventMainKey(e)].join('+')
 }
 

@@ -23,6 +23,13 @@ describe('keyboardShortcuts', () => {
     expect(formatShortcutEvent(new KeyboardEvent('keydown', { key: 'Shift', shiftKey: true }))).toBeNull()
   })
 
+  it('ignores a key event without a key, such as one Chrome autofill dispatches', () => {
+    const autofillEvent = new KeyboardEvent('keydown')
+    Object.defineProperty(autofillEvent, 'key', { value: undefined })
+
+    expect(formatShortcutEvent(autofillEvent)).toBeNull()
+  })
+
   it('returns the shared defaults with the key set', () => {
     expect(Object.keys(getDefaultKeyboardShortcuts())).toEqual(Object.keys(DEFAULT_KEYBOARD_SHORTCUTS))
   })
