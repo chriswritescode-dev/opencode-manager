@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FetchError } from '@opencode-manager/shared'
 import { sessionIDFromEvent, type V2Event } from '@opencode-manager/shared/opencode'
-import { buildServerDirectoryKey, LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
+import {
+  buildServerDirectoryKey,
+  LOCAL_OPENCODE_SERVER_ID,
+  type OpenCodeStreamEvent,
+} from '@opencode-manager/shared/schemas'
 import { listSessionMessages, readSessionSnapshot } from '@/api/opencode'
 import { openCodeEventStream } from '@/lib/opencode-event-stream'
 import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
@@ -25,6 +29,12 @@ interface NewestPageRead {
 
 const TRANSCRIPT_FALLBACK_POLL_INTERVAL_MS = 5000
 
+/**
+ * Returns the live transcript for one session: messages, pending tool calls, and status, kept
+ * current by applying stream events on animation frames and re-reading the newest page whenever
+ * events are missed or the stream reconnects. `fetchOlder` pages backwards through history, and
+ * polling stands in while the stream is not healthy.
+ */
 export function useSessionTranscript(sessionID: string, directory: string) {
   const serverId = useOpenCodeServerId()
   const isRemoteServer = !isLocalOpenCodeServer(serverId)
@@ -133,6 +143,10 @@ export function useSessionTranscript(sessionID: string, directory: string) {
       void readNewestPage().catch(() => undefined)
     }
 
+    /**
+     * Applies the events queued since the last frame to the cached transcript and requests a resync
+     * when the projection reports the cache fell behind.
+     */
     const flush = () => {
       frameRef.current = null
       const events = queuedEventsRef.current
@@ -150,9 +164,9 @@ export function useSessionTranscript(sessionID: string, directory: string) {
 
     const subscription = openCodeEventStream.subscribeGlobalMonitor({
       directories: [buildServerDirectoryKey(serverId, directory)],
-      onEvent: (data) => {
-        const event = data as V2Event & { serverId?: string }
+      onEvent: (event: OpenCodeStreamEvent) => {
         if ((event.serverId ?? LOCAL_OPENCODE_SERVER_ID) !== serverId) return
+        if (event.type === 'ssh.host-key-request') return
         if (sessionIDFromEvent(event) !== sessionID) return
         newestReadRef.current?.buffered.push(event)
         queuedEventsRef.current.push(event)

@@ -14,8 +14,9 @@ vi.mock('../../src/utils/logger', () => ({
   },
 }))
 
-import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
-import { sseAggregator, type PendingActionsFetcher } from '../../src/services/sse-aggregator'
+import type { OpenCodeApi, V2Event } from '@opencode-manager/shared/opencode'
+import { sseAggregator } from '../../src/services/sse-aggregator'
+import type { OpenCodeClient } from '../../src/services/opencode/client'
 
 interface CapturedClient {
   events: Array<{ event: string; data: string }>
@@ -40,7 +41,7 @@ function parseFrame(frame: string): { directory: string | null; serverId?: strin
   return JSON.parse(frame.replace(/^event: message\ndata: /, '').trim())
 }
 
-function makeFetcher(): PendingActionsFetcher {
+function makeClient(): Pick<OpenCodeClient, 'api'> {
   const api = {
     permission: {
       request: {
@@ -66,12 +67,18 @@ async function flushReplay(): Promise<void> {
   }
 }
 
-const PAYLOAD = '{"id":"evt_1","created":1,"type":"session.idle","location":{"directory":"/repo"},"data":{"sessionID":"ses_1"}}'
+const LOCAL_EVENT = {
+  id: 'evt_1',
+  created: 1,
+  type: 'session.idle',
+  location: { directory: '/repo' },
+  data: { sessionID: 'ses_1' },
+} satisfies V2Event
 
 describe('SSEAggregator remote envelope delivery', () => {
   beforeEach(() => {
     sseAggregator.shutdown()
-    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setOpenCodeClient(null)
     sseAggregator.setScheduledSessionsResolver(() => [])
   })
 
@@ -87,9 +94,9 @@ describe('SSEAggregator remote envelope delivery', () => {
     sseAggregator.addClient('local-dir', local.callback, local.writeFrame, ['/repo'])
     sseAggregator.addClient('no-directories', unsubscribed.callback, unsubscribed.writeFrame, [])
 
-    sseAggregator.deliverRemoteEnvelope('srv_a', '/repo', PAYLOAD)
+    sseAggregator.deliverRemoteEnvelope('srv_a', '/repo', LOCAL_EVENT)
 
-    const expected = { directory: '/repo', serverId: 'srv_a', payload: JSON.parse(PAYLOAD) }
+    const expected = { directory: '/repo', serverId: 'srv_a', payload: LOCAL_EVENT }
     expect(subscribed.frames.map(parseFrame)).toEqual([expected])
     expect(otherDirectory.frames.map(parseFrame)).toEqual([expected])
     expect(otherServer.frames.map(parseFrame)).toEqual([expected])
@@ -107,9 +114,9 @@ describe('SSEAggregator remote envelope delivery', () => {
     sseAggregator.addClient('any-c', otherServer.callback, otherServer.writeFrame, ['srv_b|/repo'])
     sseAggregator.addClient('any-d', local.callback, local.writeFrame, ['/repo'])
 
-    sseAggregator.deliverRemoteEnvelope('srv_a', null, PAYLOAD)
+    sseAggregator.deliverRemoteEnvelope('srv_a', null, LOCAL_EVENT)
 
-    const expected = { directory: null, serverId: 'srv_a', payload: JSON.parse(PAYLOAD) }
+    const expected = { directory: null, serverId: 'srv_a', payload: LOCAL_EVENT }
     expect(first.frames.map(parseFrame)).toEqual([expected])
     expect(second.frames.map(parseFrame)).toEqual([expected])
     expect(otherServer.frames.map(parseFrame)).toEqual([expected])
@@ -121,7 +128,7 @@ describe('SSEAggregator remote envelope delivery', () => {
     sseAggregator.addClient('targeted', client.callback, client.writeFrame, ['srv_a|/repo'])
     sseAggregator.removeDirectories('targeted', ['srv_a|/repo'])
 
-    sseAggregator.deliverRemoteEnvelopeToClient('targeted', 'srv_a', '/repo', PAYLOAD)
+    sseAggregator.deliverRemoteEnvelopeToClient('targeted', 'srv_a', '/repo', LOCAL_EVENT)
 
     expect(client.frames).toHaveLength(0)
   })
@@ -130,10 +137,10 @@ describe('SSEAggregator remote envelope delivery', () => {
     const client = createCapturingClient()
     sseAggregator.addClient('targeted-ok', client.callback, client.writeFrame, ['srv_a|/repo'])
 
-    sseAggregator.deliverRemoteEnvelopeToClient('targeted-ok', 'srv_a', '/repo', PAYLOAD)
+    sseAggregator.deliverRemoteEnvelopeToClient('targeted-ok', 'srv_a', '/repo', LOCAL_EVENT)
 
     expect(client.frames.map(parseFrame)).toEqual([
-      { directory: '/repo', serverId: 'srv_a', payload: JSON.parse(PAYLOAD) },
+      { directory: '/repo', serverId: 'srv_a', payload: LOCAL_EVENT },
     ])
   })
 
@@ -159,16 +166,16 @@ describe('SSEAggregator remote envelope delivery', () => {
     const client = createCapturingClient()
     sseAggregator.addClient('local-envelope', client.callback, client.writeFrame, ['/repo'])
 
-    ;(sseAggregator as unknown as { handleUpstreamMessage(data: string): void }).handleUpstreamMessage(PAYLOAD)
+    ;(sseAggregator as unknown as { handleUpstreamEvent(event: V2Event): void }).handleUpstreamEvent(LOCAL_EVENT)
 
-    expect(client.frames).toEqual([`event: message\ndata: {"directory":"/repo","payload":${PAYLOAD}}\n\n`])
+    expect(client.frames).toEqual([`event: message\ndata: {"directory":"/repo","payload":${JSON.stringify(LOCAL_EVENT)}}\n\n`])
     expect(client.frames[0]).not.toContain('serverId')
     expect(parseFrame(client.frames[0]!).serverId).toBeUndefined()
   })
 
-  it('routes remote subscriptions to the remote replay hook instead of the local fetcher', async () => {
-    const fetcher = makeFetcher()
-    sseAggregator.setPendingActionsFetcher(fetcher)
+  it('routes remote subscriptions to the remote replay hook instead of the local client', async () => {
+    const openCodeClient = makeClient()
+    sseAggregator.setOpenCodeClient(openCodeClient)
     const remoteReplay = vi.fn(async () => {})
 
     sseAggregator.addClient('mixed', () => {}, () => {}, ['/repo', 'srv_a|/repo'])
@@ -179,21 +186,21 @@ describe('SSEAggregator remote envelope delivery', () => {
 
     expect(remoteReplay).toHaveBeenCalledTimes(1)
     expect(remoteReplay).toHaveBeenCalledWith('mixed', 'srv_a', '/new')
-    expect(fetcher.api.permission.request.list).toHaveBeenCalledTimes(1)
-    expect(fetcher.api.permission.request.list).toHaveBeenCalledWith({ location: { directory: '/repo' } })
+    expect(openCodeClient.api.permission.request.list).toHaveBeenCalledTimes(1)
+    expect(openCodeClient.api.permission.request.list).toHaveBeenCalledWith({ location: { directory: '/repo' } })
   })
 
-  it('does not replay remote keys through the local fetcher on connect', async () => {
-    const fetcher = makeFetcher()
-    sseAggregator.setPendingActionsFetcher(fetcher)
+  it('does not replay remote keys through the local client on connect', async () => {
+    const openCodeClient = makeClient()
+    sseAggregator.setOpenCodeClient(openCodeClient)
     const remoteReplay = vi.fn()
     sseAggregator.setRemoteReplayHandler(remoteReplay)
 
     sseAggregator.addClient('remote-only', () => {}, () => {}, ['srv_a|/repo'])
     await flushReplay()
 
-    expect(fetcher.api.permission.request.list).not.toHaveBeenCalled()
-    expect(fetcher.api.form.list).not.toHaveBeenCalled()
+    expect(openCodeClient.api.permission.request.list).not.toHaveBeenCalled()
+    expect(openCodeClient.api.form.list).not.toHaveBeenCalled()
     expect(remoteReplay).toHaveBeenCalledWith('remote-only', 'srv_a', '/repo')
   })
 
@@ -215,8 +222,21 @@ describe('SSEAggregator remote envelope delivery', () => {
     sseAggregator.addClient('removed', client.callback, client.writeFrame, ['srv_a|/repo'])
     sseAggregator.removeClient('removed')
 
-    sseAggregator.deliverRemoteEnvelope('srv_a', null, PAYLOAD)
+    sseAggregator.deliverRemoteEnvelope('srv_a', null, LOCAL_EVENT)
 
     expect(client.frames).toHaveLength(0)
+  })
+
+  it('does not serialize an envelope that no client receives', () => {
+    const stringify = vi.spyOn(JSON, 'stringify')
+
+    try {
+      sseAggregator.deliverRemoteEnvelope('srv_a', '/repo', LOCAL_EVENT)
+      sseAggregator.deliverRemoteEnvelopeToClient('absent', 'srv_a', '/repo', LOCAL_EVENT)
+
+      expect(stringify).not.toHaveBeenCalledWith(LOCAL_EVENT)
+    } finally {
+      stringify.mockRestore()
+    }
   })
 })

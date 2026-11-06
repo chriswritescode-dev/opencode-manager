@@ -95,12 +95,14 @@ describe('useSessionsAcrossDirectories', () => {
       limit: 25,
       order: 'desc',
       search: undefined,
+      parentID: null,
     }, 'local')
     expect(mocks.listSessionPage).toHaveBeenCalledWith({
       directory: '/w/b',
       limit: 25,
       order: 'desc',
       search: undefined,
+      parentID: null,
     }, 'local')
 
     await act(async () => {
@@ -111,7 +113,7 @@ describe('useSessionsAcrossDirectories', () => {
       expect(result.current.data).toHaveLength(3)
     })
 
-    expect(mocks.listSessionPage).toHaveBeenCalledWith({ directory: '/w/a', cursor: 'cursor_a' }, 'local')
+    expect(mocks.listSessionPage).toHaveBeenCalledWith({ directory: '/w/a', cursor: 'cursor_a', parentID: null }, 'local')
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_a1', 'ses_b1', 'ses_a2'])
   })
 
@@ -130,6 +132,7 @@ describe('useSessionsAcrossDirectories', () => {
         limit: 25,
         order: 'desc',
         search: 'deploy',
+        parentID: null,
       }, 'local')
     })
   })
@@ -157,6 +160,7 @@ describe('useSessionsAcrossDirectories', () => {
       limit: 25,
       order: 'desc',
       search: undefined,
+      parentID: null,
     }, 'local')
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_all1'])
     expect(result.current.hasNextPage).toBe(true)
@@ -170,7 +174,7 @@ describe('useSessionsAcrossDirectories', () => {
     })
 
     expect(mocks.listSessionPage).toHaveBeenCalledTimes(2)
-    expect(mocks.listSessionPage).toHaveBeenLastCalledWith({ cursor: 'cursor_all' }, 'local')
+    expect(mocks.listSessionPage).toHaveBeenLastCalledWith({ cursor: 'cursor_all', parentID: null }, 'local')
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_all1', 'ses_all2'])
   })
 
@@ -194,6 +198,7 @@ describe('useSessionsAcrossDirectories', () => {
       limit: 25,
       order: 'desc',
       search: undefined,
+      parentID: null,
     }, 'local')
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_all'])
   })
@@ -216,7 +221,6 @@ describe('useSessionsAcrossDirectories', () => {
       limit: 25,
       order: 'desc',
       search: undefined,
-      includeChildren: true,
     }, 'local')
     expect(queryClient.getQueryCache().getAll()[0]?.queryKey).toEqual([
       'opencode',
@@ -278,6 +282,7 @@ describe('useSessionsAcrossDirectories', () => {
       search: undefined,
       project: 'proj_x',
       subpath: '',
+      parentID: null,
     }, 'local')
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_root'])
     expect(result.current.hasNextPage).toBe(true)
@@ -291,7 +296,7 @@ describe('useSessionsAcrossDirectories', () => {
     })
 
     expect(mocks.listSessionPage).toHaveBeenCalledTimes(2)
-    expect(mocks.listSessionPage).toHaveBeenLastCalledWith({ cursor: 'cursor_project' }, 'local')
+    expect(mocks.listSessionPage).toHaveBeenLastCalledWith({ cursor: 'cursor_project', parentID: null }, 'local')
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_root', 'ses_wt'])
   })
 

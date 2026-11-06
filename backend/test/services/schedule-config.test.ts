@@ -14,6 +14,7 @@ describe('schedule-config', () => {
       name: '  Daily health check  ',
       description: '  Summarize repo health  ',
       enabled: true,
+      showInInbox: true,
       scheduleMode: 'interval',
       intervalMinutes: 60,
       prompt: '  Review the repository and summarize risks.  ',
@@ -25,6 +26,7 @@ describe('schedule-config', () => {
       name: 'Daily health check',
       description: 'Summarize repo health',
       enabled: true,
+      showInInbox: true,
       scheduleMode: 'interval',
       intervalMinutes: 60,
       cronExpression: null,
@@ -48,6 +50,7 @@ describe('schedule-config', () => {
     const result = buildCreateSchedulePersistenceInput({
       name: 'Morning report',
       enabled: true,
+      showInInbox: true,
       scheduleMode: 'cron',
       cronExpression: ' 0 9 * * * ',
       timezone: '   ',
@@ -67,6 +70,7 @@ describe('schedule-config', () => {
       name: 'Weekly engineering summary',
       description: 'Summarize health',
       enabled: true,
+      showInInbox: true,
       scheduleMode: 'interval',
       intervalMinutes: 60,
       cronExpression: null,
@@ -101,6 +105,7 @@ describe('schedule-config', () => {
       name: 'Weekly engineering summary',
       description: 'Existing description',
       enabled: true,
+      showInInbox: true,
       scheduleMode: 'interval',
       intervalMinutes: 60,
       cronExpression: null,
@@ -138,6 +143,7 @@ describe('schedule-config', () => {
       name: 'Branch job',
       description: null,
       enabled: true,
+      showInInbox: true,
       scheduleMode: 'interval',
       intervalMinutes: 60,
       cronExpression: null,
@@ -164,6 +170,74 @@ describe('schedule-config', () => {
     expect(result.branch).toBe('feature/foo')
   })
 
+  it('preserves showInInbox false when omitted from an update', () => {
+    const existing: ScheduleJob = {
+      id: 15,
+      repoId: 42,
+      name: 'Quiet job',
+      description: null,
+      enabled: true,
+      showInInbox: false,
+      scheduleMode: 'interval',
+      intervalMinutes: 60,
+      cronExpression: null,
+      timezone: null,
+      agentSlug: null,
+      prompt: 'Prompt',
+      model: null,
+      skillMetadata: null,
+      permissionConfig: null,
+      mcpServers: [],
+      branch: null,
+      workspaceMode: 'worktree',
+      sandbox: null,
+      nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0),
+      lastRunAt: null,
+      createdAt: Date.UTC(2026, 2, 8, 12, 0, 0),
+      updatedAt: Date.UTC(2026, 2, 9, 12, 0, 0),
+    }
+
+    const result = buildUpdatedSchedulePersistenceInput(existing, {
+      prompt: 'Updated prompt',
+    })
+
+    expect(result.showInInbox).toBe(false)
+  })
+
+  it('overrides showInInbox when provided in an update', () => {
+    const existing: ScheduleJob = {
+      id: 16,
+      repoId: 42,
+      name: 'Quiet job',
+      description: null,
+      enabled: true,
+      showInInbox: false,
+      scheduleMode: 'interval',
+      intervalMinutes: 60,
+      cronExpression: null,
+      timezone: null,
+      agentSlug: null,
+      prompt: 'Prompt',
+      model: null,
+      skillMetadata: null,
+      permissionConfig: null,
+      mcpServers: [],
+      branch: null,
+      workspaceMode: 'worktree',
+      sandbox: null,
+      nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0),
+      lastRunAt: null,
+      createdAt: Date.UTC(2026, 2, 8, 12, 0, 0),
+      updatedAt: Date.UTC(2026, 2, 9, 12, 0, 0),
+    }
+
+    const result = buildUpdatedSchedulePersistenceInput(existing, {
+      showInInbox: true,
+    })
+
+    expect(result.showInInbox).toBe(true)
+  })
+
   it('overrides branch when provided in update', () => {
     const existing: ScheduleJob = {
       id: 12,
@@ -171,6 +245,7 @@ describe('schedule-config', () => {
       name: 'Branch job',
       description: null,
       enabled: true,
+      showInInbox: true,
       scheduleMode: 'interval',
       intervalMinutes: 60,
       cronExpression: null,
@@ -204,6 +279,7 @@ describe('schedule-config', () => {
       name: 'Branch job',
       description: null,
       enabled: true,
+      showInInbox: true,
       scheduleMode: 'interval',
       intervalMinutes: 60,
       cronExpression: null,
@@ -237,6 +313,7 @@ describe('schedule-config', () => {
       name: 'Paused summary',
       description: null,
       enabled: false,
+      showInInbox: true,
       scheduleMode: 'interval',
       intervalMinutes: 30,
       cronExpression: null,
@@ -269,6 +346,7 @@ describe('schedule-config', () => {
     expect(() => buildCreateSchedulePersistenceInput({
       name: 'Invalid timezone',
       enabled: true,
+      showInInbox: true,
       scheduleMode: 'cron',
       cronExpression: '0 9 * * *',
       timezone: 'Mars/Phobos',
@@ -283,6 +361,7 @@ describe('schedule-config', () => {
       name: 'Disabled summary',
       description: null,
       enabled: false,
+      showInInbox: true,
       scheduleMode: 'interval',
       intervalMinutes: 15,
       cronExpression: null,
@@ -314,6 +393,7 @@ describe('schedule-config', () => {
       name: 'Sandbox job',
       description: null,
       enabled: true,
+      showInInbox: true,
       scheduleMode: 'interval',
       intervalMinutes: 60,
       cronExpression: null,
@@ -337,6 +417,7 @@ describe('schedule-config', () => {
       const result = buildCreateSchedulePersistenceInput({
         name: 'Sandbox job',
         enabled: true,
+        showInInbox: true,
         scheduleMode: 'interval',
         intervalMinutes: 60,
         prompt: 'Prompt',
@@ -349,6 +430,7 @@ describe('schedule-config', () => {
       const result = buildCreateSchedulePersistenceInput({
         name: 'Sandbox job',
         enabled: true,
+        showInInbox: true,
         scheduleMode: 'interval',
         intervalMinutes: 60,
         prompt: 'Prompt',

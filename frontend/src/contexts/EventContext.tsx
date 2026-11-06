@@ -14,13 +14,19 @@ import {
 } from '@/api/opencode'
 import { listRepos } from '@/api/repos'
 import { FetchError } from '@opencode-manager/shared'
-import { buildServerDirectoryKey, LOCAL_OPENCODE_SERVER_ID, parseServerDirectoryKey } from '@opencode-manager/shared/schemas'
+import {
+  buildServerDirectoryKey,
+  LOCAL_OPENCODE_SERVER_ID,
+  parseServerDirectoryKey,
+  type OpenCodeStreamEvent,
+  type SSHHostKeyRequest,
+} from '@opencode-manager/shared/schemas'
 import { isLocalOpenCodeServer } from '@/contexts/OpenCodeServerContext'
 import { useAuth } from '@/hooks/useAuth'
 import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
 import { remoteProjectsQueryOptions } from '@/hooks/useRemoteProjects'
-import type { FormAnswer, FormInfo, PermissionRequest, V2Event } from '@opencode-manager/shared/opencode'
-import type { PermissionResponse, SSHHostKeyRequest, Repo } from '@/api/types'
+import type { FormAnswer, FormInfo, PermissionReply, PermissionRequest } from '@opencode-manager/shared/opencode'
+import type { Repo } from '@/api/types'
 import { showToast } from '@/lib/toast'
 import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode-event-stream'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
@@ -36,6 +42,7 @@ import {
   invalidateQueryKeysDebounced,
   invalidateRepoGitCachesDebounced,
   invalidateSessionListCachesDebounced,
+  OPEN_CODE_MANAGED_CONFIG_QUERY_KEY,
 } from '@/lib/queryInvalidation'
 
 const STATUS_POLL_INTERVAL_MS = 5000
@@ -53,9 +60,6 @@ type PendingForm = ServerScoped<FormInfo>
 type PermissionsBySession = Record<string, PendingPermission[]>
 type FormsBySession = Record<string, PendingForm[]>
 type SSEHealthState = Pick<EventStreamHealthState, 'isConnected' | 'isHealthy' | 'isStalled'>
-type StreamEvent =
-  | (V2Event & { directory?: string; serverId?: string })
-  | { type: 'ssh.host-key-request'; properties: SSHHostKeyRequest }
 
 type SessionScopedItem = { id: string; sessionID: string }
 
@@ -235,7 +239,7 @@ interface EventContextValue {
     respond: (
       permissionID: string,
       sessionID: string,
-      response: PermissionResponse,
+      response: PermissionReply,
       message?: string,
     ) => Promise<void>
     dismiss: (permissionID: string, sessionID?: string) => void
@@ -318,6 +322,11 @@ export function selectActiveSessionDirectoriesKey(
 
 const EventContext = createContext<EventContextValue | null>(null)
 
+/**
+ * Provides stream-derived state to the page tree — SSH host key prompts, permission and form
+ * queues, stream health, and session-to-repo lookup — and routes stream events, status changes,
+ * and resyncs into React Query, session status, and running-shell state.
+ */
 export function EventProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -623,7 +632,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const replyToPermission = useCallback(async (
     permissionID: string,
     sessionID: string,
-    response: PermissionResponse,
+    response: PermissionReply,
     message?: string,
   ) => {
     const permission = allPermissions.find(candidate => candidate.id === permissionID)
@@ -1046,11 +1055,13 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isAuthenticated) return
 
-    const handleSSEMessage = (data: unknown) => {
-      if (!data || typeof data !== 'object' || !('type' in data)) return
-      
-      const event = data as StreamEvent
-      const serverId = (event as { serverId?: string }).serverId ?? LOCAL_OPENCODE_SERVER_ID
+    /**
+     * Routes one stream event by type into the session status, permission, form, shell and cache
+     * stores. Goal events are offered to `applySessionGoalEvent` first and skip the switch when it
+     * consumes them.
+     */
+    const handleSSEMessage = (event: OpenCodeStreamEvent) => {
+      const serverId = event.serverId ?? LOCAL_OPENCODE_SERVER_ID
 
       const goalEvent = { type: event.type, data: 'data' in event ? event.data : null }
       if (applySessionGoalEvent(queryClient, goalEvent, serverId)) return
@@ -1096,6 +1107,15 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           useSessionStatus.getState().setSessionServer(event.data.sessionID, serverId)
           rememberSessionDirectory(event.data.sessionID, event.directory, serverId)
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
+          break
+        }
+        case 'session.compaction.started': {
+          useSessionStatus.getState().beginCompaction(event.data.sessionID)
+          break
+        }
+        case 'session.compaction.ended':
+        case 'session.compaction.failed': {
+          useSessionStatus.getState().endCompaction(event.data.sessionID)
           break
         }
         case 'session.execution.started': {
@@ -1250,6 +1270,11 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
+    /**
+     * Repairs caches after the stream reports missed events: a remote server reconciles its own
+     * directory activity and list caches, while the local server also refreshes session statuses,
+     * running shells, and pending actions.
+     */
     const handleResync = (subscribedDirectories: string[], serverId?: string) => {
       queryClient.invalidateQueries({ queryKey: [SESSION_GOAL_QUERY_ROOT] })
       invalidateProviderCachesDebounced(queryClient)
@@ -1267,7 +1292,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       void fetchInitialSessionStatuses()
       void syncRunningShells(directories)
       invalidateChildSessionCaches(queryClient)
-      invalidateQueryKeysDebounced(queryClient, LOCATION_CATALOG_QUERY_KEYS)
+      invalidateQueryKeysDebounced(queryClient, [
+        ...LOCATION_CATALOG_QUERY_KEYS,
+        OPEN_CODE_MANAGED_CONFIG_QUERY_KEY,
+      ])
     }
 
     const initialDirectories = [...new Set((reposRef.current ?? []).map(r => r.fullPath))]

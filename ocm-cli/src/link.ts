@@ -6,8 +6,10 @@ import { join } from 'node:path'
 import { renderUnicodeCompact } from 'uqr'
 import {
   buildOpenCodeBasicAuth,
+  createOpenCodeApi,
   encryptOpenCodePairingCredentials,
   isOpenCodePairingNonce,
+  openCodeErrorStatus,
   verifyOpenCodePairingProof,
   type OpenCodePairingCredentials,
   type OpenCodePairingEncryptedCredentials,
@@ -178,28 +180,46 @@ export function renderPairingQr(link: string): string {
   return renderUnicodeCompact(link, { ecc: 'M', border: 2 })
 }
 
-/** Probes `<baseUrl>/api/info` with Basic auth to report reachability and credentials validity. */
+/** Probes the OpenCode server info endpoint with Basic auth to report reachability and credentials validity. */
 export async function probeOpenCodeServer(
   baseUrl: string,
   credentials: PairingCredentials,
   timeoutMs = 3000,
 ): Promise<OpenCodeServerProbe> {
-  const authorization = buildOpenCodeBasicAuth(credentials.password, credentials.username)
+  let responseStatus: number | undefined
+  const api = createOpenCodeApi({
+    baseUrl: trimUrlTrailingSlashes(baseUrl),
+    headers: { authorization: buildOpenCodeBasicAuth(credentials.password, credentials.username) },
+    fetch: Object.assign(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const response = await fetch(input, init)
+        responseStatus = response.status
+        return response
+      },
+      { preconnect: fetch.preconnect },
+    ),
+  })
+
   try {
-    const response = await fetch(`${trimUrlTrailingSlashes(baseUrl)}/api/info`, {
-      headers: { authorization },
-      signal: AbortSignal.timeout(timeoutMs),
-    })
-    if (response.status === 401) return { status: 'unauthorized' }
-    if (!response.ok) return { status: 'unreachable', message: `HTTP ${response.status}` }
-    const payload: unknown = await response.json().catch(() => null)
-    const version = typeof payload === 'object' && payload !== null && typeof (payload as { version?: unknown }).version === 'string'
-      ? (payload as { version: string }).version
-      : null
-    return { status: 'ok', version }
+    const info = await api.server.info({ signal: AbortSignal.timeout(timeoutMs) })
+    return { status: 'ok', version: info.version ?? null }
   } catch (error) {
-    return { status: 'unreachable', message: error instanceof Error ? error.message : String(error) }
+    if (responseStatus === 401 || openCodeErrorStatus(error) === 401) return { status: 'unauthorized' }
+
+    const status = responseStatus !== undefined && responseStatus >= 400 ? responseStatus : undefined
+    return {
+      status: 'unreachable',
+      message: status === undefined ? messageOf(error) : `HTTP ${status}`,
+    }
   }
+}
+
+/**
+ * Extracts a human-readable message from an unknown thrown value, falling back to `String(error)`
+ * for non-`Error` values.
+ */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 /** Serves the one-shot pairing redeem endpoint on `0.0.0.0` and reports how it ended. */

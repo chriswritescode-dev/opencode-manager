@@ -105,6 +105,7 @@ describe('schedule database queries', () => {
       name: 'Weekly engineering summary',
       description: 'Summarize repo health and recent changes.',
       enabled: true,
+      showInInbox: true,
       scheduleMode: 'cron',
       intervalMinutes: null,
       cronExpression: '0 9 * * 1',
@@ -127,6 +128,7 @@ describe('schedule database queries', () => {
       null,
       'Weekly engineering summary',
       'Summarize repo health and recent changes.',
+      1,
       1,
       'cron',
       null,
@@ -169,6 +171,7 @@ describe('schedule database queries', () => {
       name: 'Updated summary',
       description: null,
       enabled: false,
+      showInInbox: false,
       scheduleMode: 'interval',
       intervalMinutes: 90,
       cronExpression: null,
@@ -188,6 +191,7 @@ describe('schedule database queries', () => {
     expect(updateStmt.run).toHaveBeenCalledWith(
       'Updated summary',
       null,
+      0,
       0,
       'interval',
       90,
@@ -498,9 +502,10 @@ describe('schedule database queries', () => {
 
     mockDb.prepare.mockReturnValueOnce(updateStmt).mockReturnValueOnce(selectStmt)
 
+    const finishedAt = Date.now()
     const run = schedulesDb.updateScheduleRun(mockDb, 42, 7, 5, {
       status: 'completed',
-      finishedAt: Date.now(),
+      finishedAt,
       sessionId: 'ses-1',
       sessionTitle: 'Updated title',
       logText: 'Log output',
@@ -508,9 +513,12 @@ describe('schedule database queries', () => {
       errorText: null,
     })
 
+    expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining('sj.show_in_inbox = 0'))
     expect(updateStmt.run).toHaveBeenCalledWith(
       'completed',
-      expect.any(Number),
+      finishedAt,
+      'completed',
+      finishedAt,
       'ses-1',
       'Updated title',
       'Log output',

@@ -1,5 +1,4 @@
 import { Hono, type Context } from 'hono'
-import { z } from 'zod'
 import {
   UpdateOpenCodeConfigPatchRequestSchema,
   UpdateOpenCodeConfigRequestSchema,
@@ -20,11 +19,16 @@ import {
   OpenCodeConfigRedactedValueError,
   OpenCodeConfigShadowedRemovalError,
   OpenCodeConfigSourceInvalidError,
+  OpenCodeConfigValidationError,
   readOpenCodeConfigFile,
+  readOpenCodeConfigSnapshot,
   withOpenCodeConfigLock,
 } from '../services/opencode-config-file'
+import { readManagedOpenCodeConfig } from '../services/opencode-config-effective'
 import { applyOpenCodeConfigUpdate, toOpenCodeConfigApplyResponse } from '../services/opencode-config-apply'
 import { redactOpenCodeConfigContent, redactOpenCodeConfigFile } from '../services/opencode-config-redact'
+import { patchNamesOpenCodeConfigEntities } from '../services/opencode-config-references'
+import { opencodeServerManager } from '../services/opencode-single-server'
 import { logger } from '../utils/logger'
 
 interface OpenCodeConfigRoutesOptions {
@@ -53,6 +57,26 @@ function mergeMcpServerStatus(views: McpServerView[], status: McpStatusMap) {
   })
 }
 
+/**
+ * Maps a config read failure to a JSON error response: 503 when the OpenCode server is unreachable,
+ * 502 for other client errors, and 500 otherwise, using `message` as the client-facing text.
+ */
+function toClientReadErrorResponse(c: Context, error: unknown, message: string) {
+  if (error instanceof ClientError) {
+    if (error.reason === 'Transport') {
+      return c.json({ error: 'OpenCode server unavailable' }, 503)
+    }
+    return c.json({ error: message }, 502)
+  }
+  return c.json({ error: message }, 500)
+}
+
+/**
+ * Serves the OpenCode config read routes (`/`, `/effective`, `/managed`, `/mcp`) and the `PUT` and
+ * `PATCH` write routes. Reads and writes take the shared config file lock, `redactSecrets` masks
+ * secret values in every response, and a `PATCH` that names config entities is rejected with 409
+ * while OpenCode has not yet loaded the saved configuration.
+ */
 export function createOpenCodeConfigRoutes(
   settingsService: SettingsService,
   openCodeClient: OpenCodeClient,
@@ -90,30 +114,40 @@ export function createOpenCodeConfigRoutes(
       })
     } catch (error) {
       logger.error('Failed to get effective OpenCode config:', error)
-      if (error instanceof ClientError) {
-        if (error.reason === 'Transport') {
-          return c.json({ error: 'OpenCode server unavailable' }, 503)
-        }
-        return c.json({ error: 'Failed to get effective OpenCode config' }, 502)
-      }
-      return c.json({ error: 'Failed to get effective OpenCode config' }, 500)
+      return toClientReadErrorResponse(c, error, 'Failed to get effective OpenCode config')
+    }
+  })
+
+  app.get('/managed', async (c) => {
+    try {
+      const snapshot = await withOpenCodeConfigLock(readOpenCodeConfigSnapshot)
+      const info = await readManagedOpenCodeConfig(openCodeClient.api, snapshot.sources)
+      return c.json({
+        info: options.redactSecrets
+          ? redactOpenCodeConfigContent(info as Record<string, unknown>).content
+          : info,
+      })
+    } catch (error) {
+      logger.error('Failed to get managed OpenCode config:', error)
+      return toClientReadErrorResponse(c, error, 'Failed to get managed OpenCode config')
     }
   })
 
   app.get('/mcp', async (c) => {
     try {
-      const [config, status] = await Promise.all([
-        withOpenCodeConfigLock(readOpenCodeConfigFile),
+      const snapshot = await withOpenCodeConfigLock(readOpenCodeConfigSnapshot)
+      const [info, status] = await Promise.all([
+        readManagedOpenCodeConfig(openCodeClient.api, snapshot.sources),
         readMcpStatus(openCodeClient),
       ])
-      const views = mcpServerViewsFromConfig(config?.content.mcp)
+      const views = mcpServerViewsFromConfig(info.mcp)
       return c.json({
-        revision: config?.revision ?? null,
+        revision: snapshot.revision,
         servers: mergeMcpServerStatus(views, status),
       })
     } catch (error) {
       logger.error('Failed to get OpenCode MCP servers:', error)
-      return c.json({ error: 'Failed to get OpenCode MCP servers' }, 500)
+      return toClientReadErrorResponse(c, error, 'Failed to get OpenCode MCP servers')
     }
   })
 
@@ -152,6 +186,12 @@ export function createOpenCodeConfigRoutes(
       return c.json({ error: 'Invalid config data', details: parsed.error.issues }, 400)
     }
 
+    if (opencodeServerManager.isRestartPending() && patchNamesOpenCodeConfigEntities(parsed.data.patch)) {
+      return c.json({
+        error: 'OpenCode has not loaded the saved configuration yet. Restart OpenCode before editing entries.',
+      }, 409)
+    }
+
     return applyUpdate(c, {
       content: parsed.data.patch,
       source: parsed.data.source,
@@ -165,6 +205,11 @@ export function createOpenCodeConfigRoutes(
   return app
 }
 
+/**
+ * Applies a validated config update and maps the outcome to a JSON response, redacting secrets when
+ * `redactSecrets` is set and translating conflict, invalid-source, shadowed-removal, redacted-value
+ * and schema-validation failures into their matching status codes.
+ */
 async function applyUpdate(
   c: Context,
   input: Parameters<typeof applyOpenCodeConfigUpdate>[0],
@@ -198,12 +243,12 @@ async function applyUpdate(
     if (error instanceof OpenCodeConfigRedactedValueError) {
       return c.json({ error: error.message, paths: error.paths }, 400)
     }
-    if (error instanceof z.ZodError) {
-      return c.json({ error: 'Invalid config data', details: error.issues }, 400)
+    if (error instanceof OpenCodeConfigValidationError) {
+      return c.json({ error: 'Invalid config data', validationIssues: error.issues }, 400)
     }
     if (error instanceof SyntaxError) {
       return c.json({ error: 'Invalid config data', details: error.message }, 400)
     }
-    return c.json({ error: 'Failed to update OpenCode config' }, 500)
+    return toClientReadErrorResponse(c, error, 'Failed to update OpenCode config')
   }
 }

@@ -1,67 +1,38 @@
 import { useState } from 'react'
 import { Plus } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Dialog, DialogTrigger } from '@/components/ui/dialog'
 import { SettingsList, SettingsListRow } from '@/components/ui/settings-list'
+import type { OpenCodeAgentConfig } from '@opencode-manager/shared/opencode'
+import type { OpenCodeAgentPatch, OpenCodeDirectoryFileInfo } from '@/api/types/settings'
 import { AgentDialog } from './AgentDialog'
 import { UploadFolderButton } from './UploadFolderButton'
 import { DirectoryFilesList } from './DirectoryFilesList'
-import type { OpenCodeDirectoryFileInfo } from '@/api/types/settings'
-
-interface Agent {
-  prompt?: string
-  description?: string
-  mode?: 'subagent' | 'primary' | 'all'
-  temperature?: number
-  topP?: number
-  top_p?: number
-  model?: string
-  tools?: Record<string, boolean>
-  permission?: {
-    edit?: 'ask' | 'allow' | 'deny'
-    bash?: 'ask' | 'allow' | 'deny' | Record<string, 'ask' | 'allow' | 'deny'>
-    webfetch?: 'ask' | 'allow' | 'deny'
-  }
-  disable?: boolean
-  [key: string]: unknown
-}
 
 interface AgentsEditorProps {
-  agents: Record<string, Agent>
+  agents: Record<string, OpenCodeAgentConfig>
   directoryAgents?: OpenCodeDirectoryFileInfo[]
-  onChange: (agents: Record<string, Agent>) => void
+  onSave: (name: string, agent: OpenCodeAgentPatch, previousName?: string) => void
+  onDelete: (name: string) => void
 }
 
-export function AgentsEditor({ agents, directoryAgents = [], onChange }: AgentsEditorProps) {
+/**
+ * Renders configured agents alongside agent files discovered in the workspace directory, with add,
+ * edit and delete entry points against the managed config.
+ */
+export function AgentsEditor({ agents, directoryAgents = [], onSave, onDelete }: AgentsEditorProps) {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
-  const [editingAgent, setEditingAgent] = useState<{ name: string; agent: Agent } | null>(null)
+  const [editingAgent, setEditingAgent] = useState<{ name: string; agent: OpenCodeAgentConfig } | null>(null)
   const hasAgents = Object.keys(agents).length > 0 || directoryAgents.length > 0
 
-  const handleAgentSubmit = (name: string, agent: Agent) => {
-    if (editingAgent) {
-      const updatedAgents = { ...agents }
-      delete updatedAgents[editingAgent.name]
-      updatedAgents[name] = agent
-      onChange(updatedAgents)
-      setEditingAgent(null)
-    } else {
-      const updatedAgents = {
-        ...agents,
-        [name]: agent
-      }
-      onChange(updatedAgents)
-      setIsCreateDialogOpen(false)
-    }
+  const handleAgentSubmit = (name: string, agent: OpenCodeAgentPatch) => {
+    onSave(name, agent, editingAgent?.name)
+    setEditingAgent(null)
+    setIsCreateDialogOpen(false)
   }
 
-  const deleteAgent = (name: string) => {
-    const updatedAgents = { ...agents }
-    delete updatedAgents[name]
-    onChange(updatedAgents)
-  }
-
-  const startEdit = (name: string, agent: Agent) => {
+  const startEdit = (name: string, agent: OpenCodeAgentConfig) => {
     setEditingAgent({ name, agent })
   }
 
@@ -98,12 +69,12 @@ export function AgentsEditor({ agents, directoryAgents = [], onChange }: AgentsE
             badges={
               <>
                 {agent.mode && <Badge variant="outline" className="shrink-0">{agent.mode}</Badge>}
-                {agent.disable && <Badge variant="secondary" className="shrink-0">Disabled</Badge>}
+                {agent.disabled && <Badge variant="secondary" className="shrink-0">Disabled</Badge>}
               </>
             }
             onClick={() => startEdit(name, agent)}
             primaryAction={{ label: 'Edit', onClick: () => startEdit(name, agent) }}
-            actions={[{ label: 'Delete', destructive: true, onClick: () => deleteAgent(name) }]}
+            actions={[{ label: 'Delete', destructive: true, onClick: () => onDelete(name) }]}
             actionsLabel={`Actions for ${name}`}
           />
         ))}

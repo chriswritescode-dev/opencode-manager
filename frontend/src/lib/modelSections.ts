@@ -36,13 +36,18 @@ function createOption(provider: Provider, model: Model, value: string): ModelOpt
     value,
     label,
     providerID: provider.id,
-    modelID: model.key ?? model.id,
+    modelID: model.id,
     providerName,
     model,
     searchText: `${label} ${value} ${providerName}`.toLowerCase(),
   }
 }
 
+/**
+ * Groups the models of every provider into the Default, Favorites, Recent, and per-provider
+ * sections of the model picker. A model pinned as the default or a favorite is removed from its
+ * provider section, and sections left empty are dropped.
+ */
 export function buildModelSections(
   providers: Provider[],
   modelState: OpenCodeModelState | undefined,
@@ -75,7 +80,7 @@ export function buildModelSections(
     const parsed = parseOpenCodeModelRef(defaultModel)
     if (!parsed) return undefined
     const provider = providers.find((entry) => entry.id === parsed.providerID)
-    const model = provider?.models.find((entry) => (entry.key ?? entry.id) === parsed.id)
+    const model = provider?.models.find((entry) => entry.id === parsed.id)
     if (!provider || !model) return undefined
     if (!parsed.variant) pinnedValues.add(providerModelRef(provider, model))
     return createOption(provider, model, defaultModel)

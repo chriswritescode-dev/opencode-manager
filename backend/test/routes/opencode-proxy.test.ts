@@ -323,6 +323,18 @@ describe('opencode-proxy routes', () => {
     expect(body.error).toBe('Proxy request failed')
   })
 
+  it('returns a null body for bodyless upstream statuses', async () => {
+    const upstreamFetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    globalThis.fetch = upstreamFetch as unknown as typeof fetch
+
+    const res = await app.request('/api/opencode-proxy/doc', {
+      headers: { Authorization: 'Bearer test-internal-token' },
+    })
+
+    expect(res.status).toBe(204)
+    expect(await res.text()).toBe('')
+  })
+
   it('preserves query string in upstream URL', async () => {
     const upstreamFetch = vi.fn().mockResolvedValue(
       new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })

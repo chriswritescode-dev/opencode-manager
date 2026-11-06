@@ -2,18 +2,17 @@ import { useMemo, useEffect } from 'react'
 import { useSession, useAgents } from './useOpenCode'
 import { useSessionAgentStore } from '@/stores/sessionAgentStore'
 import { getPrimaryAgents } from '@/lib/primaryAgents'
-import type { ModelRef } from '@opencode-manager/shared/opencode'
+import type { AgentInfo, ModelRef } from '@opencode-manager/shared/opencode'
 
-interface AgentInfo {
-  id: string
-  name?: string
-  mode?: string
-  hidden?: boolean
-}
+type SessionAgentInfo = Pick<AgentInfo, 'id' | 'mode' | 'hidden'>
 
+/**
+ * Resolves a requested agent id to its canonical primary-agent id, or `undefined` when it is
+ * absent or no longer selectable. Before the agent list loads the id passes through unchanged.
+ */
 const resolveAvailableAgentId = (
   agentId: string | undefined,
-  agents: AgentInfo[] | undefined,
+  agents: SessionAgentInfo[] | undefined,
   agentsLoaded: boolean
 ): string | undefined => {
   if (!agentId) return undefined
@@ -25,8 +24,12 @@ const resolveAvailableAgentId = (
   )?.id
 }
 
+/**
+ * Returns the first primary agent id once agents have loaded, falling back to `build` while
+ * loading or when no primary agent is available.
+ */
 export function resolveDefaultSessionAgent(
-  agents: AgentInfo[] | undefined,
+  agents: SessionAgentInfo[] | undefined,
   agentsLoaded: boolean
 ): string {
   const primaryAgents = getPrimaryAgents(agents)

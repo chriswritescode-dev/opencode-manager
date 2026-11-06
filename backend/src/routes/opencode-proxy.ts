@@ -16,6 +16,7 @@ import { getRepoById } from '../db/queries'
 import { getTrustedOrigins, getWorkspacePath } from '@opencode-manager/shared/config/env'
 import { isPathWithinRoot } from '../utils/fs-safe'
 import { buildProxyResponseHeaders, filterProxyHeaders } from '../utils/proxy-headers'
+import { forwardProxyRequest } from '../utils/proxy-forward'
 import {
   connectUpstreamWebSocket,
   createBridgedSocketEvents,
@@ -112,6 +113,12 @@ function rewriteRepoLocationBody(bodyText: string, resolveDirectory: RepoDirecto
   return JSON.stringify(parsed)
 }
 
+/**
+ * Serves `/repos/:repoId/*` and `/*` by forwarding to the managed OpenCode server, rewriting repo
+ * directory references in the path, query and JSON body. Every request needs the internal token
+ * except a ticketed persistent PTY WebSocket connect, which is origin-checked and bridged to the
+ * upstream socket.
+ */
 export function createOpenCodeProxyRoutes(db: Database, settingsService: SettingsService, upgradeWebSocket: UpgradeWebSocket) {
   const app = new Hono()
   const requireInternalToken = createInternalTokenMiddleware(db)
@@ -144,6 +151,11 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
     return (await upgrade(c, async () => {})) ?? c.body(null)
   }
 
+  /**
+   * Forwards the current request to the managed OpenCode server with basic auth and a default
+   * directory, letting the optional rewrites adjust path, query and JSON body first. Returns 503
+   * before lifecycle initialization, 501 for non-PTY upgrades and 502 when the upstream call fails.
+   */
   async function forwardToOpenCode(
     c: Context,
     pathSuffix: string,
@@ -192,20 +204,12 @@ export function createOpenCodeProxyRoutes(db: Database, settingsService: Setting
     const upstreamUrl = `${getOpenCodeUpstreamBaseUrl()}${pathSuffix}${url.search}`
 
     try {
-      const upstreamResponse = await fetch(upstreamUrl, {
+      return await forwardProxyRequest({
+        url: upstreamUrl,
         method: c.req.method,
         headers,
         body: requestBody,
-        redirect: 'manual',
-        duplex: 'half',
-      })
-
-      const responseHeaders = buildProxyResponseHeaders(upstreamResponse.headers)
-
-      return new Response(upstreamResponse.body, {
-        status: upstreamResponse.status,
-        statusText: upstreamResponse.statusText,
-        headers: responseHeaders,
+        buildResponseHeaders: buildProxyResponseHeaders,
       })
     } catch {
       return c.json({ error: 'Proxy request failed' }, 502)

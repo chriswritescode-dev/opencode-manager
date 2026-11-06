@@ -86,8 +86,8 @@ describe('opencode-import service', () => {
     const jsoncPath = path.join(os.homedir(), '.config', 'opencode', 'opencode.jsonc')
     mockExistsSync.mockImplementation((candidate: string) => [jsonPath, jsoncPath].includes(candidate))
     mockFileExists.mockResolvedValue(false)
-    const rawJson = '{"model":"lower"}'
-    const rawJsonc = '{\n// keep\n"model":"higher"\n}'
+    const rawJson = '{"model":"test/lower"}'
+    const rawJsonc = '{\n// keep\n"model":"test/higher"\n}'
     mockReadFileContent.mockImplementation(async (candidate: string) => candidate === jsoncPath ? rawJsonc : rawJson)
 
     const result = await syncOpenCodeImport({})
@@ -115,7 +115,7 @@ describe('opencode-import service', () => {
     const legacyPath = path.join(os.homedir(), '.config', 'opencode', 'config.json')
     mockExistsSync.mockImplementation((candidate: string) => [jsonPath, legacyPath].includes(candidate))
     mockFileExists.mockResolvedValue(false)
-    const rawJson = '{"model":"lower"}'
+    const rawJson = '{"model":"test/lower"}'
     const rawLegacy = '{"theme":"dark"}'
     mockReadFileContent.mockImplementation(async (candidate: string) =>
       candidate === legacyPath ? rawLegacy : rawJson)

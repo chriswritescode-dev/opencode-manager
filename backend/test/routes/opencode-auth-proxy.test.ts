@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { Hono } from 'hono'
 import type { MiddlewareHandler } from 'hono'
 import { createAuthenticatedOpenCodeProxyRoutes } from '../../src/routes/opencode-auth-proxy'
-import type { OpenCodeClient } from '../../src/services/opencode/client'
+import { FetchOpenCodeClient, type OpenCodeClient } from '../../src/services/opencode/client'
 import { OpenCodeSupervisor } from '../../src/services/opencode-supervisor'
 import type { SettingsService } from '../../src/services/settings'
 
@@ -14,7 +14,8 @@ vi.mock('../../src/services/opencode-single-server', () => ({
 
 const forwardRawMock = vi.hoisted(() => vi.fn<OpenCodeClient['forwardRaw']>(async () => new Response('ok', { status: 200 })))
 
-vi.mock('../../src/services/opencode/client', () => ({
+vi.mock('../../src/services/opencode/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/services/opencode/client')>()),
   createOpenCodeClient: vi.fn(),
 }))
 
@@ -342,5 +343,56 @@ describe('authenticated opencode proxy routes', () => {
     expect(forwardRawMock).toHaveBeenCalledTimes(1)
     const forwarded = JSON.parse(await (forwardRawMock.mock.calls[0]![0] as Request).text()) as Record<string, unknown>
     expect(forwarded).toEqual(JSON.parse(body))
+  })
+})
+
+describe('authenticated opencode proxy streaming', () => {
+  it('streams the upstream body chunk by chunk while forwarding the request body as a stream', async () => {
+    const encoder = new TextEncoder()
+    const decoder = new TextDecoder()
+    let upstreamController!: ReadableStreamDefaultController<Uint8Array>
+    const upstreamBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        upstreamController = controller
+      },
+    })
+
+    let capturedInit: RequestInit | undefined
+    const fetchFn = async (_input: URL | Request | string, init?: RequestInit) => {
+      capturedInit = init
+      return new Response(upstreamBody, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }
+    const client = new FetchOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:5551',
+      basicAuth: '',
+      fetchFn: fetchFn as unknown as typeof fetch,
+    })
+
+    const app = new Hono()
+    app.route('/api/opencode', createAuthenticatedOpenCodeProxyRoutes(client, passThroughAuth))
+
+    const responsePromise = app.request('/api/opencode/event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hello: 'world' }),
+    })
+
+    upstreamController.enqueue(encoder.encode('first-chunk'))
+    const response = await responsePromise
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toBe('text/event-stream')
+
+    const reader = response.body!.getReader()
+    const first = await reader.read()
+    expect(decoder.decode(first.value)).toBe('first-chunk')
+
+    upstreamController.enqueue(encoder.encode('second-chunk'))
+    const second = await reader.read()
+    expect(decoder.decode(second.value)).toBe('second-chunk')
+    upstreamController.close()
+    await reader.cancel()
+
+    expect(capturedInit?.body).toBeInstanceOf(ReadableStream)
+    expect(capturedInit?.duplex).toBe('half')
   })
 })

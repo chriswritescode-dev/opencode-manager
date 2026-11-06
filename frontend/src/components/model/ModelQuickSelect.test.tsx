@@ -43,25 +43,25 @@ const providers: Provider[] = [
   {
     id: 'opencode-go',
     name: 'OpenCode Go',
-    models: [{ id: 'go-1', key: 'go-1', name: 'Go Model One', released: 0, free: false }],
+    models: [{ id: 'go-1', modelID: 'go-1', name: 'Go Model One', released: 0, free: false }],
   },
   {
     id: 'opencode',
     name: 'OpenCode',
-    models: [{ id: 'zen-1', key: 'zen-1', name: 'Zen One', released: 0, free: false }],
+    models: [{ id: 'zen-1', modelID: 'zen-1', name: 'Zen One', released: 0, free: false }],
   },
   {
     id: 'anthropic',
     name: 'Anthropic',
     models: [
-      { id: 'claude-sonnet-4', key: 'claude-sonnet-4', name: 'Claude Sonnet 4', released: 0, free: false },
-      { id: 'claude-opus-5-5', key: 'claude-opus-5-5-fast', name: 'Claude Opus 5.5', released: 0, free: false },
+      { id: 'claude-sonnet-4', modelID: 'claude-sonnet-4', name: 'Claude Sonnet 4', released: 0, free: false },
+      { id: 'claude-opus-5-5-fast', modelID: 'claude-opus-5-5', name: 'Claude Opus 5.5', released: 0, free: false },
     ],
   },
   {
     id: 'openai',
     name: 'OpenAI',
-    models: [{ id: 'gpt-5', key: 'gpt-5', name: 'GPT-5', released: 0, free: false }],
+    models: [{ id: 'gpt-5', modelID: 'gpt-5', name: 'GPT-5', released: 0, free: false }],
   },
 ]
 
@@ -642,7 +642,7 @@ describe('ModelQuickSelect model descriptions', () => {
       models: [
         {
           id: 'claude-sonnet-4',
-          key: 'claude-sonnet-4',
+          modelID: 'claude-sonnet-4',
           name: 'Claude Sonnet 4',
           released: 0,
           free: false,
@@ -650,7 +650,7 @@ describe('ModelQuickSelect model descriptions', () => {
         },
         {
           id: 'claude-opus-5-5',
-          key: 'claude-opus-5-5',
+          modelID: 'claude-opus-5-5',
           name: 'Claude Opus 5.5',
           released: 0,
           free: false,

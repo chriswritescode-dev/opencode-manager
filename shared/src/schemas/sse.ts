@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { V2Event } from "../opencode";
+import type { SSHHostKeyRequest } from "./ssh";
 
 export const SSESubscribeSchema = z.object({
   clientId: z.string().min(1),
@@ -16,8 +17,12 @@ export const SSEVisibilitySchema = z.object({
 export type SSESubscribeRequest = z.infer<typeof SSESubscribeSchema>;
 export type SSEVisibilityRequest = z.infer<typeof SSEVisibilitySchema>;
 
-export interface SSEEventEnvelope {
-  directory?: string | null;
-  serverId?: string;
-  payload: V2Event;
+export interface SSHHostKeyRequestEvent {
+  type: "ssh.host-key-request";
+  properties: SSHHostKeyRequest;
 }
+
+export type OpenCodeStreamEvent = (V2Event | SSHHostKeyRequestEvent) & {
+  directory?: string;
+  serverId?: string;
+};

@@ -6,7 +6,8 @@ import {
   type OpenCodeServerConnection,
   type OpenCodeServerRegistry,
 } from '../services/opencode-server-registry'
-import { filterProxyHeaders, NULL_BODY_STATUSES } from '../utils/proxy-headers'
+import { filterProxyHeaders } from '../utils/proxy-headers'
+import { forwardProxyRequest, ProxyHeadersTimeoutError } from '../utils/proxy-forward'
 import { logger } from '../utils/logger'
 
 const MOUNT_PREFIX = '/api/opencode/servers/'
@@ -79,6 +80,11 @@ function isWithinUpstreamApiPath(basePath: string, pathname: string): boolean {
   return pathname.startsWith(`${basePath}/api/`)
 }
 
+/**
+ * Serves `/:serverId/*` behind `requireAuth`, proxying each request to the registry-resolved remote
+ * OpenCode server while keeping the normalized upstream pathname inside that connection's own `/api/`
+ * space. Maps an upstream header timeout to 504 and an unreachable server to 502.
+ */
 export function createOpenCodeServerProxyRoutes(
   registry: OpenCodeServerRegistry,
   requireAuth: MiddlewareHandler,
@@ -117,58 +123,28 @@ export function createOpenCodeServerProxyRoutes(
       headers.Authorization = connection.authorization
     }
 
-    const hasBody = c.req.method !== 'GET' && c.req.method !== 'HEAD'
-
-    let headersTimeoutTimer: ReturnType<typeof setTimeout> | null = null
-    let headersTimedOut = false
-    let upstreamSignal = c.req.raw.signal
-    if (!hasBody) {
-      const timeoutController = new AbortController()
-      headersTimeoutTimer = setTimeout(() => {
-        headersTimedOut = true
-        timeoutController.abort()
-      }, upstreamHeadersTimeoutMs)
-      upstreamSignal = AbortSignal.any([c.req.raw.signal, timeoutController.signal])
-    }
+    const isBodylessMethod = c.req.method === 'GET' || c.req.method === 'HEAD'
 
     try {
-      const upstreamResponse = await fetchFn(upstream.url.toString(), {
+      return await forwardProxyRequest({
+        url: upstream.url.toString(),
         method: c.req.method,
         headers,
-        body: hasBody ? c.req.raw.body : undefined,
-        redirect: 'manual',
-        signal: upstreamSignal,
-        duplex: 'half',
-      })
-
-      if (headersTimeoutTimer !== null) {
-        clearTimeout(headersTimeoutTimer)
-        headersTimeoutTimer = null
-      }
-
-      const responseHeaders = new Headers(
-        filterProxyHeaders(upstreamResponse.headers, RESPONSE_EXCLUDED_HEADERS),
-      )
-      const responseBody = NULL_BODY_STATUSES.has(upstreamResponse.status)
-        ? null
-        : upstreamResponse.body
-
-      return new Response(responseBody, {
-        status: upstreamResponse.status,
-        statusText: upstreamResponse.statusText,
-        headers: responseHeaders,
+        body: isBodylessMethod ? null : c.req.raw.body,
+        signal: c.req.raw.signal,
+        headersTimeoutMs: isBodylessMethod ? upstreamHeadersTimeoutMs : undefined,
+        fetchFn,
+        buildResponseHeaders: (upstreamHeaders) => new Headers(
+          filterProxyHeaders(upstreamHeaders, RESPONSE_EXCLUDED_HEADERS),
+        ),
       })
     } catch (error) {
-      if (headersTimedOut) {
+      if (error instanceof ProxyHeadersTimeoutError) {
         logger.warn(`OpenCode server proxy timed out waiting for headers: ${c.req.method} ${upstream.url.host}${upstreamPath.path}`, error)
         return c.json({ error: 'Remote OpenCode server timed out' }, 504)
       }
       logger.warn(`OpenCode server proxy request failed: ${c.req.method} ${upstream.url.host}${upstreamPath.path}`, error)
       return c.json({ error: 'Remote OpenCode server unreachable' }, 502)
-    } finally {
-      if (headersTimeoutTimer !== null) {
-        clearTimeout(headersTimeoutTimer)
-      }
     }
   })
 

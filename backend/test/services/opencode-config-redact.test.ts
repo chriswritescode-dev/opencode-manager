@@ -96,7 +96,7 @@ describe('redactOpenCodeConfigFile', () => {
     expect(redacted.redactedPaths).toEqual([])
   })
 
-  it('does not mask server, provider, or model names that look like secret keys', () => {
+  it('does not mask server, provider, agent, command, or model names that look like secret keys', () => {
     const redacted = redactOpenCodeConfigFile(
       buildConfig({
         mcp: {
@@ -108,12 +108,14 @@ describe('redactOpenCodeConfigFile', () => {
             },
           },
         },
-        provider: {
+        providers: {
           'secret-provider': {
             apiKey: 'provider-secret',
             models: { 'token-model': { name: 'gpt' } },
           },
         },
+        agents: { 'token-agent': { model: 'openai/gpt' } },
+        commands: { 'secret-command': { template: 'hello' } },
       }),
     )
 
@@ -127,16 +129,18 @@ describe('redactOpenCodeConfigFile', () => {
           },
         },
       },
-      provider: {
+      providers: {
         'secret-provider': {
           apiKey: '<redacted>',
           models: { 'token-model': { name: 'gpt' } },
         },
       },
+      agents: { 'token-agent': { model: 'openai/gpt' } },
+      commands: { 'secret-command': { template: 'hello' } },
     })
     expect(redacted.redactedPaths).toEqual([
       'mcp.servers.github-token.headers.Authorization',
-      'provider.secret-provider.apiKey',
+      'providers.secret-provider.apiKey',
     ])
   })
 

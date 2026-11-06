@@ -49,11 +49,11 @@ describe('mcpServersFromConfig', () => {
 })
 
 describe('mcpServerViewsFromConfig', () => {
-  it('normalizes native and legacy servers, reporting each shape and enabled state', () => {
+  it('normalizes native servers and their enabled state', () => {
     expect(
       mcpServerViewsFromConfig({
         timeout: { catalog: 5000 },
-        legacy: { type: 'local', command: ['npx', 'legacy'], enabled: false },
+        flat: { type: 'local', command: ['npx', 'flat'], enabled: false },
         servers: {
           remote: { type: 'remote', url: 'https://native.example.com', disabled: true },
           local: { type: 'local', command: ['npx', 'native'] },
@@ -61,25 +61,16 @@ describe('mcpServerViewsFromConfig', () => {
       }),
     ).toEqual([
       {
-        name: 'legacy',
-        type: 'local',
-        command: ['npx', 'legacy'],
-        enabled: false,
-        shape: 'legacy',
-      },
-      {
         name: 'local',
         type: 'local',
         command: ['npx', 'native'],
         enabled: true,
-        shape: 'servers',
       },
       {
         name: 'remote',
         type: 'remote',
         url: 'https://native.example.com',
         enabled: false,
-        shape: 'servers',
       },
     ])
   })

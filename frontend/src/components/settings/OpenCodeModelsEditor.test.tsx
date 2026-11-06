@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { OpenCodeModelsEditor } from './OpenCodeModelsEditor'
-import type { ConfigProvider, ConfigModel } from './OpenCodeModelsEditor'
+import type { OpenCodeProviderConfig, OpenCodeProviderModelConfig } from '@opencode-manager/shared/opencode'
 import { settingsApi } from '../../api/settings'
 
 vi.mock('../../api/settings', () => ({
@@ -11,7 +11,7 @@ vi.mock('../../api/settings', () => ({
   },
 }))
 
-const mockProviders: Record<string, ConfigProvider> = {
+const mockProviders: Record<string, OpenCodeProviderConfig> = {
   openai: {
     name: 'OpenAI',
     models: {
@@ -35,16 +35,14 @@ const mockProviders: Record<string, ConfigProvider> = {
 describe('OpenCodeModelsEditor', () => {
   describe('rendering', () => {
     it('should render empty state when no providers configured', () => {
-      const onChange = vi.fn()
-      render(<OpenCodeModelsEditor providers={{}} onChange={onChange} />)
+      render(<OpenCodeModelsEditor providers={{}} onSave={vi.fn()} />)
 
       expect(screen.getByText(/No models configured/)).toBeInTheDocument()
       expect(screen.getByText(/Add your first model to get started/)).toBeInTheDocument()
     })
 
     it('should render provider groups with model counts', () => {
-      const onChange = vi.fn()
-      render(<OpenCodeModelsEditor providers={mockProviders} onChange={onChange} />)
+      render(<OpenCodeModelsEditor providers={mockProviders} onSave={vi.fn()} />)
 
       expect(screen.getByText('OpenAI')).toBeInTheDocument()
       expect(screen.getByText('Anthropic')).toBeInTheDocument()
@@ -53,8 +51,7 @@ describe('OpenCodeModelsEditor', () => {
     })
 
     it('should render model entries with display names and IDs', () => {
-      const onChange = vi.fn()
-      render(<OpenCodeModelsEditor providers={mockProviders} onChange={onChange} />)
+      render(<OpenCodeModelsEditor providers={mockProviders} onSave={vi.fn()} />)
 
       expect(screen.getByText('GPT-4o')).toBeInTheDocument()
       expect(screen.getByText('gpt-4o')).toBeInTheDocument()
@@ -63,8 +60,7 @@ describe('OpenCodeModelsEditor', () => {
     })
 
     it('should render model limits when present', () => {
-      const onChange = vi.fn()
-      render(<OpenCodeModelsEditor providers={mockProviders} onChange={onChange} />)
+      render(<OpenCodeModelsEditor providers={mockProviders} onSave={vi.fn()} />)
 
       expect(screen.getByText(/Context 128000/)).toBeInTheDocument()
       expect(screen.getByText(/Output 4096/)).toBeInTheDocument()
@@ -72,48 +68,101 @@ describe('OpenCodeModelsEditor', () => {
   })
 
   describe('delete model', () => {
-    it('should call onChange with updated providers when model is deleted', async () => {
-      const onChange = vi.fn()
+    it('should save the full provider with the model key cleared', async () => {
+      const onSave = vi.fn()
       const user = userEvent.setup()
-      render(<OpenCodeModelsEditor providers={mockProviders} onChange={onChange} />)
+      render(<OpenCodeModelsEditor providers={mockProviders} onSave={onSave} />)
 
       await user.click(screen.getByLabelText('Actions for GPT-4o'))
       await user.click(screen.getByText('Delete'))
 
-      expect(onChange).toHaveBeenCalled()
-      const updatedProviders = onChange.mock.calls[0][0]
-      expect(updatedProviders.openai).toBeDefined()
-      expect(updatedProviders.openai.models).toBeDefined()
+      expect(onSave).toHaveBeenCalledWith({
+        openai: {
+          name: 'OpenAI',
+          models: { 'gpt-4o': null },
+        },
+      })
     })
   })
 
-  describe('model content structure', () => {
-    it('should preserve provider structure when models change', async () => {
-      const onChange = vi.fn()
-      const providersWithExtras: Record<string, ConfigProvider> = {
+  describe('rename model', () => {
+    it('should save the new key and clear the old key in the same provider patch', async () => {
+      const onSave = vi.fn()
+      const user = userEvent.setup()
+      render(<OpenCodeModelsEditor providers={mockProviders} onSave={onSave} />)
+
+      await user.click(screen.getByText('GPT-4o'))
+
+      fireEvent.change(document.querySelector('input[name="modelId"]') as HTMLInputElement, {
+        target: { value: 'gpt-4o-renamed' },
+      })
+      await user.click(screen.getByRole('button', { name: /update/i }))
+
+      expect(onSave).toHaveBeenCalledWith({
         openai: {
           name: 'OpenAI',
-          api: 'https://api.openai.com',
-          npm: '@opencode-manager/provider-openai',
           models: {
-            'gpt-4o': {
-              name: 'GPT-4o',
-            },
+            'gpt-4o-renamed': expect.objectContaining({ name: 'GPT-4o' }),
+            'gpt-4o': null,
           },
         },
-      }
+      })
+    })
+  })
 
+  describe('v1-converted providers', () => {
+    const convertedProviders: Record<string, OpenCodeProviderConfig> = {
+      p: {
+        name: 'Provider P',
+        settings: { baseURL: 'http://x' },
+        models: {
+          a: { name: 'Model A' },
+          b: { name: 'Model B' },
+        },
+      },
+    }
+
+    it('should keep the provider name, settings and sibling models when editing a model', async () => {
+      const onSave = vi.fn()
       const user = userEvent.setup()
-      render(<OpenCodeModelsEditor providers={providersWithExtras} onChange={onChange} />)
+      render(<OpenCodeModelsEditor providers={convertedProviders} onSave={onSave} />)
 
-      await user.click(screen.getByLabelText('Actions for GPT-4o'))
+      await user.click(screen.getByText('Model A'))
+      fireEvent.change(document.querySelector('input[name="displayName"]') as HTMLInputElement, {
+        target: { value: 'Model A Updated' },
+      })
+      await user.click(screen.getByRole('button', { name: /update/i }))
+
+      expect(onSave).toHaveBeenCalledWith({
+        p: {
+          name: 'Provider P',
+          settings: { baseURL: 'http://x' },
+          models: {
+            a: expect.objectContaining({ name: 'Model A Updated' }),
+            b: { name: 'Model B' },
+          },
+        },
+      })
+    })
+
+    it('should keep the provider name, settings and sibling models when deleting a model', async () => {
+      const onSave = vi.fn()
+      const user = userEvent.setup()
+      render(<OpenCodeModelsEditor providers={convertedProviders} onSave={onSave} />)
+
+      await user.click(screen.getByLabelText('Actions for Model A'))
       await user.click(screen.getByText('Delete'))
 
-      expect(onChange).toHaveBeenCalled()
-      const updatedProviders = onChange.mock.calls[0][0]
-      expect(updatedProviders.openai.name).toBe('OpenAI')
-      expect(updatedProviders.openai.api).toBe('https://api.openai.com')
-      expect(updatedProviders.openai.npm).toBe('@opencode-manager/provider-openai')
+      expect(onSave).toHaveBeenCalledWith({
+        p: {
+          name: 'Provider P',
+          settings: { baseURL: 'http://x' },
+          models: {
+            a: null,
+            b: { name: 'Model B' },
+          },
+        },
+      })
     })
   })
 })
@@ -189,21 +238,31 @@ describe('OpenCodeModelDialog', () => {
 
       expect(modelIdInput).toHaveValue('gpt-5')
     })
+
+    it('should not render the removed status input', async () => {
+      const { OpenCodeModelDialog } = await import('./OpenCodeModelDialog')
+      render(<OpenCodeModelDialog {...defaultProps} />)
+
+      expect(screen.queryByText('Status')).not.toBeInTheDocument()
+      expect(document.querySelector('input[name="status"]')).toBeNull()
+    })
   })
 
   describe('form submission', () => {
-    it('should call onSubmit with correct provider id, model id, and model data', async () => {
+    it('should call onSubmit with the v2 model patch', async () => {
       const onSubmit = vi.fn()
       const { OpenCodeModelDialog } = await import('./OpenCodeModelDialog')
       render(<OpenCodeModelDialog {...defaultProps} onSubmit={onSubmit} />)
 
-      const modelIdInput = document.querySelector('input[name="modelId"]') as HTMLInputElement
-      const displayNameInput = document.querySelector('input[name="displayName"]') as HTMLInputElement
-
-      expect(modelIdInput).not.toBeNull()
-      expect(displayNameInput).not.toBeNull()
-      fireEvent.change(modelIdInput, { target: { value: 'gpt-5' } })
-      fireEvent.change(displayNameInput, { target: { value: 'GPT-5' } })
+      fireEvent.change(document.querySelector('input[name="modelId"]') as HTMLInputElement, {
+        target: { value: 'gpt-5' },
+      })
+      fireEvent.change(document.querySelector('input[name="displayName"]') as HTMLInputElement, {
+        target: { value: 'GPT-5' },
+      })
+      fireEvent.change(screen.getByPlaceholderText('e.g., MiniMax-M2.7'), {
+        target: { value: 'gpt-5-backing' },
+      })
 
       await waitFor(() => {
         expect(screen.getByRole('button', { name: /create/i })).not.toBeDisabled()
@@ -216,8 +275,9 @@ describe('OpenCodeModelDialog', () => {
           'openai',
           'gpt-5',
           expect.objectContaining({
+            modelID: 'gpt-5-backing',
             name: 'GPT-5',
-          })
+          }),
         )
       })
     })
@@ -227,20 +287,18 @@ describe('OpenCodeModelDialog', () => {
       const { OpenCodeModelDialog } = await import('./OpenCodeModelDialog')
       render(<OpenCodeModelDialog {...defaultProps} onSubmit={onSubmit} />)
 
-      const modelIdInput = document.querySelector('input[name="modelId"]') as HTMLInputElement
-      const displayNameInput = document.querySelector('input[name="displayName"]') as HTMLInputElement
-      const contextLimitInput = document.querySelector('input[name="contextLimit"]') as HTMLInputElement
-      const outputLimitInput = document.querySelector('input[name="outputLimit"]') as HTMLInputElement
-
-      expect(modelIdInput).not.toBeNull()
-      expect(displayNameInput).not.toBeNull()
-      expect(contextLimitInput).not.toBeNull()
-      expect(outputLimitInput).not.toBeNull()
-
-      fireEvent.change(modelIdInput, { target: { value: 'gpt-5' } })
-      fireEvent.change(displayNameInput, { target: { value: 'GPT-5' } })
-      fireEvent.change(contextLimitInput, { target: { value: '256000' } })
-      fireEvent.change(outputLimitInput, { target: { value: '8192' } })
+      fireEvent.change(document.querySelector('input[name="modelId"]') as HTMLInputElement, {
+        target: { value: 'gpt-5' },
+      })
+      fireEvent.change(document.querySelector('input[name="displayName"]') as HTMLInputElement, {
+        target: { value: 'GPT-5' },
+      })
+      fireEvent.change(document.querySelector('input[name="contextLimit"]') as HTMLInputElement, {
+        target: { value: '256000' },
+      })
+      fireEvent.change(document.querySelector('input[name="outputLimit"]') as HTMLInputElement, {
+        target: { value: '8192' },
+      })
 
       await waitFor(() => {
         expect(screen.getByRole('button', { name: /create/i })).not.toBeDisabled()
@@ -258,7 +316,36 @@ describe('OpenCodeModelDialog', () => {
               context: 256000,
               output: 8192,
             },
-          })
+          }),
+        )
+      })
+    })
+
+    it('should parse variants as a v2 array', async () => {
+      const onSubmit = vi.fn()
+      const { OpenCodeModelDialog } = await import('./OpenCodeModelDialog')
+      render(<OpenCodeModelDialog {...defaultProps} onSubmit={onSubmit} />)
+
+      fireEvent.change(document.querySelector('input[name="modelId"]') as HTMLInputElement, {
+        target: { value: 'gpt-5' },
+      })
+      fireEvent.change(document.querySelector('textarea[name="variantsJson"]') as HTMLTextAreaElement, {
+        target: { value: '[{"id":"fast","settings":{"encoding":"fast"}}]' },
+      })
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /create/i })).not.toBeDisabled()
+      })
+
+      fireEvent.click(screen.getByRole('button', { name: /create/i }))
+
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledWith(
+          'openai',
+          'gpt-5',
+          expect.objectContaining({
+            variants: [{ id: 'fast', settings: { encoding: 'fast' } }],
+          }),
         )
       })
     })
@@ -270,9 +357,10 @@ describe('OpenCodeModelDialog', () => {
         providerId: 'openai',
         modelId: 'gpt-4o',
         model: {
+          modelID: 'gpt-4o',
           name: 'GPT-4o',
           limit: { context: 128000, output: 4096 },
-        } as ConfigModel,
+        } as OpenCodeProviderModelConfig,
       }
 
       const onSubmit = vi.fn()
@@ -287,7 +375,7 @@ describe('OpenCodeModelDialog', () => {
       )
 
       expect(screen.getByDisplayValue('GPT-4o')).toBeInTheDocument()
-      expect(screen.getByDisplayValue('gpt-4o')).toBeInTheDocument()
+      expect(document.querySelector('input[name="modelId"]')).toHaveValue('gpt-4o')
     })
 
     it('should emit Update button text when editing', async () => {
@@ -296,7 +384,7 @@ describe('OpenCodeModelDialog', () => {
         modelId: 'gpt-4o',
         model: {
           name: 'GPT-4o',
-        } as ConfigModel,
+        } as OpenCodeProviderModelConfig,
       }
 
       const { OpenCodeModelDialog } = await import('./OpenCodeModelDialog')
@@ -311,16 +399,16 @@ describe('OpenCodeModelDialog', () => {
       expect(screen.getByRole('button', { name: /update/i })).toBeInTheDocument()
     })
 
-    it('should preserve the original backing model id when renaming a model key', async () => {
+    it('should preserve the provider model id and advanced fields when renaming a model key', async () => {
       const editingModel = {
         providerId: 'openai',
         modelId: 'gpt-4o',
         model: {
-          id: 'gpt-4o',
+          modelID: 'gpt-4o',
           name: 'GPT-4o',
           limit: { context: 128000, output: 4096 },
-          reasoning: true,
-        } as ConfigModel,
+          body: { reasoning: true },
+        } as OpenCodeProviderModelConfig,
       }
 
       const onSubmit = vi.fn()
@@ -349,10 +437,57 @@ describe('OpenCodeModelDialog', () => {
           'openai',
           'my-friendly-model',
           expect.objectContaining({
-            id: 'gpt-4o',
+            modelID: 'gpt-4o',
             name: 'GPT-4o',
-            reasoning: true,
-          })
+            body: { reasoning: true },
+          }),
+        )
+      })
+    })
+
+    it('should send nulls for nested limit and header keys cleared during an edit', async () => {
+      const editingModel = {
+        providerId: 'openai',
+        modelId: 'gpt-4o',
+        model: {
+          name: 'GPT-4o',
+          limit: { context: 200000, input: 100000, output: 8000 },
+          headers: { 'X-A': '1', 'X-B': '2' },
+        } as OpenCodeProviderModelConfig,
+      }
+
+      const onSubmit = vi.fn()
+      const { OpenCodeModelDialog } = await import('./OpenCodeModelDialog')
+      render(
+        <OpenCodeModelDialog
+          {...defaultProps}
+          onSubmit={onSubmit}
+          editingModel={editingModel}
+          open={true}
+        />
+      )
+
+      fireEvent.change(document.querySelector('input[name="inputLimit"]') as HTMLInputElement, {
+        target: { value: '' },
+      })
+      fireEvent.change(document.querySelector('textarea[name="headersJson"]') as HTMLTextAreaElement, {
+        target: { value: '{"X-A":"1"}' },
+      })
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /update/i })).not.toBeDisabled()
+      })
+
+      fireEvent.click(screen.getByRole('button', { name: /update/i }))
+
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledWith(
+          'openai',
+          'gpt-4o',
+          expect.objectContaining({
+            limit: { context: 200000, input: null, output: 8000 },
+            headers: { 'X-A': '1', 'X-B': null },
+          }),
         )
       })
     })

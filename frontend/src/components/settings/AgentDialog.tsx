@@ -11,79 +11,186 @@ import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ModelCombobox } from '@/components/model/ModelCombobox'
 import { configModelRef, formatOpenCodeModelRef } from '@opencode-manager/shared/opencode'
+import type { OpenCodeAgentConfig, OpenCodePermissionRule } from '@opencode-manager/shared/opencode'
+import type { OpenCodeAgentPatch } from '@/api/types/settings'
+
+const MANAGED_PERMISSION_ACTIONS = ['edit', 'shell', 'webfetch'] as const
+
+type ManagedPermissionAction = typeof MANAGED_PERMISSION_ACTIONS[number]
+
+type PermissionEffect = OpenCodePermissionRule['effect'] | 'inherit'
+
+/**
+ * Reports whether a rule is a wildcard (`*` resource) rule for one of the
+ * managed actions (`edit`, `shell`, `webfetch`), which are the only rules the
+ * dialog's permission controls own.
+ */
+const isManagedWildcardRule = (rule: OpenCodePermissionRule): boolean =>
+  rule.resource === '*' && MANAGED_PERMISSION_ACTIONS.includes(rule.action as ManagedPermissionAction)
+
+/**
+ * Returns the final rule accepted by `matches`, mirroring OpenCode's
+ * last-match-wins resolution, or `undefined` when no rule matches.
+ */
+const lastMatchingRule = (
+  permissions: OpenCodePermissionRule[] | undefined,
+  matches: (rule: OpenCodePermissionRule) => boolean,
+): OpenCodePermissionRule | undefined => {
+  let match: OpenCodePermissionRule | undefined
+  for (const rule of permissions ?? []) {
+    if (matches(rule)) {
+      match = rule
+    }
+  }
+  return match
+}
+
+/**
+ * Resolves the effect of an action's wildcard rule from stored permissions,
+ * returning `inherit` when the action has no such rule.
+ */
+const permissionEffect = (
+  permissions: OpenCodePermissionRule[] | undefined,
+  action: ManagedPermissionAction,
+): PermissionEffect => {
+  const rule = lastMatchingRule(permissions, (entry) => entry.action === action && entry.resource === '*')
+  return rule?.effect ?? 'inherit'
+}
+
+/**
+ * Applies the form effects to the managed wildcard rules in place, so the rule
+ * order OpenCode resolves with last-match-wins stays unchanged. An `inherit`
+ * effect removes the action's wildcard rules so the global permission applies;
+ * any other effect adds a wildcard rule when the action has none yet, placed
+ * after the last catch-all `* *` rule so that rule cannot override it.
+ */
+const withManagedPermissionEffects = (
+  permissions: OpenCodePermissionRule[] | undefined,
+  effects: Record<ManagedPermissionAction, PermissionEffect>,
+): OpenCodePermissionRule[] => {
+  const updated = (permissions ?? []).flatMap((rule) => {
+    if (!isManagedWildcardRule(rule)) return [rule]
+    const effect = effects[rule.action as ManagedPermissionAction]
+    return effect === 'inherit' ? [] : [{ ...rule, effect }]
+  })
+  const actionsWithWildcard = new Set(updated.filter(isManagedWildcardRule).map((rule) => rule.action))
+  const fallbacks = MANAGED_PERMISSION_ACTIONS.flatMap((action) => {
+    const effect = effects[action]
+    return effect === 'inherit' || actionsWithWildcard.has(action) ? [] : [{ action, resource: '*', effect }]
+  })
+  const fallbackIndex = updated.reduce(
+    (index, rule, currentIndex) => (rule.action === '*' && rule.resource === '*' ? currentIndex + 1 : index),
+    0,
+  )
+  return [...updated.slice(0, fallbackIndex), ...fallbacks, ...updated.slice(fallbackIndex)]
+}
+
+/**
+ * Parses a text input into a number, yielding `undefined` for blank or
+ * unparsable input so a cleared form field stays unset.
+ */
+const optionalNumber = (value: string): number | undefined => {
+  const parsed = parseFloat(value)
+  return Number.isNaN(parsed) ? undefined : parsed
+}
+
+/**
+ * Reads a numeric sampling value from the agent's raw `request.body`, returning
+ * `undefined` when the key is absent or holds a non-number.
+ */
+const requestBodyNumber = (agent: OpenCodeAgentConfig | undefined, key: string): number | undefined => {
+  const value = agent?.request?.body?.[key]
+  return typeof value === 'number' ? value : undefined
+}
+
+/**
+ * Writes each sampling value the form sets into `request.body`. A cleared value
+ * is removed with a merge-patch `null` when the agent stored it and omitted
+ * otherwise, so the provider default applies. A request left with no fields is
+ * deleted instead of being saved as an empty object.
+ */
+const withSamplingValues = (
+  previous: OpenCodeAgentConfig | undefined,
+  values: Record<'temperature' | 'top_p', number | undefined>,
+): Pick<OpenCodeAgentPatch, 'request'> => {
+  const previousBody = previous?.request?.body ?? {}
+  const body: NonNullable<NonNullable<OpenCodeAgentConfig['request']>['body']> = { ...previousBody }
+  for (const [key, value] of Object.entries(values)) {
+    if (value !== undefined) {
+      body[key] = value
+    } else if (key in previousBody) {
+      body[key] = null
+    }
+  }
+  const request = { ...previous?.request, body }
+  const bodyHasValues = Object.values(body).some((value) => value !== null && value !== undefined)
+  const requestHasOtherFields = Object.entries(request).some(
+    ([key, value]) => key !== 'body' && value !== undefined && value !== null,
+  )
+  if (bodyHasValues || requestHasOtherFields) return { request }
+  return previous?.request ? { request: null } : {}
+}
 
 const agentFormSchema = z.object({
   name: z.string().min(1, 'Agent name is required').regex(/^[a-z0-9-]+$/, 'Must be lowercase letters, numbers, and hyphens only'),
   description: z.string().optional(),
   prompt: z.string().min(1, 'Prompt is required'),
   mode: z.enum(['subagent', 'primary', 'all']),
-  temperature: z.number().min(0).max(2),
-  topP: z.number().min(0).max(1),
+  temperature: z.number().min(0).max(2).optional(),
+  topP: z.number().min(0).max(1).optional(),
   model: z.string().optional(),
-  write: z.boolean(),
-  edit: z.boolean(),
-  bash: z.boolean(),
-  webfetch: z.boolean(),
-  editPermission: z.enum(['ask', 'allow', 'deny']),
-  bashPermission: z.enum(['ask', 'allow', 'deny']),
-  webfetchPermission: z.enum(['ask', 'allow', 'deny']),
-  disable: z.boolean()
+  editPermission: z.enum(['inherit', 'ask', 'allow', 'deny']),
+  shellPermission: z.enum(['inherit', 'ask', 'allow', 'deny']),
+  webfetchPermission: z.enum(['inherit', 'ask', 'allow', 'deny']),
+  disable: z.boolean(),
 })
 
 type AgentFormValues = z.infer<typeof agentFormSchema>
 
-interface Agent<TModel = string> {
-  prompt?: string
-  description?: string
-  mode?: 'subagent' | 'primary' | 'all'
-  temperature?: number
-  topP?: number
-  top_p?: number
-  model?: TModel
-  tools?: Record<string, boolean>
-  permission?: {
-    edit?: 'ask' | 'allow' | 'deny'
-    bash?: 'ask' | 'allow' | 'deny' | Record<string, 'ask' | 'allow' | 'deny'>
-    webfetch?: 'ask' | 'allow' | 'deny'
-  }
-  disable?: boolean
-  [key: string]: unknown
-}
-
-type StoredAgent = Agent<string | { providerID: string; model: string; variant?: string }>
+const formPermissionEffects = (values: AgentFormValues): Record<ManagedPermissionAction, PermissionEffect> => ({
+  edit: values.editPermission,
+  shell: values.shellPermission,
+  webfetch: values.webfetchPermission,
+})
 
 interface AgentDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSubmit: (name: string, agent: Agent) => void
-  editingAgent?: { name: string; agent: StoredAgent } | null
+  onSubmit: (name: string, agent: OpenCodeAgentPatch) => void
+  editingAgent?: { name: string; agent: OpenCodeAgentConfig } | null
 }
 
+/**
+ * Renders the create/edit agent dialog with identity, prompt, mode, model,
+ * permission, sampling, and disabled fields, locking the name while editing an
+ * existing agent. Submitting merges the form into the stored agent so managed
+ * permission and sampling settings survive the patch.
+ */
 export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: AgentDialogProps) {
-  const getDefaultValues = (agent?: { name: string; agent: StoredAgent } | null): AgentFormValues => {
+  /**
+   * Builds the form's initial values for an existing agent, or empty defaults
+   * when none is supplied, mapping permissions to their winning wildcard rule.
+   */
+  const getDefaultValues = (agent?: { name: string; agent: OpenCodeAgentConfig } | null): AgentFormValues => {
     const modelRef = configModelRef(agent?.agent.model)
     return {
       name: agent?.name || '',
       description: agent?.agent.description || '',
-      prompt: agent?.agent.prompt || '',
+      prompt: agent?.agent.system || '',
       mode: agent?.agent.mode || 'subagent',
-      temperature: agent?.agent.temperature ?? 0.7,
-      topP: agent?.agent.topP ?? agent?.agent.top_p ?? 1,
+      temperature: requestBodyNumber(agent?.agent, 'temperature'),
+      topP: requestBodyNumber(agent?.agent, 'top_p'),
       model: modelRef ? formatOpenCodeModelRef(modelRef) : '',
-      write: agent?.agent.tools?.write ?? true,
-      edit: agent?.agent.tools?.edit ?? true,
-      bash: agent?.agent.tools?.bash ?? true,
-      webfetch: agent?.agent.tools?.webfetch ?? true,
-      editPermission: agent?.agent.permission?.edit ?? 'allow',
-      bashPermission: typeof agent?.agent.permission?.bash === 'string' ? agent.agent.permission.bash : 'allow',
-      webfetchPermission: agent?.agent.permission?.webfetch ?? 'allow',
-      disable: agent?.agent.disable ?? false
+      editPermission: permissionEffect(agent?.agent.permissions, 'edit'),
+      shellPermission: permissionEffect(agent?.agent.permissions, 'shell'),
+      webfetchPermission: permissionEffect(agent?.agent.permissions, 'webfetch'),
+      disable: agent?.agent.disabled ?? false,
     }
   }
 
   const form = useForm<AgentFormValues>({
     resolver: zodResolver(agentFormSchema),
-    defaultValues: getDefaultValues(editingAgent)
+    defaultValues: getDefaultValues(editingAgent),
   })
 
   useEffect(() => {
@@ -93,28 +200,17 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
   }, [open, editingAgent, form])
 
   const handleSubmit = (values: AgentFormValues) => {
-    const agent: Agent = {
-      prompt: values.prompt,
-      description: values.description || undefined,
+    const previous = editingAgent?.agent
+    const permissions = withManagedPermissionEffects(previous?.permissions, formPermissionEffects(values))
+    const agent: OpenCodeAgentPatch = {
+      ...previous,
+      system: values.prompt,
+      description: values.description || null,
       mode: values.mode,
-      temperature: values.temperature,
-      topP: values.topP,
-      disable: values.disable,
-      tools: {
-        write: values.write,
-        edit: values.edit,
-        bash: values.bash,
-        webfetch: values.webfetch
-      },
-      permission: {
-        edit: values.editPermission,
-        bash: values.bashPermission,
-        webfetch: values.webfetchPermission
-      }
-    }
-
-    if (values.model?.trim()) {
-      agent.model = values.model.trim()
+      model: values.model?.trim() || null,
+      disabled: values.disable,
+      ...(permissions.length > 0 ? { permissions } : previous?.permissions ? { permissions: null } : {}),
+      ...withSamplingValues(previous, { temperature: values.temperature, top_p: values.topP }),
     }
 
     onSubmit(values.name, agent)
@@ -234,7 +330,9 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
                           min="0"
                           max="2"
                           step="0.1"
-                          onChange={(e) => field.onChange(parseFloat(e.target.value))}
+                          placeholder="Default"
+                          value={field.value ?? ''}
+                          onChange={(e) => field.onChange(optionalNumber(e.target.value))}
                         />
                       </FormControl>
                       <FormMessage />
@@ -255,7 +353,9 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
                           min="0"
                           max="1"
                           step="0.1"
-                          onChange={(e) => field.onChange(parseFloat(e.target.value))}
+                          placeholder="Default"
+                          value={field.value ?? ''}
+                          onChange={(e) => field.onChange(optionalNumber(e.target.value))}
                         />
                       </FormControl>
                       <FormMessage />
@@ -288,75 +388,6 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
               />
 
               <div className="space-y-2">
-                <div className="text-sm font-medium">Tools Configuration</div>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <FormField
-                    control={form.control}
-                    name="write"
-                    render={({ field }) => (
-                      <FormItem className="flex flex-row items-center space-x-2 space-y-0">
-                        <FormControl>
-                          <Switch
-                            checked={field.value}
-                            onCheckedChange={field.onChange}
-                          />
-                        </FormControl>
-                        <FormLabel className="font-normal">Write</FormLabel>
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="edit"
-                    render={({ field }) => (
-                      <FormItem className="flex flex-row items-center space-x-2 space-y-0">
-                        <FormControl>
-                          <Switch
-                            checked={field.value}
-                            onCheckedChange={field.onChange}
-                          />
-                        </FormControl>
-                        <FormLabel className="font-normal">Edit</FormLabel>
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="bash"
-                    render={({ field }) => (
-                      <FormItem className="flex flex-row items-center space-x-2 space-y-0">
-                        <FormControl>
-                          <Switch
-                            checked={field.value}
-                            onCheckedChange={field.onChange}
-                          />
-                        </FormControl>
-                        <FormLabel className="font-normal">Bash</FormLabel>
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="webfetch"
-                    render={({ field }) => (
-                      <FormItem className="flex flex-row items-center space-x-2 space-y-0">
-                        <FormControl>
-                          <Switch
-                            checked={field.value}
-                            onCheckedChange={field.onChange}
-                          />
-                        </FormControl>
-                        <FormLabel className="font-normal">Web Fetch</FormLabel>
-                      </FormItem>
-                    )}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
                 <div className="text-sm font-medium">Permissions</div>
                 <div className="grid grid-cols-3 gap-2 text-sm">
                   <FormField
@@ -372,6 +403,7 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
+                            <SelectItem value="inherit">Default</SelectItem>
                             <SelectItem value="ask">Ask</SelectItem>
                             <SelectItem value="allow">Allow</SelectItem>
                             <SelectItem value="deny">Deny</SelectItem>
@@ -384,10 +416,10 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
 
                   <FormField
                     control={form.control}
-                    name="bashPermission"
+                    name="shellPermission"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel className="text-xs">Bash</FormLabel>
+                        <FormLabel className="text-xs">Shell</FormLabel>
                         <Select onValueChange={field.onChange} defaultValue={field.value}>
                           <FormControl>
                             <SelectTrigger>
@@ -395,6 +427,7 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
+                            <SelectItem value="inherit">Default</SelectItem>
                             <SelectItem value="ask">Ask</SelectItem>
                             <SelectItem value="allow">Allow</SelectItem>
                             <SelectItem value="deny">Deny</SelectItem>
@@ -418,6 +451,7 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
+                            <SelectItem value="inherit">Default</SelectItem>
                             <SelectItem value="ask">Ask</SelectItem>
                             <SelectItem value="allow">Allow</SelectItem>
                             <SelectItem value="deny">Deny</SelectItem>

@@ -8,6 +8,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import type { AgentInfo } from '@opencode-manager/shared/opencode'
 import { useAgents } from '@/hooks/useOpenCode'
 import { getAgentStyleVars } from '@/lib/agent-colors'
 import { getPrimaryAgents } from '@/lib/primaryAgents'
@@ -19,16 +20,9 @@ interface AgentQuickSelectProps {
   isBashMode?: boolean
 }
 
-interface AgentInfo {
-  id: string
-  name: string
-  color?: string
-  description?: string
-  mode?: string
-  hidden?: boolean
-}
+type SelectableAgent = Pick<AgentInfo, 'id' | 'name' | 'color' | 'description' | 'mode' | 'hidden'>
 
-const findAgent = (agents: AgentInfo[], agentId: string): AgentInfo | undefined => {
+const findAgent = (agents: SelectableAgent[], agentId: string): SelectableAgent | undefined => {
   return agents.find(a => a.id.toLowerCase() === agentId.toLowerCase())
 }
 

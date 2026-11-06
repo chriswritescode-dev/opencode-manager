@@ -59,6 +59,7 @@ function getDefaultJob(overrides?: Partial<ScheduleJob>): ScheduleJob {
     name: 'Test Job',
     description: null,
     enabled: true,
+    showInInbox: true,
     scheduleMode: 'interval',
     intervalMinutes: 60,
     cronExpression: null,
@@ -91,14 +92,12 @@ async function fillRequiredFields(user: ReturnType<typeof userEvent.setup>) {
   await user.type(promptInput, 'Run a test')
 }
 
-/** The external-directory switch is the 2nd switch (index 1) after Enabled */
 function getExternalDirSwitch() {
-  return screen.getAllByRole('switch')[1]
+  return screen.getByRole('switch', { name: 'Allow access outside the working directory' })
 }
 
-/** The allow-questions switch is the 3rd switch (index 2), after Enabled and external directory */
 function getAllowQuestionsSwitch() {
-  return screen.getAllByRole('switch')[2]
+  return screen.getByRole('switch', { name: 'Allow questions' })
 }
 
 describe('ScheduleJobDialog — permission config', () => {

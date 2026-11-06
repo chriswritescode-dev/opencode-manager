@@ -7,6 +7,7 @@ import migration021 from '../../src/db/migrations/021-drop-schedule-run-workspac
 import migration022 from '../../src/db/migrations/022-schedule-runs-session-index'
 import migration024 from '../../src/db/migrations/024-schedule-runs-viewed-at'
 import migration202610251900 from '../../src/db/migrations/202610251900-schedule-sandbox-config'
+import migration202610271800 from '../../src/db/migrations/202610271800-schedule-show-in-inbox'
 
 describe('schedule migrations', () => {
   it('creates schedule jobs with nullable interval minutes in v7', () => {
@@ -313,6 +314,38 @@ describe('migration 202610251900 - schedule sandbox config', () => {
 
     const columns = (db.prepare('PRAGMA table_info(schedule_jobs)').all() as { name: string }[]).map((column) => column.name)
     expect(columns).not.toContain('sandbox_config')
+
+    db.close()
+  })
+})
+
+describe('migration 202610271800 - schedule show in inbox', () => {
+  it('adds the show_in_inbox column defaulting existing rows to 1 and is idempotent', () => {
+    const db = new Database(':memory:')
+    db.run('CREATE TABLE schedule_jobs (id INTEGER PRIMARY KEY, name TEXT)')
+    db.run("INSERT INTO schedule_jobs (id, name) VALUES (1, 'Existing job')")
+
+    migration202610271800.up(db)
+    migration202610271800.up(db)
+
+    const columns = (db.prepare('PRAGMA table_info(schedule_jobs)').all() as { name: string }[]).map((column) => column.name)
+    expect(columns).toContain('show_in_inbox')
+
+    const row = db.prepare('SELECT show_in_inbox FROM schedule_jobs WHERE id = 1').get() as { show_in_inbox: number }
+    expect(row.show_in_inbox).toBe(1)
+
+    db.close()
+  })
+
+  it('drops the column on rollback', () => {
+    const db = new Database(':memory:')
+    db.run('CREATE TABLE schedule_jobs (id INTEGER PRIMARY KEY, name TEXT)')
+
+    migration202610271800.up(db)
+    migration202610271800.down(db)
+
+    const columns = (db.prepare('PRAGMA table_info(schedule_jobs)').all() as { name: string }[]).map((column) => column.name)
+    expect(columns).not.toContain('show_in_inbox')
 
     db.close()
   })

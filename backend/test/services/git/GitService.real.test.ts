@@ -35,6 +35,7 @@ function scheduleJobInput(name: string, branch: string): ScheduleJobPersistenceI
     name,
     description: null,
     enabled: true,
+    showInInbox: true,
     scheduleMode: 'interval',
     intervalMinutes: 60,
     cronExpression: null,

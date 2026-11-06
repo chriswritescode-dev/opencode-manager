@@ -8,15 +8,10 @@ vi.mock('../../src/utils/logger', () => ({
   },
 }))
 
-import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
+import type { OpenCodeApi, V2Event } from '@opencode-manager/shared/opencode'
 import type { OpenCodeServer, OpenCodeServerTestResult } from '@opencode-manager/shared/schemas'
 import { sseAggregator } from '../../src/services/sse-aggregator'
-import {
-  RemoteServerEventHub,
-  type RemoteEventSource,
-  type RemoteEventSourceFactory,
-  type RemoteEventSourceInit,
-} from '../../src/services/remote-server-events'
+import { RemoteServerEventHub } from '../../src/services/remote-server-events'
 import type {
   OpenCodeServerChange,
   OpenCodeServerConnection,
@@ -45,32 +40,73 @@ const SERVER_B: OpenCodeServer = {
   updatedAt: 1,
 }
 
-class FakeEventSource implements RemoteEventSource {
-  onopen: ((event: unknown) => void) | null = null
-  onerror: ((event: unknown) => void) | null = null
-  onmessage: ((event: { data: string }) => void) | null = null
-  closed = false
+const SERVER_CONNECTED: V2Event = { id: 'evt_connected', type: 'server.connected', data: {} }
 
-  constructor(
-    readonly url: string,
-    readonly init?: RemoteEventSourceInit,
-  ) {}
+interface ControlledEventStream {
+  iterable: AsyncIterable<V2Event>
+  signal: AbortSignal
+  push: (event: V2Event) => void
+  end: () => void
+  fail: (error: unknown) => void
+}
 
-  close(): void {
-    this.closed = true
+function createControlledEventStream(): ControlledEventStream {
+  const queue: V2Event[] = []
+  let finished = false
+  let failure: { value: unknown } | null = null
+  let signal: AbortSignal
+  let notify: (() => void) | null = null
+
+  const wake = (): void => {
+    const current = notify
+    notify = null
+    current?.()
   }
 
-  open(): void {
-    this.onopen?.({})
+  const iterable: AsyncIterable<V2Event> = {
+    [Symbol.asyncIterator]: () => ({
+      async next() {
+        for (;;) {
+          if (queue.length > 0) return { value: queue.shift()!, done: false }
+          if (failure) {
+            const current = failure.value
+            failure = null
+            throw current
+          }
+          if (finished) return { value: undefined, done: true }
+          await new Promise<void>((resolve) => {
+            notify = resolve
+          })
+        }
+      },
+    }),
   }
 
-  fail(event: unknown = { message: 'connection lost' }): void {
-    this.onerror?.(event)
-  }
-
-  message(data: string): void {
-    this.onmessage?.({ data })
-  }
+  return {
+    iterable,
+    get signal() {
+      return signal
+    },
+    set signal(next: AbortSignal) {
+      signal = next
+      next.addEventListener('abort', () => {
+        failure = { value: next.reason ?? new Error('aborted') }
+        wake()
+      }, { once: true })
+    },
+    push: (event) => {
+      queue.push(event)
+      wake()
+    },
+    end: () => {
+      finished = true
+      wake()
+    },
+    fail: (error) => {
+      failure = { value: error }
+      wake()
+    },
+  } as ControlledEventStream
 }
 
 interface CapturedClient {
@@ -107,10 +143,18 @@ interface ApiFixture {
   sessionDirectories?: Record<string, string>
 }
 
-function makeApi(fixture: ApiFixture = {}): OpenCodeApi {
+function makeApi(fixture: ApiFixture, subscriptions: ControlledEventStream[]): OpenCodeApi {
   const directoryOf = (input?: { location?: { directory?: string } }): string => input?.location?.directory ?? ''
 
   return {
+    event: {
+      subscribe: (options: { signal?: AbortSignal; onActivity?: () => void }) => {
+        const stream = createControlledEventStream()
+        stream.signal = options.signal!
+        subscriptions.push(stream)
+        return stream.iterable
+      },
+    },
     permission: {
       request: {
         list: vi.fn(async (input?: { location?: { directory?: string } }) => ({
@@ -134,20 +178,39 @@ function makeApi(fixture: ApiFixture = {}): OpenCodeApi {
   } as unknown as OpenCodeApi
 }
 
+interface FakeServerTransport {
+  api: OpenCodeApi
+  subscriptions: ControlledEventStream[]
+}
+
 interface FakeRegistry {
   registry: OpenCodeServerRegistry
   api: OpenCodeApi
+  transport: (serverId: string) => FakeServerTransport
+  latest: (serverId: string) => ControlledEventStream
   emit: (change: OpenCodeServerChange) => void
   setServer: (server: OpenCodeServer) => void
   removeServer: (serverId: string) => void
   listCalls: () => number
+  clientCalls: string[]
 }
 
 function createRegistry(servers: OpenCodeServer[], fixture: ApiFixture = {}): FakeRegistry {
   const byId = new Map(servers.map(server => [server.id, server]))
   const listeners = new Set<(change: OpenCodeServerChange) => void>()
-  const api = makeApi(fixture)
+  const transports = new Map<string, FakeServerTransport>()
+  const clientCalls: string[] = []
   let listCalls = 0
+
+  const transport = (serverId: string): FakeServerTransport => {
+    const existing = transports.get(serverId)
+    if (existing) return existing
+
+    const subscriptions: ControlledEventStream[] = []
+    const created: FakeServerTransport = { api: makeApi(fixture, subscriptions), subscriptions }
+    transports.set(serverId, created)
+    return created
+  }
 
   const registry = {
     list: () => {
@@ -164,7 +227,10 @@ function createRegistry(servers: OpenCodeServer[], fixture: ApiFixture = {}): Fa
         authorization: server.hasPassword ? 'Basic dXNlcjpwYXNz' : null,
       }
     },
-    getClient: () => ({ api }),
+    getClient: (serverId: string) => {
+      clientCalls.push(serverId)
+      return { api: transport(serverId).api }
+    },
     onChange: (listener: (change: OpenCodeServerChange) => void) => {
       listeners.add(listener)
       return () => { listeners.delete(listener) }
@@ -174,25 +240,19 @@ function createRegistry(servers: OpenCodeServer[], fixture: ApiFixture = {}): Fa
 
   return {
     registry,
-    api,
+    api: transport(servers[0]!.id).api,
+    transport,
+    latest: (serverId) => {
+      const subscriptions = transport(serverId).subscriptions
+      const latest = subscriptions[subscriptions.length - 1]
+      if (!latest) throw new Error(`No subscription for ${serverId}`)
+      return latest
+    },
     emit: (change) => { listeners.forEach(listener => listener(change)) },
     setServer: (server) => { byId.set(server.id, server) },
     removeServer: (serverId) => { byId.delete(serverId) },
     listCalls: () => listCalls,
-  }
-}
-
-function createSourceFactory() {
-  const sources: FakeEventSource[] = []
-  const factory: RemoteEventSourceFactory = (url, init) => {
-    const source = new FakeEventSource(url, init)
-    sources.push(source)
-    return source
-  }
-  return {
-    sources,
-    factory,
-    latest: () => sources[sources.length - 1]!,
+    clientCalls,
   }
 }
 
@@ -202,28 +262,26 @@ async function flushPromises(): Promise<void> {
   }
 }
 
-function remoteEvent(type: string, data: unknown, directory?: string): string {
-  return JSON.stringify({
+function remoteEvent(type: string, data: unknown, directory?: string): V2Event {
+  return {
     id: 'evt_1',
     created: 1,
     type,
     ...(directory ? { location: { directory } } : {}),
     data,
-  })
+  } as V2Event
 }
 
 describe('RemoteServerEventHub event delivery', () => {
   let hub: RemoteServerEventHub
   let fake: FakeRegistry
-  let sources: ReturnType<typeof createSourceFactory>
 
   beforeEach(() => {
     sseAggregator.shutdown()
-    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setOpenCodeClient(null)
     sseAggregator.setScheduledSessionsResolver(() => [])
     fake = createRegistry([SERVER_A, SERVER_B])
-    sources = createSourceFactory()
-    hub = new RemoteServerEventHub(fake.registry, sseAggregator, { eventSourceFactory: sources.factory })
+    hub = new RemoteServerEventHub(fake.registry, sseAggregator)
   })
 
   afterEach(() => {
@@ -231,18 +289,15 @@ describe('RemoteServerEventHub event delivery', () => {
     sseAggregator.shutdown()
   })
 
-  it('opens one stream per enabled server with the connection authorization', () => {
+  it('opens one subscription per enabled server through the registry client', () => {
     hub.start()
 
-    expect(sources.sources.map(source => source.url)).toEqual([
-      'https://studio.example.com/api/event',
-      'https://laptop.example.com/api/event',
-    ])
-    expect(sources.sources[0]?.init?.fetch).toBeTypeOf('function')
-    expect(sources.sources[1]?.init).toBeUndefined()
+    expect(fake.clientCalls).toEqual(['srv_a', 'srv_b'])
+    expect(fake.transport('srv_a').subscriptions).toHaveLength(1)
+    expect(fake.transport('srv_b').subscriptions).toHaveLength(1)
   })
 
-  it('broadcasts a located event to every client with a serverId envelope', () => {
+  it('broadcasts a located event to every client with a serverId envelope', async () => {
     const remoteClient = createCapturingClient()
     const otherServerClient = createCapturingClient()
     const localClient = createCapturingClient()
@@ -254,11 +309,15 @@ describe('RemoteServerEventHub event delivery', () => {
     sseAggregator.onEvent(listener)
 
     hub.start()
-    const source = sources.sources[0]!
-    source.open()
+    const stream = fake.latest('srv_a')
+    stream.push(SERVER_CONNECTED)
+    await flushPromises()
     remoteClient.frames.length = 0
+    otherServerClient.frames.length = 0
+    localClient.frames.length = 0
 
-    source.message(remoteEvent('session.idle', { sessionID: 'ses_1' }, '/repo'))
+    stream.push(remoteEvent('session.idle', { sessionID: 'ses_1' }, '/repo'))
+    await flushPromises()
 
     const envelope = {
       directory: '/repo',
@@ -278,16 +337,18 @@ describe('RemoteServerEventHub event delivery', () => {
     expect(sseAggregator.getActiveSessions()).toEqual({})
   })
 
-  it('resolves a directory-less event through the per-server session map', () => {
+  it('resolves a directory-less event through the per-server session map', async () => {
     const client = createCapturingClient()
     sseAggregator.addClient('session-map', client.callback, client.writeFrame, ['srv_a|/repo'])
 
     hub.start()
-    const source = sources.sources[0]!
-    source.message(remoteEvent('session.created', { sessionID: 'ses_1', parentID: null }, '/repo'))
+    const stream = fake.latest('srv_a')
+    stream.push(remoteEvent('session.created', { sessionID: 'ses_1', parentID: null }, '/repo'))
+    await flushPromises()
     client.frames.length = 0
 
-    source.message(remoteEvent('session.execution.succeeded', { sessionID: 'ses_1' }))
+    stream.push(remoteEvent('session.execution.succeeded', { sessionID: 'ses_1' }))
+    await flushPromises()
 
     expect(client.frames.map(parseFrame)).toEqual([{
       directory: '/repo',
@@ -301,22 +362,26 @@ describe('RemoteServerEventHub event delivery', () => {
     }])
   })
 
-  it('inherits the parent directory for a forked session and forgets deleted sessions', () => {
+  it('inherits the parent directory for a forked session and forgets deleted sessions', async () => {
     const client = createCapturingClient()
     sseAggregator.addClient('fork', client.callback, client.writeFrame, ['srv_a|/repo'])
 
     hub.start()
-    const source = sources.sources[0]!
-    source.message(remoteEvent('session.created', { sessionID: 'ses_parent' }, '/repo'))
-    source.message(remoteEvent('session.forked', { sessionID: 'ses_fork', parentID: 'ses_parent' }))
+    const stream = fake.latest('srv_a')
+    stream.push(remoteEvent('session.created', { sessionID: 'ses_parent' }, '/repo'))
+    stream.push(remoteEvent('session.forked', { sessionID: 'ses_fork', parentID: 'ses_parent' }))
+    await flushPromises()
     client.frames.length = 0
 
-    source.message(remoteEvent('session.execution.succeeded', { sessionID: 'ses_fork' }))
+    stream.push(remoteEvent('session.execution.succeeded', { sessionID: 'ses_fork' }))
+    await flushPromises()
     expect(client.frames.map(parseFrame).map(frame => frame.directory)).toEqual(['/repo'])
 
-    source.message(remoteEvent('session.deleted', { sessionID: 'ses_fork' }))
+    stream.push(remoteEvent('session.deleted', { sessionID: 'ses_fork' }))
+    await flushPromises()
     client.frames.length = 0
-    source.message(remoteEvent('session.execution.succeeded', { sessionID: 'ses_fork' }))
+    stream.push(remoteEvent('session.execution.succeeded', { sessionID: 'ses_fork' }))
+    await flushPromises()
 
     expect(client.frames.map(parseFrame)).toEqual([{
       directory: null,
@@ -330,7 +395,7 @@ describe('RemoteServerEventHub event delivery', () => {
     }])
   })
 
-  it('broadcasts to every client when the directory is unknown', () => {
+  it('broadcasts to every client when the directory is unknown', async () => {
     const subscribedA = createCapturingClient()
     const otherDirectoryA = createCapturingClient()
     const subscribedB = createCapturingClient()
@@ -339,7 +404,8 @@ describe('RemoteServerEventHub event delivery', () => {
     sseAggregator.addClient('any-b', subscribedB.callback, subscribedB.writeFrame, ['srv_b|/repo'])
 
     hub.start()
-    sources.sources[0]!.message(remoteEvent('server.connected', {}))
+    fake.latest('srv_a').push(remoteEvent('server.connected', {}))
+    await flushPromises()
 
     const envelope = {
       directory: null,
@@ -351,46 +417,31 @@ describe('RemoteServerEventHub event delivery', () => {
     expect(subscribedB.frames.map(parseFrame)).toEqual([envelope])
   })
 
-  it('keeps the raw upstream payload in the remote envelope and re-serializes multi-line payloads', () => {
+  it('serializes the routed event into a single envelope data line', async () => {
     const client = createCapturingClient()
     sseAggregator.addClient('raw-remote', client.callback, client.writeFrame, ['srv_a|/repo'])
 
     hub.start()
-    const source = sources.sources[0]!
-    const raw = '{"type":"session.idle","id":"evt_raw","created":7,"location":{"directory":"/repo"},"data":{"sessionID":"ses_1","extra":{"b":2,"a":1}}}'
-    source.message(raw)
+    const event = remoteEvent('session.idle', { sessionID: 'ses_1', extra: { b: 2, a: 1 } }, '/repo')
+    fake.latest('srv_a').push(event)
+    await flushPromises()
 
-    expect(client.frames).toEqual([`event: message\ndata: {"directory":"/repo","serverId":"srv_a","payload":${raw}}\n\n`])
-
-    const multiLine = JSON.stringify(JSON.parse(raw), null, 2)
-    source.message(multiLine)
-
-    expect(client.frames[1]!.split('\n').filter(line => line.startsWith('data: '))).toHaveLength(1)
-    expect(parseFrame(client.frames[1]!).payload).toEqual(JSON.parse(raw))
+    expect(client.frames).toHaveLength(1)
+    expect(client.frames[0]!.split('\n').filter(line => line.startsWith('data: '))).toHaveLength(1)
+    expect(parseFrame(client.frames[0]!).payload).toEqual(event)
   })
 
-  it('ignores malformed remote payloads', () => {
-    const client = createCapturingClient()
-    sseAggregator.addClient('malformed-remote', client.callback, client.writeFrame, ['srv_a|/repo'])
-
-    hub.start()
-    const source = sources.sources[0]!
-    source.message('not-json')
-    source.message(JSON.stringify({ id: 'evt', created: 1, data: {} }))
-
-    expect(client.frames).toHaveLength(0)
-  })
-
-  it('notifies server event listeners with the remote server id and resolved directory', () => {
+  it('notifies server event listeners with the remote server id and resolved directory', async () => {
     const seen: Array<{ serverId: string; directory: string | null; type: string }> = []
     sseAggregator.onServerEvent((serverId, directory, event) => {
       seen.push({ serverId, directory, type: event.type })
     })
 
     hub.start()
-    const source = sources.sources[0]!
-    source.message(remoteEvent('session.created', { sessionID: 'ses_1' }, '/repo'))
-    source.message(remoteEvent('session.execution.succeeded', { sessionID: 'ses_1' }))
+    const stream = fake.latest('srv_a')
+    stream.push(remoteEvent('session.created', { sessionID: 'ses_1' }, '/repo'))
+    stream.push(remoteEvent('session.execution.succeeded', { sessionID: 'ses_1' }))
+    await flushPromises()
 
     expect(seen).toEqual([
       { serverId: 'srv_a', directory: '/repo', type: 'session.created' },
@@ -399,29 +450,32 @@ describe('RemoteServerEventHub event delivery', () => {
     expect(sseAggregator.getActiveSessions()).toEqual({})
   })
 
-  it('tracks remote subagent sessions per server', () => {
+  it('tracks remote subagent sessions per server', async () => {
     hub.start()
-    const source = sources.sources[0]!
+    const stream = fake.latest('srv_a')
 
-    source.message(remoteEvent('session.created', { sessionID: 'ses_sub', parentID: 'ses_root' }, '/repo'))
+    stream.push(remoteEvent('session.created', { sessionID: 'ses_sub', parentID: 'ses_root' }, '/repo'))
+    await flushPromises()
 
     expect(hub.isSubagentSession('srv_a', 'ses_sub')).toBe(true)
     expect(sseAggregator.isSubagentSession('ses_sub', 'srv_a')).toBe(true)
     expect(sseAggregator.isSubagentSession('ses_sub')).toBe(false)
     expect(sseAggregator.isSubagentSession('ses_sub', 'srv_b')).toBe(false)
 
-    source.message(remoteEvent('session.deleted', { sessionID: 'ses_sub' }))
+    stream.push(remoteEvent('session.deleted', { sessionID: 'ses_sub' }))
+    await flushPromises()
 
     expect(hub.isSubagentSession('srv_a', 'ses_sub')).toBe(false)
     expect(sseAggregator.isSubagentSession('ses_sub', 'srv_a')).toBe(false)
   })
 
-  it('notifies server connected listeners when a remote stream opens', () => {
+  it('notifies server connected listeners when a remote stream opens', async () => {
     const seen: string[] = []
     sseAggregator.onServerConnected(serverId => { seen.push(serverId) })
 
     hub.start()
-    sources.sources[1]!.open()
+    fake.latest('srv_b').push(SERVER_CONNECTED)
+    await flushPromises()
 
     expect(seen).toEqual(['srv_b'])
   })
@@ -430,16 +484,13 @@ describe('RemoteServerEventHub event delivery', () => {
 describe('RemoteServerEventHub reconnection', () => {
   let hub: RemoteServerEventHub
   let fake: FakeRegistry
-  let sources: ReturnType<typeof createSourceFactory>
 
   beforeEach(() => {
     sseAggregator.shutdown()
-    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setOpenCodeClient(null)
     sseAggregator.setScheduledSessionsResolver(() => [])
     fake = createRegistry([SERVER_A])
-    sources = createSourceFactory()
     hub = new RemoteServerEventHub(fake.registry, sseAggregator, {
-      eventSourceFactory: sources.factory,
       reconnectDelayMs: 1000,
       maxReconnectDelayMs: 4000,
     })
@@ -453,22 +504,24 @@ describe('RemoteServerEventHub reconnection', () => {
 
   async function openThenReconnect(): Promise<void> {
     hub.start()
-    sources.sources[0]!.open()
+    fake.latest('srv_a').push(SERVER_CONNECTED)
     await flushPromises()
-    sources.sources[0]!.fail({ message: 'connection lost' })
+    fake.latest('srv_a').fail(new Error('connection lost'))
+    await flushPromises()
     await vi.advanceTimersByTimeAsync(1000)
-    sources.sources[1]!.open()
+    fake.latest('srv_a').push(SERVER_CONNECTED)
     await flushPromises()
   }
 
-  it('sends a resync to the subscribers of the server on connect', () => {
+  it('sends a resync to the subscribers of the server on connect', async () => {
     const clientA = createCapturingClient()
     const clientB = createCapturingClient()
     sseAggregator.addClient('resync-a', clientA.callback, clientA.writeFrame, ['srv_a|/repo'])
     sseAggregator.addClient('resync-b', clientB.callback, clientB.writeFrame, ['srv_b|/repo'])
 
     hub.start()
-    sources.sources[0]!.open()
+    fake.latest('srv_a').push(SERVER_CONNECTED)
+    await flushPromises()
 
     const resyncs = clientA.events.filter(event => event.event === 'resync')
     expect(resyncs).toHaveLength(1)
@@ -476,40 +529,69 @@ describe('RemoteServerEventHub reconnection', () => {
     expect(clientB.events.filter(event => event.event === 'resync')).toHaveLength(0)
   })
 
-  it('closes the failed stream and reconnects with exponential backoff', async () => {
+  it('reconnects with exponential backoff after a stream error', async () => {
     vi.useFakeTimers()
     hub.start()
-    const first = sources.sources[0]!
-    first.open()
+    const first = fake.latest('srv_a')
+    first.push(SERVER_CONNECTED)
     await flushPromises()
     first.fail({ message: 'Unauthorized', code: 401 })
+    await flushPromises()
 
-    expect(first.closed).toBe(true)
     expect(hub.getStatuses()).toEqual([
       { serverId: 'srv_a', connected: false, version: '2.0.15', error: 'Unauthorized' },
     ])
 
     await vi.advanceTimersByTimeAsync(999)
-    expect(sources.sources).toHaveLength(1)
+    expect(fake.transport('srv_a').subscriptions).toHaveLength(1)
 
     await vi.advanceTimersByTimeAsync(1)
-    expect(sources.sources).toHaveLength(2)
+    expect(fake.transport('srv_a').subscriptions).toHaveLength(2)
 
-    const second = sources.sources[1]!
+    const second = fake.latest('srv_a')
     second.fail({ message: 'Unauthorized', code: 401 })
+    await flushPromises()
 
     await vi.advanceTimersByTimeAsync(1000)
-    expect(sources.sources).toHaveLength(2)
+    expect(fake.transport('srv_a').subscriptions).toHaveLength(2)
 
     await vi.advanceTimersByTimeAsync(1000)
-    expect(sources.sources).toHaveLength(3)
+    expect(fake.transport('srv_a').subscriptions).toHaveLength(3)
+  })
+
+  it('reconnects after the stream errors and after it ends', async () => {
+    vi.useFakeTimers()
+    hub.start()
+    const first = fake.latest('srv_a')
+    first.push(SERVER_CONNECTED)
+    await flushPromises()
+
+    first.end()
+    await flushPromises()
+    expect(hub.getStatuses()[0]?.connected).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(fake.transport('srv_a').subscriptions).toHaveLength(2)
+
+    const second = fake.latest('srv_a')
+    second.push(SERVER_CONNECTED)
+    await flushPromises()
+    expect(hub.getStatuses()[0]?.connected).toBe(true)
+
+    second.fail(new Error('connection reset'))
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(2000)
+
+    expect(fake.transport('srv_a').subscriptions).toHaveLength(3)
+    expect(hub.getStatuses()[0]?.error).toBe('connection reset')
   })
 
   it('reports the version lazily from the registry without polling', async () => {
     hub.start()
-    sources.sources[0]!.open()
+    const stream = fake.latest('srv_a')
+    stream.push(SERVER_CONNECTED)
     await flushPromises()
-    sources.sources[0]!.open()
+    stream.push(SERVER_CONNECTED)
     await flushPromises()
 
     expect(fake.registry.test).toHaveBeenCalledTimes(1)
@@ -548,7 +630,7 @@ describe('RemoteServerEventHub reconnection', () => {
 
   it('clears the version and probes again when the server is updated', async () => {
     hub.start()
-    sources.sources[0]!.open()
+    fake.latest('srv_a').push(SERVER_CONNECTED)
     await flushPromises()
     expect(hub.getStatuses()[0]?.version).toBe('2.0.15')
 
@@ -557,7 +639,7 @@ describe('RemoteServerEventHub reconnection', () => {
 
     expect(hub.getStatuses()[0]?.version).toBeNull()
 
-    sources.sources[1]!.open()
+    fake.latest('srv_a').push(SERVER_CONNECTED)
     await flushPromises()
 
     expect(fake.registry.test).toHaveBeenCalledTimes(2)
@@ -571,13 +653,13 @@ describe('RemoteServerEventHub reconnection', () => {
     }))
 
     hub.start()
-    sources.sources[0]!.open()
+    fake.latest('srv_a').push(SERVER_CONNECTED)
     await flushPromises()
     expect(fake.registry.test).toHaveBeenCalledTimes(1)
 
     vi.mocked(fake.registry.test).mockResolvedValueOnce({ ok: true, version: '2.1.0', versionSupported: true, error: null })
     fake.emit({ type: 'upserted', serverId: 'srv_a' })
-    sources.sources[1]!.open()
+    fake.latest('srv_a').push(SERVER_CONNECTED)
     await flushPromises()
 
     resolveFirstProbe({ ok: true, version: '1.0.0', versionSupported: true, error: null })
@@ -587,59 +669,60 @@ describe('RemoteServerEventHub reconnection', () => {
     expect(hub.getStatuses()[0]?.version).toBe('2.1.0')
   })
 
-  it('closes and forgets the stream when the server is disabled', () => {
+  it('closes and forgets the stream when the server is disabled', async () => {
     const client = createCapturingClient()
     sseAggregator.addClient('disable', client.callback, client.writeFrame, ['srv_a|/repo'])
 
     hub.start()
-    const source = sources.sources[0]!
-    source.open()
+    const stream = fake.latest('srv_a')
+    stream.push(SERVER_CONNECTED)
+    await flushPromises()
     client.frames.length = 0
 
     fake.setServer({ ...SERVER_A, enabled: false })
     fake.emit({ type: 'upserted', serverId: 'srv_a' })
 
-    expect(source.closed).toBe(true)
+    expect(stream.signal.aborted).toBe(true)
     expect(hub.getStatuses()).toEqual([
       { serverId: 'srv_a', connected: false, version: null, error: null },
     ])
 
-    source.message(remoteEvent('session.idle', { sessionID: 'ses_1' }, '/repo'))
+    stream.push(remoteEvent('session.idle', { sessionID: 'ses_1' }, '/repo'))
+    await flushPromises()
     expect(client.frames).toHaveLength(0)
   })
 
-  it('reconnects with a fresh stream when the server is updated', () => {
+  it('reconnects with a fresh client when the server is updated', () => {
     hub.start()
-    const first = sources.sources[0]!
-    first.open()
+    const first = fake.latest('srv_a')
 
     fake.setServer({ ...SERVER_A, baseUrl: 'https://moved.example.com' })
     fake.emit({ type: 'upserted', serverId: 'srv_a' })
 
-    expect(first.closed).toBe(true)
-    expect(sources.sources).toHaveLength(2)
-    expect(sources.sources[1]!.url).toBe('https://moved.example.com/api/event')
+    expect(first.signal.aborted).toBe(true)
+    expect(fake.transport('srv_a').subscriptions).toHaveLength(2)
+    expect(fake.clientCalls).toEqual(['srv_a', 'srv_a'])
   })
 
   it('closes the stream when the server is deleted', () => {
     hub.start()
-    const source = sources.sources[0]!
-    source.open()
+    const stream = fake.latest('srv_a')
 
     fake.removeServer('srv_a')
     fake.emit({ type: 'deleted', serverId: 'srv_a' })
 
-    expect(source.closed).toBe(true)
+    expect(stream.signal.aborted).toBe(true)
     expect(hub.getStatuses()).toEqual([])
   })
 
-  it('stops reconnecting and clears the replay hook after shutdown', () => {
+  it('stops reconnecting and clears the replay hook after shutdown', async () => {
     hub.start()
-    const source = sources.sources[0]!
-    source.open()
+    const stream = fake.latest('srv_a')
+    stream.push(SERVER_CONNECTED)
+    await flushPromises()
     hub.shutdown()
 
-    expect(source.closed).toBe(true)
+    expect(stream.signal.aborted).toBe(true)
 
     const client = createCapturingClient()
     sseAggregator.addClient('after-shutdown', client.callback, client.writeFrame, ['srv_a|/repo'])
@@ -650,16 +733,13 @@ describe('RemoteServerEventHub reconnection', () => {
 describe('RemoteServerEventHub failure handling', () => {
   let hub: RemoteServerEventHub
   let fake: FakeRegistry
-  let sources: ReturnType<typeof createSourceFactory>
 
   beforeEach(() => {
     sseAggregator.shutdown()
-    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setOpenCodeClient(null)
     sseAggregator.setScheduledSessionsResolver(() => [])
     fake = createRegistry([SERVER_A])
-    sources = createSourceFactory()
     hub = new RemoteServerEventHub(fake.registry, sseAggregator, {
-      eventSourceFactory: sources.factory,
       reconnectDelayMs: 1000,
       maxReconnectDelayMs: 4000,
     })
@@ -675,47 +755,48 @@ describe('RemoteServerEventHub failure handling', () => {
     vi.useFakeTimers()
     hub.start()
 
-    const first = sources.sources[0]!
-    first.fail(new Error('boom'))
+    fake.latest('srv_a').fail(new Error('boom'))
+    await flushPromises()
     expect(hub.getStatuses()[0]?.error).toBe('boom')
 
     await vi.advanceTimersByTimeAsync(1000)
-    sources.sources[1]!.fail('plain failure')
+    fake.latest('srv_a').fail('plain failure')
+    await flushPromises()
     expect(hub.getStatuses()[0]?.error).toBe('plain failure')
 
     await vi.advanceTimersByTimeAsync(2000)
-    sources.sources[2]!.fail({ code: 500 })
+    fake.latest('srv_a').fail({ code: 500 })
+    await flushPromises()
     expect(hub.getStatuses()[0]?.error).toBe('event stream closed (code=500)')
 
     await vi.advanceTimersByTimeAsync(4000)
-    sources.sources[3]!.fail({})
+    fake.latest('srv_a').fail({})
+    await flushPromises()
     expect(hub.getStatuses()[0]?.error).toBe('event stream disconnected')
     expect(hub.getStatuses()[0]?.error).not.toContain('Basic')
     expect(hub.getStatuses()[0]?.error).not.toContain('studio.example.com')
   })
 
-  it('records a connection failure without credentials and without opening a stream', () => {
+  it('records a connection failure without credentials and without subscribing', () => {
     ;(fake.registry as unknown as { getConnection: (serverId: string) => never }).getConnection = () => {
       throw new Error('OpenCode server is disabled: srv_a')
     }
 
     hub.start()
 
-    expect(sources.sources).toHaveLength(0)
+    expect(fake.transport('srv_a').subscriptions).toHaveLength(0)
     expect(hub.getStatuses()).toEqual([
       { serverId: 'srv_a', connected: false, version: null, error: 'OpenCode server is disabled: srv_a' },
     ])
   })
 
-  it('retries with backoff when the event source cannot be created', async () => {
+  it('retries with backoff when the client cannot be created', async () => {
     vi.useFakeTimers()
     let attempts = 0
-    const factory: RemoteEventSourceFactory = () => {
+    ;(fake.registry as unknown as { getClient: (serverId: string) => never }).getClient = () => {
       attempts += 1
       throw new Error('bad event source')
     }
-    hub.shutdown()
-    hub = new RemoteServerEventHub(fake.registry, sseAggregator, { eventSourceFactory: factory, reconnectDelayMs: 1000 })
 
     hub.start()
     expect(attempts).toBe(1)
@@ -735,24 +816,25 @@ describe('RemoteServerEventHub failure handling', () => {
     expect(hub.getStatuses()).toEqual([])
   })
 
-  it('forgets the stream when the server cannot be read on change', () => {
+  it('forgets the stream when the server cannot be read on change', async () => {
     hub.start()
-    const source = sources.sources[0]!
-    source.open()
+    const stream = fake.latest('srv_a')
+    stream.push(SERVER_CONNECTED)
+    await flushPromises()
 
     ;(fake.registry as unknown as { get: (serverId: string) => never }).get = () => {
       throw new Error('db down')
     }
     fake.emit({ type: 'upserted', serverId: 'srv_a' })
 
-    expect(source.closed).toBe(true)
+    expect(stream.signal.aborted).toBe(true)
   })
 
   it('keeps the version null when the version probe rejects', async () => {
     vi.mocked(fake.registry.test).mockRejectedValue(new Error('no info endpoint'))
 
     hub.start()
-    sources.sources[0]!.open()
+    fake.latest('srv_a').push(SERVER_CONNECTED)
     await flushPromises()
 
     expect(hub.getStatuses()).toEqual([
@@ -764,18 +846,16 @@ describe('RemoteServerEventHub failure handling', () => {
 describe('RemoteServerEventHub pending action replay', () => {
   let hub: RemoteServerEventHub
   let fake: FakeRegistry
-  let sources: ReturnType<typeof createSourceFactory>
 
   beforeEach(() => {
     sseAggregator.shutdown()
-    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setOpenCodeClient(null)
     sseAggregator.setScheduledSessionsResolver(() => [])
     fake = createRegistry([SERVER_A], {
       permissions: { '/repo': [{ id: 'perm-1', sessionID: 'ses-1', action: 'shell', resources: ['ls'] }] },
       forms: { '/repo': [{ id: 'form-1', sessionID: 'ses-1', title: 'Continue?', fields: [] }] },
     })
-    sources = createSourceFactory()
-    hub = new RemoteServerEventHub(fake.registry, sseAggregator, { eventSourceFactory: sources.factory })
+    hub = new RemoteServerEventHub(fake.registry, sseAggregator)
   })
 
   afterEach(() => {
@@ -783,13 +863,14 @@ describe('RemoteServerEventHub pending action replay', () => {
     sseAggregator.shutdown()
   })
 
-  function trackSessionStatus(sessionID: string, directory: string, status: string): void {
-    sources.sources[0]!.message(remoteEvent('session.status', { sessionID, status: { type: status } }, directory))
+  async function trackSessionStatus(sessionID: string, directory: string, status: string): Promise<void> {
+    fake.latest('srv_a').push(remoteEvent('session.status', { sessionID, status: { type: status } }, directory))
+    await flushPromises()
   }
 
   it('replays pending remote actions to the subscribing client only', async () => {
     hub.start()
-    trackSessionStatus('ses-1', '/repo', 'busy')
+    await trackSessionStatus('ses-1', '/repo', 'busy')
     const client = createCapturingClient()
     const other = createCapturingClient()
     sseAggregator.addClient('replay-a', client.callback, client.writeFrame, ['srv_a|/repo'])
@@ -825,8 +906,8 @@ describe('RemoteServerEventHub pending action replay', () => {
 
   it('stops replaying for a linked directory once its session goes idle', async () => {
     hub.start()
-    trackSessionStatus('ses-1', '/repo', 'busy')
-    trackSessionStatus('ses-1', '/repo', 'idle')
+    await trackSessionStatus('ses-1', '/repo', 'busy')
+    await trackSessionStatus('ses-1', '/repo', 'idle')
     const client = createCapturingClient()
     sseAggregator.addClient('settled', client.callback, client.writeFrame, ['srv_a|/repo'])
 
@@ -842,9 +923,9 @@ describe('RemoteServerEventHub pending action replay', () => {
       sessionDirectories: { 'ses-1': '/repo' },
       permissions: { '/repo': [{ id: 'perm-1', sessionID: 'ses-1', action: 'shell', resources: ['ls'] }] },
     })
-    hub = new RemoteServerEventHub(fake.registry, sseAggregator, { eventSourceFactory: sources.factory })
+    hub = new RemoteServerEventHub(fake.registry, sseAggregator)
     hub.start()
-    sources.sources[0]!.open()
+    fake.latest('srv_a').push(SERVER_CONNECTED)
     await flushPromises()
 
     const client = createCapturingClient()
@@ -857,11 +938,11 @@ describe('RemoteServerEventHub pending action replay', () => {
   })
 
   it('does not use the local pending action fetcher for remote keys', async () => {
-    const localApi = makeApi({ permissions: { '/repo': [{ id: 'local-perm' }] } })
-    sseAggregator.setPendingActionsFetcher({ api: localApi })
+    const localApi = makeApi({ permissions: { '/repo': [{ id: 'local-perm' }] } }, [])
+    sseAggregator.setOpenCodeClient({ api: localApi })
 
     hub.start()
-    trackSessionStatus('ses-1', '/repo', 'busy')
+    await trackSessionStatus('ses-1', '/repo', 'busy')
     const client = createCapturingClient()
     sseAggregator.addClient('mixed', client.callback, client.writeFrame, ['/repo', 'srv_a|/repo'])
 
@@ -875,7 +956,7 @@ describe('RemoteServerEventHub pending action replay', () => {
 
   it('replays remote actions when a client subscribes later', async () => {
     hub.start()
-    trackSessionStatus('ses-1', '/repo', 'busy')
+    await trackSessionStatus('ses-1', '/repo', 'busy')
     const client = createCapturingClient()
     sseAggregator.addClient('late', client.callback, client.writeFrame, [])
 
@@ -894,7 +975,7 @@ describe('RemoteServerEventHub pending action replay', () => {
     vi.mocked(fake.api.form.list).mockResolvedValue({ location: { directory: '/repo' }, data: [] })
 
     hub.start()
-    trackSessionStatus('ses-1', '/repo', 'busy')
+    await trackSessionStatus('ses-1', '/repo', 'busy')
     const client = createCapturingClient()
     sseAggregator.addClient('unsubscribed', client.callback, client.writeFrame, ['srv_a|/repo'])
     sseAggregator.removeDirectories('unsubscribed', ['srv_a|/repo'])
@@ -909,13 +990,11 @@ describe('RemoteServerEventHub pending action replay', () => {
 describe('RemoteServerEventHub session status replay', () => {
   let hub: RemoteServerEventHub
   let fake: FakeRegistry
-  let sources: ReturnType<typeof createSourceFactory>
 
   beforeEach(() => {
     sseAggregator.shutdown()
-    sseAggregator.setPendingActionsFetcher(null)
+    sseAggregator.setOpenCodeClient(null)
     sseAggregator.setScheduledSessionsResolver(() => [])
-    sources = createSourceFactory()
   })
 
   afterEach(() => {
@@ -925,7 +1004,7 @@ describe('RemoteServerEventHub session status replay', () => {
 
   function createHub(fixture: ApiFixture = {}): void {
     fake = createRegistry([SERVER_A], fixture)
-    hub = new RemoteServerEventHub(fake.registry, sseAggregator, { eventSourceFactory: sources.factory })
+    hub = new RemoteServerEventHub(fake.registry, sseAggregator)
   }
 
   function statusFrames(client: CapturedClient) {
@@ -934,10 +1013,10 @@ describe('RemoteServerEventHub session status replay', () => {
 
   async function trackSessionThenReconnect(sessionID: string, directory: string): Promise<void> {
     hub.start()
-    const first = sources.sources[0]!
-    first.open()
+    fake.latest('srv_a').push(SERVER_CONNECTED)
     await flushPromises()
-    first.message(remoteEvent('session.created', { sessionID }, directory))
+    fake.latest('srv_a').push(remoteEvent('session.created', { sessionID }, directory))
+    await flushPromises()
     fake.emit({ type: 'upserted', serverId: 'srv_a' })
     await flushPromises()
   }
@@ -948,7 +1027,7 @@ describe('RemoteServerEventHub session status replay', () => {
     const client = createCapturingClient()
     sseAggregator.addClient('status-idle', client.callback, client.writeFrame, ['srv_a|/repo'])
 
-    sources.sources[1]!.open()
+    fake.latest('srv_a').push(SERVER_CONNECTED)
     await flushPromises()
 
     const statuses = statusFrames(client)
@@ -965,7 +1044,7 @@ describe('RemoteServerEventHub session status replay', () => {
     const client = createCapturingClient()
     sseAggregator.addClient('status-busy', client.callback, client.writeFrame, ['srv_a|/repo'])
 
-    sources.sources[1]!.open()
+    fake.latest('srv_a').push(SERVER_CONNECTED)
     await flushPromises()
 
     const statuses = statusFrames(client)
@@ -983,7 +1062,7 @@ describe('RemoteServerEventHub session status replay', () => {
     const client = createCapturingClient()
     sseAggregator.addClient('status-failure', client.callback, client.writeFrame, ['srv_a|/repo'])
 
-    sources.sources[1]!.open()
+    fake.latest('srv_a').push(SERVER_CONNECTED)
     await flushPromises()
 
     expect(fake.api.session.active).toHaveBeenCalledTimes(2)
@@ -996,10 +1075,11 @@ describe('RemoteServerEventHub session status replay', () => {
     sseAggregator.addClient('status-stale', client.callback, client.writeFrame, ['srv_a|/repo'])
 
     hub.start()
-    const first = sources.sources[0]!
-    first.open()
+    const first = fake.latest('srv_a')
+    first.push(SERVER_CONNECTED)
     await flushPromises()
-    first.message(remoteEvent('session.created', { sessionID: 'ses_1' }, '/repo'))
+    first.push(remoteEvent('session.created', { sessionID: 'ses_1' }, '/repo'))
+    await flushPromises()
 
     let resolveActive: (value: Record<string, { type: 'running' }>) => void = () => {}
     vi.mocked(fake.api.session.active).mockReturnValueOnce(new Promise<Record<string, { type: 'running' }>>((resolve) => {
@@ -1007,12 +1087,13 @@ describe('RemoteServerEventHub session status replay', () => {
     }) as never)
 
     fake.emit({ type: 'upserted', serverId: 'srv_a' })
-    const second = sources.sources[1]!
-    second.open()
+    const second = fake.latest('srv_a')
+    second.push(SERVER_CONNECTED)
     await flushPromises()
     expect(fake.api.session.active).toHaveBeenCalledTimes(2)
 
-    second.fail({ message: 'connection lost' })
+    second.fail(new Error('connection lost'))
+    await flushPromises()
     resolveActive({})
     await flushPromises()
 

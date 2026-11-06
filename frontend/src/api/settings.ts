@@ -14,6 +14,8 @@ import type {
   InstallSkillResponse,
   OpenCodeDirectoryFileInfo,
   OpenCodeRestartResponse,
+  ManagedOpenCodeConfig,
+  UpdateOpenCodeConfigPatchRequest,
 } from './types/settings'
 import { API_BASE_URL } from '@/config'
 import { fetchWrapper } from './fetchWrapper'
@@ -68,6 +70,20 @@ export const settingsApi = {
   ): Promise<OpenCodeConfigSaveResponse> => {
     return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-config`, {
       method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+  },
+
+  getManagedOpenCodeConfig: async (): Promise<ManagedOpenCodeConfig> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-config/managed`)
+  },
+
+  patchOpenCodeConfig: async (
+    request: UpdateOpenCodeConfigPatchRequest
+  ): Promise<OpenCodeConfigSaveResponse> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-config`, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
     })

@@ -57,6 +57,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [enabled, setEnabled] = useState(true)
+  const [showInInbox, setShowInInbox] = useState(true)
   const [intervalMinutes, setIntervalMinutes] = useState('60')
   const [timeOfDay, setTimeOfDay] = useState('09:00')
   const [hourlyMinute, setHourlyMinute] = useState('0')
@@ -173,6 +174,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     setName(job?.name ?? '')
     setDescription(job?.description ?? '')
     setEnabled(job?.enabled ?? true)
+    setShowInInbox(job?.showInInbox ?? true)
     const scheduleDefaults = detectSchedulePreset(job)
     setSchedulePreset(scheduleDefaults.preset)
     setIntervalMinutes(scheduleDefaults.intervalMinutes)
@@ -249,6 +251,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
       name: name.trim(),
       description: description.trim() || undefined,
       enabled,
+      showInInbox,
       agentSlug: selectedAgentSlug.trim() || undefined,
       model: resolvedModel ?? undefined,
       prompt: prompt.trim(),
@@ -340,6 +343,8 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
             modelDirectory={scheduleDirectory}
             enabled={enabled}
             onEnabledChange={setEnabled}
+            showInInbox={showInInbox}
+            onShowInInboxChange={setShowInInbox}
             branch={branch}
             onBranchChange={setBranch}
             branchRepoId={!serverTargetDirectory && open && effectiveRepoId !== undefined && effectiveRepoId !== ASSISTANT_REPO_ID ? effectiveRepoId : undefined}

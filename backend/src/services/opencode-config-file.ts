@@ -3,8 +3,7 @@ import { promises as fs } from 'fs'
 import { readFile, readdir, rename, rm, stat } from 'fs/promises'
 import path from 'path'
 import { isDeepStrictEqual } from 'node:util'
-import { applyEdits, modify, type JSONPath } from 'jsonc-parser'
-import type { ZodIssue } from 'zod'
+import { applyEdits, findNodeAtLocation, modify, parseTree, type Edit, type JSONPath } from 'jsonc-parser'
 import { getConfigPath, getOpenCodeConfigHome, getOpenCodeHealthWatchPath } from '@opencode-manager/shared/config/env'
 import {
   DEFAULT_OPENCODE_CONFIG_SOURCE_NAME,
@@ -13,7 +12,7 @@ import {
   isOpenCodeConfigSourceName,
   selectPreferredOpenCodeConfigSourceName,
 } from '@opencode-manager/shared'
-import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
+import { validateOpenCodeConfig } from '@opencode-manager/shared/opencode/config-validation'
 import { parseJsonc } from '@opencode-manager/shared/utils'
 import type {
   OpenCodeConfigFile,
@@ -107,6 +106,16 @@ export class OpenCodeConfigRedactedValueError extends Error {
   }
 }
 
+export class OpenCodeConfigValidationError extends Error {
+  readonly issues: OpenCodeConfigValidationIssue[]
+
+  constructor(issues: OpenCodeConfigValidationIssue[]) {
+    super('OpenCode config is invalid')
+    this.name = 'OpenCodeConfigValidationError'
+    this.issues = issues
+  }
+}
+
 interface OpenCodeConfigParseResult {
   content: Record<string, unknown>
   isValid: boolean
@@ -139,10 +148,31 @@ interface AppliedOpenCodeConfigSourceFileState {
   previousMode: number | undefined
 }
 
-interface OpenCodeConfigPathOperation {
+export interface OpenCodeConfigPathOperation {
   path: JSONPath
   value: unknown
 }
+
+/** Maps a v2 config entity container to the v1 container OpenCode converts it from. */
+export interface OpenCodeConfigV1EntityPath {
+  v2Path: string[]
+  v1Path: string[]
+  named: boolean
+  reservedNames?: readonly string[]
+}
+
+interface OpenCodeConfigV1EntityRemoval {
+  path: JSONPath
+  container?: JSONPath
+}
+
+export const V1_ENTITY_PATHS: readonly OpenCodeConfigV1EntityPath[] = [
+  { v2Path: ['agents'], v1Path: ['agent'], named: true },
+  { v2Path: ['commands'], v1Path: ['command'], named: true },
+  { v2Path: ['providers'], v1Path: ['provider'], named: true },
+  { v2Path: ['mcp', 'servers'], v1Path: ['mcp'], named: true, reservedNames: ['servers', 'timeout'] },
+  { v2Path: ['permissions'], v1Path: ['permission'], named: false },
+]
 
 interface OpenCodeConfigSnapshotEnvelopeSource {
   name: OpenCodeConfigRestorableSourceName
@@ -178,18 +208,38 @@ function hasOwn(object: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(object, key)
 }
 
-function hasOpenCodeConfigPath(content: Record<string, unknown>, jsonPath: JSONPath): boolean {
+interface ReadOpenCodeConfigPathOptions {
+  nullAncestorCountsAsFound?: boolean
+}
+
+/**
+ * Resolves a JSON path against parsed config content, walking objects by key and arrays by index.
+ * Returns whether the path exists plus its value; an absent path yields `found: false`, and
+ * `nullAncestorCountsAsFound` treats a null intermediate value as terminal instead of missing.
+ */
+function readOpenCodeConfigPath(
+  content: Record<string, unknown>,
+  jsonPath: JSONPath,
+  options: ReadOpenCodeConfigPathOptions = {},
+): { found: boolean; value: unknown } {
   let current: unknown = content
   for (const segment of jsonPath) {
+    if (options.nullAncestorCountsAsFound && current === null) return { found: true, value: null }
     if (typeof segment === 'number') {
-      if (!Array.isArray(current) || segment < 0 || segment >= current.length) return false
+      if (!Array.isArray(current) || segment < 0 || segment >= current.length) {
+        return { found: false, value: undefined }
+      }
       current = current[segment]
       continue
     }
-    if (!isPlainObject(current) || !hasOwn(current, segment)) return false
+    if (!isPlainObject(current) || !hasOwn(current, segment)) return { found: false, value: undefined }
     current = current[segment]
   }
-  return true
+  return { found: true, value: current }
+}
+
+function hasOpenCodeConfigPath(content: Record<string, unknown>, jsonPath: JSONPath): boolean {
+  return readOpenCodeConfigPath(content, jsonPath).found
 }
 
 function defineOwnConfigValue(target: Record<string, unknown>, key: string, value: unknown): void {
@@ -238,7 +288,12 @@ interface MergeOpenCodeConfigValuesOptions {
   deleteNullValues?: boolean
 }
 
-function mergeOpenCodeConfigValues(
+/**
+ * Deep-merges `source` into `target` and returns a new object, recursing into plain-object values.
+ * With `deleteNullValues`, a null source value removes the key and nested nulls are stripped from
+ * replaced values.
+ */
+export function mergeOpenCodeConfigValues(
   target: Record<string, unknown>,
   source: Record<string, unknown>,
   options: MergeOpenCodeConfigValuesOptions = {},
@@ -271,13 +326,19 @@ export function withOpenCodeConfigLock<T>(fn: () => Promise<T>): Promise<T> {
   return withFileLock(getOpenCodeConfigDirectory(), fn)
 }
 
-export function toOpenCodeConfigValidationIssues(issues: ZodIssue[]): OpenCodeConfigValidationIssue[] {
-  return issues.map((issue) => ({
-    path: issue.path.length > 0 ? issue.path.join('.') : 'root',
-    message: issue.message,
-  }))
+/**
+ * Validates parsed config content against the OpenCode config schema and throws
+ * OpenCodeConfigValidationError carrying the reported issues when it fails.
+ */
+function assertValidOpenCodeConfig(value: unknown): void {
+  const result = validateOpenCodeConfig(value)
+  if (!result.success) throw new OpenCodeConfigValidationError(result.issues)
 }
 
+/**
+ * Parses JSONC config text and validates it against the OpenCode config schema, returning the parsed
+ * object (empty when parsing fails) with `isValid` and any validation issues instead of throwing.
+ */
 export function parseOpenCodeConfigContent(rawContent: string): OpenCodeConfigParseResult {
   let parsed: unknown
   try {
@@ -294,7 +355,7 @@ export function parseOpenCodeConfigContent(rawContent: string): OpenCodeConfigPa
 
   const content = isPlainObject(parsed) ? parsed : {}
 
-  const validated = OpenCodeConfigSchema.safeParse(parsed)
+  const validated = validateOpenCodeConfig(parsed)
   if (validated.success) {
     return {
       content,
@@ -302,7 +363,7 @@ export function parseOpenCodeConfigContent(rawContent: string): OpenCodeConfigPa
     }
   }
 
-  const validationIssues = toOpenCodeConfigValidationIssues(validated.error.issues)
+  const validationIssues = validated.issues
   logger.error(`Failed to validate OpenCode config: ${validationIssues.map((issue) => `${issue.path}: ${issue.message}`).join('; ')}`)
 
   return {
@@ -375,6 +436,11 @@ export async function readOpenCodeConfigSnapshot(): Promise<OpenCodeConfigSnapsh
   }
 }
 
+/**
+ * Projects an internal snapshot, which tracks validation per source, onto the API response shape.
+ * Per-source validation issues are flattened into one list that is omitted when empty, and the file is
+ * valid only when every source is valid.
+ */
 function toOpenCodeConfigFile(snapshot: OpenCodeConfigSnapshot): OpenCodeConfigFile {
   const validationIssues = snapshot.sources.flatMap((source) => source.validationIssues ?? [])
   return {
@@ -402,7 +468,7 @@ export async function writeOpenCodeConfigFile(
   source?: OpenCodeConfigSourceName,
   snapshot?: OpenCodeConfigSnapshot,
 ): Promise<OpenCodeConfigFile> {
-  OpenCodeConfigSchema.parse(parseJsonc(rawContent))
+  assertValidOpenCodeConfig(parseJsonc(rawContent))
 
   const resolved = snapshot ?? await readOpenCodeConfigSnapshot()
   const targetName = source !== undefined
@@ -415,6 +481,11 @@ export async function writeOpenCodeConfigFile(
   return toOpenCodeConfigFile(await readOpenCodeConfigSnapshot())
 }
 
+/**
+ * Computes the JSON-path operations that turn `current` into `next`, recursing into plain objects on
+ * both sides. Merge mode treats `null` as a deletion and strips null members from merged values,
+ * replace mode additionally removes keys absent from `next`.
+ */
 function collectOpenCodeConfigPathOperations(
   next: Record<string, unknown>,
   current: Record<string, unknown>,
@@ -452,7 +523,163 @@ function collectOpenCodeConfigPathOperations(
   return operations
 }
 
-function applyOpenCodeConfigPathOperations(
+/**
+ * Returns the v1 entity paths a v2 merge patch removes, since OpenCode still reads v1 containers.
+ * Container-wide removals carry no `container`, while named removals record their v1 container so
+ * it can be pruned once left empty.
+ */
+function collectOpenCodeConfigV1EntityRemovals(
+  patch: Record<string, unknown>,
+): OpenCodeConfigV1EntityRemoval[] {
+  const removals: OpenCodeConfigV1EntityRemoval[] = []
+  for (const mapping of V1_ENTITY_PATHS) {
+    const patched = readOpenCodeConfigPath(patch, mapping.v2Path, { nullAncestorCountsAsFound: true })
+    if (!patched.found) continue
+    if (!mapping.named || patched.value === null) {
+      if (!mapping.reservedNames) removals.push({ path: mapping.v1Path })
+      continue
+    }
+    if (!isPlainObject(patched.value)) continue
+    for (const name of Object.keys(patched.value)) {
+      if (mapping.reservedNames?.includes(name)) continue
+      removals.push({ path: [...mapping.v1Path, name], container: mapping.v1Path })
+    }
+  }
+  return removals
+}
+
+/**
+ * Returns the offset of the first comma in `rawContent` between `start` and `end`, skipping line
+ * and block comments, or -1 when none exists or a comment runs past `end`.
+ */
+function findOpenCodeConfigSeparatorComma(rawContent: string, start: number, end: number): number {
+  let index = start
+  while (index < end) {
+    if (rawContent.startsWith('//', index)) {
+      const newline = rawContent.indexOf('\n', index)
+      if (newline < 0 || newline >= end) return -1
+      index = newline + 1
+      continue
+    }
+    if (rawContent.startsWith('/*', index)) {
+      const close = rawContent.indexOf('*/', index + 2)
+      if (close < 0 || close >= end) return -1
+      index = close + 2
+      continue
+    }
+    if (rawContent[index] === ',') return index
+    index += 1
+  }
+  return -1
+}
+
+/**
+ * Returns the offset just past the line break that follows `offset`, ignoring intervening spaces
+ * and tabs, or null when the line has more content after them.
+ */
+function findOpenCodeConfigLineEnd(rawContent: string, offset: number): number | null {
+  let index = offset
+  while (index < rawContent.length && (rawContent[index] === ' ' || rawContent[index] === '\t')) {
+    index += 1
+  }
+  if (rawContent.startsWith('\r\n', index)) return index + 2
+  if (rawContent[index] === '\n') return index + 1
+  return null
+}
+
+/**
+ * Builds JSONC text edits that delete the property at `jsonPath` while leaving surrounding comments
+ * intact. Returns null when the node, its container, or a required separator comma cannot be
+ * located; a comment between the property and the next member makes the property and the comma be
+ * removed by separate edits so the comment survives.
+ */
+function buildOpenCodeConfigCommentPreservingRemovalEdits(
+  rawContent: string,
+  jsonPath: JSONPath,
+): Edit[] | null {
+  const root = parseTree(rawContent)
+  const node = root ? findNodeAtLocation(root, jsonPath) : undefined
+  const property = node?.parent
+  const container = property?.parent
+  if (!property || !container?.children) return null
+
+  const index = container.children.indexOf(property)
+  const previous = index > 0 ? container.children[index - 1] : undefined
+  const next = container.children[index + 1]
+  const propertyEnd = property.offset + property.length
+  const lineStart = rawContent.lastIndexOf('\n', property.offset - 1) + 1
+  const aloneOnLine = rawContent.slice(lineStart, property.offset).trim() === ''
+  const removeStart = aloneOnLine ? lineStart : property.offset
+
+  if (next) {
+    const separatorOffset = findOpenCodeConfigSeparatorComma(rawContent, propertyEnd, next.offset)
+    if (separatorOffset < 0) return null
+    if (rawContent.slice(propertyEnd, separatorOffset).includes('/')) {
+      return [
+        { offset: removeStart, length: propertyEnd - removeStart, content: '' },
+        { offset: separatorOffset, length: 1, content: '' },
+      ]
+    }
+    const lineEnd = aloneOnLine ? findOpenCodeConfigLineEnd(rawContent, separatorOffset + 1) : null
+    const removeEnd = lineEnd ?? separatorOffset + 1
+    return [{ offset: removeStart, length: removeEnd - removeStart, content: '' }]
+  }
+
+  const edits: Edit[] = []
+  if (previous) {
+    const separatorOffset = findOpenCodeConfigSeparatorComma(
+      rawContent,
+      previous.offset + previous.length,
+      property.offset,
+    )
+    if (separatorOffset < 0) return null
+    edits.push({ offset: separatorOffset, length: 1, content: '' })
+  }
+  const lineEnd = aloneOnLine ? findOpenCodeConfigLineEnd(rawContent, propertyEnd) : null
+  const removeEnd = lineEnd ?? propertyEnd
+  edits.push({ offset: removeStart, length: removeEnd - removeStart, content: '' })
+  return edits
+}
+
+/**
+ * Removes one property from raw JSONC config text while keeping neighbouring comments and formatting.
+ */
+export function removeOpenCodeConfigProperty(rawContent: string, jsonPath: JSONPath): string {
+  const edits = buildOpenCodeConfigCommentPreservingRemovalEdits(rawContent, jsonPath)
+  if (!edits) return rawContent
+  return applyEdits(rawContent, edits)
+}
+
+/**
+ * Returns the distinct containers named by `removals` that remain empty objects in the updated raw
+ * config text, so they can be pruned. Yields nothing when the parsed root is not an object.
+ */
+function collectEmptyOpenCodeConfigContainers(
+  rawContent: string,
+  removals: OpenCodeConfigV1EntityRemoval[],
+): JSONPath[] {
+  const parsed = parseJsonc(rawContent)
+  if (!isPlainObject(parsed)) return []
+
+  const containers: JSONPath[] = []
+  const visited = new Set<string>()
+  for (const removal of removals) {
+    if (!removal.container) continue
+    const key = removal.container.join('\0')
+    if (visited.has(key)) continue
+    visited.add(key)
+    const container = readOpenCodeConfigPath(parsed, removal.container)
+    if (isPlainObject(container.value) && Object.keys(container.value).length === 0) {
+      containers.push(removal.container)
+    }
+  }
+  return containers
+}
+
+/**
+ * Applies path edits to raw JSONC config text, preserving comments and formatting.
+ */
+export function applyOpenCodeConfigEdits(
   rawContent: string,
   operations: OpenCodeConfigPathOperation[],
 ): string {
@@ -466,6 +693,10 @@ function applyOpenCodeConfigPathOperations(
   return text
 }
 
+/**
+ * Throws OpenCodeConfigShadowedRemovalError when a planned removal targets a path the target source
+ * does not define but another config source does, listing the shadowed paths and their sources.
+ */
 function assertNoShadowedOpenCodeConfigRemovals(
   operations: OpenCodeConfigPathOperation[],
   targetSource: OpenCodeConfigSourceFile | undefined,
@@ -492,6 +723,11 @@ function assertNoShadowedOpenCodeConfigRemovals(
   }
 }
 
+/**
+ * Writes new config text, or applies object content/patch, to the requested source or the preferred
+ * writable one. Enforces `expectedRevision`, rejects redacted values and invalid sibling sources,
+ * preserves JSONC comments and formatting, and returns the refreshed config snapshot.
+ */
 export async function updateOpenCodeConfigFile(
   content: Record<string, unknown> | string,
   options: UpdateOpenCodeConfigOptions = {},
@@ -525,17 +761,30 @@ export async function updateOpenCodeConfigFile(
 
   const mode = options.mode ?? 'replace'
   const operations = collectOpenCodeConfigPathOperations(content, snapshot.content, mode)
+  const v1EntityRemovals = mode === 'merge' ? collectOpenCodeConfigV1EntityRemovals(content) : []
 
-  OpenCodeConfigSchema.parse(
+  assertValidOpenCodeConfig(
     mode === 'merge' ? mergeOpenCodeConfigValues(snapshot.content, content, { deleteNullValues: true }) : content,
   )
 
   const originalText = targetSource?.rawContent ?? '{}\n'
-  assertNoShadowedOpenCodeConfigRemovals(operations, targetSource, snapshot.sources, targetName)
-  const updatedText = applyOpenCodeConfigPathOperations(originalText, operations)
+  assertNoShadowedOpenCodeConfigRemovals(
+    [...operations, ...v1EntityRemovals.map((removal) => ({ path: removal.path, value: undefined }))],
+    targetSource,
+    snapshot.sources,
+    targetName,
+  )
+
+  let updatedText = applyOpenCodeConfigEdits(originalText, operations)
+  for (const removal of v1EntityRemovals) {
+    updatedText = removeOpenCodeConfigProperty(updatedText, removal.path)
+  }
+  for (const container of collectEmptyOpenCodeConfigContainers(updatedText, v1EntityRemovals)) {
+    updatedText = removeOpenCodeConfigProperty(updatedText, container)
+  }
 
   if (updatedText !== originalText) {
-    OpenCodeConfigSchema.parse(parseJsonc(updatedText))
+    assertValidOpenCodeConfig(parseJsonc(updatedText))
     await writeFileAtomic(targetPath, updatedText, { mode: await existingFileMode(targetPath) })
   }
 
@@ -685,6 +934,12 @@ async function applyOpenCodeConfigSourceFileStates(
   }
 }
 
+/**
+ * Restores the config source files from a serialized snapshot: sources present in the snapshot are
+ * written, sources absent from it but currently on disk are removed, and the legacy config.json source
+ * is folded afterwards. All writes roll back together on failure, and the refreshed file view is
+ * returned, or null when no sources remain.
+ */
 export async function restoreOpenCodeConfigSnapshot(snapshot: string): Promise<OpenCodeConfigFile | null> {
   const desired = parseOpenCodeConfigSnapshot(snapshot)
   const current = await readOpenCodeConfigSnapshot()
@@ -717,6 +972,11 @@ async function archiveLegacyConfigJsonSource(rawContent: string): Promise<string
   return archivePath
 }
 
+/**
+ * Migrates a legacy `config.json` into the lowest-precedence config source, archiving the original
+ * first and deleting it only after a successful merge. Returns false when the legacy file is missing
+ * or cannot be folded.
+ */
 export async function foldLegacyConfigJsonSource(): Promise<boolean> {
   const legacyPath = getOpenCodeConfigSourcePath(LEGACY_OPENCODE_CONFIG_SOURCE_NAME)
 
@@ -754,8 +1014,8 @@ export async function foldLegacyConfigJsonSource(): Promise<boolean> {
     const operations = collectOpenCodeConfigPathOperations(legacyContent, lowestPrecedenceSource.content, 'replace')
       .filter((operation) => operation.value !== undefined && !hasOpenCodeConfigPath(lowestPrecedenceSource.content, operation.path))
     if (operations.length > 0) {
-      const updatedText = applyOpenCodeConfigPathOperations(lowestPrecedenceSource.rawContent, operations)
-      OpenCodeConfigSchema.parse(parseJsonc(updatedText))
+      const updatedText = applyOpenCodeConfigEdits(lowestPrecedenceSource.rawContent, operations)
+      assertValidOpenCodeConfig(parseJsonc(updatedText))
       await writeFileAtomic(lowestPrecedenceSource.path, updatedText, { mode: await existingFileMode(lowestPrecedenceSource.path) })
     }
     await rm(legacyPath, { force: true })

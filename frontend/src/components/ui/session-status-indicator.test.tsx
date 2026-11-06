@@ -37,6 +37,14 @@ describe('SessionStatusIndicator background activity', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
+  it('labels a compacting session', () => {
+    useSessionStatus.getState().setStatus('session-a', { type: 'compact' })
+
+    render(<SessionStatusIndicator sessionID="session-a" />)
+
+    expect(screen.getByLabelText('Compacting')).toBeInTheDocument()
+  })
+
   it('renders the braille spinner with a running label for a busy session', () => {
     useSessionStatus.getState().setStatus('session-a', { type: 'busy' })
 

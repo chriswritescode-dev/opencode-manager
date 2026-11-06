@@ -1,5 +1,11 @@
 import { DEFAULTS } from '@opencode-manager/shared/config'
-import { LOCAL_OPENCODE_SERVER_ID, type SSEEventEnvelope } from '@opencode-manager/shared/schemas'
+import {
+  LOCAL_OPENCODE_SERVER_ID,
+  type OpenCodeStreamEvent,
+  type SSHHostKeyRequestEvent,
+} from '@opencode-manager/shared/schemas'
+import type { V2Event } from '@opencode-manager/shared/opencode'
+import { isRecord } from '@opencode-manager/shared/utils'
 import { createBrowserEventStreamTransport } from './browserTransport'
 import type {
   EventStreamHealthState,
@@ -265,10 +271,15 @@ export class OpenCodeEventStream {
     }
   }
 
+  /**
+   * Parses one raw stream frame, marks the connection active, and broadcasts the unwrapped event
+   * to every subscriber. Frames that fail to parse still count as activity.
+   */
   private handleMessage(data: string): void {
     try {
       this.markActivity()
-      this.broadcast(flattenEventEnvelope(JSON.parse(data)))
+      const event = flattenEventEnvelope(JSON.parse(data))
+      if (event) this.broadcast(event)
     } catch {
       this.markActivity()
     }
@@ -414,6 +425,10 @@ export class OpenCodeEventStream {
     })
   }
 
+  /**
+   * Acknowledges a resync request by marking the stream active and notifying each subscriber with the
+   * directories it tracks and the server the resync belongs to.
+   */
   private handleResync(data?: string): void {
     this.markActivity()
     const directories = Array.from(this.directoryRefCounts.keys())
@@ -427,10 +442,14 @@ export class OpenCodeEventStream {
     })
   }
 
-  private broadcast(data: unknown): void {
+  /**
+   * Delivers an event to every subscriber, isolating each callback so a throwing subscriber cannot
+   * prevent the remaining subscribers from receiving it.
+   */
+  private broadcast(event: OpenCodeStreamEvent): void {
     this.subscribers.forEach((subscriber) => {
       try {
-        subscriber.onEvent(data)
+        subscriber.onEvent(event)
       } catch {
         void 0
       }
@@ -492,6 +511,10 @@ export class OpenCodeEventStream {
   }
 }
 
+/**
+ * Reads the optional `serverId` from a resync frame, returning `undefined` when the payload is
+ * absent, malformed, or carries no string id.
+ */
 function parseResyncServerId(data?: string): string | undefined {
   if (!data) return undefined
   try {
@@ -502,22 +525,27 @@ function parseResyncServerId(data?: string): string | undefined {
   }
 }
 
-function flattenEventEnvelope(parsed: unknown): unknown {
-  if (
-    parsed !== null &&
-    typeof parsed === 'object' &&
-    'payload' in parsed &&
-    (parsed as { payload: unknown }).payload !== null &&
-    typeof (parsed as { payload: unknown }).payload === 'object'
-  ) {
-    const { payload, directory, serverId } = parsed as SSEEventEnvelope
-    return {
-      ...payload,
-      ...(typeof directory === 'string' ? { directory } : {}),
-      ...(typeof serverId === 'string' ? { serverId } : {}),
-    }
-  }
-  return parsed
+/**
+ * Type guard for a decoded stream payload, requiring an object with a string `type` discriminator.
+ */
+function isEventPayload(value: unknown): value is V2Event | SSHHostKeyRequestEvent {
+  return isRecord(value) && typeof value.type === 'string'
+}
+
+/**
+ * Unwraps a transport envelope into the stream event consumers expect, copying `directory` and
+ * `serverId` onto it when present. A bare event without an envelope is passed through unchanged;
+ * anything else returns `null`.
+ */
+function flattenEventEnvelope(parsed: unknown): OpenCodeStreamEvent | null {
+  if (!isRecord(parsed)) return null
+  if (!isEventPayload(parsed.payload)) return isEventPayload(parsed) ? { ...parsed } : null
+
+  const { payload, directory, serverId } = parsed
+  const event: OpenCodeStreamEvent = { ...payload }
+  if (typeof directory === 'string') event.directory = directory
+  if (typeof serverId === 'string') event.serverId = serverId
+  return event
 }
 
 export const openCodeEventStream = new OpenCodeEventStream()

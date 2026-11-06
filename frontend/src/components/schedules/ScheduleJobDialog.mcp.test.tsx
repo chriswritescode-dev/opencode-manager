@@ -58,6 +58,7 @@ const job: ScheduleJob = {
   name: 'Test Job',
   description: null,
   enabled: true,
+  showInInbox: true,
   scheduleMode: 'interval',
   intervalMinutes: 60,
   cronExpression: null,

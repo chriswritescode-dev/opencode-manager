@@ -41,10 +41,6 @@ vi.mock('@opencode-manager/shared/config', () => ({
   },
 }))
 
-vi.mock('eventsource', () => ({
-  EventSource: vi.fn(),
-}))
-
 vi.mock('../../src/utils/ssh-key-manager', () => ({
   writeTemporarySSHKey: vi.fn().mockResolvedValue('/tmp/test-workspace/.ssh-keys/test-key'),
   cleanupSSHKey: vi.fn().mockResolvedValue(undefined),

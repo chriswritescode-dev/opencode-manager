@@ -1,11 +1,10 @@
-import type { ConfigEntry, McpServer } from '@opencode/client'
+import type { McpServer } from '@opencode/client'
+import type { OpenCodeConfigInfo } from './config'
 import { isRecord } from '../utils/record'
 
 export const MCP_OAUTH_CALLBACK_PATH = '/api/mcp-oauth-proxy/callback'
 
-type ConfigDocumentInfo = Extract<ConfigEntry, { type: 'document' }>['info']
-
-type McpConfig = NonNullable<ConfigDocumentInfo['mcp']>
+type McpConfig = NonNullable<OpenCodeConfigInfo['mcp']>
 
 export type McpServerConfig = NonNullable<McpConfig['servers']>[string]
 
@@ -28,43 +27,31 @@ export function mcpServersFromConfig(mcp: unknown): Record<string, McpServerConf
   return Object.fromEntries(Object.entries(mcp.servers).filter((entry): entry is [string, McpServerConfig] => isMcpServerConfig(entry[1])))
 }
 
-export type McpServerShape = 'servers' | 'legacy'
-
 export interface McpServerView {
   name: string
   type: 'local' | 'remote'
   command?: string[]
   url?: string
   enabled: boolean
-  shape: McpServerShape
 }
 
-function toMcpServerView(
-  name: string,
-  config: McpServerConfig,
-  enabled: boolean,
-  shape: McpServerShape,
-): McpServerView {
+/**
+ * Maps a config server to its UI-facing view, exposing `command` for local servers and `url` for
+ * remote ones so the view never carries both. `enabled` reflects the absence of `disabled: true`.
+ */
+function toMcpServerView(name: string, config: McpServerConfig, enabled: boolean): McpServerView {
   return {
     name,
     type: config.type,
     ...(config.type === 'local' ? { command: config.command } : { url: config.url }),
     enabled,
-    shape,
   }
 }
 
 export function mcpServerViewsFromConfig(mcp: unknown): McpServerView[] {
-  if (!isRecord(mcp)) return []
-  const nativeViews = Object.entries(mcpServersFromConfig(mcp)).map(([name, config]) =>
-    toMcpServerView(name, config, config.disabled !== true, 'servers'),
-  )
-  const legacyViews = Object.entries(mcp).flatMap(([name, value]) => {
-    if (name === 'servers' || name === 'timeout' || !isMcpServerConfig(value)) return []
-    const enabled = (value as { enabled?: unknown }).enabled !== false
-    return [toMcpServerView(name, value, enabled, 'legacy')]
-  })
-  return [...nativeViews, ...legacyViews].sort((left, right) => left.name.localeCompare(right.name))
+  return Object.entries(mcpServersFromConfig(mcp))
+    .map(([name, config]) => toMcpServerView(name, config, config.disabled !== true))
+    .sort((left, right) => left.name.localeCompare(right.name))
 }
 
 export function mcpStatusByName(servers: McpServer[]): McpStatusMap {

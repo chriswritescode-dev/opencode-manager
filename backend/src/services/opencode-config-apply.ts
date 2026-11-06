@@ -10,9 +10,12 @@ import {
   restoreOpenCodeConfigSnapshot,
   serializeOpenCodeConfigSnapshot,
   updateOpenCodeConfigFile,
+  type OpenCodeConfigSnapshot,
   type OpenCodeConfigUpdateMode,
   withOpenCodeConfigLock,
 } from './opencode-config-file'
+import { readManagedOpenCodeConfig } from './opencode-config-effective'
+import { patchNamesOpenCodeConfigEntities, restoreOpenCodeConfigReferences } from './opencode-config-references'
 import { opencodeServerManager } from './opencode-single-server'
 import { reloadOpenCodeConfig } from './opencode-restart'
 import type { OpenCodeClient } from './opencode/client'
@@ -26,7 +29,7 @@ export type ApplyOpenCodeConfigResult =
   | { status: 'reloaded'; config: OpenCodeConfigFile }
   | { status: 'restart_pending'; config: OpenCodeConfigFile }
 
-export interface ApplyOpenCodeConfigInput {
+export interface ApplyOpenCodeConfigOptions {
   content: Record<string, unknown> | string
   source?: OpenCodeConfigSourceName
   expectedRevision?: string
@@ -98,16 +101,39 @@ function requiresOpenCodeReload(previous: OpenCodeConfigFile | null, next: OpenC
   return listChangedTopLevelKeys(previous?.content ?? {}, next.content).length > 0
 }
 
+/**
+ * Replaces substituted values in a merge patch with the `{env:…}` or `{file:…}` references held by
+ * the raw config, reading the resolved config from the OpenCode server. Returns the patch unchanged
+ * when it does not name any config entity.
+ */
+async function keepOpenCodeConfigReferences(
+  patch: Record<string, unknown>,
+  snapshot: OpenCodeConfigSnapshot,
+  openCodeClient: OpenCodeClient,
+): Promise<Record<string, unknown>> {
+  if (!patchNamesOpenCodeConfigEntities(patch)) return patch
+  const resolved = await readManagedOpenCodeConfig(openCodeClient.api, snapshot.sources)
+  return restoreOpenCodeConfigReferences(patch, resolved as Record<string, unknown>, snapshot.content)
+}
+
+/**
+ * Applies config content or a merge patch under the shared config file lock, saving the previous
+ * valid config as last-known-good and restoring it if that save fails. OpenCode is reloaded only when
+ * top-level keys changed, and a failed reload is reported as `restart_pending`.
+ */
 export async function applyOpenCodeConfigUpdate(
-  input: ApplyOpenCodeConfigInput,
+  input: ApplyOpenCodeConfigOptions,
 ): Promise<ApplyOpenCodeConfigResult> {
   const { reloadRequired, config } = await withOpenCodeConfigLock(async () => {
     const { content, source, expectedRevision, mode, settingsService } = input
 
     const snapshot = await readOpenCodeConfigSnapshot()
     const previous = await readOpenCodeConfigFile(snapshot)
+    const savedContent = mode === 'merge' && typeof content !== 'string'
+      ? await keepOpenCodeConfigReferences(content, snapshot, input.openCodeClient)
+      : content
 
-    const next = await updateOpenCodeConfigFile(content, { source, expectedRevision, snapshot, mode })
+    const next = await updateOpenCodeConfigFile(savedContent, { source, expectedRevision, snapshot, mode })
 
     if (previous?.isValid) {
       const snapshot = serializeOpenCodeConfigSnapshot(previous)

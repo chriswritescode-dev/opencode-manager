@@ -3,7 +3,10 @@ import path from 'path'
 import { access, readFile, writeFile } from 'fs/promises'
 import { Hono } from 'hono'
 import { AssistantSettingsPatchSchema } from '@opencode-manager/shared/schemas'
-import { ensureAssistantMode, getAssistantModeStatus, buildSchedulesSkill, buildReposSkill, buildSettingsSkill, buildSessionsSkill, buildAssistantDefaultAgentMd, buildAssistantOpenCodeConfig, buildAssistantRepo, installAssistantWorkspace } from '../../src/services/assistant-mode'
+import { parseJsonc } from '@opencode-manager/shared/utils'
+import type { OpenCodeApi, OpenCodePermissionRule } from '@opencode-manager/shared/opencode'
+import { validateOpenCodeConfig } from '@opencode-manager/shared/opencode/config-validation'
+import { ensureAssistantMode, getAssistantModeStatus, buildSchedulesSkill, buildReposSkill, buildSettingsSkill, buildSessionsSkill, buildAssistantDefaultAgentMd, buildAssistantOpenCodeConfig, buildAssistantRepo, installAssistantWorkspace, convertAssistantOpenCodeConfigToV2 } from '../../src/services/assistant-mode'
 import { createTempAssistantWorkspace, createTestDb, mockRepo } from '../helpers/assistant-workspace'
 import { ScheduleService } from '../../src/services/schedules'
 import { getOrCreateInternalToken } from '../../src/services/internal-token'
@@ -11,6 +14,16 @@ import { createOpenCodeClient } from '../../src/services/opencode/client'
 import { getRepoById } from '../../src/db/queries'
 import type { ScheduleWorktreeManager } from '../../src/services/schedule-worktree'
 import { createInternalTestApp } from '../helpers/internal-test-app'
+
+const ASSISTANT_PERMISSIONS: OpenCodePermissionRule[] = [
+  { action: 'read', resource: '*', effect: 'allow' },
+  { action: 'edit', resource: '*', effect: 'allow' },
+  { action: 'glob', resource: '*', effect: 'allow' },
+  { action: 'grep', resource: '*', effect: 'allow' },
+  { action: 'list', resource: '*', effect: 'allow' },
+  { action: 'shell', resource: '*', effect: 'allow' },
+  { action: 'external_directory', resource: '*', effect: 'ask' },
+]
 
 describe('buildSchedulesSkill', () => {
   it('instructs the agent to use the ocm tool request action', () => {
@@ -149,6 +162,25 @@ describe('buildSettingsSkill', () => {
     expect(skill).toContain('never copy this response into a save')
   })
 
+  it('names v2 config keys and documents the unreachable server response', () => {
+    const skill = buildSettingsSkill()
+    expect(skill).toContain('`plugins`')
+    expect(skill).toContain('`mcp.servers`')
+    expect(skill).toContain('`providers`')
+    expect(skill).not.toContain('including `plugin`')
+    expect(skill).toContain('GET /opencode-config/mcp returns `503`')
+  })
+
+  it('documents v1 counterpart removal, reference preservation, and both 409 causes', () => {
+    const skill = buildSettingsSkill()
+    expect(skill).toContain('also deletes its v1 counterpart')
+    expect(skill).toContain('`{env:…}` and `{file:…}` references')
+    expect(skill).toContain('OpenCodeConfigShadowedRemovalError')
+    expect(skill).toContain('expectedRevision')
+    expect(skill).not.toContain('Saving never silently drops unsupported fields')
+    expect(skill).not.toContain('every path you do not name is left untouched')
+  })
+
   it('documents the assistant reload as rebuilding every loaded location', () => {
     const skill = buildSettingsSkill()
     expect(skill).toContain('rebuilding every loaded location')
@@ -202,13 +234,15 @@ describe('buildAssistantDefaultAgentMd', () => {
 })
 
 describe('buildAssistantOpenCodeConfig', () => {
-  it('includes default_agent and agent.assistant with primary mode and no embedded persona', () => {
+  it('writes v2 permissions and agents.assistant with primary mode and no embedded persona', () => {
     const config = buildAssistantOpenCodeConfig()
     expect(config.default_agent).toBe('assistant')
-    expect(config.agent?.assistant).toEqual({ mode: 'primary' })
-    expect(config.agent?.assistant?.prompt).toBeUndefined()
-    expect(config.agent?.assistant?.description).toBeUndefined()
-    expect(config.agent?.assistant?.permission).toBeUndefined()
+    expect(config.permissions).toEqual(ASSISTANT_PERMISSIONS)
+    expect(config.agents?.assistant).toEqual({ mode: 'primary' })
+    expect(config.agents?.assistant?.system).toBeUndefined()
+    expect(config.agents?.assistant?.description).toBeUndefined()
+    expect(config.agents?.assistant?.permissions).toBeUndefined()
+    expect(validateOpenCodeConfig(config).success).toBe(true)
   })
 })
 
@@ -234,10 +268,11 @@ describe('ensureAssistantMode', () => {
     const parsedConfig = JSON.parse(opencodeJson)
     expect(parsedConfig.default_agent).toBe('assistant')
     expect(parsedConfig).not.toHaveProperty('mcp')
-    expect(parsedConfig.agent?.assistant).toEqual({ mode: 'primary' })
-    expect(parsedConfig.agent?.assistant?.prompt).toBeUndefined()
-    expect(parsedConfig.agent?.assistant?.description).toBeUndefined()
-    expect(parsedConfig.agent?.assistant?.permission).toBeUndefined()
+    expect(parsedConfig.permissions).toEqual(ASSISTANT_PERMISSIONS)
+    expect(parsedConfig.agents?.assistant).toEqual({ mode: 'primary' })
+    expect(parsedConfig.agents?.assistant?.system).toBeUndefined()
+    expect(parsedConfig.agents?.assistant?.description).toBeUndefined()
+    expect(parsedConfig.agents?.assistant?.permissions).toBeUndefined()
     expect(skill).toContain('"action": "request"')
     expect(skill).not.toContain('curl')
     expect(skill).not.toContain('Authorization: Bearer')
@@ -275,19 +310,11 @@ describe('ensureAssistantMode', () => {
 
     expect(opencodeJson.default_agent).toBe('assistant')
     expect(opencodeJson.instructions).toBeUndefined()
-    expect(opencodeJson.permission).toEqual({
-      read: 'allow',
-      edit: 'allow',
-      glob: 'allow',
-      grep: 'allow',
-      list: 'allow',
-      shell: 'allow',
-      external_directory: 'ask',
-    })
-    expect(opencodeJson.agent?.assistant).toEqual({ mode: 'primary' })
-    expect(opencodeJson.agent?.assistant?.prompt).toBeUndefined()
-    expect(opencodeJson.agent?.assistant?.description).toBeUndefined()
-    expect(opencodeJson.agent?.assistant?.permission).toBeUndefined()
+    expect(opencodeJson.permissions).toEqual(ASSISTANT_PERMISSIONS)
+    expect(opencodeJson.agents?.assistant).toEqual({ mode: 'primary' })
+    expect(opencodeJson.agents?.assistant?.system).toBeUndefined()
+    expect(opencodeJson.agents?.assistant?.description).toBeUndefined()
+    expect(opencodeJson.agents?.assistant?.permissions).toBeUndefined()
 
     const agentsMdContent = await readFile(agentsMdPath, 'utf8')
     expect(agentsMdContent).toContain('Assistant Mode Workspace')
@@ -374,21 +401,22 @@ describe('ensureAssistantMode', () => {
       model: 'provider/model',
       instructions: ['AGENTS.md'],
       default_agent: 'build',
-      agent: {
-        custom: { mode: 'primary', prompt: 'Custom agent' },
+      agents: {
+        custom: { mode: 'primary', system: 'Custom agent' },
       },
-      skills: { paths: ['.opencode/skills'] },
+      skills: ['.opencode/skills'],
     }, null, 2))
 
     const result = await ensureAssistantMode(mockRepo)
     const repaired = JSON.parse(await readFile(opencodeJsonPath, 'utf8'))
 
     expect(repaired.default_agent).toBe('assistant')
-    expect(repaired.agent.assistant).toEqual({ mode: 'primary', disable: false })
-    expect(repaired.agent.assistant.prompt).toBeUndefined()
-    expect(repaired.agent.custom.prompt).toBe('Custom agent')
+    expect(repaired.permissions).toEqual(ASSISTANT_PERMISSIONS)
+    expect(repaired.agents.assistant).toEqual({ mode: 'primary', disabled: false })
+    expect(repaired.agents.assistant.system).toBeUndefined()
+    expect(repaired.agents.custom.system).toBe('Custom agent')
     expect(repaired.model).toBe('provider/model')
-    expect(repaired.skills.paths).toEqual(['.opencode/skills'])
+    expect(repaired.skills).toEqual(['.opencode/skills'])
     expect(result.files.opencodeJson?.created).toBe(true)
   })
 
@@ -397,12 +425,12 @@ describe('ensureAssistantMode', () => {
     const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
     await writeFile(opencodeJsonPath, JSON.stringify({
       default_agent: 'assistant',
-      agent: {
+      agents: {
         assistant: {
           mode: 'subagent',
-          prompt: 'Custom assistant prompt',
+          system: 'Custom assistant prompt',
           description: 'Custom assistant',
-          permission: { bash: 'ask' },
+          permissions: [{ action: 'shell', resource: '*', effect: 'ask' }],
         },
       },
     }, null, 2))
@@ -410,11 +438,45 @@ describe('ensureAssistantMode', () => {
     const result = await ensureAssistantMode(mockRepo)
     const repaired = JSON.parse(await readFile(opencodeJsonPath, 'utf8'))
 
-    expect(repaired.agent.assistant.prompt).toBe('Custom assistant prompt')
-    expect(repaired.agent.assistant.description).toBe('Custom assistant')
-    expect(repaired.agent.assistant.permission.bash).toBe('ask')
-    expect(repaired.agent.assistant.mode).toBe('primary')
-    expect(repaired.agent.assistant.disable).toBe(false)
+    expect(repaired.agents.assistant.system).toBe('Custom assistant prompt')
+    expect(repaired.agents.assistant.description).toBe('Custom assistant')
+    expect(repaired.agents.assistant.permissions).toEqual([{ action: 'shell', resource: '*', effect: 'ask' }])
+    expect(repaired.agents.assistant.mode).toBe('primary')
+    expect(repaired.agents.assistant.disabled).toBe(false)
+    expect(result.files.opencodeJson?.created).toBe(true)
+  })
+
+  it('leaves a v1 assistant opencode config untouched so the conversion can upgrade it', async () => {
+    await ensureAssistantMode(mockRepo)
+    const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
+    const v1Config = `{
+  // keep this comment
+  "default_agent": "assistant",
+  "permission": { "read": "allow", "shell": "ask" },
+  "agent": { "assistant": { "mode": "primary", "prompt": "Custom v1 prompt" } }
+}
+`
+    await writeFile(opencodeJsonPath, v1Config)
+
+    const result = await ensureAssistantMode(mockRepo)
+
+    expect(await readFile(opencodeJsonPath, 'utf8')).toBe(v1Config)
+    expect(result.files.opencodeJson?.created).toBe(false)
+  })
+
+  it('writes the generated v2 config over a v1 config when overwrite is requested', async () => {
+    await ensureAssistantMode(mockRepo)
+    const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
+    const v1Config = `{
+  "permission": { "read": "allow", "shell": "ask" },
+  "agent": { "assistant": { "mode": "primary", "prompt": "Custom v1 prompt" } }
+}
+`
+    await writeFile(opencodeJsonPath, v1Config)
+
+    const result = await ensureAssistantMode(mockRepo, { overwriteOpenCodeConfig: true })
+
+    expect(JSON.parse(await readFile(opencodeJsonPath, 'utf8'))).toEqual(buildAssistantOpenCodeConfig())
     expect(result.files.opencodeJson?.created).toBe(true)
   })
 
@@ -508,29 +570,13 @@ Ask before destructive operations or changes outside this assistant workspace.
     await writeFile(opencodeJsonPath, JSON.stringify({
       default_agent: 'assistant',
       instructions: ['AGENTS.md'],
-      permission: {
-        read: 'allow',
-        edit: 'allow',
-        glob: 'allow',
-        grep: 'allow',
-        list: 'allow',
-        bash: 'allow',
-        external_directory: 'ask',
-      },
-      agent: {
+      permissions: [{ action: 'read', resource: '*', effect: 'allow' }],
+      agents: {
         assistant: {
           description: 'Default OpenCode Manager assistant workspace agent',
           mode: 'primary',
-          prompt: legacyAssistantPrompt,
-          permission: {
-            read: 'allow',
-            edit: 'allow',
-            glob: 'allow',
-            grep: 'allow',
-            list: 'allow',
-            bash: 'allow',
-            external_directory: 'ask',
-          },
+          system: legacyAssistantPrompt,
+          permissions: [{ action: 'shell', resource: '*', effect: 'allow' }],
         },
       },
     }, null, 2))
@@ -553,10 +599,11 @@ Ask before destructive operations or changes outside this assistant workspace.
     expect(updatedAssistantAgent).toContain('notifications')
     expect(updatedAssistantAgent).toContain('manager-settings')
 
-    expect(updatedOpenCodeJson.agent.assistant.prompt).toBeUndefined()
-    expect(updatedOpenCodeJson.agent.assistant.description).toBeUndefined()
-    expect(updatedOpenCodeJson.agent.assistant.permission).toBeUndefined()
-    expect(updatedOpenCodeJson.agent.assistant.mode).toBe('primary')
+    expect(updatedOpenCodeJson.agents.assistant.system).toBeUndefined()
+    expect(updatedOpenCodeJson.agents.assistant.description).toBeUndefined()
+    expect(updatedOpenCodeJson.agents.assistant.permissions).toBeUndefined()
+    expect(updatedOpenCodeJson.agents.assistant.mode).toBe('primary')
+    expect(updatedOpenCodeJson.permissions).toEqual([{ action: 'read', resource: '*', effect: 'allow' }])
 
     expect(result.files.agentsMd?.created).toBe(true)
     expect(result.files.opencodeJson?.created).toBe(true)
@@ -670,6 +717,273 @@ Ask before destructive operations or changes outside this assistant workspace.
     expect(updatedContent).toContain('.opencode/agents/assistant.md')
     expect(updatedContent).not.toBe(customContent)
     expect(result.files.agentsMd?.created).toBe(true)
+  })
+})
+
+describe('convertAssistantOpenCodeConfigToV2', () => {
+  let ws: Awaited<ReturnType<typeof createTempAssistantWorkspace>>
+
+  beforeEach(async () => {
+    ws = await createTempAssistantWorkspace()
+  })
+  afterEach(async () => { await ws.cleanup() })
+
+  function createConfigApi(
+    getEntries: (assistantDir: string) => unknown[],
+  ): OpenCodeApi {
+    return {
+      config: {
+        get: async () => getEntries(ws.assistantDir),
+      },
+    } as unknown as OpenCodeApi
+  }
+
+  const v1Config = `{
+  // keep this comment
+  "default_agent": "assistant",
+  "permission": { "read": "allow", "shell": "ask" },
+  "agent": { "assistant": { "mode": "primary", "prompt": "Custom v1 prompt" } }
+}
+`
+
+  const convertedPermissions = [
+    { action: 'read', resource: '*', effect: 'allow' },
+    { action: 'shell', resource: '*', effect: 'ask' },
+  ]
+
+  it('writes the converted v2 values and removes the v1 keys while keeping comments', async () => {
+    await ensureAssistantMode(mockRepo)
+    const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
+    await writeFile(opencodeJsonPath, v1Config)
+
+    const api = createConfigApi((assistantDir) => [{
+      type: 'document',
+      path: path.join(assistantDir, 'opencode.json'),
+      info: {
+        default_agent: 'assistant',
+        permissions: convertedPermissions,
+        agents: { assistant: { mode: 'primary', system: 'Converted prompt' } },
+      },
+    }])
+
+    const converted = await convertAssistantOpenCodeConfigToV2(api)
+
+    const raw = await readFile(opencodeJsonPath, 'utf8')
+    const config = parseJsonc<Record<string, unknown>>(raw)
+    expect(converted).toBe(true)
+    expect(config.agents).toEqual({ assistant: { mode: 'primary', system: 'Converted prompt' } })
+    expect(config.permissions).toEqual(convertedPermissions)
+    expect(config.agent).toBeUndefined()
+    expect(config.permission).toBeUndefined()
+    expect(raw).toContain('// keep this comment')
+  })
+
+  it('keeps comments attached to retained keys in a commented v1 config', async () => {
+    await ensureAssistantMode(mockRepo)
+    const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
+    await writeFile(opencodeJsonPath, `{
+  // about agent
+  "agent": {
+    // assistant comment
+    "assistant": { "mode": "primary", "prompt": "Custom v1 prompt" },
+    // kept sibling comment
+    "reviewer": { "mode": "subagent", "prompt": "Reviewer" }
+  },
+  // about permission
+  "permission": { "read": "allow", "shell": "ask" }, // trailing note
+  "theme": "opencode"
+}
+`)
+
+    const api = createConfigApi((assistantDir) => [{
+      type: 'document',
+      path: path.join(assistantDir, 'opencode.json'),
+      info: {
+        default_agent: 'assistant',
+        permissions: convertedPermissions,
+        agents: { assistant: { mode: 'primary', system: 'Converted prompt' } },
+      },
+    }])
+
+    expect(await convertAssistantOpenCodeConfigToV2(api)).toBe(true)
+
+    const raw = await readFile(opencodeJsonPath, 'utf8')
+    const config = parseJsonc<Record<string, unknown>>(raw)
+    expect(config.agents).toEqual({ assistant: { mode: 'primary', system: 'Converted prompt' } })
+    expect(config.permissions).toEqual(convertedPermissions)
+    expect(config.agent).toEqual({ reviewer: { mode: 'subagent', prompt: 'Reviewer' } })
+    expect(config.permission).toBeUndefined()
+    expect(config.theme).toBe('opencode')
+    expect(raw).toContain('// about agent')
+    expect(raw).toContain('// kept sibling comment')
+    expect(raw).toContain('// about permission')
+    expect(raw).toContain('// trailing note')
+  })
+
+  it('keeps other v1 agent entries when only agent.assistant is converted', async () => {
+    await ensureAssistantMode(mockRepo)
+    const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
+    await writeFile(opencodeJsonPath, JSON.stringify({
+      default_agent: 'assistant',
+      agent: {
+        assistant: { mode: 'primary', prompt: 'Custom v1 prompt' },
+        reviewer: { mode: 'subagent', prompt: 'Reviewer' },
+      },
+    }, null, 2))
+
+    const api = createConfigApi((assistantDir) => [{
+      type: 'document',
+      path: path.join(assistantDir, 'opencode.json'),
+      info: {
+        default_agent: 'assistant',
+        permissions: convertedPermissions,
+        agents: { assistant: { mode: 'primary', system: 'Converted prompt' } },
+      },
+    }])
+
+    expect(await convertAssistantOpenCodeConfigToV2(api)).toBe(true)
+
+    const config = JSON.parse(await readFile(opencodeJsonPath, 'utf8'))
+    expect(config.agents.assistant.system).toBe('Converted prompt')
+    expect(config.agent.assistant).toBeUndefined()
+    expect(config.agent.reviewer.prompt).toBe('Reviewer')
+  })
+
+  it('drops a generated assistant persona from the converted agent', async () => {
+    await ensureAssistantMode(mockRepo)
+    const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
+    await writeFile(opencodeJsonPath, JSON.stringify({
+      default_agent: 'assistant',
+      agent: { assistant: { mode: 'all' } },
+    }, null, 2))
+
+    const generatedPrompt = buildAssistantDefaultAgentMd().split('---\n\n')[1]?.trimEnd()
+    if (generatedPrompt === undefined) throw new Error('Generated assistant prompt is missing')
+
+    const api = createConfigApi((assistantDir) => [{
+      type: 'document',
+      path: path.join(assistantDir, 'opencode.json'),
+      info: {
+        default_agent: 'assistant',
+        permissions: convertedPermissions,
+        agents: { assistant: { mode: 'all', system: generatedPrompt, description: 'Generated persona' } },
+      },
+    }])
+
+    expect(await convertAssistantOpenCodeConfigToV2(api)).toBe(true)
+
+    const config = JSON.parse(await readFile(opencodeJsonPath, 'utf8'))
+    expect(config.agents.assistant).toEqual({ mode: 'all' })
+  })
+
+  it('keeps the v1 permission block when the converted document has no permissions', async () => {
+    await ensureAssistantMode(mockRepo)
+    const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
+    await writeFile(opencodeJsonPath, v1Config)
+
+    const api = createConfigApi((assistantDir) => [{
+      type: 'document',
+      path: path.join(assistantDir, 'opencode.json'),
+      info: {
+        default_agent: 'assistant',
+        agents: { assistant: { mode: 'primary', system: 'Converted prompt' } },
+      },
+    }])
+
+    expect(await convertAssistantOpenCodeConfigToV2(api)).toBe(true)
+
+    const config = parseJsonc<Record<string, unknown>>(await readFile(opencodeJsonPath, 'utf8'))
+    expect(config.agents).toEqual({ assistant: { mode: 'primary', system: 'Converted prompt' } })
+    expect(config.permission).toEqual({ read: 'allow', shell: 'ask' })
+    expect(config.agent).toBeUndefined()
+  })
+
+  it('restores a config reference from the v1 agent definition', async () => {
+    await ensureAssistantMode(mockRepo)
+    const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
+    await writeFile(opencodeJsonPath, JSON.stringify({
+      default_agent: 'assistant',
+      agent: { assistant: { mode: 'primary', prompt: '{file:./p.md}' } },
+    }, null, 2))
+
+    const api = createConfigApi((assistantDir) => [{
+      type: 'document',
+      path: path.join(assistantDir, 'opencode.json'),
+      info: {
+        default_agent: 'assistant',
+        agents: { assistant: { mode: 'primary', system: 'Resolved prompt text' } },
+      },
+    }])
+
+    expect(await convertAssistantOpenCodeConfigToV2(api)).toBe(true)
+
+    const config = JSON.parse(await readFile(opencodeJsonPath, 'utf8'))
+    expect(config.agents.assistant).toEqual({ mode: 'primary', system: '{file:./p.md}' })
+    expect(config.agent).toBeUndefined()
+  })
+
+  it('leaves the file unchanged when the OpenCode client fails', async () => {
+    await ensureAssistantMode(mockRepo)
+    const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
+    await writeFile(opencodeJsonPath, v1Config)
+
+    const api = {
+      config: {
+        get: async () => { throw new Error('unreachable') },
+      },
+    } as unknown as OpenCodeApi
+
+    const converted = await convertAssistantOpenCodeConfigToV2(api)
+
+    expect(converted).toBe(false)
+    expect(await readFile(opencodeJsonPath, 'utf8')).toBe(v1Config)
+  })
+
+  it('does nothing for a v2 config', async () => {
+    await ensureAssistantMode(mockRepo)
+    let calls = 0
+    const api = {
+      config: {
+        get: async () => { calls += 1; return [] },
+      },
+    } as unknown as OpenCodeApi
+
+    expect(await convertAssistantOpenCodeConfigToV2(api)).toBe(false)
+    expect(calls).toBe(0)
+  })
+
+  it('leaves a customized v1 assistant untouched when OpenCode returns no converted agent', async () => {
+    await ensureAssistantMode(mockRepo)
+    const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
+    await writeFile(opencodeJsonPath, v1Config)
+
+    const api = createConfigApi((assistantDir) => [{
+      type: 'document',
+      path: path.join(assistantDir, 'opencode.json'),
+      info: { default_agent: 'assistant', permissions: convertedPermissions },
+    }])
+
+    expect(await convertAssistantOpenCodeConfigToV2(api)).toBe(false)
+    expect(await readFile(opencodeJsonPath, 'utf8')).toBe(v1Config)
+  })
+
+  it('leaves the file untouched when the converted config is invalid', async () => {
+    await ensureAssistantMode(mockRepo)
+    const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
+    await writeFile(opencodeJsonPath, v1Config)
+
+    const api = createConfigApi((assistantDir) => [{
+      type: 'document',
+      path: path.join(assistantDir, 'opencode.json'),
+      info: {
+        default_agent: 'assistant',
+        permissions: [{ action: 'shell', resource: '*', effect: 'sometimes' }],
+        agents: { assistant: { mode: 'primary', system: 'Converted prompt' } },
+      },
+    }])
+
+    expect(await convertAssistantOpenCodeConfigToV2(api)).toBe(false)
+    expect(await readFile(opencodeJsonPath, 'utf8')).toBe(v1Config)
   })
 })
 

@@ -1,6 +1,7 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,6 +22,9 @@ import {
 } from "@/components/ui/form";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { configModelRef, formatOpenCodeModelRef } from "@opencode-manager/shared/opencode";
+import type { OpenCodeCommandConfig } from "@opencode-manager/shared/opencode";
+import type { OpenCodeCommandPatch } from "@/api/types/settings";
 
 const commandFormSchema = z.object({
   name: z
@@ -34,55 +38,72 @@ const commandFormSchema = z.object({
   description: z.string().optional(),
   agent: z.string().optional(),
   model: z.string().optional(),
-  subtask: z.boolean(),
-  topP: z.number().min(0).max(1).optional(),
+  subagent: z.boolean(),
 });
 
 type CommandFormValues = z.infer<typeof commandFormSchema>;
 
-interface Command {
-  template: string;
-  description?: string;
-  agent?: string;
-  model?: string;
-  subtask?: boolean;
-  topP?: number;
-}
-
 interface CommandDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (name: string, command: Command) => void;
-  editingCommand?: { name: string; command: Command } | null;
+  onSubmit: (name: string, command: OpenCodeCommandPatch) => void;
+  editingCommand?: { name: string; command: OpenCodeCommandConfig } | null;
 }
 
+/**
+ * Renders the create/edit command dialog with name, template, description,
+ * agent, model, and subagent fields, locking the name while editing an existing
+ * command.
+ */
 export function CommandDialog({
   open,
   onOpenChange,
   onSubmit,
   editingCommand,
 }: CommandDialogProps) {
+  /**
+   * Builds the form defaults for creating or editing a command, rendering any stored model
+   * reference in the `provider/model` display format and falling back to empty values when there is
+   * no command to edit.
+   */
+  const getDefaultValues = (
+    command?: { name: string; command: OpenCodeCommandConfig } | null,
+  ): CommandFormValues => {
+    const modelRef = configModelRef(command?.command.model);
+    return {
+      name: command?.name || "",
+      template: command?.command.template || "",
+      description: command?.command.description || "",
+      agent: command?.command.agent || "",
+      model: modelRef ? formatOpenCodeModelRef(modelRef) : "",
+      subagent: command?.command.subagent || false,
+    };
+  };
+
   const form = useForm<CommandFormValues>({
     resolver: zodResolver(commandFormSchema),
-    defaultValues: {
-      name: editingCommand?.name || "",
-      template: editingCommand?.command.template || "",
-      description: editingCommand?.command.description || "",
-      agent: editingCommand?.command.agent || "",
-      model: editingCommand?.command.model || "",
-      subtask: editingCommand?.command.subtask || false,
-      topP: editingCommand?.command.topP ?? 1,
-    },
+    defaultValues: getDefaultValues(editingCommand),
   });
 
+  useEffect(() => {
+    if (open) {
+      form.reset(getDefaultValues(editingCommand));
+    }
+  }, [open, editingCommand, form]);
+
+  /**
+   * Submits the validated command form as a patch that keeps the stored
+   * command's other fields, nulls emptied optional fields, and then resets and
+   * closes the dialog.
+   */
   const handleSubmit = (values: CommandFormValues) => {
-    const command: Command = {
+    const command: OpenCodeCommandPatch = {
+      ...editingCommand?.command,
       template: values.template,
-      description: values.description || undefined,
-      agent: values.agent || undefined,
-      model: values.model || undefined,
-      subtask: values.subtask || undefined,
-      topP: values.topP || undefined,
+      description: values.description || null,
+      agent: values.agent || null,
+      model: values.model?.trim() || null,
+      subagent: values.subagent ? true : null,
     };
 
     onSubmit(values.name, command);
@@ -171,7 +192,7 @@ export function CommandDialog({
                 )}
               />
 
-              <div className="flex flex-wrap sm:grid grid-cols-3 gap-4">
+              <div className="flex flex-col gap-4 sm:grid sm:grid-cols-2">
                 <FormField
                   control={form.control}
                   name="agent"
@@ -180,28 +201,6 @@ export function CommandDialog({
                       <FormLabel>Agent (optional)</FormLabel>
                       <FormControl>
                         <Input {...field} placeholder="build" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="topP"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Top P (optional)</FormLabel>
-                      <FormControl>
-                        <Input
-                          {...field}
-                          type="number"
-                          min="0"
-                          max="1"
-                          step="0.1"
-                          onChange={(e) =>
-                            field.onChange(parseFloat(e.target.value))
-                          }
-                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -228,13 +227,13 @@ export function CommandDialog({
 
               <FormField
                 control={form.control}
-                name="subtask"
+                name="subagent"
                 render={({ field }) => (
                   <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
                     <div className="space-y-0.5">
-                      <FormLabel className="text-base">Run as subtask</FormLabel>
+                      <FormLabel className="text-base">Run as subagent</FormLabel>
                       <FormDescription>
-                        Execute this command as a separate subtask
+                        Execute this command in a subagent session
                       </FormDescription>
                     </div>
                     <FormControl>
@@ -262,4 +261,3 @@ export function CommandDialog({
     </Dialog>
   );
 }
-

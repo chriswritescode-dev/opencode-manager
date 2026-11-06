@@ -57,7 +57,7 @@ const provider = (id: string, name: string, modelIDs: string[]): Provider => ({
   name,
   models: modelIDs.map((modelID) => ({
     id: modelID,
-    key: modelID,
+    modelID,
     name: modelID,
     released: 0,
     free: false,

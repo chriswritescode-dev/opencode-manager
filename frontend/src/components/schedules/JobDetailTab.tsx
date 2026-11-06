@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
   formatScheduleSummary,
+  formatScheduleInbox,
   formatScheduleSandbox,
   formatTimestamp,
   getJobStatusTone,
@@ -197,6 +198,10 @@ export function JobDetailTab({
                 <div>
                   <p className="text-muted-foreground">Sandbox</p>
                   <p className="font-medium">{formatScheduleSandbox(selectedJob.sandbox)}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Inbox</p>
+                  <p className="font-medium">{formatScheduleInbox(selectedJob.showInInbox)}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Created</p>

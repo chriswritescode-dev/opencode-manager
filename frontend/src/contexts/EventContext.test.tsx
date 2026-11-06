@@ -164,6 +164,7 @@ const childSessionForm: FormInfo = {
 function Harness() {
   const { current, pendingCount, syncForSession, navigateToCurrent, cancel, reply, getForSession } = useForms()
   const permissions = usePermissions()
+  const { sshHostKey } = useEventContext()
   const location = useLocation()
   const [rejection, setRejection] = useState('none')
   const recordRejection = (action: Promise<void>) => {
@@ -192,6 +193,7 @@ function Harness() {
       <div data-testid="path">{location.pathname}</div>
       <div data-testid="search">{location.search}</div>
       <div data-testid="location-key">{location.key}</div>
+      <div data-testid="ssh-host">{sshHostKey.request?.host ?? 'none'}</div>
       <button onClick={() => syncForSession('/repo', 'session-1')}>Sync</button>
       <button onClick={() => permissions.syncForSession('/repo', 'session-1')}>Sync Permissions</button>
       <button onClick={navigateToCurrent}>Navigate</button>
@@ -941,6 +943,36 @@ describe('EventProvider permissions and forms', () => {
     })
   })
 
+  it('exposes an SSH host key request received via the global monitor onEvent', async () => {
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled()
+    })
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({
+        type: 'ssh.host-key-request',
+        properties: {
+          id: 'host-key-1',
+          host: 'example.com:22',
+          ip: '203.0.113.10',
+          keyType: 'ssh-ed25519',
+          fingerprint: 'SHA256:abc',
+          timestamp: Date.now(),
+          isKeyChanged: false,
+        },
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ssh-host')).toHaveTextContent('example.com:22')
+    })
+  })
+
   it('adds a pending permission received via the global monitor onEvent', async () => {
     mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
 
@@ -1200,6 +1232,7 @@ describe('EventProvider permissions and forms', () => {
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'skills'] })
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'providers'] })
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['provider-integrations'] })
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode-config', 'managed'] })
     })
   })
 
@@ -1899,6 +1932,58 @@ describe('EventProvider permissions and forms', () => {
     })
 
     expect(useSessionStatus.getState().getStatus('session-9')).toEqual({ type: 'busy' })
+  })
+
+  it('shows compaction from compaction events and restores the previous status', async () => {
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled())
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({ type: 'session.execution.started', data: { sessionID: 'session-compact' }, directory: '/repo' })
+      onEvent({
+        type: 'session.compaction.started',
+        data: { sessionID: 'session-compact', reason: 'manual' },
+        directory: '/repo',
+      })
+    })
+    expect(useSessionStatus.getState().getStatus('session-compact')).toEqual({ type: 'compact' })
+
+    act(() => {
+      onEvent({
+        type: 'session.compaction.ended',
+        data: { sessionID: 'session-compact', reason: 'manual', text: 'summary' },
+        directory: '/repo',
+      })
+    })
+    expect(useSessionStatus.getState().getStatus('session-compact')).toEqual({ type: 'busy' })
+
+    act(() => {
+      onEvent({
+        type: 'session.compaction.started',
+        data: { sessionID: 'session-compact', reason: 'auto' },
+        directory: '/repo',
+      })
+      onEvent({
+        type: 'session.status',
+        data: { sessionID: 'session-compact', status: { type: 'retry', attempt: 1, message: 'rate limited', next: 5 } },
+        directory: '/repo',
+      })
+      onEvent({
+        type: 'session.compaction.failed',
+        data: { sessionID: 'session-compact', reason: 'auto', error: { message: 'boom' } },
+        directory: '/repo',
+      })
+    })
+    expect(useSessionStatus.getState().getStatus('session-compact')).toEqual({
+      type: 'retry',
+      attempt: 1,
+      message: 'rate limited',
+      next: 5,
+    })
   })
 
   it('applies execution lifecycle and idle events from the global monitor to the status store', async () => {
@@ -3030,6 +3115,7 @@ describe('EventProvider permissions and forms', () => {
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['provider-integrations'] })
     })
     expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['opencode', 'commands'] })
+    expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['opencode-config', 'managed'] })
   })
 
   it('reconciles only linked directories with active work on a remote resync', async () => {
