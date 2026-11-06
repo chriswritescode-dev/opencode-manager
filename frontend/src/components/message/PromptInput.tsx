@@ -1281,9 +1281,9 @@ return (
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           autoComplete="off"
-          autoCorrect={isBashMode ? 'off' : 'on'}
-          autoCapitalize={isBashMode ? 'off' : 'sentences'}
-          spellCheck={!isBashMode}
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
           placeholder={
             isBashMode
               ? "Enter bash command..."

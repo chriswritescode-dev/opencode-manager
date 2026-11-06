@@ -643,8 +643,9 @@ describe('PromptInput command submission', () => {
 
       const input = await screen.findByPlaceholderText('Send a message...')
       expect(input).toHaveAttribute('autocomplete', 'off')
-      expect(input).toHaveAttribute('autocorrect', 'on')
-      expect(input).toHaveAttribute('spellcheck', 'true')
+      expect(input).toHaveAttribute('autocorrect', 'off')
+      expect(input).toHaveAttribute('autocapitalize', 'off')
+      expect(input).toHaveAttribute('spellcheck', 'false')
       fireEvent.focus(input)
       fireEvent.change(input, { target: { value: 'text' } })
       expect(screen.getByRole('button', { name: 'bash !' })).toBeDisabled()
