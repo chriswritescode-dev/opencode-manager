@@ -136,6 +136,7 @@ export type {
 } from './pairing'
 
 export {
+  OPENCODE_MIN_VERSION,
   OPENCODE_PINNED_VERSION,
   OPENCODE_SUPPORTED_VERSION_RANGE,
   buildOpenCodeReleaseAsset,

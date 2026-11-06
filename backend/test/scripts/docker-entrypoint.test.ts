@@ -240,6 +240,7 @@ const runOpenCodeSection = (snippet: string, env: Record<string, string> = {}) =
       OCM_STUB_RUNUSER_EXEC: '1',
       HOME: homeDir,
       OPENCODE_BUNDLED_VERSION: '2.0.15',
+      OPENCODE_MIN_VERSION: '2.0.15',
       ...env,
     },
   })
@@ -459,11 +460,11 @@ exit 1`)
     expect(curlLog()).toHaveLength(0)
   })
 
-  it('treats every persisted binary as unsupported when the bundled version is unknown', () => {
+  it('treats every persisted binary as unsupported when the minimum version is unknown', () => {
     mkdirSync(join(stubDir, 'home/.opencode/bin'), { recursive: true })
     writeBinary(join(stubDir, 'home/.opencode/bin'), '2.0.15')
     const res = runOpenCodeSection(`${installPrelude()}\nreconcile_persisted_opencode`, {
-      OPENCODE_BUNDLED_VERSION: '',
+      OPENCODE_MIN_VERSION: '',
     })
     expect(res.status).toBe(0)
     expect(existsSync(homeBinPath())).toBe(false)

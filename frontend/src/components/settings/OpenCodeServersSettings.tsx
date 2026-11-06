@@ -34,7 +34,7 @@ function ServerTestResult({ result }: { result: OpenCodeServerTestResult }) {
       {result.versionSupported ? (
         <Badge variant="secondary">Supported</Badge>
       ) : (
-        <Badge variant="destructive">Unsupported version</Badge>
+        <Badge variant="outline">Different version: some features may not work</Badge>
       )}
     </div>
   )
