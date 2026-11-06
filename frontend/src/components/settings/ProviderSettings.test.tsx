@@ -489,6 +489,17 @@ describe('ProviderSettings', () => {
     expect(within(connectedCard).queryByRole('button', { name: 'Edit API key for Connected Command Only' })).not.toBeInTheDocument()
   })
 
+  it('leaves MCP server integrations out of the provider lists', async () => {
+    vi.mocked(oauthApi.getIntegrations).mockResolvedValue([
+      integrationFixture('anthropic', 'Anthropic', [oauthMethod], true),
+      { ...integrationFixture('mcp_figma', 'figma', [oauthMethod]), metadata: { source: 'mcp' } },
+    ])
+    renderSettings()
+
+    await screen.findByText('Anthropic')
+    expect(screen.queryByText('figma')).not.toBeInTheDocument()
+  })
+
   it('shows an integration-list error instead of guessing connection status', async () => {
     vi.mocked(oauthApi.getIntegrations).mockRejectedValue(new Error('Server unavailable'))
     renderSettings()

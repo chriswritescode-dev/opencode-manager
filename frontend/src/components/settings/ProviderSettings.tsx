@@ -35,6 +35,10 @@ function hasKeyConnection(integration: IntegrationInfo): boolean {
   )
 }
 
+function isMcpIntegration(integration: IntegrationInfo): boolean {
+  return integration.metadata?.source === 'mcp'
+}
+
 function supportsOAuthMethods(methods: IntegrationMethod[]): boolean {
   return methods.some((method) => method.type === 'oauth')
 }
@@ -79,6 +83,7 @@ function buildProviderEntries(
     .filter(
       (integration) =>
         !seen.has(integration.id) &&
+        !isMcpIntegration(integration) &&
         (supportsSettingsAuthentication(integration.methods) || hasCredentialConnection(integration)),
     )
     .map((integration): ProviderEntry => ({
