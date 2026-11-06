@@ -45,15 +45,24 @@ function deriveMinorLineRange(version: string): string {
 }
 
 /**
- * Asserts that an installed version satisfies a plugin peer declaration,
- * accepting both an exact peer pin and an open `>=` floor.
+ * Asserts that an installed version satisfies a plugin peer declaration: an exact
+ * pin, or space-separated `>=`, `<=` and `<` bounds such as `>=0.8.0 <0.9.0`.
  */
 function expectVersionSatisfiesPeer(version: string, peer: string): void {
-  if (peer.startsWith('>=')) {
-    expect(compareSemver(version, peer.slice(2).trim())).toBeGreaterThanOrEqual(0)
+  const comparators = peer.trim().split(/\s+/)
+  if (!comparators.every((comparator) => comparator.startsWith('>=') || comparator.startsWith('<'))) {
+    expect(version).toBe(peer)
     return
   }
-  expect(version).toBe(peer)
+  for (const comparator of comparators) {
+    if (comparator.startsWith('>=')) {
+      expect(compareSemver(version, comparator.slice(2))).toBeGreaterThanOrEqual(0)
+    } else if (comparator.startsWith('<=')) {
+      expect(compareSemver(version, comparator.slice(2))).toBeLessThanOrEqual(0)
+    } else {
+      expect(compareSemver(version, comparator.slice(1))).toBeLessThan(0)
+    }
+  }
 }
 
 const ocmManifest = readManifest(join(__dirname, '..', 'package.json'))

@@ -67,6 +67,11 @@ export function isSupportedOpenCodeVersion(version: string): boolean {
   return parsed.major === OPENCODE_MIN.major && compareParsedSemver(parsed, OPENCODE_MIN) >= 0
 }
 
+/** Reports whether a server version shares Manager's OpenCode major, so the V2 client can still talk to it. */
+export function isSameOpenCodeMajor(version: string): boolean {
+  return parseOpenCodeVersion(version)?.major === OPENCODE_MIN.major
+}
+
 export function describeUnsupportedOpenCodeVersion(version: string): string {
   return `OpenCode ${version} is not supported; OpenCode Manager requires OpenCode ${OPENCODE_SUPPORTED_VERSION_RANGE}`
 }

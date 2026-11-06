@@ -143,6 +143,7 @@ export {
   compareOpenCodeVersions,
   describeUnsupportedOpenCodeVersion,
   isStableOpenCodeVersion,
+  isSameOpenCodeMajor,
   isSupportedOpenCodeVersion,
   normalizeOpenCodeVersion,
   parseOpenCodeVersion,

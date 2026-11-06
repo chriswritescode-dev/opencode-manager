@@ -10,7 +10,7 @@ to the local working tree.
 
 | ocm | OpenCode Manager | Local OpenCode |
 |---|---|---|
-| 0.6.x | >= 0.19.0 | >= 2.2.3, < 3 |
+| 0.6.x | >= 0.19.0 | >= 2.2.5, < 3 |
 | 0.5.x | >= 0.19.0 | >= 2.2.0, < 3 |
 | 0.4.x | >= 0.19.0 | >= 2.0.15, < 3 |
 | 0.3.x | >= 0.19.0 | >= 2.0.15, < 3 |
@@ -26,8 +26,8 @@ Use ocm 0.2.x with OpenCode Manager < 0.19.0 and OpenCode 1.x, installed pinned
 release.
 
 From ocm 0.6.0, the TUI plugin is built against `@opencode/plugin` 2.2.5 and
-OpenTUI 0.8, so it requires a local OpenCode >= 2.2.3. OpenCode 2.2.0 through
-2.2.2 ship OpenTUI 0.7; stay on ocm 0.5.x with those builds. ocm 0.5.0 itself
+OpenTUI 0.8 and declares an `@opencode/theme` peer of `>=2.2.5`, so it requires
+a local OpenCode >= 2.2.5. Stay on ocm 0.5.x with an older 2.2.x. ocm 0.5.0 itself
 is built against `@opencode/plugin` 2.2.1 and OpenTUI 0.7 and requires a local
 OpenCode >= 2.2.0: OpenCode 2.2.0 refuses plugins built for OpenTUI 0.6, and
 older OpenCode builds may refuse the 0.7 peers. Stay on ocm 0.4.x with a local
@@ -324,7 +324,7 @@ global installs); the plugin surface is TUI-only.
 ## Requirements
 
 - macOS or Linux (Windows is unsupported)
-- OpenCode >= 2.2.3 (same major, 2.x) available on `PATH` for the TUI plugin
+- OpenCode >= 2.2.5 (same major, 2.x) available on `PATH` for the TUI plugin
 - Node available on `PATH` (runs the `ocm` binary)
 - OpenCode Manager >= 0.19.0
 - `git` and `tar` (with gzip support, i.e. the `-z` flag) available on `PATH`

@@ -60,7 +60,7 @@ ensure_auth_secret() {
   export AUTH_SECRET
 }
 
-OPENCODE_SUPPORTED_FLOOR="${OPENCODE_MIN_VERSION:-}"
+OPENCODE_SUPPORTED_FLOOR="${OPENCODE_MIN_VERSION:-${OPENCODE_BUNDLED_VERSION:-}}"
 
 read_opencode_version() {
   local binary output

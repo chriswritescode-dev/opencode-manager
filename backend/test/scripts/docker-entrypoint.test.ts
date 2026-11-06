@@ -460,14 +460,26 @@ exit 1`)
     expect(curlLog()).toHaveLength(0)
   })
 
-  it('treats every persisted binary as unsupported when the minimum version is unknown', () => {
+  it('treats every persisted binary as unsupported when neither the minimum nor the bundled version is known', () => {
+    mkdirSync(join(stubDir, 'home/.opencode/bin'), { recursive: true })
+    writeBinary(join(stubDir, 'home/.opencode/bin'), '2.0.15')
+    const res = runOpenCodeSection(`${installPrelude()}\nreconcile_persisted_opencode`, {
+      OPENCODE_MIN_VERSION: '',
+      OPENCODE_BUNDLED_VERSION: '',
+    })
+    expect(res.status).toBe(0)
+    expect(existsSync(homeBinPath())).toBe(false)
+  })
+
+  it('falls back to the bundled version as the floor when the minimum is unset', () => {
     mkdirSync(join(stubDir, 'home/.opencode/bin'), { recursive: true })
     writeBinary(join(stubDir, 'home/.opencode/bin'), '2.0.15')
     const res = runOpenCodeSection(`${installPrelude()}\nreconcile_persisted_opencode`, {
       OPENCODE_MIN_VERSION: '',
     })
     expect(res.status).toBe(0)
-    expect(existsSync(homeBinPath())).toBe(false)
+    expect(res.stdout).toContain('Persisted OpenCode 2.0.15 is usable; retaining it')
+    expect(existsSync(homeBinPath())).toBe(true)
   })
 
   it('removes a malformed persisted home binary and selects the bundled binary without downloading', () => {

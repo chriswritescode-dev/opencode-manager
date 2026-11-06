@@ -80,6 +80,8 @@ RUN echo "Installing uv=${UV_VERSION} opencode=${OPENCODE_VERSION} (cachebust=${
     chmod +x /usr/local/bin/uv /usr/local/bin/uvx && \
     test "$(uv --version | cut -d' ' -f2)" = "${UV_VERSION}" && \
     . /usr/local/lib/ocm/opencode-release.sh && \
+    OPENCODE_SUPPORTED_FLOOR="${OPENCODE_MIN_VERSION}" && \
+    { is_supported_opencode_version "${OPENCODE_VERSION}" || { echo "OPENCODE_VERSION ${OPENCODE_VERSION} is outside the supported range $(supported_opencode_range)" >&2; exit 1; }; } && \
     echo "Downloading opencode ${OPENCODE_VERSION}..." && \
     download_opencode_to "${OPENCODE_VERSION}" /opt/opencode/bin/opencode && \
     ln -s /opt/opencode/bin/opencode /usr/local/bin/opencode && \

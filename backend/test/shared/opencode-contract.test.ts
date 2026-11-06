@@ -11,6 +11,7 @@ import {
   compareOpenCodeVersions,
   createOpenCodeApi,
   describeUnsupportedOpenCodeVersion,
+  isSameOpenCodeMajor,
   isStableOpenCodeVersion,
   isSupportedOpenCodeVersion,
   normalizeOpenCodeVersion,
@@ -104,6 +105,15 @@ describe('OpenCode v2 contract', () => {
       expect(isSupportedOpenCodeVersion('')).toBe(false)
     })
 
+    it('treats any release of the same major as reachable, regardless of the floor', () => {
+      expect(isSameOpenCodeMajor('2.0.15')).toBe(true)
+      expect(isSameOpenCodeMajor('2.2.4')).toBe(true)
+      expect(isSameOpenCodeMajor('2.9.0')).toBe(true)
+      expect(isSameOpenCodeMajor('1.18.32')).toBe(false)
+      expect(isSameOpenCodeMajor('3.0.0')).toBe(false)
+      expect(isSameOpenCodeMajor('not-a-version')).toBe(false)
+    })
+
     it('describes the supported range for unsupported versions', () => {
       expect(describeUnsupportedOpenCodeVersion('3.0.0')).toBe(
         'OpenCode 3.0.0 is not supported; OpenCode Manager requires OpenCode >=2.2.5 <3.0.0',
@@ -174,7 +184,7 @@ describe('OpenCode v2 contract', () => {
       const entrypoint = readFileSync(join(REPO_ROOT, 'scripts', 'docker-entrypoint.sh'), 'utf8')
       const setupDev = readFileSync(join(REPO_ROOT, 'scripts', 'setup-dev.sh'), 'utf8')
       const releaseHelper = readFileSync(join(REPO_ROOT, 'scripts', 'lib', 'opencode-release.sh'), 'utf8')
-      expect(entrypoint).toContain('OPENCODE_SUPPORTED_FLOOR="${OPENCODE_MIN_VERSION:-}"')
+      expect(entrypoint).toContain('OPENCODE_SUPPORTED_FLOOR="${OPENCODE_MIN_VERSION:-${OPENCODE_BUNDLED_VERSION:-}}"')
       expect(setupDev).toContain("sed -n 's/^ARG OPENCODE_MIN_VERSION=//p' \"$REPO_ROOT/Dockerfile\"")
       for (const script of [entrypoint, setupDev, releaseHelper]) {
         expect(script).not.toMatch(/(?<![\d.])\d+\.\d+\.\d+(?![\d.])/)
