@@ -304,13 +304,6 @@ describe('providerCredentialsApi', () => {
     vi.clearAllMocks()
   })
 
-  it('lists provider ids with credentials from the Manager response', async () => {
-    mockFetchWrapper.mockResolvedValue({ providers: ['anthropic', 'openai'] })
-
-    await expect(providerCredentialsApi.list()).resolves.toEqual(['anthropic', 'openai'])
-    expect(mockFetchWrapper).toHaveBeenCalledWith(`${API_BASE_URL}/api/providers/credentials`)
-  })
-
   it('reports credential status from the Manager response', async () => {
     mockFetchWrapper.mockResolvedValue({ hasCredentials: true })
 

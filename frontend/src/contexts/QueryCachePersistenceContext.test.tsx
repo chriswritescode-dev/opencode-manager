@@ -183,7 +183,7 @@ describe('QueryCachePersistenceProvider', () => {
       client.setQueryData(['opencode', 'sessions', '/work/repo'], [{ id: 'ses_1' }])
       client.setQueryData(['settings', 'user-1'], { opencodeServerAuth: 'secret' })
       client.setQueryData(['opencode', 'transcript', 'ses_1'], [{ text: 'streamed' }])
-      client.setQueryData(['provider-credentials'], [{ apiKey: 'secret' }])
+      client.setQueryData(['provider-integrations'], [{ apiKey: 'secret' }])
     })
     await settle()
 

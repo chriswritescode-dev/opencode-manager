@@ -130,8 +130,8 @@ describe('invalidateProviderCaches', () => {
 
     invalidateProviderCaches(queryClient)
 
-    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['provider-credentials'] })
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['provider-auth-methods'] })
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['provider-integrations'] })
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'providers'] })
     expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['providers'] })
     expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['providers-for-execution-model'] })

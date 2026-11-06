@@ -1,12 +1,14 @@
 import { API_BASE_URL } from "@/config"
-import type { FormAnswer, IntegrationMethod } from "@opencode-manager/shared/opencode"
+import type { FormAnswer, IntegrationInfo, IntegrationMethod } from "@opencode-manager/shared/opencode"
 import type { OAuthAttemptStatus, OAuthAuthorizeResponse } from "@opencode-manager/shared/schemas"
 import { fetchWrapper, fetchWrapperVoid } from "./fetchWrapper"
+import { callOpenCode } from "./opencodeApi"
 
 export type {
   FormAnswer,
   FormField,
   FormValue,
+  IntegrationInfo,
   IntegrationKeyMethod,
   IntegrationMethod,
   IntegrationOAuthMethod,
@@ -44,5 +46,10 @@ export const oauthApi = {
       `${API_BASE_URL}/api/oauth/auth-methods`
     )
     return providers
+  },
+
+  getIntegrations: async (): Promise<IntegrationInfo[]> => {
+    const { data } = await callOpenCode((api) => api.integration.list())
+    return data
   },
 }
