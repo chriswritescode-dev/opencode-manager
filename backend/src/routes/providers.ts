@@ -78,10 +78,8 @@ export function createProvidersRoutes(openCodeClient: OpenCodeClient) {
 
   app.get('/credentials', async (c) => {
     try {
-      const integrations = await openCodeClient.api.integration.list()
-      const providers = integrations.data
-        .filter((integration) => credentialConnections(integration).length > 0)
-        .map((integration) => integration.id)
+      const credentials = await openCodeClient.api.credential.list()
+      const providers = [...new Set(credentials.map((credential) => credential.integrationID))]
       return c.json({ providers })
     } catch (error) {
       return handleOpenCodeError(c, error, 'Failed to list provider credentials')

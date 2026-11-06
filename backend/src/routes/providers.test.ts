@@ -1,14 +1,23 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Hono } from 'hono'
 import { createProvidersRoutes } from './providers'
+import { createOAuthRoutes } from './oauth'
 import { createStubOpenCodeClient } from '../../test/helpers/stub-opencode-client'
 import { FetchOpenCodeClient } from '../services/opencode/client'
-import { resolveOpenCode2Binary, startOpenCodeServe } from '../../test/helpers/opencode-binary'
+import {
+  createOpenCodeServeDirectories,
+  readOpenCodeVersion,
+  resolveOpenCode2Binary,
+  startOpenCodeServe,
+  type OpenCodeServe,
+  type OpenCodeServeDirectories,
+} from '../../test/helpers/opencode-binary'
 import { buildOpenCodeBasicAuth } from '@opencode-manager/shared/opencode'
 import { ClientError } from '@opencode-manager/shared/opencode'
+import { compareSemver } from '@opencode-manager/shared/utils'
 import type { IntegrationInfo } from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from '../services/opencode/client'
 import type { ModelPreferenceDocument } from '@opencode-manager/shared/opencode'
@@ -53,6 +62,16 @@ function integrationFixture(overrides: Partial<IntegrationInfo> = {}): Integrati
 
 function credentialConnection(id: string) {
   return { type: 'credential' as const, id, label: 'Anthropic', method: 'key' as const }
+}
+
+function credentialFixture(integrationID: string, id = `cred_${integrationID}`) {
+  return {
+    id,
+    integrationID,
+    label: 'Anthropic',
+    active: true,
+    value: { type: 'key' as const, key: 'sk-test' },
+  }
 }
 
 function taggedError(tag: string, message: string): Error {
@@ -267,7 +286,21 @@ describe('providers routes', () => {
   })
 
   describe('GET /credentials', () => {
-    it('lists only integrations that hold a credential connection', async () => {
+    it('lists each provider from credentials once, without label or value', async () => {
+      const client = createStubOpenCodeClient()
+      vi.mocked(client.api.credential.list).mockResolvedValueOnce([
+        credentialFixture('anthropic', 'cred_1'),
+        credentialFixture('anthropic', 'cred_2'),
+        credentialFixture('openai'),
+      ])
+
+      const res = await createCredentialApp(client).request('/providers/credentials')
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ providers: ['anthropic', 'openai'] })
+    })
+
+    it('omits a provider that only has an env connection and no credential', async () => {
       const client = createStubOpenCodeClient()
       vi.mocked(client.api.integration.list).mockResolvedValueOnce({
         location: LOCATION,
@@ -276,6 +309,7 @@ describe('providers routes', () => {
           integrationFixture({ id: 'openai', connections: [{ type: 'env', name: 'OPENAI_API_KEY' }] }),
         ],
       })
+      vi.mocked(client.api.credential.list).mockResolvedValueOnce([credentialFixture('anthropic', 'cred_1')])
 
       const res = await createCredentialApp(client).request('/providers/credentials')
 
@@ -283,9 +317,44 @@ describe('providers routes', () => {
       expect(await res.json()).toEqual({ providers: ['anthropic'] })
     })
 
+    it('includes a policy-filtered provider that still holds a credential', async () => {
+      const client = createStubOpenCodeClient()
+      vi.mocked(client.api.integration.list).mockResolvedValueOnce({
+        location: LOCATION,
+        data: [integrationFixture({ id: 'openai' })],
+      })
+      vi.mocked(client.api.credential.list).mockResolvedValueOnce([credentialFixture('anthropic')])
+      vi.mocked(client.api.integration.get).mockResolvedValueOnce({
+        location: LOCATION,
+        data: integrationFixture({ connections: [credentialConnection('cred_anthropic')] }),
+      })
+      const app = createCredentialApp(client)
+
+      const listResponse = await app.request('/providers/credentials')
+      expect(await listResponse.json()).toEqual({ providers: ['anthropic'] })
+
+      const statusResponse = await app.request('/providers/anthropic/credentials/status')
+      expect(statusResponse.status).toBe(200)
+      expect(await statusResponse.json()).toEqual({ hasCredentials: true })
+    })
+
+    it('includes a credential for an MCP-sourced integration', async () => {
+      const client = createStubOpenCodeClient()
+      vi.mocked(client.api.integration.list).mockResolvedValueOnce({
+        location: LOCATION,
+        data: [integrationFixture({ id: 'mcp:sample', name: 'Sample MCP' })],
+      })
+      vi.mocked(client.api.credential.list).mockResolvedValueOnce([credentialFixture('mcp:sample')])
+
+      const res = await createCredentialApp(client).request('/providers/credentials')
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ providers: ['mcp:sample'] })
+    })
+
     it('maps a declared upstream error to 502 with the upstream message', async () => {
       const client = createStubOpenCodeClient()
-      vi.mocked(client.api.integration.list).mockRejectedValueOnce(
+      vi.mocked(client.api.credential.list).mockRejectedValueOnce(
         taggedError('UnknownError', 'upstream exploded'),
       )
 
@@ -297,7 +366,7 @@ describe('providers routes', () => {
 
     it('maps an unreachable upstream to 502', async () => {
       const client = createStubOpenCodeClient()
-      vi.mocked(client.api.integration.list).mockRejectedValueOnce(new ClientError('UnexpectedStatus'))
+      vi.mocked(client.api.credential.list).mockRejectedValueOnce(new ClientError('UnexpectedStatus'))
 
       const res = await createCredentialApp(client).request('/providers/credentials')
 
@@ -615,6 +684,194 @@ describe.skipIf(!openCodeBinary)('providers routes against a real OpenCode 2 ser
       expect(await statusResponse.json()).toEqual({ hasCredentials: true })
     } finally {
       await serve.stop()
+    }
+  }, 120000)
+})
+
+describe.skipIf(!openCodeBinary)('providers credential inventory against a real OpenCode 2 server', () => {
+  const VERSION = openCodeBinary ? readOpenCodeVersion(openCodeBinary) : null
+  const HAS_CONNECT_POLICY = VERSION !== null && compareSemver(VERSION, '2.2.3') >= 0
+
+  type Policy = { action: 'integration.connect' | 'integration.use'; resource: string; effect: 'deny' }
+
+  function createApps(serve: OpenCodeServe) {
+    const client = new FetchOpenCodeClient({
+      baseUrl: serve.baseUrl,
+      basicAuth: buildOpenCodeBasicAuth(serve.password),
+    })
+    const providers = new Hono()
+    providers.route('/providers', createProvidersRoutes(client))
+    const oauth = new Hono()
+    oauth.route('/oauth', createOAuthRoutes(client))
+    return { client, providers, oauth }
+  }
+
+  async function writePolicy(directories: OpenCodeServeDirectories, policies: Policy[]): Promise<void> {
+    const configDirectory = path.join(directories.configHome, 'opencode')
+    await mkdir(configDirectory, { recursive: true })
+    await writeFile(path.join(configDirectory, 'opencode.json'), JSON.stringify({ policies }, null, 2))
+  }
+
+  async function restart(
+    serve: OpenCodeServe,
+    directories: OpenCodeServeDirectories,
+    policies: Policy[],
+  ): Promise<OpenCodeServe> {
+    await serve.stop()
+    await writePolicy(directories, policies)
+    return startOpenCodeServe({ directories })
+  }
+
+  async function connectAnthropicKey(providers: Hono): Promise<void> {
+    const response = await providers.request('/providers/anthropic/credentials', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey: 'sk-ant-binary-test' }),
+    })
+    expect(response.status).toBe(200)
+  }
+
+  async function credentialProviders(providers: Hono): Promise<string[]> {
+    const response = await providers.request('/providers/credentials')
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as { providers: string[] }
+    return body.providers
+  }
+
+  it('lists a stored credential in the inventory and the status route', async () => {
+    const directories = await createOpenCodeServeDirectories()
+    const serve = await startOpenCodeServe({ directories })
+    try {
+      const { client, providers } = createApps(serve)
+      await client.api.integration.list()
+      await connectAnthropicKey(providers)
+
+      expect(await credentialProviders(providers)).toContain('anthropic')
+
+      const status = await providers.request('/providers/anthropic/credentials/status')
+      expect(status.status).toBe(200)
+      expect(await status.json()).toEqual({ hasCredentials: true })
+
+      const credentials = await client.api.credential.list()
+      expect(credentials.map((credential) => credential.integrationID)).toContain('anthropic')
+    } finally {
+      await serve.stop()
+      await rm(directories.root, { recursive: true, force: true })
+    }
+  }, 120000)
+
+  /** Requires OpenCode >= 2.2.3, the first release that parses integration.connect policies. */
+  it.skipIf(!HAS_CONNECT_POLICY)('keeps a provider with a stored credential when integration.connect is denied', async () => {
+    const directories = await createOpenCodeServeDirectories()
+    let serve = await startOpenCodeServe({ directories })
+    try {
+      let apps = createApps(serve)
+      await apps.client.api.integration.list()
+      await connectAnthropicKey(apps.providers)
+
+      serve = await restart(serve, directories, [
+        { action: 'integration.connect', resource: 'anthropic', effect: 'deny' },
+      ])
+      apps = createApps(serve)
+
+      const integrations = await apps.client.api.integration.list()
+      expect(integrations.data.map((integration) => integration.id)).not.toContain('anthropic')
+
+      const authMethods = await apps.oauth.request('/oauth/auth-methods')
+      expect(authMethods.status).toBe(200)
+      const authBody = (await authMethods.json()) as { providers: Record<string, unknown> }
+      expect(authBody.providers).not.toHaveProperty('anthropic')
+
+      const credentials = await apps.client.api.credential.list()
+      expect(credentials.map((credential) => credential.integrationID)).toContain('anthropic')
+
+      expect(await credentialProviders(apps.providers)).toContain('anthropic')
+
+      const status = await apps.providers.request('/providers/anthropic/credentials/status')
+      expect(status.status).toBe(200)
+      expect(await status.json()).toEqual({ hasCredentials: true })
+
+      const rejected = await apps.providers.request('/providers/anthropic/credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: 'sk-ant-binary-test' }),
+      })
+      expect(rejected.status).toBe(502)
+      const rejectedBody = (await rejected.json()) as { error: string }
+      expect(rejectedBody.error).toContain('connecting anthropic is not allowed')
+    } finally {
+      await serve.stop()
+      await rm(directories.root, { recursive: true, force: true })
+    }
+  }, 180000)
+
+  it('keeps the provider listed when integration.use is denied', async () => {
+    const directories = await createOpenCodeServeDirectories()
+    await writePolicy(directories, [{ action: 'integration.use', resource: 'anthropic', effect: 'deny' }])
+    const serve = await startOpenCodeServe({ directories })
+    try {
+      const { client, providers } = createApps(serve)
+      await client.api.integration.list()
+      await connectAnthropicKey(providers)
+
+      const integrations = await client.api.integration.list()
+      expect(integrations.data.map((integration) => integration.id)).toContain('anthropic')
+
+      expect(await credentialProviders(providers)).toContain('anthropic')
+
+      const status = await providers.request('/providers/anthropic/credentials/status')
+      expect(status.status).toBe(200)
+      expect(await status.json()).toEqual({ hasCredentials: true })
+    } finally {
+      await serve.stop()
+      await rm(directories.root, { recursive: true, force: true })
+    }
+  }, 120000)
+
+  it('excludes an env-only provider from the inventory and reports no credential', async () => {
+    const directories = await createOpenCodeServeDirectories()
+    const serve = await startOpenCodeServe({ directories, env: { OPENAI_API_KEY: 'sk-openai-env-test' } })
+    try {
+      const { client, providers } = createApps(serve)
+      await client.api.integration.list()
+
+      expect(await credentialProviders(providers)).not.toContain('openai')
+
+      const status = await providers.request('/providers/openai/credentials/status')
+      expect(status.status).toBe(200)
+      expect(await status.json()).toEqual({ hasCredentials: false })
+
+      const credentials = await client.api.credential.list()
+      expect(credentials.map((credential) => credential.integrationID)).not.toContain('openai')
+    } finally {
+      await serve.stop()
+      await rm(directories.root, { recursive: true, force: true })
+    }
+  }, 120000)
+
+  it('names a provider once when it holds two credentials', async () => {
+    const directories = await createOpenCodeServeDirectories()
+    const serve = await startOpenCodeServe({ directories })
+    try {
+      const { client, providers } = createApps(serve)
+      await client.api.integration.list()
+      await connectAnthropicKey(providers)
+
+      const second = await client.api.credential.create({
+        integrationID: 'anthropic',
+        value: { type: 'key', key: 'sk-ant-binary-second' },
+      })
+      await client.api.credential.activate({ credentialID: second.id })
+
+      const listed = await credentialProviders(providers)
+      expect(listed.filter((provider) => provider === 'anthropic')).toEqual(['anthropic'])
+
+      const status = await providers.request('/providers/anthropic/credentials/status')
+      expect(status.status).toBe(200)
+      expect(await status.json()).toEqual({ hasCredentials: true })
+    } finally {
+      await serve.stop()
+      await rm(directories.root, { recursive: true, force: true })
     }
   }, 120000)
 })

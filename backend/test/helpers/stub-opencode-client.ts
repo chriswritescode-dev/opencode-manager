@@ -70,6 +70,7 @@ export function createStubOpenCodeClient(overrides: Partial<OpenCodeClient> = {}
         },
       },
       credential: {
+        list: vi.fn(async () => []),
         remove: vi.fn(async () => undefined),
       },
       skill: {

@@ -40,7 +40,8 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function readOpenCodeVersion(binary: string): string | null {
+/** Reads the semantic version reported by an OpenCode binary, or null when it cannot be determined. */
+export function readOpenCodeVersion(binary: string): string | null {
   const result = spawnSync(binary, ['--version'], { encoding: 'utf8', timeout: VERSION_TIMEOUT_MS })
   if (result.status !== 0) return null
   const match = /(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(`${result.stdout ?? ''}${result.stderr ?? ''}`)

@@ -270,6 +270,50 @@ describe('ProviderSettings', () => {
     })
   })
 
+  /** A provider missing from auth-methods is filtered from OpenCode's integration.list, so it lands in API Keys. */
+  it('shows a connect-denied provider with a stored credential in the Connected API keys list', async () => {
+    const user = userEvent.setup()
+    vi.mocked(getProviders).mockResolvedValue({
+      providers: [oauthProviderWithKey, oauthProviderWithoutKey],
+      models: [],
+    })
+    vi.mocked(oauthApi.getAuthMethods).mockResolvedValue({
+      google: [{ id: 'oauth', type: 'oauth', label: 'OAuth' }],
+    })
+    vi.mocked(providerCredentialsApi.list).mockResolvedValue(['anthropic'])
+    const { container } = renderSettings()
+
+    await screen.findByText('Google')
+
+    const availableList = container.querySelector('.max-h-96') as HTMLElement
+    expect(within(availableList).queryByText('Anthropic')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /Connected/ }))
+
+    const connectedCard = screen.getByText('Anthropic').closest('.bg-card') as HTMLElement
+    expect(within(connectedCard).getByText('Connected')).toBeInTheDocument()
+    expect(within(connectedCard).getByRole('button', { name: 'Edit API key for Anthropic' })).toBeInTheDocument()
+    expect(within(connectedCard).getByRole('button', { name: 'Remove credentials for Anthropic' })).toBeInTheDocument()
+    expect(within(connectedCard).queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument()
+    expect(within(connectedCard).queryByRole('button', { name: 'Reconnect' })).not.toBeInTheDocument()
+  })
+
+  it('keeps a normal OAuth provider in the OAuth list with its reconnect actions', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+
+    await screen.findByText('Anthropic')
+
+    const connectedRow = screen.getByText('Anthropic').closest('.py-3') as HTMLElement
+    expect(within(connectedRow).getByRole('button', { name: 'Reconnect' })).toBeInTheDocument()
+    expect(within(connectedRow).getByRole('button', { name: 'Disconnect' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /Connected/ }))
+
+    expect(screen.queryByRole('button', { name: 'Edit API key for Anthropic' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Remove credentials for Anthropic' })).not.toBeInTheDocument()
+  })
+
   it('shows the empty state when no OAuth-capable providers exist', async () => {
     vi.mocked(oauthApi.getAuthMethods).mockResolvedValue({})
     renderSettings()
