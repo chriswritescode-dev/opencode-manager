@@ -1280,6 +1280,10 @@ return (
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
+          autoComplete="off"
+          autoCorrect={isBashMode ? 'off' : 'on'}
+          autoCapitalize={isBashMode ? 'off' : 'sentences'}
+          spellCheck={!isBashMode}
           placeholder={
             isBashMode
               ? "Enter bash command..."

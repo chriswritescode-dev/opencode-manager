@@ -642,6 +642,9 @@ describe('PromptInput command submission', () => {
       renderComponent()
 
       const input = await screen.findByPlaceholderText('Send a message...')
+      expect(input).toHaveAttribute('autocomplete', 'off')
+      expect(input).toHaveAttribute('autocorrect', 'on')
+      expect(input).toHaveAttribute('spellcheck', 'true')
       fireEvent.focus(input)
       fireEvent.change(input, { target: { value: 'text' } })
       expect(screen.getByRole('button', { name: 'bash !' })).toBeDisabled()
@@ -654,6 +657,9 @@ describe('PromptInput command submission', () => {
       expect(input).toHaveValue('!')
       expect(screen.getByTestId('composer-mode-badge')).toHaveTextContent('BASH')
       expect(screen.getByRole('button', { name: 'cmd /' })).toBeDisabled()
+      expect(input).toHaveAttribute('autocorrect', 'off')
+      expect(input).toHaveAttribute('autocapitalize', 'off')
+      expect(input).toHaveAttribute('spellcheck', 'false')
 
       fireEvent.click(screen.getByRole('button', { name: 'bash !' }))
       expect(input).toHaveValue('')
