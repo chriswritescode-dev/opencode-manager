@@ -1,5 +1,6 @@
-import { render, screen } from '@testing-library/react'
-import { describe, it, expect } from 'vitest'
+import { createRef } from 'react'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, it, expect, vi } from 'vitest'
 import { SandboxedHtmlFrame } from './sandboxed-html-frame'
 
 describe('SandboxedHtmlFrame', () => {
@@ -32,5 +33,27 @@ describe('SandboxedHtmlFrame', () => {
     )
     const iframe = container.querySelector('iframe')
     expect(iframe).toHaveClass('block', 'w-full', 'border-0', 'bg-white', 'h-[480px]')
+  })
+
+  it('forwards a ref to the iframe element', () => {
+    const ref = createRef<HTMLIFrameElement>()
+    render(<SandboxedHtmlFrame ref={ref} src="/artifact" title="Artifact" />)
+    const iframe = screen.getByTitle('Artifact')
+    expect(ref.current).toBe(iframe)
+    expect(ref.current).toBeInstanceOf(HTMLIFrameElement)
+  })
+
+  it('calls onLoad when the iframe loads', () => {
+    const onLoad = vi.fn()
+    render(<SandboxedHtmlFrame src="/artifact" title="Artifact" onLoad={onLoad} />)
+    fireEvent.load(screen.getByTitle('Artifact'))
+    expect(onLoad).toHaveBeenCalledTimes(1)
+  })
+
+  it('applies a height-only style while keeping the sandbox policy', () => {
+    render(<SandboxedHtmlFrame src="/artifact" title="Artifact" style={{ height: 480 }} />)
+    const iframe = screen.getByTitle('Artifact')
+    expect(iframe).toHaveStyle({ height: '480px' })
+    expect(iframe).toHaveAttribute('sandbox', 'allow-scripts')
   })
 })

@@ -2,6 +2,7 @@ import type { ComponentType, ReactNode } from 'react'
 import { SandboxedHtmlFrame } from '@/components/ui/sandboxed-html-frame'
 import { getFileApiUrl } from '@/api/files'
 import type { OutputDefinition, OutputRecord } from '@opencode-manager/shared/schemas'
+import { OutputTemplateFrame } from './OutputTemplateFrame'
 import { WalkthroughOutputRenderer } from './renderers/WalkthroughOutputRenderer'
 
 export interface BuiltinOutputRendererProps {
@@ -59,5 +60,17 @@ export function OutputRendererHost({
     )
   }
 
-  return <p className="text-sm text-muted-foreground">Template rendering is not available yet.</p>
+  if (renderer.kind === 'template') {
+    if (!output?.outputDir) return null
+    return (
+      <OutputTemplateFrame
+        src={getFileApiUrl(`${output.outputDir}/index.html`, { params: { raw: true } })}
+        data={data}
+        reloadKey={reloadKey}
+        onOpenFile={onOpenFile}
+        onRefine={definition.generation === 'separateSession' ? onRefine : undefined}
+        title={definition.label}
+      />
+    )
+  }
 }
