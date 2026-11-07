@@ -2,6 +2,7 @@ import type { ComponentType, ReactNode } from 'react'
 import { SandboxedHtmlFrame } from '@/components/ui/sandboxed-html-frame'
 import { getFileApiUrl } from '@/api/files'
 import type { OutputDefinition, OutputRecord } from '@opencode-manager/shared/schemas'
+import { WalkthroughOutputRenderer } from './renderers/WalkthroughOutputRenderer'
 
 export interface BuiltinOutputRendererProps {
   data: unknown
@@ -12,7 +13,9 @@ export interface BuiltinOutputRendererProps {
 /** Builtin renderer components keyed by the definition's builtin renderer id. */
 const BUILTIN_OUTPUT_RENDERERS: Partial<
   Record<'walkthrough', ComponentType<BuiltinOutputRendererProps>>
-> = {}
+> = {
+  walkthrough: WalkthroughOutputRenderer,
+}
 
 export { BUILTIN_OUTPUT_RENDERERS }
 
