@@ -11,7 +11,7 @@ import {
   type ModelRef,
   type SessionInfo,
 } from '@opencode-manager/shared/opencode'
-import { getOpenCodeGlobalConfigPath, getWalkthroughsPath } from '@opencode-manager/shared/config/env'
+import { getOpenCodeGlobalConfigPath, getOutputsPath } from '@opencode-manager/shared/config/env'
 import {
   DEFAULT_CHANGE_SOURCE,
   WALKTHROUGH_GENERATION_TIMEOUT_MS,
@@ -169,7 +169,7 @@ export class ChangeWalkthroughService {
     options: ChangeWalkthroughServiceOptions = {},
   ) {
     this.generationTimeoutMs = options.generationTimeoutMs ?? WALKTHROUGH_GENERATION_TIMEOUT_MS
-    this.walkthroughsRoot = options.walkthroughsRoot ?? getWalkthroughsPath()
+    this.walkthroughsRoot = options.walkthroughsRoot ?? getOutputsPath()
   }
 
   /** Sessions the walkthrough runs were created in, which are helper sessions rather than user sessions. */
