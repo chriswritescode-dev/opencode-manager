@@ -3,6 +3,7 @@ import { Server } from 'lucide-react'
 import { BottomSheet, BottomSheetContent, BottomSheetHeader } from '@/components/ui/bottom-sheet'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { DeleteSessionDialog } from '@/components/session/DeleteSessionDialog'
 import { useMobile } from '@/hooks/useMobile'
 import { cn } from '@/lib/utils'
 
@@ -16,6 +17,8 @@ export interface SessionDetailsSheetProps {
   branch?: string | null
   directory?: string
   onRename: (title: string) => Promise<void>
+  /** Deletes the open session, when the caller supports it. */
+  onDeleteSession?: () => Promise<void>
 }
 
 interface InfoRowProps {
@@ -49,12 +52,16 @@ export function SessionDetailsSheet({
   branch,
   directory,
   onRename,
+  onDeleteSession,
 }: SessionDetailsSheetProps) {
   const isMobile = useMobile()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
   const [renameFailed, setRenameFailed] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteFailed, setDeleteFailed] = useState(false)
   const [lastOpen, setLastOpen] = useState(open)
 
   if (open !== lastOpen) {
@@ -62,6 +69,9 @@ export function SessionDetailsSheet({
     if (open) {
       setEditing(false)
       setRenameFailed(false)
+      setDeleteFailed(false)
+    } else {
+      setDeleteOpen(false)
     }
   }
 
@@ -104,6 +114,21 @@ export function SessionDetailsSheet({
       return
     }
     onOpenChange(true)
+  }
+
+  const confirmDelete = async () => {
+    if (!onDeleteSession) return
+    setDeleting(true)
+    setDeleteFailed(false)
+    try {
+      await onDeleteSession()
+      setDeleteOpen(false)
+      onOpenChange(false)
+    } catch {
+      setDeleteFailed(true)
+    } finally {
+      setDeleting(false)
+    }
   }
 
   const body = (
@@ -175,31 +200,63 @@ export function SessionDetailsSheet({
       <InfoRow label="Project" value={project} />
       {branch ? <InfoRow label="Branch" value={branch} mono /> : null}
       {directory ? <InfoRow label="Directory" value={directory} mono /> : null}
+      {onDeleteSession ? (
+        <div className="flex flex-col gap-2 border-t border-border pt-3">
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            onClick={() => setDeleteOpen(true)}
+            className="self-start"
+          >
+            Delete chat session
+          </Button>
+          {deleteFailed && (
+            <span className="text-xs text-destructive">Delete failed</span>
+          )}
+        </div>
+      ) : null}
     </div>
   )
 
+  const deleteDialog = onDeleteSession ? (
+    <DeleteSessionDialog
+      open={deleteOpen}
+      onOpenChange={setDeleteOpen}
+      onConfirm={() => { void confirmDelete() }}
+      onCancel={() => setDeleteOpen(false)}
+      isDeleting={deleting}
+    />
+  ) : null
+
   if (isMobile) {
     return (
-      <BottomSheet
-        isOpen={open}
-        onClose={handleClose}
-        ariaLabel="Session details"
-        dismissible={!saving}
-      >
-        <BottomSheetHeader title="Session details" />
-        <BottomSheetContent>{body}</BottomSheetContent>
-      </BottomSheet>
+      <>
+        <BottomSheet
+          isOpen={open}
+          onClose={handleClose}
+          ariaLabel="Session details"
+          dismissible={!saving}
+        >
+          <BottomSheetHeader title="Session details" />
+          <BottomSheetContent>{body}</BottomSheetContent>
+        </BottomSheet>
+        {deleteDialog}
+      </>
     )
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Session details</DialogTitle>
-        </DialogHeader>
-        {body}
-      </DialogContent>
-    </Dialog>
+    <>
+      <Dialog open={open} onOpenChange={handleOpenChange}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Session details</DialogTitle>
+          </DialogHeader>
+          {body}
+        </DialogContent>
+      </Dialog>
+      {deleteDialog}
+    </>
   )
 }

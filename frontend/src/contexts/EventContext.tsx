@@ -30,7 +30,7 @@ import type { Repo } from '@/api/types'
 import { showToast } from '@/lib/toast'
 import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode-event-stream'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
-import { getServerSessionPath, getSessionPath, parseRepoRoute, parseServerProjectRoute, parseServerSessionRoute } from '@/lib/navigation'
+import { getServerSessionPath, getSessionPath, parseChatSessionRoute, parseRepoRoute, parseServerProjectRoute, parseServerSessionRoute } from '@/lib/navigation'
 import { serverScopedKey } from '@/lib/serverScope'
 import { repoMatchesDirectory } from '@/components/navigation/sidebar-session-tree'
 import { changeWalkthroughQueryKey } from '@/hooks/useChangeWalkthrough'
@@ -451,7 +451,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [location.pathname, location.search])
 
   const viewedSessionId = useMemo(
-    () => parseServerSessionRoute(location.pathname)?.sessionId ?? parseRepoRoute(location.pathname).sessionId,
+    () => parseServerSessionRoute(location.pathname)?.sessionId ?? parseChatSessionRoute(location.pathname)?.sessionId ?? parseRepoRoute(location.pathname).sessionId,
     [location.pathname],
   )
 

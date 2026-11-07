@@ -50,6 +50,7 @@ function getBaseItems(): MoreDrawerItem[] {
 const SESSION_DETAIL_PATH = /^\/repos\/(\d+)\/sessions\/[^/]+$/
 const SERVER_SESSION_DETAIL_PATH = /^\/servers\/[^/]+\/sessions\/[^/]+$/
 const SERVER_PROJECT_PATH = /^\/servers\/[^/]+\/projects$/
+const CHAT_SESSION_DETAIL_PATH = /^\/chats\/[^/]+\/sessions\/[^/]+$/
 
 export function isSessionDetailPath(pathname: string): boolean {
   return SESSION_DETAIL_PATH.test(pathname)
@@ -173,6 +174,18 @@ function buildRouteNavModel(pathname: string): NavModel {
       items: [
         { key: 'all-schedules', label: 'All Schedules', icon: CalendarClock, to: '/schedules' },
         { key: 'files', label: 'Files', icon: Folder, dialog: 'files' },
+        ...baseItems,
+      ],
+    }
+  }
+
+  if (CHAT_SESSION_DETAIL_PATH.test(pathname)) {
+    return {
+      primary: [getAssistantNavItem()],
+      items: [
+        { key: 'files', label: 'Files', icon: Folder, dialog: 'files' },
+        { key: 'terminal', label: 'Terminal', icon: SquareTerminal, dialog: 'terminal' },
+        { key: 'preview', label: 'Preview', icon: Globe, dialog: 'preview' },
         ...baseItems,
       ],
     }

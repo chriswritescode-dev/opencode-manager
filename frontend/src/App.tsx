@@ -342,6 +342,11 @@ const router = createBrowserRouter([
             loader: protectedLoader,
           },
           {
+            path: '/chats/:chatId/sessions/:sessionId',
+            element: <SessionDetail />,
+            loader: protectedLoader,
+          },
+          {
             path: '/repos/:id/schedules',
             element: <Schedules />,
             loader: protectedLoader,
