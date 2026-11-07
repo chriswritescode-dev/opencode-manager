@@ -5,6 +5,7 @@ import { render, screen, fireEvent, waitFor, act, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import type { Repo, Session } from '@/api/types'
+import type { ChatSessionRow } from '@/hooks/useChats'
 import type { ActiveWorkGroups, ActiveWorkItem, ActiveWorkState } from '@/lib/activeWork'
 import { stubMatchMedia } from '@/test/test-utils'
 import { makeRepo, makeSession } from '@/test/fixtures/session-picker'
@@ -33,6 +34,15 @@ const mocks = vi.hoisted(() => ({
   repos: [] as Repo[],
   activeWorkGroups: { needsInput: [], running: [], recent: [] } as ActiveWorkGroups,
   activeWorkWindowMs: 0,
+  chatRows: [] as ChatSessionRow[],
+  chatHasMore: false,
+  chatIsLoading: false,
+  chatIsError: false,
+  chatError: undefined as Error | undefined,
+  createdChatId: '20260101-120000-abc123',
+  showMoreChats: vi.fn(),
+  createChatMock: vi.fn(),
+  deleteChatSessionMock: vi.fn(),
   preferences: undefined as
     | {
         leaderKey?: string
@@ -113,6 +123,32 @@ vi.mock('@/hooks/useSessionPins', () => ({
   useToggleSessionPin: () => ({ mutate: mocks.togglePinMock }),
 }))
 
+vi.mock('@/hooks/useChats', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/useChats')>()
+  return {
+    ...actual,
+    useChatSessions: () => ({
+      rows: mocks.chatRows,
+      hasMore: mocks.chatHasMore,
+      showMore: mocks.showMoreChats,
+      isLoading: mocks.chatIsLoading,
+      isError: mocks.chatIsError,
+      error: mocks.chatError,
+    }),
+    useCreateChat: (onCreated?: (path: string) => void) => ({
+      mutate: () => {
+        mocks.createChatMock()
+        onCreated?.(`/chats/${mocks.createdChatId}/sessions/ses_new`)
+      },
+      isPending: false,
+    }),
+    useDeleteChatSession: () => ({
+      mutateAsync: mocks.deleteChatSessionMock,
+      isPending: false,
+    }),
+  }
+})
+
 vi.mock('@/components/navigation/RemoteProjectNav', () => ({
   RemoteProjectNavList: ({ serverId }: { serverId: string }) => (
     <div data-testid="remote-project-nav" data-server={serverId} />
@@ -154,6 +190,23 @@ function activeWorkItem(
     state,
     updatedAt: itemSession.time.updated,
     path: `/repos/${itemRepo.id}/sessions/${id}`,
+  }
+}
+
+function makeChatRow(
+  sessionId: string,
+  title: string,
+  directory: string,
+  updated: number,
+  chatId: string,
+): ChatSessionRow {
+  const session = makeSession(sessionId, title, directory, updated)
+  return {
+    key: `${directory}:${sessionId}`,
+    session,
+    chat: { id: chatId, directory, filesPath: `${directory}/.chats/${chatId}`, createdAt: updated },
+    path: `/chats/${chatId}/sessions/${sessionId}`,
+    isPinned: false,
   }
 }
 
@@ -205,6 +258,10 @@ const openActiveTab = () => {
   fireEvent.mouseDown(screen.getByRole('tab', { name: 'Activity' }))
 }
 
+const openChatsTab = () => {
+  fireEvent.mouseDown(screen.getByRole('tab', { name: 'Chats' }))
+}
+
 describe('SessionPickerDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -225,6 +282,12 @@ describe('SessionPickerDialog', () => {
     mocks.sessionsData = []
     mocks.activeWorkGroups = { needsInput: [], running: [], recent: [] }
     mocks.activeWorkWindowMs = 0
+    mocks.chatRows = []
+    mocks.chatHasMore = false
+    mocks.chatIsLoading = false
+    mocks.chatIsError = false
+    mocks.chatError = undefined
+    mocks.deleteChatSessionMock.mockResolvedValue(undefined)
     mocks.preferences = undefined
   })
 
@@ -669,11 +732,12 @@ describe('SessionPickerDialog', () => {
     expect(screen.getByRole('option', { name: /Active session/ })).toHaveAttribute('aria-selected', 'true')
   })
 
-  it('renders an Activity/Sessions/Projects tab switcher and defaults to the sessions tab', () => {
+  it('renders an Activity/Sessions/Chats/Projects tab switcher and defaults to the sessions tab', () => {
     renderPicker()
 
     expect(screen.getByRole('tab', { name: 'This project' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('tab', { name: 'Chats' })).toHaveAttribute('aria-selected', 'false')
     expect(screen.getByRole('tab', { name: 'Projects' })).toHaveAttribute('aria-selected', 'false')
     expect(combobox()).toHaveAttribute('placeholder', 'Search sessions...')
   })
@@ -714,6 +778,8 @@ describe('SessionPickerDialog', () => {
 
     await user.click(screen.getByPlaceholderText('Search sessions...'))
     await user.keyboard('{Control>}s{/Control}')
+    await waitFor(() => expect(screen.getByPlaceholderText('Search chats...')).toHaveFocus())
+    await user.keyboard('{Control>}s{/Control}')
 
     await waitFor(() => expect(screen.getByPlaceholderText('Search projects...')).toHaveFocus())
   })
@@ -725,6 +791,8 @@ describe('SessionPickerDialog', () => {
     renderPicker()
 
     await user.click(screen.getByPlaceholderText('Search sessions...'))
+    await user.keyboard('{Control>}s{/Control}')
+    await waitFor(() => expect(screen.getByPlaceholderText('Search chats...')).toHaveFocus())
     await user.keyboard('{Control>}s{/Control}')
 
     await waitFor(() => expect(screen.getByPlaceholderText('Search projects...')).toHaveFocus())
@@ -826,10 +894,13 @@ describe('SessionPickerDialog', () => {
     expect(screen.getByText('No projects found')).toBeInTheDocument()
   })
 
-  it('cycles Activity, Sessions and Projects with the default Ctrl+S binding', async () => {
+  it('cycles Sessions, Chats, Projects and Activity with the default Ctrl+S binding', async () => {
     renderPicker()
 
     expect(screen.getByRole('tab', { name: 'This project', selected: true })).toBeInTheDocument()
+
+    fireEvent.keyDown(combobox(), { key: 's', ctrlKey: true })
+    expect(await screen.findByRole('tab', { name: 'Chats', selected: true })).toBeInTheDocument()
 
     fireEvent.keyDown(combobox(), { key: 's', ctrlKey: true })
     expect(await screen.findByRole('tab', { name: 'Projects', selected: true })).toBeInTheDocument()
@@ -846,6 +917,9 @@ describe('SessionPickerDialog', () => {
     renderPicker()
 
     expect(screen.getByText(/Ctrl\+G projects/)).toBeInTheDocument()
+
+    fireEvent.keyDown(combobox(), { key: 'g', ctrlKey: true })
+    expect(await screen.findByRole('tab', { name: 'Chats', selected: true })).toBeInTheDocument()
 
     fireEvent.keyDown(combobox(), { key: 'g', ctrlKey: true })
     expect(await screen.findByRole('tab', { name: 'Projects', selected: true })).toBeInTheDocument()
@@ -1013,6 +1087,124 @@ describe('SessionPickerDialog', () => {
     })
   })
 
+  describe('chats tab', () => {
+    const chatFixture = () => [
+      makeChatRow('ses_new', 'Newest chat', '/w/chat-newest', 3000, '20260103-100000-cccccc'),
+      makeChatRow('ses_mid', 'Middle chat', '/w/chat-mid', 2000, '20260102-100000-bbbbbb'),
+      makeChatRow('ses_old', 'Oldest chat', '/w/chat-old', 1000, '20260101-100000-aaaaaa'),
+    ]
+
+    it('lists chat sessions newest first in the order the hook returns them', async () => {
+      mocks.chatRows = chatFixture()
+      renderPicker()
+
+      openChatsTab()
+
+      const options = await screen.findAllByRole('option')
+      expect(options).toHaveLength(3)
+      expect(options[0]).toHaveTextContent('Newest chat')
+      expect(options[1]).toHaveTextContent('Middle chat')
+      expect(options[2]).toHaveTextContent('Oldest chat')
+    })
+
+    it('filters chats by title without matching other tabs', async () => {
+      mocks.chatRows = chatFixture()
+      renderPicker()
+
+      openChatsTab()
+      await screen.findByRole('option', { name: /Newest chat/ })
+
+      fireEvent.change(combobox(), { target: { value: 'middle' } })
+
+      expect(screen.queryByRole('option', { name: /Newest chat/ })).not.toBeInTheDocument()
+      expect(screen.getByRole('option', { name: /Middle chat/ })).toBeInTheDocument()
+
+      fireEvent.change(combobox(), { target: { value: 'zzz' } })
+
+      expect(screen.getByText('No chats found')).toBeInTheDocument()
+    })
+
+    it('shows the show more action and forwards it to the chats hook', async () => {
+      mocks.chatRows = chatFixture()
+      mocks.chatHasMore = true
+      renderPicker()
+
+      openChatsTab()
+      await screen.findByRole('option', { name: /Newest chat/ })
+      fireEvent.click(screen.getByRole('button', { name: 'Show more' }))
+
+      expect(mocks.showMoreChats).toHaveBeenCalledTimes(1)
+    })
+
+    it('creates a chat from the header action and navigates to its new session', async () => {
+      const onNavigate = vi.fn()
+      renderPicker({ onNavigate })
+
+      openChatsTab()
+      fireEvent.click(await screen.findByRole('button', { name: 'New chat' }))
+
+      expect(mocks.createChatMock).toHaveBeenCalledTimes(1)
+      expect(onNavigate).toHaveBeenCalledWith(
+        `/chats/${mocks.createdChatId}/sessions/ses_new`,
+      )
+    })
+
+    it('pins a chat from the shared row menu', async () => {
+      mocks.chatRows = [chatFixture()[0]]
+      renderPicker()
+      const user = userEvent.setup()
+
+      openChatsTab()
+      await screen.findByRole('option', { name: /Newest chat/ })
+      await user.click(screen.getByRole('button', { name: 'Session actions' }))
+      await user.click(await screen.findByText('Pin'))
+
+      expect(mocks.togglePinMock).toHaveBeenCalledWith({
+        sessionId: 'ses_new',
+        directory: '/w/chat-newest',
+        pinned: true,
+      })
+    })
+
+    it('opens the delete confirmation with Ctrl+D', async () => {
+      mocks.chatRows = [chatFixture()[0]]
+      renderPicker()
+
+      openChatsTab()
+      await screen.findByRole('option', { name: /Newest chat/ })
+      fireEvent.keyDown(combobox(), { key: 'd', ctrlKey: true })
+
+      expect(await screen.findByRole('dialog', { name: 'Delete Session' })).toBeInTheDocument()
+      expect(mocks.deleteChatSessionMock).not.toHaveBeenCalled()
+    })
+
+    it('deletes a chat session after confirmation and clears the active session first', async () => {
+      mocks.chatRows = [chatFixture()[0]]
+      const { onDeleteActiveSession } = renderPicker({ activeSessionID: 'ses_new' })
+      const user = userEvent.setup()
+
+      openChatsTab()
+      await screen.findByRole('option', { name: /Newest chat/ })
+      await user.click(screen.getByRole('button', { name: 'Session actions' }))
+      await user.click(await screen.findByText('Delete'))
+
+      const dialog = await screen.findByRole('dialog', { name: 'Delete Session' })
+      await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+
+      await waitFor(() =>
+        expect(mocks.deleteChatSessionMock).toHaveBeenCalledWith({
+          chatId: '20260103-100000-cccccc',
+          sessionId: 'ses_new',
+          directory: '/w/chat-newest',
+        }),
+      )
+      expect(onDeleteActiveSession).toHaveBeenCalledTimes(1)
+      expect(onDeleteActiveSession.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.deleteChatSessionMock.mock.invocationCallOrder[0],
+      )
+    })
+  })
+
   describe('linked-server mode', () => {
     beforeEach(() => {
       mocks.repos = [makeRepo(1, 'alpha', '/w/a')]
@@ -1032,6 +1224,7 @@ describe('SessionPickerDialog', () => {
 
       expect(screen.getByRole('tab', { name: 'Projects' })).toBeInTheDocument()
       expect(screen.getByRole('tab', { name: 'Activity' })).toBeInTheDocument()
+      expect(screen.queryByRole('tab', { name: 'Chats' })).not.toBeInTheDocument()
 
       const row = await screen.findByRole('option', { name: /Remote session/ })
       expect(row).toHaveTextContent('Kitchen')

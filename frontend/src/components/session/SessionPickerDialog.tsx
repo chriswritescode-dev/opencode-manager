@@ -1,7 +1,7 @@
-import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { format, startOfDay } from 'date-fns'
-import { ChevronsUpDown, MoreHorizontal, Pin, PinOff, Plus } from 'lucide-react'
+import { ChevronsUpDown, Plus } from 'lucide-react'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { OpenCodeServerProvider, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { openCodeLocationQueryOptions } from '@/lib/openCodeLocation'
@@ -9,18 +9,17 @@ import type { Repo, Session } from '@/api/types'
 import { ACTIVE_WORK_GROUPS, MS_PER_MINUTE, formatActivityEmptyMessage } from '@/lib/activeWork'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { SessionStatusIndicator } from '@/components/ui/session-status-indicator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DeleteSessionDialog } from '@/components/session/DeleteSessionDialog'
+import { ChatPickerContent } from '@/components/session/ChatPickerContent'
+import {
+  SessionPickerList,
+  type SessionPickerRow,
+  type SessionPickerSection,
+} from '@/components/session/SessionPickerList'
 import { ProjectPickerContent } from '@/components/session/ProjectPickerContent'
 import { AddRepoDialog } from '@/components/repo/AddRepoDialog'
-import { LocalRepoNewSessionButton } from '@/components/navigation/RepoSessionNav'
+import { LocalRepoNewSessionButton, NewChatButton } from '@/components/navigation/RepoSessionNav'
 import { RemoteProjectNavList } from '@/components/navigation/RemoteProjectNav'
 import {
   PickerSearchBar,
@@ -36,25 +35,25 @@ import { useSessionSearch } from '@/hooks/useSessionSearch'
 import { useSessionPins, useToggleSessionPin } from '@/hooks/useSessionPins'
 import { usePersistentBoolean } from '@/hooks/usePersistentBoolean'
 import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
-import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
 import { useShortcutActions } from '@/contexts/KeyboardShortcutsContext'
 import { useSettings } from '@/hooks/useSettings'
 import { buildPinnedSessionKeys, getSessionKey } from '@/lib/sessionKey'
 import { formatShortcutLabel, resolveShortcutBindings } from '@/lib/keyboardShortcuts'
-import { cn, formatShortRelativeTime, getRepoDisplayName } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { FINE_POINTER_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
 
 const ALL_PROJECTS_STORAGE_KEY = 'oc:session-picker:all-projects'
-const UNTITLED_SESSION_TITLE = 'Untitled Session'
 const NEAR_BOTTOM_PX = 240
 
-type SessionPickerTab = 'active' | 'sessions' | 'projects'
+type SessionPickerTab = 'active' | 'sessions' | 'chats' | 'projects'
 
-const SESSION_PICKER_TABS: SessionPickerTab[] = ['active', 'sessions', 'projects']
+const SESSION_PICKER_TABS: SessionPickerTab[] = ['active', 'sessions', 'chats', 'projects']
+const REMOTE_SESSION_PICKER_TABS: SessionPickerTab[] = ['active', 'sessions', 'projects']
 
 const SESSION_PICKER_TAB_LABELS: Record<SessionPickerTab, string> = {
   active: 'Activity',
   sessions: 'Sessions',
+  chats: 'Chats',
   projects: 'Projects',
 }
 
@@ -82,21 +81,6 @@ type SessionPickerDialogProps = Omit<
   'searchTrailing' | 'onAddRepo' | 'renderTitle'
 > & {
   onOpenChange: (open: boolean) => void
-}
-
-interface SessionPickerRow {
-  key: string
-  session: Session
-  repo?: Repo
-  serverId?: string
-  serverName?: string
-  updatedAt?: number
-}
-
-interface SessionPickerSection {
-  id: string
-  heading: string
-  rows: SessionPickerRow[]
 }
 
 function buildSections(
@@ -179,143 +163,6 @@ function sessionWorktreeLabel(session: Session, canonical: string | undefined): 
   const segments = root.split('/').filter(Boolean)
   return segments[segments.length - 1]
 }
-
-function SessionPickerGutter({ sessionID, isActive }: { sessionID: string; isActive: boolean }) {
-  const status = useSessionStatusForSession(sessionID)
-  if (status.type !== 'idle') {
-    return (
-      <SessionStatusIndicator sessionID={sessionID} />
-    )
-  }
-  if (isActive) {
-    return <span aria-hidden="true">●</span>
-  }
-  return null
-}
-
-interface SessionPickerRowItemProps {
-  row: SessionPickerRow
-  index: number
-  optionId: string
-  isCursor: boolean
-  isActive: boolean
-  isPinned: boolean
-  isPendingDelete: boolean
-  showRepo: boolean
-  showActions: boolean
-  label?: string
-  onOpen: (row: SessionPickerRow) => void
-  onHover: (index: number) => void
-  onTogglePin: (row: SessionPickerRow) => void
-  onRequestDelete: (session: Session) => void
-  registerRef: (key: string, node: HTMLDivElement | null) => void
-}
-
-const SessionPickerRowItem = memo(function SessionPickerRowItem({
-  row,
-  index,
-  optionId,
-  isCursor,
-  isActive,
-  isPinned,
-  isPendingDelete,
-  showRepo,
-  showActions,
-  label,
-  onOpen,
-  onHover,
-  onTogglePin,
-  onRequestDelete,
-  registerRef,
-}: SessionPickerRowItemProps) {
-  return (
-    <div
-      ref={(node) => registerRef(row.key, node)}
-      role="presentation"
-      onPointerMove={(event) => {
-        if (event.pointerType === 'mouse') onHover(index)
-      }}
-      className={cn(
-        'group flex items-center rounded-md text-sm min-h-8 pointer-coarse:min-h-11',
-        isPendingDelete
-          ? 'bg-destructive text-destructive-foreground'
-          : isCursor
-            ? 'bg-primary text-primary-foreground'
-            : 'hover:bg-accent',
-      )}
-    >
-      <div
-        role="option"
-        id={optionId}
-        aria-selected={isCursor}
-        onClick={() => onOpen(row)}
-        className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-2"
-      >
-        <span className="flex w-4 shrink-0 items-center justify-center">
-          <SessionPickerGutter sessionID={row.session.id} isActive={isActive} />
-        </span>
-        <span
-          className={cn(
-            'min-w-0 flex-1 truncate',
-            isPendingDelete
-              ? 'text-destructive-foreground'
-              : isCursor
-                ? 'text-primary-foreground'
-                : isActive
-                  ? 'text-primary'
-                  : 'text-foreground',
-          )}
-        >
-          {isPendingDelete ? 'Press Ctrl+D again to confirm' : row.session.title || UNTITLED_SESSION_TITLE}
-        </span>
-        <span
-          className={cn(
-            'flex shrink-0 items-center gap-2 text-xs',
-            isPendingDelete
-              ? 'text-destructive-foreground/80'
-              : isCursor
-                ? 'text-primary-foreground/80'
-                : 'text-muted-foreground',
-          )}
-        >
-          {showRepo && row.repo ? (
-            <span className="max-w-32 truncate">{getRepoDisplayName(row.repo)}</span>
-          ) : null}
-          {showRepo && !row.repo && (row.serverName || row.serverId) ? (
-            <span className="max-w-32 truncate">{row.serverName ?? row.serverId}</span>
-          ) : null}
-          {!showRepo && label && <span className="max-w-32 truncate">{label}</span>}
-          <span>{formatShortRelativeTime(new Date(row.updatedAt ?? row.session.time.updated))}</span>
-        </span>
-      </div>
-      <div className="flex shrink-0 items-center pr-1">
-        {row.serverId || !showActions ? null : <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              aria-label="Session actions"
-              onClick={(event) => event.stopPropagation()}
-              className={cn(
-                'h-7 w-7 p-0 shrink-0 pointer-coarse:h-11 pointer-coarse:w-11 pointer-coarse:opacity-100',
-                isCursor || isPendingDelete ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
-              )}
-            >
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="z-[200]" onClick={(event) => event.stopPropagation()}>
-            <DropdownMenuItem onClick={() => onTogglePin(row)}>
-              {isPinned ? <PinOff className="h-4 w-4 mr-2" /> : <Pin className="h-4 w-4 mr-2" />}
-              {isPinned ? 'Unpin' : 'Pin'}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onRequestDelete(row.session)}>Delete</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>}
-      </div>
-    </div>
-  )
-})
 
 interface SessionPickerRowActionsOptions {
   directories: string[]
@@ -444,112 +291,6 @@ function useSessionPickerRowActions({
     handleRequestDelete,
     deleteDialogProps,
   }
-}
-
-interface SessionPickerListProps {
-  listId: string
-  optionBaseId: string
-  ariaLabel: string
-  sections: SessionPickerSection[]
-  rows: SessionPickerRow[]
-  rowIndexByKey: ReadonlyMap<string, number>
-  cursorIndex: number
-  activeSessionID?: string
-  pinnedKeys: ReadonlySet<string>
-  pendingDeleteKey: string | null
-  showRepo: boolean
-  showRowActions?: boolean
-  labelFor?: (row: SessionPickerRow) => string | undefined
-  emptyState: React.ReactNode
-  onOpenRow: (row: SessionPickerRow) => void
-  onHoverRow: (index: number) => void
-  onTogglePin: (row: SessionPickerRow) => void
-  onRequestDelete: (session: Session) => void
-  registerRef: (key: string, node: HTMLDivElement | null) => void
-  listRef?: React.RefObject<HTMLDivElement | null>
-  onScroll?: (event: React.UIEvent<HTMLDivElement>) => void
-  children?: React.ReactNode
-}
-
-function SessionPickerList({
-  listId,
-  optionBaseId,
-  ariaLabel,
-  sections,
-  rows,
-  rowIndexByKey,
-  cursorIndex,
-  activeSessionID,
-  pinnedKeys,
-  pendingDeleteKey,
-  showRepo,
-  showRowActions = true,
-  labelFor,
-  emptyState,
-  onOpenRow,
-  onHoverRow,
-  onTogglePin,
-  onRequestDelete,
-  registerRef,
-  listRef,
-  onScroll,
-  children,
-}: SessionPickerListProps) {
-  return (
-    <div
-      ref={listRef}
-      role="listbox"
-      id={listId}
-      aria-label={ariaLabel}
-      onScroll={onScroll}
-      className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-md"
-    >
-      {rows.length === 0 ? (
-        <div className="p-4 text-sm text-muted-foreground">{emptyState}</div>
-      ) : (
-        <>
-          {sections.map((section) => (
-            <div
-              key={section.id}
-              role="group"
-              aria-labelledby={`${optionBaseId}-heading-${section.id}`}
-            >
-              <div
-                id={`${optionBaseId}-heading-${section.id}`}
-                className="pl-8 pr-2 pt-2 pb-1 text-xs font-semibold text-muted-foreground"
-              >
-                {section.heading}
-              </div>
-              {section.rows.map((row) => {
-                const index = rowIndexByKey.get(row.key) ?? -1
-                return (
-                  <SessionPickerRowItem
-                    key={row.key}
-                    row={row}
-                    index={index}
-                    optionId={optionId(optionBaseId, index)}
-                    isCursor={index === cursorIndex}
-                    isActive={row.session.id === activeSessionID}
-                    isPinned={pinnedKeys.has(row.key)}
-                    isPendingDelete={pendingDeleteKey === row.key}
-                    showRepo={showRepo}
-                    showActions={showRowActions}
-                    label={labelFor?.(row)}
-                    onOpen={onOpenRow}
-                    onHover={onHoverRow}
-                    onTogglePin={onTogglePin}
-                    onRequestDelete={onRequestDelete}
-                    registerRef={registerRef}
-                  />
-                )
-              })}
-            </div>
-          ))}
-          {children}
-        </>
-      )}
-    </div>
-  )
 }
 
 interface SessionPickerContentProps {
@@ -1240,6 +981,7 @@ function SessionPickerPanelBody({
 }: SessionPickerPanelProps) {
   const searchInputRef = useRef<HTMLInputElement>(null)
   const activeSearchInputRef = useRef<HTMLInputElement>(null)
+  const chatsSearchInputRef = useRef<HTMLInputElement>(null)
   const projectSearchInputRef = useRef<HTMLInputElement>(null)
   const focusSearchAfterSwitchRef = useRef(false)
   const scopePressRef = useRef(false)
@@ -1267,14 +1009,18 @@ function SessionPickerPanelBody({
     if (open) setActiveTab('sessions')
   }
 
+  if (isRemote && activeTab === 'chats') setActiveTab('sessions')
+
   const scopeEnabled = !isRemote && Boolean(currentRepo)
   const allProjects = scopeEnabled ? allProjectsPreference : true
   const readyRepo = scopeEnabled && currentRepo && isRepoReady(currentRepo) ? currentRepo : undefined
 
   const toggleTab = useCallback(() => {
     focusSearchAfterSwitchRef.current = true
-    setActiveTab((current) => nextSessionPickerTab(current, SESSION_PICKER_TABS))
-  }, [])
+    setActiveTab((current) =>
+      nextSessionPickerTab(current, isRemote ? REMOTE_SESSION_PICKER_TABS : SESSION_PICKER_TABS),
+    )
+  }, [isRemote])
 
   useShortcutActions({ switchPickerTab: open ? toggleTab : undefined })
 
@@ -1288,6 +1034,7 @@ function SessionPickerPanelBody({
       focusSearchAfterSwitchRef.current = false
       if (activeTab === 'projects') projectSearchInputRef.current?.focus()
       else if (activeTab === 'active') activeSearchInputRef.current?.focus()
+      else if (activeTab === 'chats') chatsSearchInputRef.current?.focus()
       else searchInputRef.current?.focus()
     })
     return () => cancelAnimationFrame(frame)
@@ -1326,6 +1073,7 @@ function SessionPickerPanelBody({
   }
 
   const sessionsTrailing = withTrailing(newSessionButton)
+  const chatsTrailing = withTrailing(<NewChatButton onOpenSession={onNavigate} />)
   const projectsTrailing = withTrailing(addRepoButton)
 
   const canToggleScope = scopeEnabled && activeTab === 'sessions'
@@ -1362,7 +1110,7 @@ function SessionPickerPanelBody({
       >
         <div className="shrink-0 px-4 pt-4 sm:px-0 sm:pt-6">
           {renderTitle?.(SESSION_PICKER_TAB_LABELS[activeTab])}
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className={cn('grid w-full', isRemote ? 'grid-cols-3' : 'grid-cols-4')}>
             <TabsTrigger value="active">{SESSION_PICKER_TAB_LABELS.active}</TabsTrigger>
             <TabsTrigger
               value="sessions"
@@ -1375,6 +1123,7 @@ function SessionPickerPanelBody({
                 <ChevronsUpDown aria-hidden="true" className="ml-1 h-3 w-3 shrink-0 opacity-60" />
               )}
             </TabsTrigger>
+            {!isRemote && <TabsTrigger value="chats">{SESSION_PICKER_TAB_LABELS.chats}</TabsTrigger>}
             <TabsTrigger value="projects">{SESSION_PICKER_TAB_LABELS.projects}</TabsTrigger>
           </TabsList>
         </div>
@@ -1428,6 +1177,21 @@ function SessionPickerPanelBody({
             />
           )}
         </TabsContent>
+        {!remote && (
+          <TabsContent
+            value="chats"
+            className="mt-0 flex min-h-0 w-full min-w-0 flex-1 flex-col px-0"
+          >
+            <ChatPickerContent
+              open={open}
+              activeSessionID={activeSessionID}
+              onNavigate={onNavigate}
+              onDeleteActiveSession={onDeleteActiveSession}
+              searchInputRef={chatsSearchInputRef}
+              searchTrailing={chatsTrailing}
+            />
+          </TabsContent>
+        )}
         <TabsContent
           value="projects"
           className="mt-0 flex min-h-0 w-full min-w-0 flex-1 flex-col px-0"
