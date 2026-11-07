@@ -43,6 +43,7 @@ import { createSessionPermissionModeRoutes } from './routes/session-permission-m
 import { createSessionSandboxRoutes } from './routes/session-sandbox'
 import { createMultiRunRoutes } from './routes/multi-runs'
 import { createChangeWalkthroughRoutes } from './routes/change-walkthroughs'
+import { createOutputDefinitionRoutes } from './routes/output-definitions'
 import { getChangeWalkthroughByWalkthroughSession } from './db/change-walkthroughs'
 import { createLogRoutes } from './routes/logs'
 import { createPreviewRoutes, createPreviewAvailability } from './routes/preview'
@@ -69,6 +70,7 @@ import { SessionAncestry } from './services/session-ancestry'
 import { GoalOutcomeTracker } from './services/goal-outcomes'
 import { MultiRunService } from './services/multi-runs'
 import { ChangeWalkthroughService } from './services/change-walkthroughs'
+import { OutputDefinitionRegistry } from './services/outputs/definition-registry'
 import { opencodeServerManager } from './services/opencode-single-server'
 import { createOpenCodeClient } from './services/opencode/client'
 import { OpenCodeServerRegistry } from './services/opencode-server-registry'
@@ -305,6 +307,7 @@ const goalOutcomes = new GoalOutcomeTracker()
 
 const multiRunService = new MultiRunService(db, openCodeClient, repoWorkspaces, sessionPermissionModeService, (serverId) => opencodeServerRegistry.getClient(serverId))
 const changeWalkthroughService = new ChangeWalkthroughService(db, openCodeClient, sessionSettingsService, gitAuthService, gitService)
+const outputDefinitionRegistry = new OutputDefinitionRegistry(db)
 
 sseAggregator.onEvent((directory, event) => {
   sessionSandboxService.handleEvent(directory, event).catch((err) => {
@@ -428,6 +431,7 @@ protectedApi.route('/session-permission-modes', createSessionPermissionModeRoute
 protectedApi.route('/session-sandbox', createSessionSandboxRoutes(sessionSandboxService))
 protectedApi.route('/multi-runs', createMultiRunRoutes(multiRunService))
 protectedApi.route('/change-walkthroughs', createChangeWalkthroughRoutes(changeWalkthroughService))
+protectedApi.route('/output-definitions', createOutputDefinitionRoutes(outputDefinitionRegistry))
 protectedApi.route('/schedules', createScheduleRoutes(scheduleService))
 protectedApi.route('/logs', createLogRoutes())
 protectedApi.route('/preview', createPreviewRoutes({ store: previewSessionStore, isEnabled: previewAvailability.isEnabled }))
