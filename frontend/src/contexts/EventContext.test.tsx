@@ -8,7 +8,7 @@ import type { FormInfo, PermissionRequest, GoalState } from '@opencode-manager/s
 import { FetchError } from '@opencode-manager/shared'
 import { showToast } from '@/lib/toast'
 import { useSessionStatus, hasBackgroundActivity } from '@/stores/sessionStatusStore'
-import { changeWalkthroughQueryKey } from '@/hooks/useChangeWalkthrough'
+import { outputsQueryKey } from '@/hooks/useOutputs'
 import { EventProvider, selectActiveSessionDirectoriesKey, useEventContext, useForms, usePermissions, useSSEHealth } from './EventContext'
 
 const mocks = vi.hoisted(() => ({
@@ -2014,7 +2014,7 @@ describe('EventProvider permissions and forms', () => {
     ['session.execution.succeeded', { sessionID: 'session-9' }],
     ['session.execution.failed', { sessionID: 'session-9', error: { message: 'boom' } }],
     ['session.execution.interrupted', { sessionID: 'session-9', reason: 'user' }],
-  ] as const)('invalidates the change walkthrough query on %s', async (type, data) => {
+  ] as const)('invalidates the outputs query on %s', async (type, data) => {
     const queryClient = createTestQueryClient()
     const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
 
@@ -2031,7 +2031,7 @@ describe('EventProvider permissions and forms', () => {
     })
 
     await waitFor(() => {
-      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: changeWalkthroughQueryKey('session-9') })
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: outputsQueryKey('session-9') })
     })
   })
 

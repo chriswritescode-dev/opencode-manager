@@ -7,7 +7,7 @@ import { useSettings } from '@/hooks/useSettings'
 import { cn } from '@/lib/utils'
 import { TRANSCRIPT_DETAIL_CLASS } from './transcriptStyles'
 import type { ShellNoticeOutcome } from '@/lib/backgroundWork'
-import type { ChangeSource } from '@opencode-manager/shared/schemas'
+import type { OutputParams } from '@opencode-manager/shared/schemas'
 
 type AssistantContentPart = SessionMessageAssistant['content'][number]
 
@@ -20,10 +20,10 @@ interface MessagePartProps {
   shellOutcome?: ShellNoticeOutcome
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
-  onOpenWalkthrough?: (source?: ChangeSource) => void
+  onOpenOutput?: (definitionId: string, params?: OutputParams) => void
 }
 
-export const MessagePart = memo(function MessagePart({ part, messageID, directory, repoFullPath, repoLocalPath, shellOutcome, onFileClick, onChildSessionClick, onOpenWalkthrough }: MessagePartProps) {
+export const MessagePart = memo(function MessagePart({ part, messageID, directory, repoFullPath, repoLocalPath, shellOutcome, onFileClick, onChildSessionClick, onOpenOutput }: MessagePartProps) {
   const { preferences } = useSettings()
   const simpleChatMode = preferences?.simpleChatMode ?? false
   const showReasoning = preferences?.showReasoning ?? false
@@ -56,7 +56,7 @@ export const MessagePart = memo(function MessagePart({ part, messageID, director
           shellOutcome={shellOutcome}
           onFileClick={onFileClick}
           onChildSessionClick={onChildSessionClick}
-          onOpenWalkthrough={onOpenWalkthrough}
+          onOpenOutput={onOpenOutput}
         />
       )
     default:

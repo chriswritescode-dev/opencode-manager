@@ -4,8 +4,8 @@ import { useSessionSearch } from './useSessionSearch'
 
 const helperSessionIdsRef = vi.hoisted(() => ({ current: new Set<string>() }))
 
-vi.mock('@/hooks/useChangeWalkthrough', () => ({
-  useWalkthroughHelperSessionIds: () => helperSessionIdsRef.current,
+vi.mock('@/hooks/useOutputs', () => ({
+  useOutputHelperSessionIds: () => helperSessionIdsRef.current,
 }))
 
 const { sessionsData, lastArgsRef, flagsRef } = vi.hoisted(() => ({
@@ -119,7 +119,7 @@ describe('useSessionSearch', () => {
     expect(result.current.filteredSessions.map((session) => session.id)).toEqual(['ses_root', 'ses_wt'])
   })
 
-  it('hides walkthrough helper sessions from the session list', () => {
+  it('hides output helper sessions from the session list', () => {
     sessionsData.splice(
       0,
       sessionsData.length,

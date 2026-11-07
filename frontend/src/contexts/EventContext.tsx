@@ -33,7 +33,7 @@ import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessi
 import { getServerSessionPath, getSessionPath, parseRepoRoute, parseServerProjectRoute, parseServerSessionRoute } from '@/lib/navigation'
 import { serverScopedKey } from '@/lib/serverScope'
 import { repoMatchesDirectory } from '@/components/navigation/sidebar-session-tree'
-import { changeWalkthroughQueryKey } from '@/hooks/useChangeWalkthrough'
+import { outputsQueryKey } from '@/hooks/useOutputs'
 import { applySessionGoalEvent, SESSION_GOAL_QUERY_ROOT } from '@/hooks/useSessionGoals'
 import { busyStatusesFromActiveSessions, useSessionStatus } from '@/stores/sessionStatusStore'
 import {
@@ -1130,7 +1130,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           useSessionStatus.getState().setOutcome(event.data.sessionID, 'succeeded')
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
           invalidateSessionListCachesDebounced(queryClient, event.directory, serverId)
-          queryClient.invalidateQueries({ queryKey: changeWalkthroughQueryKey(event.data.sessionID) })
+          queryClient.invalidateQueries({ queryKey: outputsQueryKey(event.data.sessionID) })
           break
         }
         case 'session.execution.failed': {
@@ -1138,7 +1138,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           useSessionStatus.getState().setOutcome(event.data.sessionID, 'failed')
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
           invalidateSessionListCachesDebounced(queryClient, event.directory, serverId)
-          queryClient.invalidateQueries({ queryKey: changeWalkthroughQueryKey(event.data.sessionID) })
+          queryClient.invalidateQueries({ queryKey: outputsQueryKey(event.data.sessionID) })
           break
         }
         case 'session.execution.interrupted': {
@@ -1146,7 +1146,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           useSessionStatus.getState().setOutcome(event.data.sessionID, 'interrupted')
           useSessionStatus.getState().setStatus(event.data.sessionID, { type: 'idle' })
           invalidateSessionListCachesDebounced(queryClient, event.directory, serverId)
-          queryClient.invalidateQueries({ queryKey: changeWalkthroughQueryKey(event.data.sessionID) })
+          queryClient.invalidateQueries({ queryKey: outputsQueryKey(event.data.sessionID) })
           break
         }
         case 'session.deleted': {

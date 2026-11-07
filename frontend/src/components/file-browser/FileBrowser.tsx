@@ -24,6 +24,7 @@ interface FileBrowserProps {
   onFileSelect?: (file: FileInfo) => void
   embedded?: boolean
   initialSelectedFile?: string
+  initialSelectedLine?: number
   onDirectoryLoad?: (info: { workspaceRoot?: string; currentPath: string }) => void
   onPreviewStateChange?: (isOpen: boolean) => void
   allowNavigateAboveBase?: boolean
@@ -132,7 +133,7 @@ function getUploadItemsFromFileList(fileList: FileList): UploadItem[] {
   return items
 }
 
-export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrowser({ basePath = '', onFileSelect, embedded = false, initialSelectedFile, onDirectoryLoad, onPreviewStateChange, allowNavigateAboveBase = false, compact = false }, ref) {
+export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrowser({ basePath = '', onFileSelect, embedded = false, initialSelectedFile, initialSelectedLine, onDirectoryLoad, onPreviewStateChange, allowNavigateAboveBase = false, compact = false }, ref) {
   const [currentPath, setCurrentPath] = useState(basePath)
   const [files, setFiles] = useState<FileInfo | null>(null)
   const [selectedFile, setSelectedFile] = useState<FileInfo | null>(null)
@@ -519,6 +520,10 @@ useEffect(() => {
   const isUploadComplete = uploadProgress && uploadProgress.current >= uploadProgress.total
   const canDismissDialog = isUploadComplete || uploadProgress?.cancelled
 
+  const initialFileLine = selectedFile && initialFileData && !initialFileData.isDirectory && selectedFile.path === initialFileData.path
+    ? initialSelectedLine
+    : undefined
+
   const uploadDialog = (
     <Dialog open={!!uploadProgress} onOpenChange={(open: boolean) => { if (!open && canDismissDialog) setUploadProgress(null) }}>
       <DialogContent className="sm:max-w-md" hideCloseButton={!canDismissDialog}>
@@ -604,7 +609,7 @@ useEffect(() => {
         <div className="flex-1 flex overflow-hidden min-h-0 h-full">
           {compact && !isMobile && isPreviewModalOpen && selectedFile && !selectedFile.isDirectory ? (
             <div className="flex-1 min-h-0 overflow-hidden">
-              <FilePreview key={selectedFile.path} file={selectedFile} isMobileModal onCloseModal={handleCloseModal} onOpenFile={openFilePath} />
+              <FilePreview key={selectedFile.path} file={selectedFile} isMobileModal onCloseModal={handleCloseModal} initialLineNumber={initialFileLine} onOpenFile={openFilePath} />
             </div>
           ) : (
           <div className={`${stacked ? 'w-full' : 'w-[30%]'} border-r border-border px-1 md:px-4 flex flex-col min-h-0 h-full`}>
@@ -658,7 +663,7 @@ useEffect(() => {
           {!stacked && (
             <div className="flex-1 overflow-y-auto min-h-0 h-full">
               {selectedFile && !selectedFile.isDirectory ? (
-                <FilePreview key={selectedFile.path} file={selectedFile} onOpenFile={openFilePath} />
+                <FilePreview key={selectedFile.path} file={selectedFile} initialLineNumber={initialFileLine} onOpenFile={openFilePath} />
               ) : (
                 <div className="flex items-center justify-center h-full text-muted-foreground">
                   Select a file to preview
@@ -674,6 +679,7 @@ useEffect(() => {
           onClose={handleCloseModal}
           file={selectedFile}
           showFilePreviewHeader={true}
+          initialLineNumber={initialFileLine}
           onOpenFile={openFilePath}
         />
       </div>
@@ -760,7 +766,7 @@ useEffect(() => {
           {!stacked && (
             <div className="flex-1 overflow-y-auto min-h-0 ">
               {selectedFile && !selectedFile.isDirectory ? (
-                <FilePreview key={selectedFile.path} file={selectedFile} onOpenFile={openFilePath} />
+                <FilePreview key={selectedFile.path} file={selectedFile} initialLineNumber={initialFileLine} onOpenFile={openFilePath} />
               ) : (
                 <div className="flex items-center justify-center h-64 text-muted-foreground">
                   Select a file to preview
@@ -776,6 +782,7 @@ useEffect(() => {
         isOpen={isMobile && isPreviewModalOpen}
         onClose={handleCloseModal}
         file={selectedFile}
+        initialLineNumber={initialFileLine}
         onOpenFile={openFilePath}
       />
       

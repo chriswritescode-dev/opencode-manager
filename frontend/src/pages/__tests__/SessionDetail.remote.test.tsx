@@ -42,7 +42,7 @@ const mocks = vi.hoisted(() => ({
   ResetPermissionsDialog: vi.fn(() => null),
   RepoSkillsDialog: vi.fn(() => null),
   RepoMcpDialog: vi.fn(() => null),
-  ChangesWalkthroughSheet: vi.fn(() => null),
+  OutputSheet: vi.fn(() => null),
   ToolSidePanel: vi.fn(() => null),
   SessionGoalBar: vi.fn(() => null),
   SessionMoreButton: vi.fn(() => null),
@@ -103,7 +103,7 @@ vi.mock('@/hooks/useAutoPlayLastResponse', () => ({
   useAutoPlayLastResponse: vi.fn(() => {}),
 }))
 
-vi.mock('@/hooks/useAutoOpenWalkthrough', () => ({ useAutoOpenWalkthrough: vi.fn(() => {}) }))
+vi.mock('@/hooks/useAutoOpenOutputs', () => ({ useAutoOpenOutputs: vi.fn(() => {}) }))
 vi.mock('@/hooks/useSpeakVisibleMessages', () => ({ useSpeakVisibleMessages: vi.fn(() => vi.fn()) }))
 vi.mock('@/hooks/useUndoMessage', () => ({
   useUndoMessage: vi.fn(() => ({ mutateAsync: vi.fn() })),
@@ -136,8 +136,8 @@ vi.mock('@/components/session/BackgroundWorkBar', () => ({ BackgroundWorkBar: vi
 vi.mock('@/components/session/SessionGoalBar', () => ({ SessionGoalBar: mocks.SessionGoalBar }))
 vi.mock('@/components/session/FormPrompt', () => ({ FormPrompt: vi.fn(() => null) }))
 vi.mock('@/components/session/MinimizedFormIndicator', () => ({ MinimizedFormIndicator: vi.fn(() => null) }))
-vi.mock('@/components/session/ChangesWalkthroughSheet', () => ({
-  ChangesWalkthroughSheet: mocks.ChangesWalkthroughSheet,
+vi.mock('@/components/outputs/OutputSheet', () => ({
+  OutputSheet: mocks.OutputSheet,
 }))
 vi.mock('@/components/notifications/PendingActionsGroup', () => ({
   PendingActionsGroup: vi.fn(() => null),
@@ -348,7 +348,7 @@ describe('SessionDetail remote server mode', () => {
     expect(mocks.ProjectActionsMenu).not.toHaveBeenCalled()
     expect(mocks.RepoActionsDialog).not.toHaveBeenCalled()
     expect(mocks.ResetPermissionsDialog).not.toHaveBeenCalled()
-    expect(mocks.ChangesWalkthroughSheet).not.toHaveBeenCalled()
+    expect(mocks.OutputSheet).not.toHaveBeenCalled()
     expect(mocks.SessionMoreButton).toHaveBeenCalled()
     expect(vi.mocked(PendingActionsGroup).mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({ showScheduleReports: false }),
@@ -512,7 +512,7 @@ describe('SessionDetail remote server mode', () => {
 
     const threadProps = vi.mocked(MessageThread).mock.calls.at(-1)?.[0]
     expect(threadProps?.onFileClick).toBeUndefined()
-    expect(threadProps?.onOpenWalkthrough).toBeUndefined()
+    expect(threadProps?.onOpenOutput).toBeUndefined()
 
     act(() => {
       threadProps?.onChildSessionClick?.('ses_child')

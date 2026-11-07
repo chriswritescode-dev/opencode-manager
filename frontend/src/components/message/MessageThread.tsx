@@ -26,7 +26,7 @@ import { TTSButton } from '@/components/ui/tts-button'
 import { backgroundShellID, collectBackgroundParts, type ShellNoticeOutcome } from '@/lib/backgroundWork'
 import { readShowArtifactCall } from '@/lib/artifactTool'
 import { groupExplorationParts, type AssistantContentItem } from '@/lib/explorationGroups'
-import type { ChangeSource } from '@opencode-manager/shared/schemas'
+import type { OutputParams } from '@opencode-manager/shared/schemas'
 import { ExplorationGroup } from './ExplorationGroup'
 import { ShellPreview, ToolDetails, useToolDetailsState } from './ToolDetails'
 import { cn, formatDuration } from '@/lib/utils'
@@ -358,7 +358,7 @@ interface MessageRowProps {
   repoLocalPath?: string
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
-  onOpenWalkthrough?: (source?: ChangeSource) => void
+  onOpenOutput?: (definitionId: string, params?: OutputParams) => void
   model?: string
   simpleChatMode: boolean
   showReasoning: boolean
@@ -381,7 +381,7 @@ const MessageRow = memo(function MessageRow({
   repoLocalPath,
   onFileClick,
   onChildSessionClick,
-  onOpenWalkthrough,
+  onOpenOutput,
   model,
   simpleChatMode,
   showReasoning,
@@ -495,7 +495,7 @@ const MessageRow = memo(function MessageRow({
                   shellOutcome={shellOutcomeFor(part)}
                   onFileClick={onFileClick}
                   onChildSessionClick={onChildSessionClick}
-                  onOpenWalkthrough={onOpenWalkthrough}
+                  onOpenOutput={onOpenOutput}
                 />
               </div>
             ))}
@@ -529,7 +529,7 @@ const MessageRow = memo(function MessageRow({
                   repoLocalPath={repoLocalPath}
                   onFileClick={onFileClick}
                   onChildSessionClick={onChildSessionClick}
-                  onOpenWalkthrough={onOpenWalkthrough}
+                  onOpenOutput={onOpenOutput}
                 />
               ) : (
                 <MessagePart
@@ -541,7 +541,7 @@ const MessageRow = memo(function MessageRow({
                   shellOutcome={shellOutcomeFor(item.part)}
                   onFileClick={onFileClick}
                   onChildSessionClick={onChildSessionClick}
-                  onOpenWalkthrough={onOpenWalkthrough}
+                  onOpenOutput={onOpenOutput}
                 />
               )}
             </div>
@@ -637,7 +637,7 @@ interface MessageThreadProps {
   pending: SessionInboxInfo[]
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
-  onOpenWalkthrough?: (source?: ChangeSource) => void
+  onOpenOutput?: (definitionId: string, params?: OutputParams) => void
   onUndoMessage?: (restoredPrompt: string) => void
   model?: string
   isSessionBusy?: boolean
@@ -652,7 +652,7 @@ export const MessageThread = memo(function MessageThread({
   pending,
   onFileClick,
   onChildSessionClick,
-  onOpenWalkthrough,
+  onOpenOutput,
   onUndoMessage,
   model,
   isSessionBusy = false,
@@ -722,7 +722,7 @@ export const MessageThread = memo(function MessageThread({
           repoLocalPath={repoLocalPath}
           onFileClick={onFileClick}
           onChildSessionClick={onChildSessionClick}
-          onOpenWalkthrough={onOpenWalkthrough}
+          onOpenOutput={onOpenOutput}
           model={model}
           simpleChatMode={simpleChatMode}
           showReasoning={showReasoning}

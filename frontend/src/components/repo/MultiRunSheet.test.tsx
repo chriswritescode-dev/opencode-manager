@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { MultiRunSheet } from './MultiRunSheet'
+import type { OutputSheetProps } from '@/components/outputs/OutputSheet'
 import { FetchError } from '@/api/fetchWrapper'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 import type { FuseMultiRunRequest, MultiRun, MultiRunEntry, MultiRunFusion } from '@opencode-manager/shared/schemas'
@@ -17,8 +18,6 @@ const mocks = vi.hoisted(() => ({
   useOpenCodeModelState: vi.fn(),
   useOpenCodeDefaultModel: vi.fn(),
   listBranches: vi.fn(),
-  getChangeWalkthrough: vi.fn(),
-  generateChangeWalkthrough: vi.fn(),
 }))
 
 const mockNavigate = vi.fn()
@@ -48,9 +47,13 @@ vi.mock('@/api/repos', () => ({
   listBranches: mocks.listBranches,
 }))
 
-vi.mock('@/api/changeWalkthroughs', () => ({
-  getChangeWalkthrough: mocks.getChangeWalkthrough,
-  generateChangeWalkthrough: mocks.generateChangeWalkthrough,
+vi.mock('@/components/outputs/OutputSheet', () => ({
+  OutputSheet: ({ sessionId, open, definitionId }: OutputSheetProps) =>
+    open ? (
+      <div>
+        outputs-sheet {sessionId} {definitionId}
+      </div>
+    ) : null,
 }))
 
 vi.mock('@/lib/toast', () => ({
@@ -253,7 +256,6 @@ describe('MultiRunSheet', () => {
       status: { ahead: 0, behind: 0 },
     })
     mocks.listMultiRuns.mockResolvedValue([])
-    mocks.getChangeWalkthrough.mockResolvedValue({ walkthrough: null, currentDiffHash: null, stale: false })
   })
 
   it('opens as a right sheet on the Runs tab', async () => {
@@ -519,7 +521,7 @@ describe('MultiRunSheet', () => {
       await waitFor(() => expect(mocks.discardMultiRunEntry).toHaveBeenCalledWith(3, 11))
     })
 
-    it('opens the walkthrough dialog for an entry session', async () => {
+    it('opens the walkthrough output for an entry session', async () => {
       const user = userEvent.setup()
       mocks.listMultiRuns.mockResolvedValue([oneStartedRun])
       renderSheet()
@@ -527,10 +529,7 @@ describe('MultiRunSheet', () => {
       const card = await screen.findByRole('region', { name: 'Sweep' })
       await user.click(within(card).getByRole('button', { name: /walkthrough/i }))
 
-      expect(await screen.findByText('Change walkthrough')).toBeInTheDocument()
-      await waitFor(() =>
-        expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_11', { kind: 'session' }),
-      )
+      expect(await screen.findByText('outputs-sheet ses_11 walkthrough')).toBeInTheDocument()
     })
 
     it('lists fusions with truncation and opens the fusion session', async () => {

@@ -67,7 +67,7 @@ vi.mock('@/hooks/useAutoPlayLastResponse', () => ({
   getLatestPlayableAssistantMessage: vi.fn(() => null),
   useAutoPlayLastResponse: vi.fn(() => {}),
 }))
-vi.mock('@/hooks/useAutoOpenWalkthrough', () => ({ useAutoOpenWalkthrough: vi.fn(() => {}) }))
+vi.mock('@/hooks/useAutoOpenOutputs', () => ({ useAutoOpenOutputs: vi.fn(() => {}) }))
 vi.mock('@/hooks/useSpeakVisibleMessages', () => ({ useSpeakVisibleMessages: vi.fn(() => vi.fn()) }))
 vi.mock('@/hooks/useUndoMessage', () => ({
   useUndoMessage: vi.fn(() => ({ mutateAsync: vi.fn() })),
@@ -92,7 +92,7 @@ vi.mock('@/components/session/BackgroundWorkBar', () => ({ BackgroundWorkBar: ()
 vi.mock('@/components/session/SessionGoalBar', () => ({ SessionGoalBar: () => null }))
 vi.mock('@/components/session/FormPrompt', () => ({ FormPrompt: () => null }))
 vi.mock('@/components/session/MinimizedFormIndicator', () => ({ MinimizedFormIndicator: () => null }))
-vi.mock('@/components/session/ChangesWalkthroughSheet', () => ({ ChangesWalkthroughSheet: () => null }))
+vi.mock('@/components/outputs/OutputSheet', () => ({ OutputSheet: () => null }))
 vi.mock('@/components/notifications/PendingActionsGroup', () => ({ PendingActionsGroup: () => null }))
 vi.mock('@/components/navigation/SessionMoreButton', () => ({ SessionMoreButton: () => null }))
 vi.mock('@/components/navigation/ToolSidePanel', () => ({ ToolSidePanel: () => null }))

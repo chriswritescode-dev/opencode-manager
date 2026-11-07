@@ -1,7 +1,6 @@
 import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { ReactNode } from 'react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { stubMatchMedia } from '@/test/test-utils'
 import { ToolSidePanel } from './ToolSidePanel'
@@ -44,7 +43,18 @@ vi.mock('@/components/session/RouteSessionPicker', () => ({
 }))
 
 vi.mock('@/components/file-browser/FileBrowser', () => ({
-  FileBrowser: ({ initialSelectedFile }: { initialSelectedFile?: string }) => <div>files-tool {initialSelectedFile}</div>,
+  FileBrowser: ({
+    initialSelectedFile,
+    initialSelectedLine,
+  }: {
+    initialSelectedFile?: string
+    initialSelectedLine?: number
+  }) => (
+    <div>
+      files-tool {initialSelectedFile}
+      {initialSelectedLine !== undefined ? ` line:${initialSelectedLine}` : ''}
+    </div>
+  ),
 }))
 vi.mock('@/components/source-control', () => ({
   SourceControlContent: () => <div>source-control-tool</div>,
@@ -75,12 +85,13 @@ vi.mock('@/components/repo/RepoSkillsDialog', () => ({ RepoSkillsContent: () => 
 vi.mock('@/components/secrets/RepoSecretsDialog', () => ({
   RepoSecretsContent: () => <div>secrets-tool</div>,
 }))
-vi.mock('@/components/session/ChangesWalkthroughSheet', () => ({
-  ChangesWalkthroughProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
-  ChangesWalkthroughRegenerate: () => null,
-  ChangesWalkthroughSourcePicker: () => null,
-  ChangesWalkthroughCancel: () => null,
-  ChangesWalkthroughView: () => <div>walkthrough-tool</div>,
+vi.mock('@/components/outputs/OutputsPanel', () => ({
+  OutputsPanel: ({ definitionId, request }: { definitionId: string; request?: { definitionId: string } }) => (
+    <div>
+      outputs-tool {definitionId}
+      {request ? ` request:${request.definitionId}` : ''}
+    </div>
+  ),
 }))
 
 function LocationProbe() {
@@ -96,9 +107,11 @@ function LocationProbe() {
 function Harness({
   docked,
   deleteActiveSessionPath,
+  selectedFileLine,
 }: {
   docked: boolean
   deleteActiveSessionPath?: string
+  selectedFileLine?: number
 }) {
   const panel = useToolPanel(docked)
   return (
@@ -113,6 +126,7 @@ function Harness({
           filesBasePath="repo"
           currentBranch="main"
           selectedFilePath="src/a.ts"
+          selectedFileLine={selectedFileLine}
           repoDirectory="/repo"
           onSkillLoaded={() => {}}
           deleteActiveSessionPath={deleteActiveSessionPath}
@@ -123,10 +137,14 @@ function Harness({
   )
 }
 
-function renderAt(search: string, docked = true, deleteActiveSessionPath?: string) {
+function renderAt(search: string, docked = true, deleteActiveSessionPath?: string, selectedFileLine?: number) {
   return render(
     <MemoryRouter initialEntries={[`/repos/1/sessions/ses_1${search}`]}>
-      <Harness docked={docked} deleteActiveSessionPath={deleteActiveSessionPath} />
+      <Harness
+        docked={docked}
+        deleteActiveSessionPath={deleteActiveSessionPath}
+        selectedFileLine={selectedFileLine}
+      />
     </MemoryRouter>,
   )
 }
@@ -223,12 +241,35 @@ describe('ToolSidePanel', () => {
     await waitFor(() => expect(screen.getByTestId('pathname').textContent).toBe('/schedules'))
   })
 
-  it('moves a panel tool opened as a dialog into the docked panel', async () => {
+  it('redirects a legacy walkthrough dialog into the docked outputs panel', async () => {
     renderAt('?dialog=walkthrough')
 
-    expect(await screen.findByText('walkthrough-tool')).toBeInTheDocument()
-    expect(search().get('panel')).toBe('walkthrough')
+    expect(await screen.findByText('outputs-tool walkthrough')).toBeInTheDocument()
+    expect(search().get('panel')).toBe('outputs')
+    expect(search().get('output')).toBe('walkthrough')
     expect(search().has('dialog')).toBe(false)
+  })
+
+  it('redirects a legacy walkthrough panel to the outputs panel', async () => {
+    renderAt('?panel=walkthrough')
+
+    expect(await screen.findByText('outputs-tool walkthrough')).toBeInTheDocument()
+    expect(search().get('panel')).toBe('outputs')
+    expect(search().get('output')).toBe('walkthrough')
+  })
+
+  it('opens a requested output definition inside the outputs panel', async () => {
+    renderAt('?dialog=outputs&output=summary')
+
+    expect(await screen.findByText('outputs-tool summary')).toBeInTheDocument()
+    expect(search().get('panel')).toBe('outputs')
+    expect(search().get('output')).toBe('summary')
+  })
+
+  it('forwards the selected file line to the embedded file browser', async () => {
+    renderAt('?panel=files', true, undefined, 12)
+
+    expect(await screen.findByText('files-tool src/a.ts line:12')).toBeInTheDocument()
   })
 
   it('leaves non-panel dialogs alone', async () => {

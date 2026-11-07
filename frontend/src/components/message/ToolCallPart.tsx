@@ -28,7 +28,7 @@ import {
   type ShellNoticeOutcome,
 } from '@/lib/backgroundWork'
 import { getToolInputPath, getToolSpecificRender } from './FileToolRender'
-import { readOpenWalkthroughCall } from '@/lib/walkthroughTool'
+import { readOpenOutputCall } from '@/lib/outputTool'
 import { readShowArtifactCall } from '@/lib/artifactTool'
 import { getWorkspaceFilePath } from '@/lib/markdownLinks'
 import { getFileApiUrl } from '@/api/files'
@@ -38,7 +38,7 @@ import { FileReferenceText } from './FileReferenceText'
 import { ShellPreview, ToolDetails, useToolDetailsState } from './ToolDetails'
 import { ToolContentFiles } from './ToolContentFiles'
 import { TRANSCRIPT_DETAIL_CLASS, TRANSCRIPT_ROW_CLASS } from './transcriptStyles'
-import type { ChangeSource } from '@opencode-manager/shared/schemas'
+import type { OutputParams } from '@opencode-manager/shared/schemas'
 
 function BoundedPre({ content, className }: { content: string; className: string }) {
   const clamped = useMemo(() => clampDisplayText(content), [content])
@@ -54,7 +54,7 @@ interface ToolCallPartProps {
   shellOutcome?: ShellNoticeOutcome
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
-  onOpenWalkthrough?: (source?: ChangeSource) => void
+  onOpenOutput?: (definitionId: string, params?: OutputParams) => void
 }
 
 function toolInput(part: SessionMessageAssistantTool): Record<string, unknown> | undefined {
@@ -77,7 +77,7 @@ function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (fi
   )
 }
 
-export const ToolCallPart = memo(function ToolCallPart({ part, messageID, directory, repoFullPath, repoLocalPath, shellOutcome, onFileClick, onChildSessionClick, onOpenWalkthrough }: ToolCallPartProps) {
+export const ToolCallPart = memo(function ToolCallPart({ part, messageID, directory, repoFullPath, repoLocalPath, shellOutcome, onFileClick, onChildSessionClick, onOpenOutput }: ToolCallPartProps) {
   const { preferences } = useSettings()
   const isMobile = useMobile()
   const isSubagent = part.name === 'subagent'
@@ -104,7 +104,7 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
   const outputRef = useRef<HTMLDivElement>(null)
   const userOpenedDetailsRef = useRef(false)
   const input = toolInput(part)
-  const openWalkthrough = readOpenWalkthroughCall(part)
+  const openOutput = readOpenOutputCall(part)
   const rawCommand = part.name === 'shell' && typeof input?.command === 'string'
     ? input.command
     : undefined
@@ -449,14 +449,14 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
           <span className="ml-auto shrink-0 text-xs">{statusLabel}</span>
         </button>
 
-        {openWalkthrough ? (
+        {openOutput ? (
           <Button
             variant="outline"
             size="sm"
             className="h-7 shrink-0"
-            onClick={() => onOpenWalkthrough?.(openWalkthrough.source)}
+            onClick={() => onOpenOutput?.(openOutput.definitionId, openOutput.params)}
           >
-            Open walkthrough
+            Open output
           </Button>
         ) : null}
       </div>

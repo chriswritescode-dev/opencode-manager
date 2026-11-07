@@ -617,7 +617,7 @@ describe('ToolCallPart file content', () => {
   })
 })
 
-describe('ToolCallPart open walkthrough action', () => {
+describe('ToolCallPart open output action', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.useSettings.mockReturnValue({
@@ -629,7 +629,7 @@ describe('ToolCallPart open walkthrough action', () => {
     mocks.useToolCallPermission.mockReturnValue(null)
   })
 
-  const openWalkthrough = (status: 'running' | 'completed'): SessionMessageAssistantTool => ({
+  const openOutput = (status: 'running' | 'completed'): SessionMessageAssistantTool => ({
     type: 'tool',
     id: 'call_ocm',
     name: 'ocm',
@@ -638,30 +638,31 @@ describe('ToolCallPart open walkthrough action', () => {
       status === 'completed'
         ? {
             status: 'completed',
-            input: { action: 'open_walkthrough', params: {} },
-            content: [{ type: 'text', text: 'Walkthrough opened' }],
+            input: { action: 'open_output', params: { definitionId: 'walkthrough' } },
+            content: [{ type: 'text', text: 'Output opened' }],
           }
         : {
             status: 'running',
-            input: { action: 'open_walkthrough', params: {} },
+            input: { action: 'open_output', params: { definitionId: 'walkthrough' } },
             metadata: {},
           },
   })
 
-  it('renders an Open walkthrough button and calls the opener', () => {
-    const onOpenWalkthrough = vi.fn()
+  it('renders an Open output button and calls the opener', () => {
+    const onOpenOutput = vi.fn()
 
     renderWithProviders(
-      <ToolCallPart part={openWalkthrough('completed')} messageID="msg_1" onOpenWalkthrough={onOpenWalkthrough} />,
+      <ToolCallPart part={openOutput('completed')} messageID="msg_1" onOpenOutput={onOpenOutput} />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open walkthrough' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open output' }))
 
-    expect(onOpenWalkthrough).toHaveBeenCalledTimes(1)
+    expect(onOpenOutput).toHaveBeenCalledTimes(1)
+    expect(onOpenOutput).toHaveBeenCalledWith('walkthrough', undefined)
   })
 
-  it('passes the requested source to the opener', () => {
-    const onOpenWalkthrough = vi.fn()
+  it('passes the definition id and requested params to the opener', () => {
+    const onOpenOutput = vi.fn()
     const part: SessionMessageAssistantTool = {
       type: 'tool',
       id: 'call_ocm',
@@ -669,22 +670,25 @@ describe('ToolCallPart open walkthrough action', () => {
       time: { created: 1, ran: 2, completed: 3 },
       state: {
         status: 'completed',
-        input: { action: 'open_walkthrough', params: { source: { kind: 'staged' } } },
-        content: [{ type: 'text', text: 'Walkthrough opened' }],
+        input: {
+          action: 'open_output',
+          params: { definitionId: 'walkthrough', params: { source: { kind: 'staged' } } },
+        },
+        content: [{ type: 'text', text: 'Output opened' }],
       },
     }
 
     renderWithProviders(
-      <ToolCallPart part={part} messageID="msg_1" onOpenWalkthrough={onOpenWalkthrough} />,
+      <ToolCallPart part={part} messageID="msg_1" onOpenOutput={onOpenOutput} />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open walkthrough' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open output' }))
 
-    expect(onOpenWalkthrough).toHaveBeenCalledWith({ kind: 'staged' })
+    expect(onOpenOutput).toHaveBeenCalledWith('walkthrough', { source: { kind: 'staged' } })
   })
 
-  it('passes no source when the call invalidates one', () => {
-    const onOpenWalkthrough = vi.fn()
+  it('does not render the button when the definition id does not validate', () => {
+    const onOpenOutput = vi.fn()
     const part: SessionMessageAssistantTool = {
       type: 'tool',
       id: 'call_ocm',
@@ -692,26 +696,24 @@ describe('ToolCallPart open walkthrough action', () => {
       time: { created: 1, ran: 2, completed: 3 },
       state: {
         status: 'completed',
-        input: { action: 'open_walkthrough', params: { source: { kind: 'nonsense' } } },
-        content: [{ type: 'text', text: 'Walkthrough opened' }],
+        input: { action: 'open_output', params: { definitionId: 'Not Valid!' } },
+        content: [{ type: 'text', text: 'Output opened' }],
       },
     }
 
     renderWithProviders(
-      <ToolCallPart part={part} messageID="msg_1" onOpenWalkthrough={onOpenWalkthrough} />,
+      <ToolCallPart part={part} messageID="msg_1" onOpenOutput={onOpenOutput} />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open walkthrough' }))
-
-    expect(onOpenWalkthrough).toHaveBeenCalledWith(undefined)
+    expect(screen.queryByRole('button', { name: 'Open output' })).not.toBeInTheDocument()
   })
 
   it('does not render the button while the call is still running', () => {
     renderWithProviders(
-      <ToolCallPart part={openWalkthrough('running')} messageID="msg_1" onOpenWalkthrough={vi.fn()} />,
+      <ToolCallPart part={openOutput('running')} messageID="msg_1" onOpenOutput={vi.fn()} />,
     )
 
-    expect(screen.queryByRole('button', { name: 'Open walkthrough' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open output' })).not.toBeInTheDocument()
   })
 
   it('does not render the button for another ocm action', () => {
@@ -727,9 +729,9 @@ describe('ToolCallPart open walkthrough action', () => {
       },
     }
 
-    renderWithProviders(<ToolCallPart part={otherAction} messageID="msg_1" onOpenWalkthrough={vi.fn()} />)
+    renderWithProviders(<ToolCallPart part={otherAction} messageID="msg_1" onOpenOutput={vi.fn()} />)
 
-    expect(screen.queryByRole('button', { name: 'Open walkthrough' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open output' })).not.toBeInTheDocument()
   })
 })
 

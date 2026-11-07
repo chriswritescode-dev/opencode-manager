@@ -175,7 +175,7 @@ describe('DesktopSidebar', () => {
     for (const label of ['Home', 'Settings', 'Logout']) {
       expect(screen.getByText(label)).toBeInTheDocument()
     }
-    for (const label of ['Menu', 'Files', 'MCP', 'Skills', 'Schedules', 'All Schedules', 'Source Control', 'Terminal', 'Walkthrough', 'Preview']) {
+    for (const label of ['Menu', 'Files', 'MCP', 'Skills', 'Schedules', 'All Schedules', 'Source Control', 'Terminal', 'Outputs', 'Preview']) {
       expect(screen.queryByText(label)).toBeNull()
     }
   })

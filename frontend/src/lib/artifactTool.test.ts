@@ -72,7 +72,7 @@ describe('readShowArtifactCall', () => {
       time: { created: 1 },
       state: {
         status: 'completed',
-        input: { action: 'open_walkthrough', params: { title: 'Report', path: 'a.html' } },
+        input: { action: 'open_output', params: { title: 'Report', path: 'a.html' } },
         content: [{ type: 'text', text: 'Opened.' }],
       },
     }

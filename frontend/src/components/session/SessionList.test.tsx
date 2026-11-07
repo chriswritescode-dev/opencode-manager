@@ -61,8 +61,8 @@ vi.mock('@/hooks/useSessionPins', () => ({
   useToggleSessionPin: () => ({ mutate: togglePinMock }),
 }))
 
-vi.mock('@/hooks/useChangeWalkthrough', () => ({
-  useWalkthroughHelperSessionIds: () => new Set<string>(),
+vi.mock('@/hooks/useOutputs', () => ({
+  useOutputHelperSessionIds: () => new Set<string>(),
 }))
 
 describe('SessionList', () => {

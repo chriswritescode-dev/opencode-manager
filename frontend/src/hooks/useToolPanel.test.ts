@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
-import { isPanelTool, toggleToolDialogParams, toggleToolPanelParams, useToolPanel, useToolPanelToggle } from './useToolPanel'
+import { isPanelTool, migrateLegacyOutputParams, toggleToolDialogParams, toggleToolPanelParams, useToolPanel, useToolPanelToggle } from './useToolPanel'
 
 describe('sessions tool', () => {
   it('is a panel tool', () => {
@@ -26,6 +26,81 @@ describe('sessions tool', () => {
 
     await waitFor(() => expect(screen.getByTestId('search').textContent).not.toContain('panel=sessions'))
     expect(screen.getByTestId('search').textContent).not.toContain('dialog=sessions')
+  })
+})
+
+describe('migrateLegacyOutputParams', () => {
+  it('rewrites a legacy walkthrough panel to the outputs tool', () => {
+    const params = new URLSearchParams('panel=walkthrough')
+
+    expect(migrateLegacyOutputParams(params)).toBe(true)
+    expect(params.get('panel')).toBe('outputs')
+    expect(params.get('output')).toBe('walkthrough')
+  })
+
+  it('rewrites a legacy walkthrough dialog to the outputs tool', () => {
+    const params = new URLSearchParams('dialog=walkthrough')
+
+    expect(migrateLegacyOutputParams(params)).toBe(true)
+    expect(params.get('dialog')).toBe('outputs')
+    expect(params.get('output')).toBe('walkthrough')
+  })
+
+  it('keeps an output the URL already selects', () => {
+    const params = new URLSearchParams('panel=walkthrough&output=summary')
+
+    expect(migrateLegacyOutputParams(params)).toBe(true)
+    expect(params.get('panel')).toBe('outputs')
+    expect(params.get('output')).toBe('summary')
+  })
+
+  it('leaves params without a legacy walkthrough alone', () => {
+    const params = new URLSearchParams('panel=files&output=summary')
+
+    expect(migrateLegacyOutputParams(params)).toBe(false)
+    expect(params.get('panel')).toBe('files')
+    expect(params.get('output')).toBe('summary')
+  })
+})
+
+describe('legacy walkthrough redirect', () => {
+  function renderPanelProbe(entry: string, panelAvailable: boolean) {
+    function Probe() {
+      useToolPanel(panelAvailable)
+      const location = useLocation()
+      return createElement('div', { 'data-testid': 'search' }, location.search)
+    }
+
+    render(createElement(MemoryRouter, { initialEntries: [entry] }, createElement(Probe)))
+  }
+
+  it('moves a legacy panel into the docked outputs tool', async () => {
+    renderPanelProbe('/repos/1/sessions/ses_1?panel=walkthrough', true)
+
+    await waitFor(() => expect(screen.getByTestId('search').textContent).toBe('?panel=outputs&output=walkthrough'))
+  })
+
+  it('moves a legacy dialog into the docked outputs tool', async () => {
+    renderPanelProbe('/repos/1/sessions/ses_1?dialog=walkthrough', true)
+
+    await waitFor(() => {
+      const params = new URLSearchParams(screen.getByTestId('search').textContent ?? '')
+      expect(params.get('panel')).toBe('outputs')
+      expect(params.get('output')).toBe('walkthrough')
+      expect(params.has('dialog')).toBe(false)
+    })
+  })
+
+  it('keeps a legacy dialog in dialog form when the panel is unavailable', async () => {
+    renderPanelProbe('/repos/1/sessions/ses_1?dialog=walkthrough', false)
+
+    await waitFor(() => expect(screen.getByTestId('search').textContent).toBe('?dialog=outputs&output=walkthrough'))
+  })
+
+  it('keeps an existing output selection when migrating a legacy panel', async () => {
+    renderPanelProbe('/repos/1/sessions/ses_1?panel=walkthrough&output=summary', true)
+
+    await waitFor(() => expect(screen.getByTestId('search').textContent).toBe('?panel=outputs&output=summary'))
   })
 })
 

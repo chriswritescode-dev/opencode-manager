@@ -54,8 +54,8 @@ describe('buildMoreItems', () => {
     expect(items[6].key).toBe('source-control')
     expect(items[7].key).toBe('terminal')
     expect(items[7].dialog).toBe('terminal')
-    expect(items[8].key).toBe('walkthrough')
-    expect(items[8].dialog).toBe('walkthrough')
+    expect(items[8].key).toBe('outputs')
+    expect(items[8].dialog).toBe('outputs')
     expect(items[9].key).toBe('actions')
     expect(items[9].dialog).toBe('actions')
     expect(items[10].key).toBe('preview')
@@ -96,7 +96,7 @@ describe('buildMoreItems', () => {
     expect(items).toHaveLength(12)
     expect(items.map((item) => item.key)).not.toContain('actions')
     expect(items[7].key).toBe('terminal')
-    expect(items[8].key).toBe('walkthrough')
+    expect(items[8].key).toBe('outputs')
     expect(items[9].key).toBe('preview')
     expect(items[9].dialog).toBe('preview')
     expect(items[10].key).toBe('settings')
@@ -187,7 +187,7 @@ describe('buildToolItems', () => {
       'schedules',
       'source-control',
       'terminal',
-      'walkthrough',
+      'outputs',
       'actions',
       'preview',
     ])

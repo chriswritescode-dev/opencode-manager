@@ -4,7 +4,7 @@ import { useUrlParams } from './useUrlParams'
 
 const PANEL_PARAM = 'panel'
 
-const PANEL_TOOLS = ['sourceControl', 'files', 'terminal', 'walkthrough', 'preview', 'mcp', 'actions', 'skills', 'schedules', 'sessions', 'secrets'] as const
+const PANEL_TOOLS = ['sourceControl', 'files', 'terminal', 'outputs', 'preview', 'mcp', 'actions', 'skills', 'schedules', 'sessions', 'secrets'] as const
 
 export type PanelTool = (typeof PANEL_TOOLS)[number]
 
@@ -12,6 +12,7 @@ export type ToolPanelToggleAction = 'open' | 'switch' | 'close'
 
 const TOOL_OWNED_PARAMS: Partial<Record<PanelTool, readonly string[]>> = {
   terminal: ['terminal', 'terminalDirectory'],
+  outputs: ['output'],
   preview: ['previewPort', 'previewPath'],
   schedules: ['scheduleTab', 'scheduleDialog', 'jobId', 'runId'],
 }
@@ -63,6 +64,18 @@ export function clearToolPanelParams(params: URLSearchParams): void {
   clearToolParams(params)
 }
 
+/** Rewrites a legacy `walkthrough` panel or dialog into the `outputs` tool with `output=walkthrough`. */
+export function migrateLegacyOutputParams(params: URLSearchParams): boolean {
+  let changed = false
+  for (const key of [PANEL_PARAM, 'dialog']) {
+    if (params.get(key) !== 'walkthrough') continue
+    params.set(key, 'outputs')
+    if (!params.has('output')) params.set('output', 'walkthrough')
+    changed = true
+  }
+  return changed
+}
+
 /**
  * Toggles a tool in the desktop tool panel from anywhere outside the panel: closes it when it is already
  * open, switches the open panel in place, or opens it with a new history entry.
@@ -99,6 +112,11 @@ export function useToolPanel(panelAvailable: boolean): ToolPanelState {
   const activeTool = panelAvailable && isPanelTool(panelParam) ? panelParam : null
 
   useEffect(() => {
+    const migrated = new URLSearchParams(searchParams)
+    if (migrateLegacyOutputParams(migrated)) {
+      updateParams(migrateLegacyOutputParams, 'replace')
+      return
+    }
     if (panelAvailable && isPanelTool(dialogParam)) {
       updateParams((params) => {
         params.delete('dialog')
@@ -117,7 +135,7 @@ export function useToolPanel(panelAvailable: boolean): ToolPanelState {
         if (!params.has('dialog')) params.set('dialog', panelParam)
       }, 'replace')
     }
-  }, [panelAvailable, dialogParam, panelParam, updateParams])
+  }, [panelAvailable, dialogParam, panelParam, searchParams, updateParams])
 
   const closePanel = useCallback(() => {
     closePushedParams(clearToolPanelParams)

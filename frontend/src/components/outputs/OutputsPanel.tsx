@@ -372,10 +372,12 @@ export function OutputsPanel({
                     A walkthrough covers changed files. Change something, then generate one.
                   </p>
                 </div>
-              ) : (
+              ) : definition.provider === 'changes' ? (
                 <p className="text-sm text-muted-foreground">
                   Build a {labelLower} of {describeChangeSource(source)}.
                 </p>
+              ) : (
+                <p className="text-sm text-muted-foreground">Generate this {labelLower}.</p>
               )
             ) : null}
 

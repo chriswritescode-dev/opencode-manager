@@ -1,30 +1,30 @@
 import { useEffect, useRef } from 'react'
 import type { SessionMessageInfo } from '@opencode-manager/shared/opencode'
-import type { ChangeSource } from '@opencode-manager/shared/schemas'
-import { collectOpenWalkthroughCalls } from '@/lib/walkthroughTool'
+import type { OutputParams } from '@opencode-manager/shared/schemas'
+import { collectOpenOutputCalls } from '@/lib/outputTool'
 
-interface UseAutoOpenWalkthroughOptions {
+interface UseAutoOpenOutputsOptions {
   sessionId: string | undefined
   messages: SessionMessageInfo[]
   enabled: boolean
   loading: boolean
-  onOpen: (source?: ChangeSource) => void
+  onOpen: (definitionId: string, params?: OutputParams) => void
 }
 
 /**
- * Opens the change walkthrough when an `open_walkthrough` tool call completes live in the viewed
- * session. Calls present at the first loaded render are treated as history and ignored, and calls in
- * messages older than that render's oldest message stay ignored when the transcript pages in older
- * history. Each call opens at most once. `enabled` gates the automatic open so a mode where the
- * walkthrough is a full-screen dialog (mobile) leaves the user to open it from the tool call row.
+ * Opens an output when an `open_output` tool call completes live in the viewed session. Calls present
+ * at the first loaded render are treated as history and ignored, and calls in messages older than
+ * that render's oldest message stay ignored when the transcript pages in older history. Each call
+ * opens at most once. `enabled` gates the automatic open so a mode where the output is a full-screen
+ * dialog (mobile) leaves the user to open it from the tool call row.
  */
-export function useAutoOpenWalkthrough({
+export function useAutoOpenOutputs({
   sessionId,
   messages,
   enabled,
   loading,
   onOpen,
-}: UseAutoOpenWalkthroughOptions): void {
+}: UseAutoOpenOutputsOptions): void {
   const seenRef = useRef<Set<string> | null>(null)
   const frontierRef = useRef<string | null>(null)
   const lastScannedRef = useRef<string | null>(null)
@@ -41,7 +41,7 @@ export function useAutoOpenWalkthrough({
     }
     if (loading) return
     if (seenRef.current === null) {
-      seenRef.current = new Set(collectOpenWalkthroughCalls(messages).map((call) => call.id))
+      seenRef.current = new Set(collectOpenOutputCalls(messages).map((call) => call.id))
       frontierRef.current = messages[0]?.id ?? null
       lastScannedRef.current = messages[messages.length - 1]?.id ?? null
       return
@@ -65,12 +65,12 @@ export function useAutoOpenWalkthrough({
     }
     lastScannedRef.current = messages[messages.length - 1]?.id ?? null
     let opened = false
-    for (const call of collectOpenWalkthroughCalls(liveMessages)) {
+    for (const call of collectOpenOutputCalls(liveMessages)) {
       if (seenRef.current.has(call.id)) continue
       seenRef.current.add(call.id)
       if (enabled && !opened) {
         opened = true
-        onOpenRef.current(call.source)
+        onOpenRef.current(call.definitionId, call.params)
       }
     }
   }, [sessionId, messages, enabled, loading])

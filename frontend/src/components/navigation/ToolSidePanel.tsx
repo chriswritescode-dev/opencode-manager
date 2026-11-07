@@ -7,14 +7,8 @@ import { FileBrowser } from '@/components/file-browser/FileBrowser'
 import { SourceControlContent } from '@/components/source-control'
 import { RemoteSourceControlContent } from '@/components/source-control/RemoteSourceControlContent'
 import { TerminalWorkspace } from '@/components/terminal/TerminalPanel'
-import {
-  ChangesWalkthroughCancel,
-  ChangesWalkthroughProvider,
-  ChangesWalkthroughRegenerate,
-  ChangesWalkthroughSourcePicker,
-  ChangesWalkthroughView,
-  type WalkthroughSourceRequest,
-} from '@/components/session/ChangesWalkthroughSheet'
+import { OutputsPanel } from '@/components/outputs/OutputsPanel'
+import type { OutputOpenRequest } from '@/components/outputs/OutputsPanel'
 import { PreviewWorkspace } from '@/components/preview/PreviewPanel'
 import { RepoMcpContent } from '@/components/repo/RepoMcpDialog'
 import { RepoActionsContent } from '@/components/repo/RepoActionsDialog'
@@ -22,6 +16,7 @@ import { RepoSkillsContent } from '@/components/repo/RepoSkillsDialog'
 import { RepoSecretsContent } from '@/components/secrets/RepoSecretsDialog'
 import { RepoSchedulesContent } from '@/components/schedules/RepoSchedulesContent'
 import type { SkillFileInfo } from '@opencode-manager/shared'
+import { DEFAULT_OUTPUT_DEFINITION_ID } from '@opencode-manager/shared/schemas'
 import type { ModelRef } from '@opencode-manager/shared/opencode'
 import { buildToolItems, toolKeyOf, type MoreDrawerItem } from '@/components/navigation/moreDrawerItems'
 import { isPanelTool, type ToolPanelState, type PanelTool } from '@/hooks/useToolPanel'
@@ -37,6 +32,7 @@ import { restoreOverlayFocus } from '@/lib/overlayFocus'
 import { useRestoreFocusOnClose } from '@/hooks/useRestoreFocusOnClose'
 import { cn } from '@/lib/utils'
 import { useToolPanelLayout, useToolPanelWidth } from '@/hooks/useToolPanelLayout'
+import { useUrlParams } from '@/hooks/useUrlParams'
 import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 
 interface PanelResizeState {
@@ -215,10 +211,12 @@ interface ToolSidePanelProps {
   repoDirectory?: string
   currentBranch?: string
   selectedFilePath?: string
+  selectedFileLine?: number
   onSkillLoaded?: (skill: SkillFileInfo) => void
-  walkthroughSourceRequest?: WalkthroughSourceRequest
-  walkthroughModel?: ModelRef | null
-  walkthroughOnOpenSession?: (id: string) => void
+  outputRequest?: OutputOpenRequest
+  outputModel?: ModelRef | null
+  onOpenOutputSession?: (id: string) => void
+  onOpenFile?: (path: string, line?: number) => void
   /**
    * Path the session picker opens after the open session is deleted; the session page passes the
    * remote project path on linked-server routes.
@@ -285,13 +283,17 @@ export function ToolSidePanel({
   repoDirectory,
   currentBranch = 'main',
   selectedFilePath,
+  selectedFileLine,
   onSkillLoaded,
-  walkthroughSourceRequest,
-  walkthroughModel,
-  walkthroughOnOpenSession,
+  outputRequest,
+  outputModel,
+  onOpenOutputSession,
+  onOpenFile,
   deleteActiveSessionPath,
 }: ToolSidePanelProps) {
   const { activeTool, toggleTool, closePanel } = panel
+  const { searchParams, updateParams } = useUrlParams()
+  const outputDefinitionId = searchParams.get('output') ?? DEFAULT_OUTPUT_DEFINITION_ID
   const location = useLocation()
   const openNavItem = useOpenNavItem()
   const routeServerId = useRouteOpenCodeServerId()
@@ -329,6 +331,13 @@ export function ToolSidePanel({
     }
   }, [activeTool])
 
+  const handleOutputDefinitionChange = useCallback(
+    (definitionId: string) => {
+      updateParams((params) => params.set('output', definitionId), 'replace')
+    },
+    [updateParams],
+  )
+
   const panelTools: Array<{ item: MoreDrawerItem; tool: PanelTool }> = []
   const actionItems: MoreDrawerItem[] = []
   const terminalWorkspaceTarget: TerminalTarget | undefined =
@@ -352,12 +361,23 @@ export function ToolSidePanel({
           basePath={filesBasePath || '.'}
           allowNavigateAboveBase={allowNavigateAboveBase}
           initialSelectedFile={selectedFilePath}
+          initialSelectedLine={selectedFileLine}
         />
       )
     }
     if (tool === 'preview') return <PreviewWorkspace isOpen directory={directory} compact />
     if (tool === 'mcp') return repoDirectory ? <RepoMcpContent open directory={repoDirectory} /> : null
-    if (tool === 'walkthrough') return sessionId ? <ChangesWalkthroughView /> : null
+    if (tool === 'outputs') return sessionId ? (
+      <OutputsPanel
+        sessionId={sessionId}
+        definitionId={outputDefinitionId}
+        onDefinitionChange={handleOutputDefinitionChange}
+        request={outputRequest}
+        model={outputModel}
+        onOpenSession={onOpenOutputSession}
+        onOpenFile={onOpenFile}
+      />
+    ) : null
     if (tool === 'sessions') {
       return <SessionsPanelBody docked={docked} onClose={closePanel} deleteActiveSessionPath={deleteActiveSessionPath} />
     }
@@ -436,13 +456,6 @@ export function ToolSidePanel({
           ) : null}
           <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
             <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{activeLabel}</h2>
-            {activeTool === 'walkthrough' ? (
-              <>
-                <ChangesWalkthroughSourcePicker />
-                <ChangesWalkthroughCancel />
-                <ChangesWalkthroughRegenerate />
-              </>
-            ) : null}
             <button
               type="button"
               onClick={closePanel}
@@ -464,22 +477,7 @@ export function ToolSidePanel({
 
   return (
     <>
-      {panelContent ? (
-        activeTool === 'walkthrough' && sessionId ? (
-          <ChangesWalkthroughProvider
-            key={sessionId}
-            sessionId={sessionId}
-            active
-            sourceRequest={walkthroughSourceRequest}
-            model={walkthroughModel}
-            onOpenSession={walkthroughOnOpenSession}
-          >
-            {panelContent}
-          </ChangesWalkthroughProvider>
-        ) : (
-          panelContent
-        )
-      ) : null}
+      {panelContent}
 
       <TooltipProvider>
         <nav ref={railRef} aria-label="Tools" className="flex w-11 shrink-0 flex-col items-center gap-1 overflow-y-auto border-l border-border bg-background py-2">

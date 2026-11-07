@@ -16,7 +16,7 @@ import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { NotFoundState } from "@/components/ui/not-found-state";
 import { useSession, useInterruptSession, useUpdateSession, useCreateSession } from "@/hooks/useOpenCode";
 import { useSessionTranscript } from "@/hooks/useSessionTranscript";
-import { useAutoOpenWalkthrough } from "@/hooks/useAutoOpenWalkthrough";
+import { useAutoOpenOutputs } from "@/hooks/useAutoOpenOutputs";
 import { useRepoActivity } from "@/hooks/useRepoActivity";
 import { useRepoSiblings } from "@/hooks/useRepoSiblings";
 import { useSSE } from "@/hooks/useSSE";
@@ -74,15 +74,17 @@ import { ReconnectingBanner } from "@/components/session/ReconnectingBanner";
 import { SessionDetailsSheet } from "@/components/session/SessionDetailsSheet";
 import { BackgroundWorkBar } from "@/components/session/BackgroundWorkBar";
 import { SessionGoalBar } from "@/components/session/SessionGoalBar";
-import { useDialogParam } from "@/hooks/useDialogParam";
+import { openDialogParam, useDialogParam } from "@/hooks/useDialogParam";
 import { useTerminalDialogParam } from "@/hooks/useOpenTerminal";
 import { SessionMoreButton } from "@/components/navigation/SessionMoreButton";
 import { SideQuestionDialog } from "@/components/session/SideQuestionDialog";
 import { SessionMessagePickerDialog } from "@/components/session/SessionMessagePickerDialog";
-import { ChangesWalkthroughSheet, type WalkthroughSourceRequest } from "@/components/session/ChangesWalkthroughSheet";
+import { OutputSheet } from "@/components/outputs/OutputSheet";
+import type { OutputOpenRequest } from "@/components/outputs/OutputsPanel";
 import { ToolSidePanel } from "@/components/navigation/ToolSidePanel";
-import type { ChangeSource } from "@opencode-manager/shared/schemas";
+import type { OutputParams } from "@opencode-manager/shared/schemas";
 import { useToolPanel } from "@/hooks/useToolPanel";
+import { useUrlParams } from "@/hooks/useUrlParams";
 
 const OLDER_HISTORY_SCROLL_THRESHOLD_PX = 200
 
@@ -149,9 +151,10 @@ export function SessionDetail() {
   const [actionsDialogOpen, setActionsDialogOpen] = useDialogParam('actions');
   const [previewOpen, setPreviewOpen] = useDialogParam('preview');
   const [resetPermissionsOpen, setResetPermissionsOpen] = useDialogParam('resetPermissions');
-  const [walkthroughOpen, setWalkthroughOpen] = useDialogParam('walkthrough');
-  const [requestedChangeSource, setRequestedChangeSource] = useState<WalkthroughSourceRequest | null>(null);
+  const [outputsOpen, setOutputsOpen] = useDialogParam('outputs');
+  const [requestedOutput, setRequestedOutput] = useState<OutputOpenRequest | null>(null);
   const [selectedFilePath, setSelectedFilePath] = useState<string | undefined>();
+  const [selectedFileLine, setSelectedFileLine] = useState<number | undefined>();
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [hasPromptContent, setHasPromptContent] = useState(false);
   const [hasComposerSuggestions, setHasComposerSuggestions] = useState(false);
@@ -167,6 +170,13 @@ export function SessionDetail() {
   const { docked, showRail } = useToolPanelLayout();
   const sidePanel = useToolPanel(showRail);
   const { activeTool: activePanelTool, toggleTool: togglePanelTool } = sidePanel;
+  const { searchParams, updateParams } = useUrlParams();
+  const outputDefinitionId = searchParams.get('output') ?? 'walkthrough';
+  const setOutputDefinition = useCallback((definitionId: string) => {
+    updateParams((params) => {
+      params.set('output', definitionId)
+    }, 'replace')
+  }, [updateParams]);
   const { keyboardHeight } = useVisualViewport();
   const inputBottomOffset = isMobile ? keyboardHeight : 0;
   const promptOverlayObserverRef = useRef<ResizeObserver | null>(null);
@@ -382,27 +392,24 @@ export function SessionDetail() {
   }, [isMobile, openMobileSheet, activePanelTool, togglePanelTool]);
   const handleShowMcpDialog = useCallback(() => setMcpDialogOpen(true), [setMcpDialogOpen]);
   const handleShowSkillsDialog = useCallback(() => setSkillsDialogOpen(true), [setSkillsDialogOpen]);
-  const handleShowWalkthrough = useCallback((source?: ChangeSource) => {
-    setRequestedChangeSource({
-      sessionId: sessionId ?? '',
-      source,
-    });
-    setWalkthroughOpen(true);
-  }, [sessionId, setWalkthroughOpen]);
-  const handleShowWalkthroughCommand = useCallback(() => handleShowWalkthrough(), [handleShowWalkthrough]);
-  const walkthroughSourceRequest =
-    requestedChangeSource && requestedChangeSource.sessionId === (sessionId ?? '')
-      ? requestedChangeSource
+  const handleShowOutput = useCallback((definitionId: string, params?: OutputParams) => {
+    setRequestedOutput({ sessionId: sessionId ?? '', definitionId, params });
+    openDialogParam(updateParams, 'outputs', { output: definitionId });
+  }, [sessionId, updateParams]);
+  const handleShowOutputCommand = useCallback(() => handleShowOutput('walkthrough'), [handleShowOutput]);
+  const outputRequest =
+    requestedOutput && requestedOutput.sessionId === (sessionId ?? '')
+      ? requestedOutput
       : undefined;
   const handleSkillLoaded = useCallback((skill: SkillFileInfo) => showToast.success(`Loaded skill: ${skill.name}`), []);
   const handleConnectProvider = useCallback(() => openSettingsTab('providers'), [openSettingsTab]);
 
-  useAutoOpenWalkthrough({
+  useAutoOpenOutputs({
     sessionId,
     messages,
     enabled: docked && !isRemoteServer,
     loading: messagesLoading,
-    onOpen: handleShowWalkthrough,
+    onOpen: handleShowOutput,
   });
 
   const handleMinimizeForm = useCallback((form: FormInfo) => {
@@ -560,12 +567,13 @@ export function SessionDetail() {
     }
   };
 
-  const handleFileClick = useCallback((filePath: string) => {
+  const handleFileClick = useCallback((filePath: string, line?: number) => {
     setSelectedFilePath(getWorkspaceFilePath(filePath, {
       directory: sessionDirectory,
       repoFullPath: repo?.fullPath,
       repoLocalPath: repo?.localPath,
     }))
+    setSelectedFileLine(line)
     setFileBrowserOpen(true)
   }, [repo?.fullPath, repo?.localPath, sessionDirectory, setFileBrowserOpen]);
 
@@ -590,7 +598,10 @@ export function SessionDetail() {
 
   const filesVisible = fileBrowserOpen || sidePanel.activeTool === 'files';
   useEffect(() => {
-    if (!filesVisible) setSelectedFilePath(undefined);
+    if (!filesVisible) {
+      setSelectedFilePath(undefined);
+      setSelectedFileLine(undefined);
+    }
   }, [filesVisible]);
 
   const handleChildSessionClick = useCallback((childSessionId: string) => {
@@ -668,7 +679,7 @@ export function SessionDetail() {
     redo: handleRedo,
     showMcp: handleShowMcpDialog,
     showSkills: handleShowSkillsDialog,
-    showWalkthrough: handleShowWalkthroughCommand,
+    showWalkthrough: handleShowOutputCommand,
     showSettings: openSettings,
     connectProvider: handleConnectProvider,
   }), [
@@ -687,7 +698,7 @@ export function SessionDetail() {
     handleRedo,
     handleShowMcpDialog,
     handleShowSkillsDialog,
-    handleShowWalkthroughCommand,
+    handleShowOutputCommand,
     openSettings,
     handleConnectProvider,
   ]);
@@ -892,7 +903,7 @@ export function SessionDetail() {
               isSessionBusy={isSessionActive}
               onFileClick={isRemoteServer ? undefined : handleFileClick}
               onChildSessionClick={handleChildSessionClick}
-              onOpenWalkthrough={isRemoteServer ? undefined : handleShowWalkthrough}
+              onOpenOutput={isRemoteServer ? undefined : handleShowOutput}
               onUndoMessage={handleUndoMessage}
               model={modelRef ? formatOpenCodeModelRef(modelRef) : undefined}
             />
@@ -1025,12 +1036,14 @@ export function SessionDetail() {
           filesBasePath={workspaceBasePath}
           currentBranch={repo?.currentBranch || repo?.branch || "main"}
           selectedFilePath={selectedFilePath}
+          selectedFileLine={selectedFileLine}
           repoDirectory={isRemoteServer ? sessionDirectory : repoDirectory}
           terminalTarget={isRemoteServer ? { kind: 'server', serverId } : { kind: 'repo', repoId }}
           onSkillLoaded={handleSkillLoaded}
-          walkthroughSourceRequest={walkthroughSourceRequest}
-          walkthroughModel={modelRef}
-          walkthroughOnOpenSession={handleChildSessionClick}
+          outputRequest={outputRequest}
+          outputModel={modelRef}
+          onOpenOutputSession={handleChildSessionClick}
+          onOpenFile={isRemoteServer ? undefined : handleFileClick}
           deleteActiveSessionPath={isRemoteServer ? remoteProjectBackPath : undefined}
         />
       )}
@@ -1082,6 +1095,7 @@ export function SessionDetail() {
           repoName={projectDisplayName}
           repoId={repoId}
           initialSelectedFile={selectedFilePath}
+          initialSelectedLine={selectedFileLine}
         />
       )}
 
@@ -1097,13 +1111,16 @@ export function SessionDetail() {
       )}
 
       {!isRemoteServer && sessionId && (
-        <ChangesWalkthroughSheet
+        <OutputSheet
           sessionId={sessionId}
-          open={!docked && walkthroughOpen}
-          onOpenChange={setWalkthroughOpen}
-          sourceRequest={walkthroughSourceRequest}
+          open={!docked && outputsOpen}
+          onOpenChange={setOutputsOpen}
+          definitionId={outputDefinitionId}
+          onDefinitionChange={setOutputDefinition}
+          request={outputRequest}
           model={modelRef}
           onOpenSession={handleChildSessionClick}
+          onOpenFile={handleFileClick}
         />
       )}
 

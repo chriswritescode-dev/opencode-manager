@@ -398,6 +398,13 @@ describe('OutputsPanel', () => {
     })
   })
 
+  it('uses a neutral idle prompt for a definition without the changes provider', async () => {
+    renderPanel({ definitionId: 'summary' })
+
+    expect(await screen.findByText('Generate this summary.')).toBeInTheDocument()
+    expect(screen.queryByText(/changes in this session/i)).not.toBeInTheDocument()
+  })
+
   it('shows the no-input empty state when hasInput is false', async () => {
     mocks.getOutputState.mockResolvedValue(
       state(WALKTHROUGH_OUTPUT_DEFINITION, { hasInput: false }),

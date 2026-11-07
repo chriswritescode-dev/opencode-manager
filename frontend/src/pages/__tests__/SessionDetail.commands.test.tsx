@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   useMobile: vi.fn(),
   useAutoScroll: vi.fn(),
   dialogSetters: {} as Record<string, ReturnType<typeof vi.fn>>,
+  useRealDialogParams: false,
   openSettings: vi.fn(),
   openSettingsTab: vi.fn(),
   useSessionStatusForSession: vi.fn(),
@@ -141,9 +142,16 @@ vi.mock('@/hooks/useAutoScroll', () => ({
   useAutoScroll: mocks.useAutoScroll,
 }))
 
-vi.mock('@/hooks/useDialogParam', () => ({
-  useDialogParam: vi.fn((name: string) => [false, mocks.dialogSetters[name]]),
-}))
+vi.mock('@/hooks/useDialogParam', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/useDialogParam')>()
+  return {
+    ...actual,
+    useDialogParam: (name: string): [boolean, (open: boolean) => void] =>
+      mocks.useRealDialogParams
+        ? actual.useDialogParam(name)
+        : [false, mocks.dialogSetters[name] as (open: boolean) => void],
+  }
+})
 
 vi.mock('@/hooks/useAutoPlayLastResponse', () => ({
   getAssistantText: vi.fn(() => ''),
@@ -214,7 +222,7 @@ vi.mock('@/hooks/useSessionGoals', () => ({
   useSessionGoalCommand: vi.fn(() => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false })),
 }))
 vi.mock('@/components/session/SideQuestionDialog', () => ({ SideQuestionDialog: vi.fn(() => null) }))
-vi.mock('@/components/session/ChangesWalkthroughSheet', () => ({ ChangesWalkthroughSheet: vi.fn(() => null) }))
+vi.mock('@/components/outputs/OutputSheet', () => ({ OutputSheet: vi.fn(() => null) }))
 vi.mock('@/components/navigation/ToolSidePanel', () => ({ ToolSidePanel: vi.fn(() => null) }))
 vi.mock('@/components/file-browser/FileBrowserSheet', () => ({ FileBrowserSheet: vi.fn(() => null) }))
 vi.mock('@/components/repo/RepoMcpDialog', () => ({ RepoMcpDialog: vi.fn(() => null) }))
@@ -275,6 +283,7 @@ describe('SessionDetail command actions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.promptInputProps = null
+    mocks.useRealDialogParams = false
 
     mocks.useSession.mockReturnValue({ data: createSession(), isLoading: false })
     mocks.useSessionTranscript.mockReturnValue({
@@ -306,7 +315,7 @@ describe('SessionDetail command actions', () => {
       skills: vi.fn(),
       sourceControl: vi.fn(),
       resetPermissions: vi.fn(),
-      walkthrough: vi.fn(),
+      outputs: vi.fn(),
     }
     mocks.useSessionStatusForSession.mockReturnValue({ type: 'idle' })
     mocks.compactSession.mockResolvedValue(undefined)
@@ -730,15 +739,35 @@ describe('SessionDetail command actions', () => {
     expect(mocks.dialogSetters.skills).toHaveBeenCalledWith(true)
   })
 
-  it('opens the walkthrough dialog from the showWalkthrough command action', async () => {
-    renderSessionDetail()
+  it('opens the outputs tool from the showWalkthrough command action', async () => {
+    const captured = { search: { current: '' }, pathname: { current: '' } }
+
+    renderSessionDetail(captured)
     const showWalkthrough = await commandHandler('showWalkthrough')
 
     await act(async () => {
       await showWalkthrough()
     })
 
-    expect(mocks.dialogSetters.walkthrough).toHaveBeenCalledWith(true)
+    await waitFor(() => expect(captured.search.current).toContain('output=walkthrough'))
+  })
+
+  it('opens the outputs panel with its definition in one navigation', async () => {
+    mocks.useRealDialogParams = true
+    const captured = { search: { current: '' }, pathname: { current: '' } }
+
+    renderSessionDetail(captured)
+    const showWalkthrough = await commandHandler('showWalkthrough')
+
+    await act(async () => {
+      await showWalkthrough()
+    })
+
+    await waitFor(() => {
+      const params = new URLSearchParams(captured.search.current)
+      expect(params.get('output')).toBe('walkthrough')
+      expect(params.get('panel') ?? params.get('dialog')).toBe('outputs')
+    })
   })
 
   it('opens settings from the showSettings command action', async () => {

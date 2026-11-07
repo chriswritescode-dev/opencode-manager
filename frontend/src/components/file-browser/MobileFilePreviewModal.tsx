@@ -10,6 +10,7 @@ interface MobileFilePreviewModalProps {
   onClose: () => void;
   file: FileInfo | null;
   showFilePreviewHeader?: boolean;
+  initialLineNumber?: number;
   onOpenFile?: (path: string) => void;
 }
 
@@ -18,6 +19,7 @@ export const MobileFilePreviewModal = memo(function MobileFilePreviewModal({
   onClose,
   file,
   showFilePreviewHeader = false,
+  initialLineNumber,
   onOpenFile,
 }: MobileFilePreviewModalProps) {
   const [localFile, setLocalFile] = useState<FileInfo | null>(null);
@@ -79,6 +81,7 @@ export const MobileFilePreviewModal = memo(function MobileFilePreviewModal({
             hideHeader={!showFilePreviewHeader}
             isMobileModal={showFilePreviewHeader}
             onCloseModal={handleClose}
+            initialLineNumber={initialLineNumber}
             onOpenFile={onOpenFile}
           />
         </div>

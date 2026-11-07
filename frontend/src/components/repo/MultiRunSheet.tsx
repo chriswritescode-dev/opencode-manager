@@ -13,7 +13,7 @@ import { BranchCombobox } from '@/components/repo/BranchCombobox'
 import { ModelCheckboxList } from '@/components/repo/ModelCheckboxList'
 import { MultiRunCard } from '@/components/repo/MultiRunCard'
 import { FusionComposer, type FusionComposerSubmission } from '@/components/repo/FusionComposer'
-import { ChangesWalkthroughSheet } from '@/components/session/ChangesWalkthroughSheet'
+import { OutputSheet } from '@/components/outputs/OutputSheet'
 import { useModelSections } from '@/hooks/useModelSections'
 import { useDiscardMultiRunEntry, useFuseMultiRun, useLaunchMultiRun, useMultiRuns } from '@/hooks/useMultiRuns'
 import { filterModelSections } from '@/lib/modelSections'
@@ -70,7 +70,8 @@ export function MultiRunSheet({ target, directory, defaultBaseRef, open, onOpenC
   const [selection, setSelection] = useState<FusionSelection | null>(null)
   const [fusionRequestId, setFusionRequestId] = useState(() => randomId())
   const [pendingDiscard, setPendingDiscard] = useState<PendingDiscard | null>(null)
-  const [walkthroughSessionId, setWalkthroughSessionId] = useState<string | null>(null)
+  const [outputSessionId, setOutputSessionId] = useState<string | null>(null)
+  const [outputDefinitionId, setOutputDefinitionId] = useState('walkthrough')
 
   const runsQuery = useMultiRuns(target, open)
   const fuse = useFuseMultiRun(target)
@@ -205,7 +206,14 @@ export function MultiRunSheet({ target, directory, defaultBaseRef, open, onOpenC
                     onExitSelection={exitSelection}
                     onToggleEntry={toggleEntry}
                     onOpenSession={openSession}
-                    onWalkthrough={target.kind === 'repo' ? setWalkthroughSessionId : undefined}
+                    onWalkthrough={
+                      target.kind === 'repo'
+                        ? (sessionId) => {
+                            setOutputDefinitionId('walkthrough')
+                            setOutputSessionId(sessionId)
+                          }
+                        : undefined
+                    }
                     onDiscard={(entry) => setPendingDiscard({ runId: run.id, entry })}
                   />
                 ))
@@ -259,13 +267,15 @@ export function MultiRunSheet({ target, directory, defaultBaseRef, open, onOpenC
         isPending={discard.isPending}
       />
 
-      {walkthroughSessionId ? (
-        <ChangesWalkthroughSheet
-          sessionId={walkthroughSessionId}
+      {outputSessionId ? (
+        <OutputSheet
+          sessionId={outputSessionId}
           open
           onOpenChange={(next) => {
-            if (!next) setWalkthroughSessionId(null)
+            if (!next) setOutputSessionId(null)
           }}
+          definitionId={outputDefinitionId}
+          onDefinitionChange={setOutputDefinitionId}
           onOpenSession={(id) => navigate(multiRunSessionPath(target, id, false))}
         />
       ) : null}

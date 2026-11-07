@@ -77,6 +77,8 @@ export const WALKTHROUGH_OUTPUT_DEFINITION: OutputDefinition = OutputDefinitionS
 
 export const BUILTIN_OUTPUT_DEFINITIONS = [WALKTHROUGH_OUTPUT_DEFINITION]
 
+export const DEFAULT_OUTPUT_DEFINITION_ID = WALKTHROUGH_OUTPUT_DEFINITION.id
+
 export function isBuiltinOutputDefinitionId(id: string): boolean {
   return BUILTIN_OUTPUT_DEFINITIONS.some((definition) => definition.id === id)
 }

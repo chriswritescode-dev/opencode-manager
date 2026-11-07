@@ -285,7 +285,7 @@ describe('MoreDrawer', () => {
     const sectionLabels = (name: string) =>
       within(screen.getByRole('region', { name })).getAllByRole('button').map((button) => button.textContent)
 
-    expect(sectionLabels('Workspace')).toEqual(['Files', 'Source Control', 'Terminal', 'Walkthrough', 'Preview'])
+    expect(sectionLabels('Workspace')).toEqual(['Files', 'Source Control', 'Terminal', 'Outputs', 'Preview'])
     expect(sectionLabels('Project')).toEqual(['MCP', 'Skills', 'Reset Permissions', 'Schedules', 'Actions'])
     expect(screen.getAllByText('Settings')).toHaveLength(1)
     expect(screen.getAllByText('Logout')).toHaveLength(1)
