@@ -2,11 +2,18 @@ import type { Repo, Session } from '@/api/types'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { getRepoBranchLabel, getRepoDisplayName } from '@/lib/utils'
 import { getSessionKey } from '@/lib/sessionKey'
-import { getSessionPath, isAssistantPath, parseRepoRoute, parseServerSessionRoute } from '@/lib/navigation'
+import {
+  getSessionPath,
+  isAssistantPath,
+  parseChatSessionRoute,
+  parseRepoRoute,
+  parseServerSessionRoute,
+} from '@/lib/navigation'
 import { partitionSessions, selectRootSessions } from '@/components/session/session-partition'
 import type { ActiveWorktree } from '@/lib/activeWork'
 
 export const SIDEBAR_SESSIONS_PER_REPO = 10
+export const SIDEBAR_CHATS_PER_PAGE = 3
 
 /** Collects the loaded session from each query result, dropping unresolved queries. */
 export const combineQuerySessions = (results: Array<{ data?: Session }>): Session[] =>
@@ -28,8 +35,11 @@ export function mergeExtraSessions(sessions: Session[], extraSessions: Session[]
 export interface SidebarSessionItem {
   key: string
   session: Session
-  repoId: number
-  /** The linked server owning the session; absent for local repo sessions. */
+  /** The repository owning the session; absent for chat and linked-server sessions. */
+  repoId?: number
+  /** The chat folder owning the session; absent for repo and linked-server sessions. */
+  chatId?: string
+  /** The linked server owning the session; absent for local repo and chat sessions. */
   serverId?: string
   repoLabel: string
   branchLabel: string | null
@@ -48,6 +58,10 @@ export interface SidebarRepoGroup {
 }
 
 export function isCurrentSessionItem(item: SidebarSessionItem, pathname: string): boolean {
+  if (item.chatId) {
+    const selection = parseChatSessionRoute(pathname)
+    return selection?.chatId === item.chatId && item.session.id === selection.sessionId
+  }
   if (item.serverId) {
     const selection = parseServerSessionRoute(pathname)
     return selection?.serverId === item.serverId && item.session.id === selection.sessionId
