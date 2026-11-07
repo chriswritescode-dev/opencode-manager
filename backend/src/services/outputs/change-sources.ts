@@ -61,8 +61,8 @@ export async function resolvePullRequestRefs(
   return {
     remote,
     baseBranch,
-    headRef: `refs/ocm-walkthrough/${sessionId}/pr/${source.number}/head`,
-    baseRef: `refs/ocm-walkthrough/${sessionId}/pr/${source.number}/base/${baseBranch}`,
+    headRef: `refs/ocm-output/${sessionId}/pr/${source.number}/head`,
+    baseRef: `refs/ocm-output/${sessionId}/pr/${source.number}/base/${baseBranch}`,
   }
 }
 
@@ -204,7 +204,7 @@ async function readUntrackedDiff(directory: string, gitEnv?: Record<string, stri
     return ''
   }
 
-  const tempDir = mkdtempSync(path.join(tmpdir(), 'ocm-walkthrough-index-'))
+  const tempDir = mkdtempSync(path.join(tmpdir(), 'ocm-output-index-'))
   const tempIndex = path.join(tempDir, 'index')
   const env = { ...gitEnv, GIT_INDEX_FILE: tempIndex }
 

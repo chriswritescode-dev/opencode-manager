@@ -499,6 +499,23 @@ describe('OutputService', () => {
     expect(fake.createCalls[0]!.model).toEqual({ providerID: 'openai', id: 'gpt-5' })
   })
 
+  it('prefers the output model over the legacy walkthrough model', async () => {
+    new SettingsService(db).updateSettings({
+      outputModel: 'openai/gpt-5',
+      walkthroughModel: 'anthropic/claude-sonnet-4',
+    })
+    sessions[SESSION_ID]!.info = {
+      id: SESSION_ID,
+      title: 'Title',
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+      location: { directory: '/abs/repo' },
+    } as SessionInfo
+
+    await service.startGeneration(SESSION_ID, { definitionId: DEFINITION_ID, model: 'openai/gpt-5-mini' })
+
+    expect(fake.createCalls[0]!.model).toEqual({ providerID: 'openai', id: 'gpt-5' })
+  })
+
   it('uses the request model over the session model', async () => {
     sessions[SESSION_ID]!.info = {
       id: SESSION_ID,
@@ -617,8 +634,8 @@ describe('OutputService', () => {
         git(['fetch', remote, ...refspecs], target.fullPath)
       })
 
-      const headRef = `refs/ocm-walkthrough/${SESSION_ID}/pr/1/head`
-      const baseRef = `refs/ocm-walkthrough/${SESSION_ID}/pr/1/base/main`
+      const headRef = `refs/ocm-output/${SESSION_ID}/pr/1/head`
+      const baseRef = `refs/ocm-output/${SESSION_ID}/pr/1/base/main`
 
       await service.startGeneration(SESSION_ID, {
         definitionId: DEFINITION_ID,

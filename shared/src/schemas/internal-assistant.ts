@@ -9,21 +9,24 @@ export const MANAGER_PROMPT_CLIENTS = ['mobile', 'desktop'] as const
 
 export type ManagerPromptClient = (typeof MANAGER_PROMPT_CLIENTS)[number]
 
-export const MANAGER_TOOL_OPEN_WALKTHROUGH_ACTION = 'open_walkthrough'
+export const MANAGER_TOOL_OPEN_OUTPUT_ACTION = 'open_output'
 
 export const MANAGER_TOOL_SHOW_ARTIFACT_ACTION = 'show_artifact'
 
-export const MANAGER_TOOL_WALKTHROUGH_CHANGES_ACTION = 'walkthrough_changes'
+export const MANAGER_TOOL_DEFINE_OUTPUT_ACTION = 'define_output'
 
-export const MANAGER_TOOL_PUBLISH_WALKTHROUGH_ACTION = 'publish_walkthrough'
+export const MANAGER_TOOL_READ_OUTPUT_INPUT_ACTION = 'read_output_input'
+
+export const MANAGER_TOOL_PUBLISH_OUTPUT_ACTION = 'publish_output'
 
 export const MANAGER_TOOL_ACTIONS = [
   'send_notification',
   'request',
-  MANAGER_TOOL_OPEN_WALKTHROUGH_ACTION,
+  MANAGER_TOOL_OPEN_OUTPUT_ACTION,
   MANAGER_TOOL_SHOW_ARTIFACT_ACTION,
-  MANAGER_TOOL_WALKTHROUGH_CHANGES_ACTION,
-  MANAGER_TOOL_PUBLISH_WALKTHROUGH_ACTION,
+  MANAGER_TOOL_DEFINE_OUTPUT_ACTION,
+  MANAGER_TOOL_READ_OUTPUT_INPUT_ACTION,
+  MANAGER_TOOL_PUBLISH_OUTPUT_ACTION,
 ] as const
 
 export const ARTIFACT_LIMITS = {
@@ -45,18 +48,6 @@ export const ShowArtifactParamsSchema = z
   .strict()
 
 export type ShowArtifactParams = z.infer<typeof ShowArtifactParamsSchema>
-
-export const WalkthroughChangesParamsSchema = z
-  .object({
-    file: z.string().min(1).max(1000).optional().describe('A changed file path from the outline; omit for the outline.'),
-  })
-  .strict()
-
-export type WalkthroughChangesParams = z.infer<typeof WalkthroughChangesParamsSchema>
-
-export const PublishWalkthroughParamsSchema = z.object({}).strict()
-
-export type PublishWalkthroughParams = z.infer<typeof PublishWalkthroughParamsSchema>
 
 export const AssistantNotificationPrioritySchema = z.enum(['normal', 'high'])
 
@@ -108,7 +99,7 @@ export const AssistantSettingsPatchSchema = UserPreferencesSchema.pick({
   colorTheme: true,
   mode: true,
   defaultModel: true,
-  walkthroughModel: true,
+  outputModel: true,
   activityWindowMinutes: true,
   defaultAgent: true,
   autoScroll: true,

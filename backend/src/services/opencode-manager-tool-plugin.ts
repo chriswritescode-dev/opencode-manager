@@ -1,16 +1,17 @@
 import { z } from 'zod'
 import {
   ASSISTANT_NOTIFICATION_LIMITS,
-  DEFAULT_CHANGE_SOURCE,
+  BUILTIN_OUTPUT_DEFINITIONS,
+  DefineOutputParamsSchema,
   MANAGER_PROMPT_CLIENT_METADATA_KEY,
   MANAGER_PROMPT_CLIENTS,
   MANAGER_TOOL_ACTIONS,
   MANAGER_TOOL_NAME,
-  PublishWalkthroughParamsSchema,
+  OpenOutputParamsSchema,
+  OutputDefinitionIdSchema,
+  OutputParamsSchema,
+  ReadOutputInputParamsSchema,
   ShowArtifactParamsSchema,
-  WalkthroughChangesParamsSchema,
-  ChangeSourceSchema,
-  changeSourceKey,
 } from '@opencode-manager/shared/schemas'
 
 const MANAGER_TOOL_REQUEST_TIMEOUT_MS = 60000
@@ -77,20 +78,37 @@ const ManagerToolRequestParamsSchema = z
   .strict()
   .describe('Call an allow-listed OpenCode Manager internal API route.')
 
-const ManagerToolWalkthroughParamsSchema = z
+const ManagerToolOpenOutputParamsSchema = OpenOutputParamsSchema.extend({
+  definitionId: OutputDefinitionIdSchema.describe(
+    'Output definition id, for example "walkthrough" for the built-in change walkthrough.',
+  ),
+}).describe('Open the output for an output definition in this session.')
+
+const ManagerToolDefineOutputParamsSchema = DefineOutputParamsSchema.describe('Define an output for this session only.')
+
+const ManagerToolReadOutputInputParamsSchema = ReadOutputInputParamsSchema.describe(
+  "Read the changes this output was generated from. Omit params.file for an outline of every changed file; pass params.file for one file's full hunks.",
+)
+
+const ManagerToolPublishOutputParamsSchema = z
   .object({
-    source: ChangeSourceSchema.optional().describe('The change source to walk through. Defaults to the changes in this session.'),
+    definitionId: OutputDefinitionIdSchema.optional().describe('The output definition id when publishing a current-session definition.'),
+    params: OutputParamsSchema.optional().describe('The output parameters when publishing a current-session definition.'),
+    data: z.unknown().optional().describe('The output data, matching the definition data schema.'),
+    path: z.string().trim().min(1).max(1000).optional().describe('Path of the HTML file for an html output.'),
   })
   .strict()
-  .describe("Start a separate walkthrough session that builds an interactive walkthrough UI for this session's changes and waits until it is ready, which can take several minutes. It opens in the user's Manager walkthrough panel when this session is open on desktop; otherwise the user can open it from this tool call.")
+  .refine((value) => (value.data !== undefined) !== (value.path !== undefined), { message: 'Provide exactly one of data or path' })
+  .describe('Publish the output you built so the Manager Outputs panel renders it.')
 
 const MANAGER_TOOL_ACTION_PARAMS_SCHEMAS: Record<(typeof MANAGER_TOOL_ACTIONS)[number], z.ZodType> = {
   send_notification: ManagerToolNotificationParamsSchema,
   request: ManagerToolRequestParamsSchema,
-  open_walkthrough: ManagerToolWalkthroughParamsSchema,
+  open_output: ManagerToolOpenOutputParamsSchema,
   show_artifact: ShowArtifactParamsSchema.describe('Show a self-contained HTML file the agent wrote to the user, rendered inline in the Manager chat in a sandboxed frame.'),
-  walkthrough_changes: WalkthroughChangesParamsSchema.describe('Read the changed files of the walkthrough. Omit params.file for an outline of every changed file; pass params.file to get one file\'s full hunks.'),
-  publish_walkthrough: PublishWalkthroughParamsSchema.describe('Publish the walkthrough HTML file you wrote so the Manager walkthrough panel renders it.'),
+  define_output: ManagerToolDefineOutputParamsSchema,
+  read_output_input: ManagerToolReadOutputInputParamsSchema,
+  publish_output: ManagerToolPublishOutputParamsSchema,
 }
 
 export function parseAllowedRoute(route: string): { method: string; path: string } {
@@ -123,10 +141,11 @@ function buildManagerToolInputJsonSchema(): Record<string, unknown> {
           .union([
             MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.send_notification,
             MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.request,
-            MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.open_walkthrough,
+            MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.open_output,
             MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.show_artifact,
-            MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.walkthrough_changes,
-            MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.publish_walkthrough,
+            MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.define_output,
+            MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.read_output_input,
+            MANAGER_TOOL_ACTION_PARAMS_SCHEMAS.publish_output,
           ])
           .describe('The parameters for the chosen action.'),
       })
@@ -141,15 +160,19 @@ function buildManagerToolActionRequiredKeys(): Record<string, string[]> {
 }
 
 function buildManagerToolDescription(): string {
+  const builtinOutputs = BUILTIN_OUTPUT_DEFINITIONS.map(
+    (definition) => `${definition.id} (${definition.description})`,
+  ).join('; ')
   return [
     'Perform an OpenCode Manager action.',
     'The action runs inside OpenCode Manager itself, so it needs no token and no network access from the agent shell, and it works in sandboxed sessions and scheduled runs.',
     'Actions:',
     '- send_notification: send a push notification to every device the user has registered.',
     '- request: call an allow-listed internal API route to read and manage settings, the OpenCode configuration file, repos (list, inspect, clone from a git URL with POST /repos and body { repoUrl, branch?, directoryName? }), OpenCode workspaces, sessions (list, create, follow up, read the latest reply, fork), and schedules.',
-    "- open_walkthrough: start a separate walkthrough session that builds an interactive walkthrough UI for the current session's changes and waits until it is ready (this can take several minutes), then it opens in the Manager walkthrough panel when this session is open on desktop; otherwise the user opens it from this tool call. Use when the user asks to walk through, review or explain the changes.",
-    "- walkthrough_changes: only valid inside a walkthrough session. Call it with no arguments for an outline of the changed files, or with { file } for one file's full hunks.",
-    '- publish_walkthrough: only valid inside a walkthrough session. Call it after writing the walkthrough HTML to publish it to the Manager walkthrough panel.',
+    `- open_output: open an output for this session. Built-in definitions: ${builtinOutputs} Use definitionId "walkthrough" when the user asks to walk through, review or explain the changes; its optional params.source takes a change source and defaults to this session's changes. Use the id the user names for a global output or one defined with define_output. A separate-session definition starts its output session and waits until it is ready (this can take several minutes), then it opens in the Manager Outputs panel when this session is open on desktop; otherwise the user opens it from this tool call. A current-session definition returns its instructions and data schema so you build and publish it with publish_output.`,
+    '- define_output: define an output for this session only. Pass { definition } with id, label, description, icon, params, provider?, instructions, dataSchema?, renderer and generation.',
+    "- read_output_input: only valid inside a generated output session. Call it with no arguments for an outline of the changed files, or with { file } for one file's full hunks.",
+    '- publish_output: only valid inside a generated output session or for a current-session definition. Pass { data } matching the definition data schema, or { path } for an HTML output.',
     '- show_artifact: write a self-contained .html file with your file tools, then call show_artifact with its path to show it to the user, rendered inline in this session\'s Manager chat inside a sandboxed frame. Edit the file to fix or change it (no need to resend content). Inline your own CSS and JavaScript; libraries may load from public CDNs. Forms, popups, cookies and local storage are blocked. Single file only: sibling .js and .css files will not load.',
     'Allowed request routes:',
   ]
@@ -161,7 +184,7 @@ function buildManagerToolDescription(): string {
 export function buildManagerToolPluginSource(id: string): string {
   return `var REQUEST_TIMEOUT_MS = ${MANAGER_TOOL_REQUEST_TIMEOUT_MS}
 
-var WALKTHROUGH_POLL_INTERVAL_MS = 2000
+var OUTPUT_POLL_INTERVAL_MS = 2000
 
 var ALLOWED_ROUTES = ${JSON.stringify(MANAGER_TOOL_ALLOWED_ROUTES)}
 
@@ -184,10 +207,6 @@ var MOBILE_CLIENT = ${JSON.stringify(MOBILE_PROMPT_CLIENT)}
 var DESKTOP_CLIENT = ${JSON.stringify(DESKTOP_PROMPT_CLIENT)}
 
 var MOBILE_OUTPUT_INSTRUCTIONS = ${JSON.stringify(MANAGER_MOBILE_OUTPUT_INSTRUCTIONS)}
-
-var DEFAULT_CHANGE_SOURCE = ${JSON.stringify(DEFAULT_CHANGE_SOURCE)}
-
-var changeSourceKey = ${changeSourceKey.toString()}
 
 var MOBILE_SESSIONS = new Set()
 
@@ -282,22 +301,30 @@ async function requestInternalJson(method, routePath, body, signal) {
   }
 }
 
-/** Waits one walkthrough poll interval, rejecting promptly when the signal aborts. */
-function waitForWalkthroughPoll(signal) {
+function outputQuery(definitionId, params) {
+  var query = '?definitionId=' + encodeURIComponent(definitionId)
+  if (params !== undefined) {
+    query += '&params=' + encodeURIComponent(JSON.stringify(params))
+  }
+  return query
+}
+
+/** Waits one output poll interval, rejecting promptly when the signal aborts. */
+function waitForOutputPoll(signal) {
   return new Promise(function (resolve, reject) {
     var timer
     function onAbort() {
       clearTimeout(timer)
-      reject(new Error('The walkthrough wait was aborted before it was ready.'))
+      reject(new Error('The output wait was aborted before it was ready.'))
     }
     if (signal.aborted) {
-      reject(new Error('The walkthrough wait was aborted before it was ready.'))
+      reject(new Error('The output wait was aborted before it was ready.'))
       return
     }
     timer = setTimeout(function () {
       signal.removeEventListener('abort', onAbort)
       resolve()
-    }, WALKTHROUGH_POLL_INTERVAL_MS)
+    }, OUTPUT_POLL_INTERVAL_MS)
     signal.addEventListener('abort', onAbort)
   })
 }
@@ -320,26 +347,46 @@ var ACTIONS = {
       return text || 'The request succeeded with an empty response body.'
     },
   },
-  open_walkthrough: {
+  open_output: {
     run: async function (params, context) {
-      var source = params.source === undefined ? DEFAULT_CHANGE_SOURCE : params.source
-      var body = params.source === undefined ? undefined : { source: params.source }
-      var statePath = '/change-walkthroughs/' + encodeURIComponent(context.sessionID)
-      var state = await postInternalApi(statePath, body, context.signal)
-      var pollPath = statePath + '?source=' + encodeURIComponent(changeSourceKey(source))
+      var query = outputQuery(params.definitionId, params.params)
+      var outputPath = '/outputs/' + encodeURIComponent(context.sessionID)
+      var state = await getInternalApi(outputPath + query, context.signal)
+      if (state.definition && state.definition.generation === 'currentSession') {
+        var publishArgs = 'definitionId: "' + params.definitionId + '"'
+        if (params.params !== undefined) {
+          publishArgs += ', params: ' + JSON.stringify(params.params)
+        }
+        var lines = []
+        if (state.definition.renderer && state.definition.renderer.kind === 'html') {
+          lines.push('Write one self-contained .html file, then publish it with publish_output { ' + publishArgs + ', path }.')
+        } else {
+          lines.push('Publish it with publish_output { ' + publishArgs + ', data }, where the data matches this JSON Schema:')
+          lines.push(JSON.stringify(state.definition.dataSchema || {}, null, 2))
+        }
+        return {
+          content: [state.definition.instructions || ''].concat(lines).join('\\n\\n'),
+          metadata: { definitionId: params.definitionId, params: params.params },
+        }
+      }
+      var body = { definitionId: params.definitionId }
+      if (params.params !== undefined) {
+        body.params = params.params
+      }
+      state = await postInternalApi(outputPath, body, context.signal)
       while (state.generating === true) {
-        await waitForWalkthroughPoll(context.signal)
-        state = await getInternalApi(pollPath, context.signal)
+        await waitForOutputPoll(context.signal)
+        state = await getInternalApi(outputPath + query, context.signal)
       }
-      var hint = ' It opens in the Manager walkthrough panel when this session is open on desktop; otherwise the user can open it from this tool call.'
-      if (state.walkthrough && state.walkthrough.status === 'ready') {
-        return 'The walkthrough is ready.' + hint
+      var hint = ' It opens in the Manager Outputs panel when this session is open on desktop; otherwise the user can open it from this tool call.'
+      if (state.output && state.output.status === 'ready') {
+        return 'The output is ready.' + hint
       }
-      var failure = state.error || (state.walkthrough && state.walkthrough.error)
-      if (failure || (state.walkthrough && state.walkthrough.status === 'failed')) {
-        throw new Error('The walkthrough failed: ' + (failure && failure.message ? failure.message : 'unknown error'))
+      var failure = state.error || (state.output && state.output.error)
+      if (failure || (state.output && state.output.status === 'failed')) {
+        throw new Error('The output failed: ' + (failure && failure.message ? failure.message : 'unknown error'))
       }
-      throw new Error('The walkthrough was cancelled before it was ready.')
+      throw new Error('The output was cancelled before it was ready.')
     },
   },
   show_artifact: {
@@ -355,20 +402,35 @@ var ACTIONS = {
       }
     },
   },
-  walkthrough_changes: {
+  define_output: {
+    run: async function (params, context) {
+      var result = await postInternalApi('/output-actions/' + encodeURIComponent(context.sessionID) + '/define', params, context.signal)
+      return 'Defined the output "' + result.definition.id + '" for this session.'
+    },
+  },
+  read_output_input: {
     run: async function (params, context) {
       var body = params.file === undefined ? undefined : { file: params.file }
-      var result = await postInternalApi('/walkthrough-sessions/' + encodeURIComponent(context.sessionID) + '/changes', body, context.signal)
+      var result = await postInternalApi('/output-actions/' + encodeURIComponent(context.sessionID) + '/input', body, context.signal)
       return result.text
     },
   },
-  publish_walkthrough: {
+  publish_output: {
     run: async function (params, context) {
-      var result = await postInternalApi('/walkthrough-sessions/' + encodeURIComponent(context.sessionID) + '/publish', undefined, context.signal)
-      return {
-        content: 'Published the walkthrough from ' + result.path + '. The Manager walkthrough panel renders the current file; edit it and call publish_walkthrough again after significant changes.',
-        metadata: { path: result.path },
+      var result = await postInternalApi('/output-actions/' + encodeURIComponent(context.sessionID) + '/publish', params, context.signal)
+      var content = 'Published the output from ' + result.outputDir + '. The Manager Outputs panel renders it; edit it and call publish_output again after significant changes.'
+      var uncovered = result.uncoveredHunkIds || []
+      if (uncovered.length > 0) {
+        content += ' Unreferenced hunks: ' + uncovered.join(', ') + '. They are shown under Other changes; add them to stops if they matter.'
       }
+      var metadata = { outputDir: result.outputDir }
+      if (params.definitionId !== undefined) {
+        metadata.definitionId = params.definitionId
+      }
+      if (params.params !== undefined) {
+        metadata.params = params.params
+      }
+      return { content: content, metadata: metadata }
     },
   },
 }

@@ -8,6 +8,7 @@ import os from 'os'
 import {
   ASSISTANT_NOTIFICATION_LIMITS,
   AssistantNotificationRequestSchema,
+  BUILTIN_OUTPUT_DEFINITIONS,
   MANAGER_PROMPT_CLIENT_METADATA_KEY,
   MANAGER_TOOL_NAME,
 } from '@opencode-manager/shared/schemas'
@@ -20,6 +21,9 @@ import { installManagedPlugins, getOpenCodePluginDir } from '../../src/services/
 import { loadGeneratedPlugin, type GeneratedPlugin, type GeneratedTool, type SessionContextEvent } from '../helpers/opencode-plugin-context'
 import { resolveOpenCode2Binary, runOpenCodeStandalone } from '../helpers/opencode-binary'
 
+const OUTPUT_READY_MESSAGE =
+  'The output is ready. It opens in the Manager Outputs panel when this session is open on desktop; otherwise the user can open it from this tool call.'
+
 type JsonSchema = {
   type?: string
   properties?: Record<string, JsonSchema>
@@ -31,6 +35,7 @@ type JsonSchema = {
   const?: string
   maxLength?: number
   minLength?: number
+  description?: string
 }
 
 /** Loads the installed manager plugin from the supplied configuration home for hook tests. */
@@ -57,7 +62,7 @@ function requestParamsSchema(tool: GeneratedTool): JsonSchema {
   return toolInputSchema(tool).properties?.params?.anyOf?.[1] ?? {}
 }
 
-function walkthroughParamsSchema(tool: GeneratedTool): JsonSchema {
+function openOutputParamsSchema(tool: GeneratedTool): JsonSchema {
   return toolInputSchema(tool).properties?.params?.anyOf?.[2] ?? {}
 }
 
@@ -65,12 +70,16 @@ function artifactParamsSchema(tool: GeneratedTool): JsonSchema {
   return toolInputSchema(tool).properties?.params?.anyOf?.[3] ?? {}
 }
 
-function changesParamsSchema(tool: GeneratedTool): JsonSchema {
+function defineOutputParamsSchema(tool: GeneratedTool): JsonSchema {
   return toolInputSchema(tool).properties?.params?.anyOf?.[4] ?? {}
 }
 
-function publishParamsSchema(tool: GeneratedTool): JsonSchema {
+function readOutputInputParamsSchema(tool: GeneratedTool): JsonSchema {
   return toolInputSchema(tool).properties?.params?.anyOf?.[5] ?? {}
+}
+
+function publishOutputParamsSchema(tool: GeneratedTool): JsonSchema {
+  return toolInputSchema(tool).properties?.params?.anyOf?.[6] ?? {}
 }
 
 async function runToolResult(
@@ -178,49 +187,43 @@ describe('ocm-manager plugin', () => {
     expect(schema.type).toBe('object')
     expect(schema.required).toEqual(['action', 'params'])
     expect(schema.additionalProperties).toBe(false)
-    expect(schema.properties?.action?.enum).toEqual(['send_notification', 'request', 'open_walkthrough', 'show_artifact', 'walkthrough_changes', 'publish_walkthrough'])
-    expect(schema.properties?.params?.anyOf).toHaveLength(6)
+    expect(schema.properties?.action?.enum).toEqual(['send_notification', 'request', 'open_output', 'show_artifact', 'define_output', 'read_output_input', 'publish_output'])
+    expect(schema.properties?.params?.anyOf).toHaveLength(7)
     expect(notificationParamsSchema(tool).required).toEqual(['title', 'body'])
     expect(requestParamsSchema(tool).required).toEqual(['method', 'path'])
-    expect(walkthroughParamsSchema(tool).required).toBeUndefined()
+    expect(openOutputParamsSchema(tool).required).toEqual(['definitionId'])
     expect(artifactParamsSchema(tool).required).toEqual(['title', 'path'])
+    expect(defineOutputParamsSchema(tool).required).toEqual(['definition'])
+    expect(readOutputInputParamsSchema(tool).required).toBeUndefined()
+    expect(publishOutputParamsSchema(tool).required).toBeUndefined()
     expect(notificationParamsSchema(tool).additionalProperties).toBe(false)
     expect(requestParamsSchema(tool).additionalProperties).toBe(false)
-    expect(walkthroughParamsSchema(tool).additionalProperties).toBe(false)
+    expect(openOutputParamsSchema(tool).additionalProperties).toBe(false)
     expect(artifactParamsSchema(tool).additionalProperties).toBe(false)
+    expect(defineOutputParamsSchema(tool).additionalProperties).toBe(false)
+    expect(readOutputInputParamsSchema(tool).additionalProperties).toBe(false)
+    expect(publishOutputParamsSchema(tool).additionalProperties).toBe(false)
     expect(notificationParamsSchema(tool).properties?.priority?.enum).toEqual(['normal', 'high'])
     expect(requestParamsSchema(tool).properties?.method?.enum).toEqual(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
-    expect(walkthroughParamsSchema(tool).properties?.source?.oneOf?.map((variant) => variant.properties?.kind?.const)).toEqual([
-      'session',
-      'uncommitted',
-      'staged',
-      'unstaged',
-      'branch',
-      'pullRequest',
-    ])
-    expect(changesParamsSchema(tool).required).toBeUndefined()
-    expect(changesParamsSchema(tool).additionalProperties).toBe(false)
-    expect(changesParamsSchema(tool).properties?.file?.maxLength).toBe(1000)
-    expect(changesParamsSchema(tool).properties?.file?.minLength).toBe(1)
-    expect(publishParamsSchema(tool).required).toBeUndefined()
-    expect(publishParamsSchema(tool).additionalProperties).toBe(false)
+    expect(openOutputParamsSchema(tool).properties?.definitionId?.minLength).toBe(1)
+    expect(openOutputParamsSchema(tool).properties?.definitionId?.maxLength).toBe(48)
+    expect(readOutputInputParamsSchema(tool).properties?.file?.minLength).toBe(1)
+    expect(readOutputInputParamsSchema(tool).properties?.file?.maxLength).toBe(1000)
   })
 
-  it('lists the open_walkthrough action in the description', async () => {
+  it('lists the output actions and built-in definition ids in the description', async () => {
     const tool = await loadTool(configHome)
 
-    expect(tool.description).toContain('open_walkthrough')
-    expect(tool.description).toContain('start a separate walkthrough session')
-    expect(tool.description).toContain('waits until it is ready')
-    expect(tool.description).toContain('when this session is open on desktop')
-  })
-
-  it('lists the walkthrough data actions in the description', async () => {
-    const tool = await loadTool(configHome)
-
-    expect(tool.description).toContain('walkthrough_changes')
-    expect(tool.description).toContain('publish_walkthrough')
-    expect(tool.description).toContain('only valid inside a walkthrough session')
+    expect(tool.description).toContain('open_output')
+    expect(tool.description).toContain('separate-session definition starts its output session')
+    expect(tool.description).toContain('define_output')
+    expect(tool.description).toContain('read_output_input')
+    expect(tool.description).toContain('publish_output')
+    for (const definition of BUILTIN_OUTPUT_DEFINITIONS) {
+      expect(tool.description).toContain(`${definition.id} (${definition.description})`)
+    }
+    expect(tool.description).toContain('when the user asks to walk through, review or explain the changes')
+    expect(openOutputParamsSchema(tool).properties?.definitionId?.description).toContain('walkthrough')
   })
 
   it('lists the show_artifact action in the description', async () => {
@@ -320,116 +323,175 @@ describe('ocm-manager plugin', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('opens the walkthrough for the current session with the requested source and returns immediately when it is ready', async () => {
-    const fetchMock = jsonResponse({ walkthrough: { status: 'ready' }, currentDiffHash: 'h', stale: false, generating: false, error: null })
+  it('opens a current-session output and returns its instructions and data schema', async () => {
+    const dataSchema = { type: 'object', properties: { title: { type: 'string' } } }
+    const fetchMock = jsonResponse({
+      definition: {
+        id: 'walkthrough',
+        label: 'Walkthrough',
+        generation: 'currentSession',
+        instructions: 'Build the walkthrough.',
+        renderer: { kind: 'builtin', id: 'walkthrough' },
+        dataSchema,
+      },
+      output: null,
+      generating: false,
+      currentInputHash: null,
+      hasInput: true,
+      stale: false,
+      running: false,
+      error: null,
+    })
     vi.stubGlobal('fetch', fetchMock)
     const tool = await loadTool(configHome)
 
-    const result = await runToolResult(
-      tool,
-      { action: 'open_walkthrough', params: { source: { kind: 'staged' } } },
-      { sessionID: 'ses_abc' },
-    )
+    const result = await runToolResult(tool, { action: 'open_output', params: { definitionId: 'walkthrough' } }, { sessionID: 'ses_abc' })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] ?? []
-    expect(url).toBe('http://localhost:5003/api/internal/change-walkthroughs/ses_abc')
-    expect(init.method).toBe('POST')
-    expect(init.headers.Authorization).toBe('Bearer secret-token')
-    expect(init.headers['content-type']).toBe('application/json')
-    expect(JSON.parse(init.body)).toEqual({ source: { kind: 'staged' } })
-    expect(result.content).toBe(
-      'The walkthrough is ready. It opens in the Manager walkthrough panel when this session is open on desktop; otherwise the user can open it from this tool call.',
-    )
-    expect(result.metadata).toBeUndefined()
+    expect(url).toBe('http://localhost:5003/api/internal/outputs/ses_abc?definitionId=walkthrough')
+    expect(init.method).toBe('GET')
+    expect(result.content).toContain('Build the walkthrough.')
+    expect(result.content).toContain('publish_output')
+    expect(result.content).toContain('definitionId: "walkthrough"')
+    expect(result.content).toContain('data')
+    expect(result.content).toContain(JSON.stringify(dataSchema, null, 2))
+    expect(result.metadata).toEqual({ definitionId: 'walkthrough', params: undefined })
   })
 
-  it('polls the walkthrough state until it is ready and encodes the staged source key', async () => {
+  it('opens a current-session html output and asks for a file path', async () => {
+    const fetchMock = jsonResponse({
+      definition: {
+        id: 'walkthrough',
+        label: 'Walkthrough',
+        generation: 'currentSession',
+        instructions: 'Build the walkthrough.',
+        renderer: { kind: 'html' },
+      },
+      output: null,
+      generating: false,
+      currentInputHash: null,
+      hasInput: true,
+      stale: false,
+      running: false,
+      error: null,
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const tool = await loadTool(configHome)
+
+    const result = await runToolResult(tool, { action: 'open_output', params: { definitionId: 'walkthrough' } }, { sessionID: 'ses_abc' })
+
+    expect(result.content).toContain('Build the walkthrough.')
+    expect(result.content).toContain('publish_output')
+    expect(result.content).toContain(', path }')
+    expect(result.content).not.toContain('data }')
+  })
+
+  it('starts a separate-session output and returns immediately when it is ready', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
-        text: async () => JSON.stringify({ walkthrough: null, currentDiffHash: 'h', stale: false, generating: true, error: null }),
+        text: async () =>
+          JSON.stringify({
+            definition: { id: 'walkthrough', label: 'Walkthrough', generation: 'separateSession' },
+            output: null,
+            generating: false,
+            error: null,
+          }),
       })
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
-        text: async () => JSON.stringify({ walkthrough: { status: 'ready' }, currentDiffHash: 'h', stale: false, generating: false, error: null }),
+        text: async () => JSON.stringify({ definition: { generation: 'separateSession' }, output: { status: 'ready' }, generating: false, error: null }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+    const tool = await loadTool(configHome)
+
+    const result = await runToolResult(tool, { action: 'open_output', params: { definitionId: 'walkthrough' } }, { sessionID: 'ses_abc' })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const [stateUrl, stateInit] = fetchMock.mock.calls[0] ?? []
+    expect(stateUrl).toBe('http://localhost:5003/api/internal/outputs/ses_abc?definitionId=walkthrough')
+    expect(stateInit.method).toBe('GET')
+    const [startUrl, startInit] = fetchMock.mock.calls[1] ?? []
+    expect(startUrl).toBe('http://localhost:5003/api/internal/outputs/ses_abc')
+    expect(startInit.method).toBe('POST')
+    expect(startInit.headers.Authorization).toBe('Bearer secret-token')
+    expect(JSON.parse(startInit.body)).toEqual({ definitionId: 'walkthrough' })
+    expect(result.content).toBe(OUTPUT_READY_MESSAGE)
+  })
+
+  it('polls a separate-session output until it is ready and encodes the params in the poll query', async () => {
+    const params = { source: { kind: 'staged' } }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            definition: { id: 'walkthrough', label: 'Walkthrough', generation: 'separateSession' },
+            output: null,
+            generating: false,
+            error: null,
+          }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ output: null, generating: true, error: null }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ output: { status: 'ready' }, generating: false, error: null }),
       })
     vi.stubGlobal('fetch', fetchMock)
     const tool = await loadTool(configHome)
 
     vi.useFakeTimers()
     try {
-      const pending = runToolResult(tool, { action: 'open_walkthrough', params: { source: { kind: 'staged' } } }, { sessionID: 'ses_abc' })
+      const pending = runToolResult(tool, { action: 'open_output', params: { definitionId: 'walkthrough', params } }, { sessionID: 'ses_abc' })
       await vi.advanceTimersByTimeAsync(2000)
       const result = await pending
 
-      expect(fetchMock).toHaveBeenCalledTimes(2)
-      const [pollUrl, pollInit] = fetchMock.mock.calls[1] ?? []
-      expect(pollUrl).toBe('http://localhost:5003/api/internal/change-walkthroughs/ses_abc?source=staged')
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+      const [pollUrl, pollInit] = fetchMock.mock.calls[2] ?? []
+      expect(pollUrl).toContain('?definitionId=walkthrough&params=' + encodeURIComponent(JSON.stringify(params)))
       expect(pollInit.method).toBe('GET')
-      expect(result.content).toBe(
-        'The walkthrough is ready. It opens in the Manager walkthrough panel when this session is open on desktop; otherwise the user can open it from this tool call.',
-      )
+      expect(result.content).toBe(OUTPUT_READY_MESSAGE)
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('encodes a branch source key when polling', async () => {
+  it('throws when the output fails', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
-        text: async () => JSON.stringify({ walkthrough: null, generating: true, error: null }),
+        text: async () => JSON.stringify({ definition: { generation: 'separateSession' }, output: null, generating: false, error: null }),
       })
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
-        text: async () => JSON.stringify({ walkthrough: { status: 'ready' }, generating: false, error: null }),
+        text: async () => JSON.stringify({ output: null, generating: true, error: null }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ output: { status: 'failed' }, generating: false, error: { message: 'the model crashed' } }),
       })
     vi.stubGlobal('fetch', fetchMock)
     const tool = await loadTool(configHome)
 
     vi.useFakeTimers()
     try {
-      const pending = runToolResult(
-        tool,
-        { action: 'open_walkthrough', params: { source: { kind: 'branch', base: 'main' } } },
-        { sessionID: 'ses_abc' },
-      )
-      await vi.advanceTimersByTimeAsync(2000)
-      await pending
-
-      expect(fetchMock.mock.calls[1]?.[0]).toBe('http://localhost:5003/api/internal/change-walkthroughs/ses_abc?source=branch%3Amain')
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('throws when the walkthrough fails', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        text: async () => JSON.stringify({ walkthrough: null, generating: true, error: null }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        text: async () => JSON.stringify({ walkthrough: { status: 'failed' }, generating: false, error: { message: 'the model crashed' } }),
-      })
-    vi.stubGlobal('fetch', fetchMock)
-    const tool = await loadTool(configHome)
-
-    vi.useFakeTimers()
-    try {
-      const pending = runTool(tool, { action: 'open_walkthrough', params: {} }, { sessionID: 'ses_abc' })
-      const assertion = expect(pending).rejects.toThrow('The walkthrough failed: the model crashed')
+      const pending = runTool(tool, { action: 'open_output', params: { definitionId: 'walkthrough' } }, { sessionID: 'ses_abc' })
+      const assertion = expect(pending).rejects.toThrow('The output failed: the model crashed')
       await vi.advanceTimersByTimeAsync(2000)
       await assertion
     } finally {
@@ -437,86 +499,127 @@ describe('ocm-manager plugin', () => {
     }
   })
 
-  it('throws when the walkthrough was cancelled before it was ready', async () => {
-    vi.stubGlobal('fetch', jsonResponse({ walkthrough: { status: 'cancelled' }, generating: false, error: null }))
+  it('throws when the output was cancelled before it was ready', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ definition: { generation: 'separateSession' }, output: { status: 'cancelled' }, generating: false, error: null }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ definition: { generation: 'separateSession' }, output: { status: 'cancelled' }, generating: false, error: null }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
     const tool = await loadTool(configHome)
 
-    await expect(runTool(tool, { action: 'open_walkthrough', params: {} }, { sessionID: 'ses_abc' }))
-      .rejects.toThrow('The walkthrough was cancelled before it was ready.')
+    await expect(runTool(tool, { action: 'open_output', params: { definitionId: 'walkthrough' } }, { sessionID: 'ses_abc' }))
+      .rejects.toThrow('The output was cancelled before it was ready.')
   })
 
-  it('stops waiting when the signal is aborted', async () => {
-    const fetchMock = jsonResponse({ walkthrough: null, generating: true, error: null })
+  it('stops waiting for the output when the signal is aborted', async () => {
+    const fetchMock = jsonResponse({ definition: { generation: 'separateSession' }, output: null, generating: true })
     vi.stubGlobal('fetch', fetchMock)
     const tool = await loadTool(configHome)
     const controller = new AbortController()
 
-    const pending = runTool(tool, { action: 'open_walkthrough', params: {} }, { sessionID: 'ses_abc', signal: controller.signal })
+    const pending = runTool(tool, { action: 'open_output', params: { definitionId: 'walkthrough' } }, { sessionID: 'ses_abc', signal: controller.signal })
     controller.abort()
 
     await expect(pending).rejects.toThrow(/aborted/)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
-  it('opens the walkthrough without a body when no source is given', async () => {
-    const fetchMock = jsonResponse({ walkthrough: { status: 'ready' }, generating: false, error: null })
+  it('defines a current-session output through the internal API', async () => {
+    const params = {
+      definition: {
+        id: 'notes',
+        label: 'Notes',
+        description: '',
+        icon: 'FileText',
+        params: [],
+        instructions: 'Write notes.',
+        renderer: { kind: 'html' },
+        generation: 'currentSession',
+      },
+    }
+    const fetchMock = jsonResponse({ definition: { id: 'notes' } })
     vi.stubGlobal('fetch', fetchMock)
     const tool = await loadTool(configHome)
 
-    await runTool(tool, { action: 'open_walkthrough', params: {} }, { sessionID: 'ses_abc' })
+    const result = await runTool(tool, { action: 'define_output', params }, { sessionID: 'ses_abc' })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] ?? []
-    expect(url).toBe('http://localhost:5003/api/internal/change-walkthroughs/ses_abc')
-    expect(init.headers['content-type']).toBeUndefined()
-    expect(init.body).toBeUndefined()
+    expect(url).toBe('http://localhost:5003/api/internal/output-actions/ses_abc/define')
+    expect(init.method).toBe('POST')
+    expect(init.headers.Authorization).toBe('Bearer secret-token')
+    expect(JSON.parse(init.body)).toEqual(params)
+    expect(result).toBe('Defined the output "notes" for this session.')
   })
 
-  it('requests the outline through walkthrough_changes with no body', async () => {
+  it('requests the output input outline with no body', async () => {
     const fetchMock = jsonResponse({ text: '## Outline' })
     vi.stubGlobal('fetch', fetchMock)
     const tool = await loadTool(configHome)
 
-    await expect(runTool(tool, { action: 'walkthrough_changes', params: {} }, { sessionID: 'ses_abc' })).resolves.toBe('## Outline')
+    await expect(runTool(tool, { action: 'read_output_input', params: {} }, { sessionID: 'ses_abc' })).resolves.toBe('## Outline')
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] ?? []
-    expect(url).toBe('http://localhost:5003/api/internal/walkthrough-sessions/ses_abc/changes')
+    expect(url).toBe('http://localhost:5003/api/internal/output-actions/ses_abc/input')
     expect(init.method).toBe('POST')
     expect(init.headers.Authorization).toBe('Bearer secret-token')
     expect(init.headers['content-type']).toBeUndefined()
     expect(init.body).toBeUndefined()
   })
 
-  it('requests one file through walkthrough_changes', async () => {
+  it('requests one changed file through read_output_input', async () => {
     const fetchMock = jsonResponse({ text: 'diff' })
     vi.stubGlobal('fetch', fetchMock)
     const tool = await loadTool(configHome)
 
-    await runTool(tool, { action: 'walkthrough_changes', params: { file: 'src/a.ts' } }, { sessionID: 'ses_abc' })
+    await runTool(tool, { action: 'read_output_input', params: { file: 'src/a.ts' } }, { sessionID: 'ses_abc' })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] ?? []
-    expect(url).toBe('http://localhost:5003/api/internal/walkthrough-sessions/ses_abc/changes')
+    expect(url).toBe('http://localhost:5003/api/internal/output-actions/ses_abc/input')
     expect(init.headers['content-type']).toBe('application/json')
     expect(JSON.parse(init.body)).toEqual({ file: 'src/a.ts' })
   })
 
-  it('publishes the walkthrough through the internal API and reports the path', async () => {
-    const fetchMock = jsonResponse({ path: '/workspace/walkthroughs/ses_abc/gen/index.html' })
+  it('publishes the output through the internal API and reports the output directory', async () => {
+    const fetchMock = jsonResponse({ outputDir: '/workspace/outputs/ses_abc/gen', uncoveredHunkIds: [] })
     vi.stubGlobal('fetch', fetchMock)
     const tool = await loadTool(configHome)
 
-    const result = await runToolResult(tool, { action: 'publish_walkthrough', params: {} }, { sessionID: 'ses_abc' })
+    const result = await runToolResult(
+      tool,
+      { action: 'publish_output', params: { data: { title: 'T' } } },
+      { sessionID: 'ses_abc' },
+    )
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] ?? []
-    expect(url).toBe('http://localhost:5003/api/internal/walkthrough-sessions/ses_abc/publish')
+    expect(url).toBe('http://localhost:5003/api/internal/output-actions/ses_abc/publish')
     expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({ data: { title: 'T' } })
     expect(result.content).toBe(
-      'Published the walkthrough from /workspace/walkthroughs/ses_abc/gen/index.html. The Manager walkthrough panel renders the current file; edit it and call publish_walkthrough again after significant changes.',
+      'Published the output from /workspace/outputs/ses_abc/gen. The Manager Outputs panel renders it; edit it and call publish_output again after significant changes.',
     )
-    expect(result.metadata).toEqual({ path: '/workspace/walkthroughs/ses_abc/gen/index.html' })
+    expect(result.metadata).toEqual({ outputDir: '/workspace/outputs/ses_abc/gen' })
+  })
+
+  it('reports unreferenced hunks after publishing an output', async () => {
+    const fetchMock = jsonResponse({ outputDir: '/workspace/outputs/ses_abc/gen', uncoveredHunkIds: ['h1', 'h2'] })
+    vi.stubGlobal('fetch', fetchMock)
+    const tool = await loadTool(configHome)
+
+    const result = await runTool(tool, { action: 'publish_output', params: { data: { title: 'T' } } }, { sessionID: 'ses_abc' })
+
+    expect(result).toContain('Unreferenced hunks: h1, h2. They are shown under Other changes; add them to stops if they matter.')
   })
 
   it('resolves the artifact file through the internal API and reports the resolved path', async () => {
@@ -614,7 +717,7 @@ describe('ocm-manager plugin', () => {
   it('allows every route in the exported allow list', async () => {
     const tool = await loadTool(configHome)
 
-    expect(MANAGER_TOOL_ALLOWED_ROUTES.some((route) => route.includes('/walkthrough-sessions'))).toBe(false)
+    expect(MANAGER_TOOL_ALLOWED_ROUTES.some((route) => route.includes('/outputs') || route.includes('/output-actions') || route.includes('/output-definitions'))).toBe(false)
 
     for (const route of MANAGER_TOOL_ALLOWED_ROUTES) {
       const { method, path: pattern } = parseAllowedRoute(route)
@@ -666,10 +769,16 @@ describe('ocm-manager plugin', () => {
       ['POST', '/multi-runs'],
       ['POST', '/multi-runs/1/fusions'],
       ['POST', '/multi-runs/1/entries/2/discard'],
-      ['GET', '/change-walkthroughs/x'],
-      ['POST', '/change-walkthroughs/x'],
-      ['POST', '/walkthrough-sessions/x/changes'],
-      ['POST', '/walkthrough-sessions/x/publish'],
+      ['GET', '/outputs/x'],
+      ['POST', '/outputs/x'],
+      ['POST', '/outputs/x/refine'],
+      ['DELETE', '/outputs/x'],
+      ['GET', '/outputs/helper-sessions'],
+      ['POST', '/output-actions/x/define'],
+      ['POST', '/output-actions/x/input'],
+      ['POST', '/output-actions/x/publish'],
+      ['GET', '/output-definitions'],
+      ['POST', '/output-definitions'],
     ] as const
 
     for (const [method, path] of deniedRoutes) {
@@ -895,7 +1004,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-manager plugin against the s
       expect(managerTool?.function?.parameters).toMatchObject({
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['send_notification', 'request', 'open_walkthrough', 'show_artifact', 'walkthrough_changes', 'publish_walkthrough'] },
+          action: { type: 'string', enum: ['send_notification', 'request', 'open_output', 'show_artifact', 'define_output', 'read_output_input', 'publish_output'] },
           params: {
             anyOf: [
               {
@@ -920,9 +1029,11 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-manager plugin against the s
               },
               {
                 type: 'object',
+                required: ['definitionId'],
                 additionalProperties: false,
                 properties: {
-                  source: expect.anything(),
+                  definitionId: expect.anything(),
+                  params: expect.anything(),
                 },
               },
               {
@@ -935,6 +1046,14 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-manager plugin against the s
               },
               {
                 type: 'object',
+                required: ['definition'],
+                additionalProperties: false,
+                properties: {
+                  definition: expect.anything(),
+                },
+              },
+              {
+                type: 'object',
                 additionalProperties: false,
                 properties: {
                   file: { type: 'string', minLength: 1, maxLength: 1000 },
@@ -943,6 +1062,12 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-manager plugin against the s
               {
                 type: 'object',
                 additionalProperties: false,
+                properties: {
+                  definitionId: expect.anything(),
+                  params: expect.anything(),
+                  data: expect.anything(),
+                  path: expect.anything(),
+                },
               },
             ],
           },

@@ -211,6 +211,8 @@ export const UserPreferencesSchema = z.object({
   colorTheme: ColorThemeIdSchema.optional(),
   mode: z.enum(["plan", "build"]),
   defaultModel: z.string().optional(),
+  outputModel: z.string().optional(),
+  /** Legacy field, read as a fallback for outputModel; never written by new clients. */
   walkthroughModel: z.string().optional(),
   activityWindowMinutes: ActivityWindowMinutesSchema.optional(),
   defaultAgent: z.string().optional(),

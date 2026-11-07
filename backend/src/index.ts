@@ -42,9 +42,8 @@ import { createSessionPinRoutes } from './routes/session-pins'
 import { createSessionPermissionModeRoutes } from './routes/session-permission-modes'
 import { createSessionSandboxRoutes } from './routes/session-sandbox'
 import { createMultiRunRoutes } from './routes/multi-runs'
-import { createChangeWalkthroughRoutes } from './routes/change-walkthroughs'
+import { createOutputRoutes } from './routes/outputs'
 import { createOutputDefinitionRoutes } from './routes/output-definitions'
-import { getChangeWalkthroughByWalkthroughSession } from './db/change-walkthroughs'
 import { createLogRoutes } from './routes/logs'
 import { createPreviewRoutes, createPreviewAvailability } from './routes/preview'
 import { createGlobalSecretRoutes } from './routes/secrets'
@@ -69,7 +68,8 @@ import { SessionSandboxService } from './services/session-sandbox'
 import { SessionAncestry } from './services/session-ancestry'
 import { GoalOutcomeTracker } from './services/goal-outcomes'
 import { MultiRunService } from './services/multi-runs'
-import { ChangeWalkthroughService } from './services/change-walkthroughs'
+import { ChangesOutputProvider } from './services/outputs/changes-provider'
+import { OutputService } from './services/outputs/output-service'
 import { OutputDefinitionRegistry } from './services/outputs/definition-registry'
 import { opencodeServerManager } from './services/opencode-single-server'
 import { createOpenCodeClient } from './services/opencode/client'
@@ -306,17 +306,19 @@ const sessionPermissionModeService = new SessionPermissionModeService(db, openco
 const goalOutcomes = new GoalOutcomeTracker()
 
 const multiRunService = new MultiRunService(db, openCodeClient, repoWorkspaces, sessionPermissionModeService, (serverId) => opencodeServerRegistry.getClient(serverId))
-const changeWalkthroughService = new ChangeWalkthroughService(db, openCodeClient, sessionSettingsService, gitAuthService, gitService)
 const outputDefinitionRegistry = new OutputDefinitionRegistry(db)
+const outputService = new OutputService(db, openCodeClient, sessionSettingsService, outputDefinitionRegistry, {
+  changes: new ChangesOutputProvider(openCodeClient, gitAuthService, gitService, db),
+})
 
 sseAggregator.onEvent((directory, event) => {
   sessionSandboxService.handleEvent(directory, event).catch((err) => {
     logger.error('Session sandbox event handling error:', err)
   })
   try {
-    changeWalkthroughService.handleEvent(event)
+    outputService.handleEvent(event)
   } catch (err) {
-    logger.error('Change walkthrough event handling error:', err)
+    logger.error('Output event handling error:', err)
   }
 })
 
@@ -340,7 +342,7 @@ notificationService.addEventSuppressor(async (event, sessionId, serverId) => {
   if (serverId !== LOCAL_OPENCODE_SERVER_ID) return false
   if (!sessionId) return false
   if (event.type !== NotificationEventType.SESSION_IDLE && event.type !== NotificationEventType.SESSION_FAILED) return false
-  return getChangeWalkthroughByWalkthroughSession(db, sessionId) !== null
+  return outputService.isGeneratorSession(sessionId)
 })
 
 if (ENV.VAPID.PUBLIC_KEY && ENV.VAPID.PRIVATE_KEY) {
@@ -395,7 +397,7 @@ app.route('/api/auth-info', createAuthInfoRoutes(auth))
 app.route('/api/health', createHealthRoutes(db, openCodeSupervisor))
 
 app.route('/api/mcp-oauth-proxy', createMcpOauthProxyRoutes(openCodeClient, requireAuth))
-app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, openCodeClient, sessionPermissionModeService, repoWorkspaces, gitAuthService, multiRunService, changeWalkthroughService, sessionSandboxService, repoEnvService))
+app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, openCodeClient, sessionPermissionModeService, repoWorkspaces, gitAuthService, multiRunService, outputService, sessionSandboxService, repoEnvService))
 app.route('/api/opencode-proxy', createOpenCodeProxyRoutes(db, settingsService, upgradeWebSocket))
 
 const protectedApi = new Hono()
@@ -430,7 +432,7 @@ protectedApi.route('/opencode-servers', createOpenCodeServerRoutes(opencodeServe
 protectedApi.route('/session-permission-modes', createSessionPermissionModeRoutes(sessionPermissionModeService))
 protectedApi.route('/session-sandbox', createSessionSandboxRoutes(sessionSandboxService))
 protectedApi.route('/multi-runs', createMultiRunRoutes(multiRunService))
-protectedApi.route('/change-walkthroughs', createChangeWalkthroughRoutes(changeWalkthroughService))
+protectedApi.route('/outputs', createOutputRoutes(outputService))
 protectedApi.route('/output-definitions', createOutputDefinitionRoutes(outputDefinitionRegistry))
 protectedApi.route('/schedules', createScheduleRoutes(scheduleService))
 protectedApi.route('/logs', createLogRoutes())

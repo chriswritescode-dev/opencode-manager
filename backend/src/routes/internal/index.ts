@@ -20,14 +20,14 @@ import { createInternalGitCredentialsRoutes } from './git-credentials'
 import { createInternalSandboxRoutes } from './sandbox'
 import { createInternalSessionArtifactRoutes } from './session-artifacts'
 import { createMultiRunRoutes } from '../multi-runs'
-import { createChangeWalkthroughRoutes } from '../change-walkthroughs'
-import { createInternalWalkthroughSessionRoutes } from './walkthrough-sessions'
+import { createOutputRoutes } from '../outputs'
+import { createInternalOutputActionRoutes } from './output-actions'
 import type { SessionPermissionModeService } from '../../services/session-permission-modes'
 import type { SessionSandboxService } from '../../services/session-sandbox'
 import type { RepoWorkspaceService } from '../../services/repo-workspace'
 import type { GitAuthService } from '../../services/git-auth'
 import type { MultiRunService } from '../../services/multi-runs'
-import type { ChangeWalkthroughService } from '../../services/change-walkthroughs'
+import type { OutputService } from '../../services/outputs/output-service'
 import type { RepoEnvService } from '../../services/repo-env'
 
 export function createInternalRoutes(
@@ -40,7 +40,7 @@ export function createInternalRoutes(
   repoWorkspaces: RepoWorkspaceService,
   gitAuthService: GitAuthService,
   multiRuns: MultiRunService,
-  changeWalkthroughService: ChangeWalkthroughService,
+  outputService: OutputService,
   sessionSandbox: SessionSandboxService,
   repoEnvService: RepoEnvService,
 ) {
@@ -60,8 +60,8 @@ export function createInternalRoutes(
   app.route('/opencode-workspaces', createInternalOpenCodeWorkspacesRoutes(db))
   app.route('/sessions', createInternalSessionRoutes(db, openCodeClient, permissionModes, repoWorkspaces))
   app.route('/assistant', createInternalAssistantRoutes(openCodeClient))
-  app.route('/change-walkthroughs', createChangeWalkthroughRoutes(changeWalkthroughService))
-  app.route('/walkthrough-sessions', createInternalWalkthroughSessionRoutes(changeWalkthroughService))
+  app.route('/outputs', createOutputRoutes(outputService))
+  app.route('/output-actions', createInternalOutputActionRoutes(outputService))
   app.route('/session-artifacts', createInternalSessionArtifactRoutes(openCodeClient))
   app.route('/shell-env', createInternalShellEnvRoutes(db, repoEnvService))
   app.route('/git-credentials', createInternalGitCredentialsRoutes(db))

@@ -387,7 +387,22 @@ describe('internal/settings routes', () => {
     expect(body.preferences.mode).toBe('plan')
   })
 
-  it('PATCH /api/internal/settings with { walkthroughModel } persists it', async () => {
+  it('PATCH /api/internal/settings with { outputModel } persists it', async () => {
+    const res = await app.request('/api/internal/settings', {
+      method: 'PATCH',
+      body: JSON.stringify({ outputModel: 'openai/gpt-5-mini' }),
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json() as { preferences: { outputModel?: string } }
+    expect(body.preferences.outputModel).toBe('openai/gpt-5-mini')
+    expect(settingsService.getSettings().preferences.outputModel).toBe('openai/gpt-5-mini')
+  })
+
+  it('PATCH /api/internal/settings with { walkthroughModel } returns 400 (legacy write reject)', async () => {
     const res = await app.request('/api/internal/settings', {
       method: 'PATCH',
       body: JSON.stringify({ walkthroughModel: 'openai/gpt-5-mini' }),
@@ -396,9 +411,8 @@ describe('internal/settings routes', () => {
         authorization: `Bearer ${token}`,
       },
     })
-    expect(res.status).toBe(200)
-    const body = await res.json() as { preferences: { walkthroughModel?: string } }
-    expect(body.preferences.walkthroughModel).toBe('openai/gpt-5-mini')
-    expect(settingsService.getSettings().preferences.walkthroughModel).toBe('openai/gpt-5-mini')
+    expect(res.status).toBe(400)
+    const body = await res.json() as { error: string }
+    expect(body.error).toBe('Invalid request body')
   })
 })

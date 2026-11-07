@@ -213,11 +213,11 @@ describe('readChanges', () => {
 
     expect(plan.remote).toBe('upstream')
     expect(plan.refspecs).toEqual([
-      `+refs/pull/7/head:refs/ocm-walkthrough/${TEST_SESSION_ID}/pr/7/head`,
-      `+refs/heads/main:refs/ocm-walkthrough/${TEST_SESSION_ID}/pr/7/base/main`,
+      `+refs/pull/7/head:refs/ocm-output/${TEST_SESSION_ID}/pr/7/head`,
+      `+refs/heads/main:refs/ocm-output/${TEST_SESSION_ID}/pr/7/base/main`,
     ])
-    expect(plan.headRef).toBe(`refs/ocm-walkthrough/${TEST_SESSION_ID}/pr/7/head`)
-    expect(plan.baseRef).toBe(`refs/ocm-walkthrough/${TEST_SESSION_ID}/pr/7/base/main`)
+    expect(plan.headRef).toBe(`refs/ocm-output/${TEST_SESSION_ID}/pr/7/head`)
+    expect(plan.baseRef).toBe(`refs/ocm-output/${TEST_SESSION_ID}/pr/7/base/main`)
   })
 
   it('falls back to the origin remote when no upstream exists', async () => {
@@ -229,8 +229,8 @@ describe('readChanges', () => {
 
     expect(plan.remote).toBe('origin')
     expect(plan.refspecs).toEqual([
-      `+refs/pull/3/head:refs/ocm-walkthrough/${TEST_SESSION_ID}/pr/3/head`,
-      `+refs/heads/main:refs/ocm-walkthrough/${TEST_SESSION_ID}/pr/3/base/main`,
+      `+refs/pull/3/head:refs/ocm-output/${TEST_SESSION_ID}/pr/3/head`,
+      `+refs/heads/main:refs/ocm-output/${TEST_SESSION_ID}/pr/3/base/main`,
     ])
   })
 
@@ -246,8 +246,8 @@ describe('readChanges', () => {
 
     expect(plan.remote).toBe('upstream')
     expect(plan.refspecs).toEqual([
-      `+refs/pull/9/head:refs/ocm-walkthrough/${TEST_SESSION_ID}/pr/9/head`,
-      `+refs/heads/trunk:refs/ocm-walkthrough/${TEST_SESSION_ID}/pr/9/base/trunk`,
+      `+refs/pull/9/head:refs/ocm-output/${TEST_SESSION_ID}/pr/9/head`,
+      `+refs/heads/trunk:refs/ocm-output/${TEST_SESSION_ID}/pr/9/base/trunk`,
     ])
   })
 

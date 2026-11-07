@@ -956,13 +956,14 @@ export class OutputService {
   }
 
   /**
-   * Resolves the model for the output session, preferring the configured walkthrough model, then the request model,
-   * then the target session model. Waits once for OpenCode's lazily-loaded global catalog so an explicit model is
-   * registered before the session is created. A failed wait is swallowed because generation proceeds and lets
-   * OpenCode surface its own error.
+   * Resolves the model for the output session, preferring the configured output model, then the legacy
+   * walkthrough model, then the request model, then the target session model. Waits once for OpenCode's
+   * lazily-loaded global catalog so an explicit model is registered before the session is created. A failed
+   * wait is swallowed because generation proceeds and lets OpenCode surface its own error.
    */
   private async resolveOutputModel(session: SessionInfo, requestModel?: string): Promise<ModelRef> {
-    const configured = this.settingsService.getSettings().preferences.walkthroughModel?.trim()
+    const preferences = this.settingsService.getSettings().preferences
+    const configured = preferences.outputModel?.trim() || preferences.walkthroughModel?.trim()
     const parsedConfigured = configured ? parseOpenCodeModelRef(configured) : undefined
     const parsedRequest = requestModel ? parseOpenCodeModelRef(requestModel) : undefined
     const preferred = parsedConfigured ?? parsedRequest ?? session.model

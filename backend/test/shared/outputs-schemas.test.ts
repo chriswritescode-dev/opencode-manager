@@ -57,7 +57,9 @@ describe('validateOutputData', () => {
   })
 
   it('rejects data without stops', () => {
-    const { stops: _stops, ...withoutStops } = validPublishData
+    const withoutStops = Object.fromEntries(
+      Object.entries(validPublishData).filter(([key]) => key !== 'stops'),
+    )
     const result = validateOutputData(dataSchema, withoutStops)
 
     expect(result.ok).toBe(false)
