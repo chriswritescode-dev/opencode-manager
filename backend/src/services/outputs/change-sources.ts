@@ -2,23 +2,23 @@ import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { FileDiffInfo, SessionInfo } from '@opencode-manager/shared/opencode'
-import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
+import type { ChangeSource } from '@opencode-manager/shared/schemas'
 import { splitUnifiedDiffByFile } from '@opencode-manager/shared/utils'
-import { getErrorMessage } from '../utils/error-utils'
-import { executeCommand } from '../utils/process'
-import { ChangeWalkthroughError } from './change-walkthrough-error'
-import type { OpenCodeClient } from './opencode/client'
-import { resolveBaseRef, resolveDefaultBranch } from './repo'
-import { readSessionChanges } from './session-changes'
+import { getErrorMessage } from '../../utils/error-utils'
+import { executeCommand } from '../../utils/process'
+import { OutputError } from './output-error'
+import type { OpenCodeClient } from '../opencode/client'
+import { resolveBaseRef, resolveDefaultBranch } from '../repo'
+import { readSessionChanges } from '../session-changes'
 
-export interface ReadWalkthroughChangesOptions {
+export interface ReadChangesOptions {
   client: OpenCodeClient
   session: SessionInfo
-  source: WalkthroughSource
+  source: ChangeSource
   gitEnv?: Record<string, string>
 }
 
-type GitWalkthroughSource = Exclude<WalkthroughSource, { kind: 'session' }>
+type GitChangeSource = Exclude<ChangeSource, { kind: 'session' }>
 
 const GIT_DIFF_TIMEOUT_MS = 30_000
 const GIT_FETCH_TIMEOUT_MS = 60_000
@@ -27,7 +27,7 @@ const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
 const DIFF_ARGS = ['--no-color', '--src-prefix=a/', '--dst-prefix=b/', '--no-ext-diff', '--no-textconv', '-U3']
 const PULL_REQUEST_REMOTE_PREFERENCE = ['upstream', 'origin']
 
-type PullRequestSource = Extract<GitWalkthroughSource, { kind: 'pullRequest' }>
+type PullRequestSource = Extract<GitChangeSource, { kind: 'pullRequest' }>
 
 export interface PullRequestRefs {
   remote: string
@@ -129,12 +129,12 @@ export async function deletePullRequestRef(
   }
 }
 
-export async function readWalkthroughChanges({
+export async function readChanges({
   client,
   session,
   source,
   gitEnv,
-}: ReadWalkthroughChangesOptions): Promise<FileDiffInfo[]> {
+}: ReadChangesOptions): Promise<FileDiffInfo[]> {
   if (source.kind === 'session') {
     return readSessionChanges(client, session.id)
   }
@@ -144,7 +144,7 @@ export async function readWalkthroughChanges({
 async function readGitChanges(
   directory: string,
   sessionId: string,
-  source: GitWalkthroughSource,
+  source: GitChangeSource,
   gitEnv?: Record<string, string>,
 ): Promise<FileDiffInfo[]> {
   await assertGitRepository(directory, gitEnv)
@@ -175,7 +175,7 @@ async function resolveBase(directory: string, base: string | undefined, gitEnv?:
     gitEnv ?? {},
   )
   if (!resolved) {
-    throw new ChangeWalkthroughError('No base branch found', 409, { code: 'WALKTHROUGH_SOURCE_UNAVAILABLE' })
+    throw new OutputError('No base branch found', 409, { code: 'OUTPUT_SOURCE_UNAVAILABLE' })
   }
   return resolved
 }
@@ -238,10 +238,10 @@ async function runDiff(directory: string, revisionArgs: string[], gitEnv?: Recor
     'git diff failed',
   )
   if (result.truncated) {
-    throw new ChangeWalkthroughError('The diff is too large to display', 413, { code: 'WALKTHROUGH_DIFF_TOO_LARGE' })
+    throw new OutputError('The diff is too large to display', 413, { code: 'OUTPUT_DIFF_TOO_LARGE' })
   }
   if (result.exitCode !== 0) {
-    throw new ChangeWalkthroughError(result.stderr.trim() || 'git diff failed', 502, { code: 'WALKTHROUGH_SOURCE_UNAVAILABLE' })
+    throw new OutputError(result.stderr.trim() || 'git diff failed', 502, { code: 'OUTPUT_SOURCE_UNAVAILABLE' })
   }
   return result.stdout
 }
@@ -254,7 +254,7 @@ async function assertGitRepository(directory: string, gitEnv?: Record<string, st
     insideWorkTree = false
   }
   if (!insideWorkTree) {
-    throw new ChangeWalkthroughError('Not a git repository', 409, { code: 'WALKTHROUGH_SOURCE_UNAVAILABLE' })
+    throw new OutputError('Not a git repository', 409, { code: 'OUTPUT_SOURCE_UNAVAILABLE' })
   }
 }
 
@@ -302,8 +302,8 @@ async function mapGitError<T>(run: () => Promise<T>, fallback: string): Promise<
   } catch (error) {
     const message = getErrorMessage(error)
     if (message.includes('timed out')) {
-      throw new ChangeWalkthroughError('git timed out', 504, { code: 'WALKTHROUGH_SOURCE_UNAVAILABLE' })
+      throw new OutputError('git timed out', 504, { code: 'OUTPUT_SOURCE_UNAVAILABLE' })
     }
-    throw new ChangeWalkthroughError(message || fallback, 502, { code: 'WALKTHROUGH_SOURCE_UNAVAILABLE' })
+    throw new OutputError(message || fallback, 502, { code: 'OUTPUT_SOURCE_UNAVAILABLE' })
   }
 }

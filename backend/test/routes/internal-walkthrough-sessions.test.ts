@@ -5,7 +5,7 @@ import { allMigrations } from '../../src/db/migrations'
 import { getOrCreateInternalToken } from '../../src/services/internal-token'
 import { migrate } from '../../src/db/migration-runner'
 import type { ChangeWalkthroughService } from '../../src/services/change-walkthroughs'
-import { ChangeWalkthroughError } from '../../src/services/change-walkthrough-error'
+import { OutputError } from '../../src/services/outputs/output-error'
 import { createInternalTestApp } from '../helpers/internal-test-app'
 
 const SESSION_ID = 'ses_walk'
@@ -71,7 +71,7 @@ describe('internal/walkthrough-sessions routes', () => {
 
   it('POST /changes maps a service error', async () => {
     readChangesForWalkthroughSession.mockRejectedValueOnce(
-      new ChangeWalkthroughError('This session is not a walkthrough session', 404, { code: 'WALKTHROUGH_NOT_A_WALKTHROUGH_SESSION' }),
+      new OutputError('This session is not a walkthrough session', 404, { code: 'WALKTHROUGH_NOT_A_WALKTHROUGH_SESSION' }),
     )
 
     const res = await app.request(`/api/internal/walkthrough-sessions/${SESSION_ID}/changes`, {
@@ -99,7 +99,7 @@ describe('internal/walkthrough-sessions routes', () => {
 
   it('POST /publish maps a service error', async () => {
     publishFromWalkthroughSession.mockRejectedValueOnce(
-      new ChangeWalkthroughError('This session is not a walkthrough session', 404, { code: 'WALKTHROUGH_NOT_A_WALKTHROUGH_SESSION' }),
+      new OutputError('This session is not a walkthrough session', 404, { code: 'WALKTHROUGH_NOT_A_WALKTHROUGH_SESSION' }),
     )
 
     const res = await app.request(`/api/internal/walkthrough-sessions/${SESSION_ID}/publish`, {

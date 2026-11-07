@@ -26,7 +26,7 @@ import { TTSButton } from '@/components/ui/tts-button'
 import { backgroundShellID, collectBackgroundParts, type ShellNoticeOutcome } from '@/lib/backgroundWork'
 import { readShowArtifactCall } from '@/lib/artifactTool'
 import { groupExplorationParts, type AssistantContentItem } from '@/lib/explorationGroups'
-import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
+import type { ChangeSource } from '@opencode-manager/shared/schemas'
 import { ExplorationGroup } from './ExplorationGroup'
 import { ShellPreview, ToolDetails, useToolDetailsState } from './ToolDetails'
 import { cn, formatDuration } from '@/lib/utils'
@@ -358,7 +358,7 @@ interface MessageRowProps {
   repoLocalPath?: string
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
-  onOpenWalkthrough?: (source?: WalkthroughSource) => void
+  onOpenWalkthrough?: (source?: ChangeSource) => void
   model?: string
   simpleChatMode: boolean
   showReasoning: boolean
@@ -637,7 +637,7 @@ interface MessageThreadProps {
   pending: SessionInboxInfo[]
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
-  onOpenWalkthrough?: (source?: WalkthroughSource) => void
+  onOpenWalkthrough?: (source?: ChangeSource) => void
   onUndoMessage?: (restoredPrompt: string) => void
   model?: string
   isSessionBusy?: boolean

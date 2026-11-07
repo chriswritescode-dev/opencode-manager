@@ -1,19 +1,19 @@
 import type { SessionMessageAssistantTool, SessionMessageInfo } from '@opencode-manager/shared/opencode'
-import { MANAGER_TOOL_NAME, MANAGER_TOOL_OPEN_WALKTHROUGH_ACTION, WalkthroughSourceSchema } from '@opencode-manager/shared/schemas'
-import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
+import { MANAGER_TOOL_NAME, MANAGER_TOOL_OPEN_WALKTHROUGH_ACTION, ChangeSourceSchema } from '@opencode-manager/shared/schemas'
+import type { ChangeSource } from '@opencode-manager/shared/schemas'
 
 interface OpenWalkthroughCall {
   id: string
-  source?: WalkthroughSource
+  source?: ChangeSource
 }
 
 /**
  * Reads the optional walkthrough source the agent passed to `open_walkthrough`, ignoring anything that
- * does not validate as a `WalkthroughSource`.
+ * does not validate as a `ChangeSource`.
  */
-function readOpenWalkthroughSource(params: unknown): WalkthroughSource | undefined {
+function readOpenChangeSource(params: unknown): ChangeSource | undefined {
   if (typeof params !== 'object' || params === null || Array.isArray(params)) return undefined
-  const parsed = WalkthroughSourceSchema.safeParse((params as Record<string, unknown>).source)
+  const parsed = ChangeSourceSchema.safeParse((params as Record<string, unknown>).source)
   return parsed.success ? parsed.data : undefined
 }
 
@@ -27,7 +27,7 @@ export function readOpenWalkthroughCall(
 ): OpenWalkthroughCall | undefined {
   if (part.name !== MANAGER_TOOL_NAME || part.state.status !== 'completed') return undefined
   if (part.state.input.action !== MANAGER_TOOL_OPEN_WALKTHROUGH_ACTION) return undefined
-  return { id: part.id, source: readOpenWalkthroughSource(part.state.input.params) }
+  return { id: part.id, source: readOpenChangeSource(part.state.input.params) }
 }
 
 /** Every completed `open_walkthrough` call in a transcript, in message order. */

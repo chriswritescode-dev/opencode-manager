@@ -13,18 +13,18 @@ import {
 } from '@opencode-manager/shared/opencode'
 import { getOpenCodeGlobalConfigPath, getWalkthroughsPath } from '@opencode-manager/shared/config/env'
 import {
-  DEFAULT_WALKTHROUGH_SOURCE,
+  DEFAULT_CHANGE_SOURCE,
   WALKTHROUGH_GENERATION_TIMEOUT_MS,
   buildSchedulePermissionRuleset,
-  describeWalkthroughSource,
-  walkthroughSourceKey,
+  describeChangeSource,
+  changeSourceKey,
   type ChangeWalkthrough,
   type ChangeWalkthroughState,
   type GenerateChangeWalkthroughRequest,
   type RefineChangeWalkthroughRequest,
   type SchedulePermissionRuleset,
   type WalkthroughGenerationError,
-  type WalkthroughSource,
+  type ChangeSource,
 } from '@opencode-manager/shared/schemas'
 import {
   claimChangeWalkthroughGeneration,
@@ -41,15 +41,15 @@ import { ServiceError } from '../utils/service-error'
 import { logger } from '../utils/logger'
 import { resolveOpenCodeModel } from './opencode-models'
 import type { OpenCodeClient } from './opencode/client'
-import { ChangeWalkthroughError } from './change-walkthrough-error'
+import { OutputError } from './outputs/output-error'
 import {
-  buildWalkthroughInput,
+  buildChangesInput,
   computeChangesHash,
-  formatWalkthroughFileChanges,
-  formatWalkthroughOutline,
-} from './walkthrough-outline'
+  formatChangedFile,
+  formatChangesOutline,
+} from './outputs/change-outline'
 import { assertHtmlArtifactFile } from './session-artifacts'
-import { readWalkthroughChanges, fetchPullRequestRef, deletePullRequestRef } from './walkthrough-sources'
+import { readChanges, fetchPullRequestRef, deletePullRequestRef } from './outputs/change-sources'
 import { resolveRepoForDirectory } from './repo'
 import type { GitService } from './git/GitService'
 import type { GitAuthService } from './git-auth'
@@ -111,31 +111,31 @@ export function buildWalkthroughSessionPrompt({
   ].join('\n\n')
 }
 
-function entryKey(sessionId: string, source: WalkthroughSource): string {
-  return `${sessionId}\0${walkthroughSourceKey(source)}`
+function entryKey(sessionId: string, source: ChangeSource): string {
+  return `${sessionId}\0${changeSourceKey(source)}`
 }
 
-function walkthroughTitle(session: SessionInfo, source: WalkthroughSource): string {
+function walkthroughTitle(session: SessionInfo, source: ChangeSource): string {
   const base = session.title ?? session.id
-  return source.kind === 'session' ? base : `${base} — ${describeWalkthroughSource(source)}`
+  return source.kind === 'session' ? base : `${base} — ${describeChangeSource(source)}`
 }
 
-function sourceChangesVerb(source: WalkthroughSource): string {
+function sourceChangesVerb(source: ChangeSource): string {
   return source.kind === 'branch' || source.kind === 'pullRequest' ? 'contains' : 'contain'
 }
 
-function noChangesMessage(source: WalkthroughSource): string {
+function noChangesMessage(source: ChangeSource): string {
   if (source.kind === 'session') {
     return 'This session has no changes to walk through'
   }
-  return `The ${describeWalkthroughSource(source)} ${sourceChangesVerb(source)} no changes to walk through`
+  return `The ${describeChangeSource(source)} ${sourceChangesVerb(source)} no changes to walk through`
 }
 
-function noTextChangesMessage(source: WalkthroughSource): string {
+function noTextChangesMessage(source: ChangeSource): string {
   if (source.kind === 'session') {
     return 'This session has no text changes to walk through'
   }
-  return `The ${describeWalkthroughSource(source)} ${sourceChangesVerb(source)} no text changes`
+  return `The ${describeChangeSource(source)} ${sourceChangesVerb(source)} no text changes`
 }
 
 function toGenerationError(error: unknown): WalkthroughGenerationError {
@@ -179,15 +179,15 @@ export class ChangeWalkthroughService {
 
   async getState(
     sessionId: string,
-    source: WalkthroughSource = DEFAULT_WALKTHROUGH_SOURCE,
+    source: ChangeSource = DEFAULT_CHANGE_SOURCE,
   ): Promise<ChangeWalkthroughState> {
     const session = await this.readSession(sessionId)
     const key = entryKey(sessionId, source)
 
-    let walkthrough = getChangeWalkthrough(this.db, sessionId, walkthroughSourceKey(source))
+    let walkthrough = getChangeWalkthrough(this.db, sessionId, changeSourceKey(source))
     if (this.hasGenerationTimedOut(walkthrough)) {
       await this.expireGeneration(sessionId, source)
-      walkthrough = getChangeWalkthrough(this.db, sessionId, walkthroughSourceKey(source))
+      walkthrough = getChangeWalkthrough(this.db, sessionId, changeSourceKey(source))
     }
 
     const currentDiffHash = await this.readCurrentDiffHash(session, source, key)
@@ -206,7 +206,7 @@ export class ChangeWalkthroughService {
     sessionId: string,
     request: GenerateChangeWalkthroughRequest,
   ): Promise<ChangeWalkthroughState> {
-    const source = request.source ?? DEFAULT_WALKTHROUGH_SOURCE
+    const source = request.source ?? DEFAULT_CHANGE_SOURCE
     const key = entryKey(sessionId, source)
     const session = await this.readSession(sessionId)
 
@@ -217,22 +217,22 @@ export class ChangeWalkthroughService {
     const changes = await this.readChanges(session, source)
 
     if (changes.length === 0) {
-      throw new ChangeWalkthroughError(noChangesMessage(source), 409, {
-        code: 'WALKTHROUGH_NO_CHANGES',
+      throw new OutputError(noChangesMessage(source), 409, {
+        code: 'OUTPUT_NO_CHANGES',
       })
     }
 
-    const input = buildWalkthroughInput(changes)
+    const input = buildChangesInput(changes)
     if (input.hunks.length === 0 && input.mechanicalHunks.length === 0) {
-      throw new ChangeWalkthroughError(noTextChangesMessage(source), 409, {
-        code: 'WALKTHROUGH_NO_TEXT_CHANGES',
+      throw new OutputError(noTextChangesMessage(source), 409, {
+        code: 'OUTPUT_NO_TEXT_CHANGES',
       })
     }
 
     const diffHash = computeChangesHash(changes)
     this.currentHashes.set(key, diffHash)
 
-    const previous = getChangeWalkthrough(this.db, sessionId, walkthroughSourceKey(source))
+    const previous = getChangeWalkthrough(this.db, sessionId, changeSourceKey(source))
     if (previous?.status === 'ready' && previous.diffHash === diffHash && !request.regenerate) {
       return this.getState(sessionId, source)
     }
@@ -287,7 +287,7 @@ export class ChangeWalkthroughService {
       })
       walkthroughSessionId = walkthroughSession.id
 
-      const recorded = updateChangeWalkthrough(this.db, sessionId, walkthroughSourceKey(source), ['generating'], {
+      const recorded = updateChangeWalkthrough(this.db, sessionId, changeSourceKey(source), ['generating'], {
         walkthroughSessionId,
         executionStartedAt: Date.now(),
         updatedAt: Date.now(),
@@ -308,12 +308,12 @@ export class ChangeWalkthroughService {
         sessionID: walkthroughSessionId,
         text: buildWalkthroughSessionPrompt({
           title,
-          sourceDescription: describeWalkthroughSource(source),
+          sourceDescription: describeChangeSource(source),
           artifactPath,
         }),
       })
 
-      const current = getChangeWalkthrough(this.db, sessionId, walkthroughSourceKey(source))
+      const current = getChangeWalkthrough(this.db, sessionId, changeSourceKey(source))
       if (!current || current.status !== 'generating' || current.walkthroughSessionId !== walkthroughSessionId) {
         this.changesSnapshots.delete(walkthroughSessionId)
         await this.interruptWalkthroughSession(
@@ -335,13 +335,13 @@ export class ChangeWalkthroughService {
       }
       await rm(outputDir, { recursive: true, force: true })
       const generationError = toGenerationError(error)
-      updateChangeWalkthrough(this.db, sessionId, walkthroughSourceKey(source), ['generating'], {
+      updateChangeWalkthrough(this.db, sessionId, changeSourceKey(source), ['generating'], {
         status: 'failed',
         error: generationError,
         executionStartedAt: null,
         updatedAt: Date.now(),
       })
-      throw new ChangeWalkthroughError(
+      throw new OutputError(
         generationError.message || 'Failed to start the walkthrough session',
         502,
         { code: 'WALKTHROUGH_SESSION_START_FAILED' },
@@ -351,8 +351,8 @@ export class ChangeWalkthroughService {
     return this.getState(sessionId, source)
   }
 
-  async cancelGeneration(sessionId: string, source: WalkthroughSource = DEFAULT_WALKTHROUGH_SOURCE): Promise<boolean> {
-    const record = getChangeWalkthrough(this.db, sessionId, walkthroughSourceKey(source))
+  async cancelGeneration(sessionId: string, source: ChangeSource = DEFAULT_CHANGE_SOURCE): Promise<boolean> {
+    const record = getChangeWalkthrough(this.db, sessionId, changeSourceKey(source))
     if (!record || (record.status !== 'generating' && record.executionStartedAt === null)) {
       return false
     }
@@ -362,11 +362,11 @@ export class ChangeWalkthroughService {
 
   async publishFromWalkthroughSession(walkthroughSessionId: string): Promise<{ path: string }> {
     const { walkthrough } = this.requireWalkthroughSession(walkthroughSessionId)
-    const sourceKey = walkthroughSourceKey(walkthrough.source)
+    const sourceKey = changeSourceKey(walkthrough.source)
 
     const artifactPath = walkthrough.artifactPath
     if (!artifactPath) {
-      throw new ChangeWalkthroughError('The walkthrough has no artifact file yet', 404)
+      throw new OutputError('The walkthrough has no artifact file yet', 404)
     }
     await assertHtmlArtifactFile(artifactPath, artifactPath)
 
@@ -385,7 +385,7 @@ export class ChangeWalkthroughService {
       { walkthroughSessionId },
     )
     if (!updated) {
-      throw new ChangeWalkthroughError('This walkthrough was superseded by a newer generation', 409, {
+      throw new OutputError('This walkthrough was superseded by a newer generation', 409, {
         code: 'WALKTHROUGH_SUPERSEDED',
       })
     }
@@ -399,28 +399,28 @@ export class ChangeWalkthroughService {
     const changes = await this.readWalkthroughSessionChanges(walkthroughSessionId, walkthrough, session)
 
     if (file === undefined) {
-      return formatWalkthroughOutline({
+      return formatChangesOutline({
         title: walkthroughTitle(session, walkthrough.source),
-        sourceDescription: describeWalkthroughSource(walkthrough.source),
+        sourceDescription: describeChangeSource(walkthrough.source),
         changes,
       })
     }
 
-    const text = formatWalkthroughFileChanges(changes, file)
+    const text = formatChangedFile(changes, file)
     if (text === null) {
-      throw new ChangeWalkthroughError(`The file is not part of the changes: ${file}`, 404, {
-        code: 'WALKTHROUGH_FILE_NOT_CHANGED',
+      throw new OutputError(`The file is not part of the changes: ${file}`, 404, {
+        code: 'OUTPUT_FILE_NOT_CHANGED',
       })
     }
     return text
   }
 
   async refine(sessionId: string, request: RefineChangeWalkthroughRequest): Promise<ChangeWalkthroughState> {
-    const source = request.source ?? DEFAULT_WALKTHROUGH_SOURCE
-    const sourceKey = walkthroughSourceKey(source)
+    const source = request.source ?? DEFAULT_CHANGE_SOURCE
+    const sourceKey = changeSourceKey(source)
     const record = getChangeWalkthrough(this.db, sessionId, sourceKey)
     if (!record || !record.walkthroughSessionId) {
-      throw new ChangeWalkthroughError('The walkthrough has not been started yet', 409, {
+      throw new OutputError('The walkthrough has not been started yet', 409, {
         code: 'WALKTHROUGH_NOT_STARTED',
       })
     }
@@ -439,7 +439,7 @@ export class ChangeWalkthroughService {
       { running: false },
     )
     if (!claimed) {
-      throw new ChangeWalkthroughError('The walkthrough is still being built', 409, { code: 'WALKTHROUGH_BUSY' })
+      throw new OutputError('The walkthrough is still being built', 409, { code: 'WALKTHROUGH_BUSY' })
     }
 
     this.changesSnapshots.delete(record.walkthroughSessionId)
@@ -467,11 +467,11 @@ export class ChangeWalkthroughService {
         { walkthroughSessionId: record.walkthroughSessionId, running: true },
       )
       if (isSessionNotFoundError(error)) {
-        throw new ChangeWalkthroughError('The walkthrough session no longer exists', 409, {
+        throw new OutputError('The walkthrough session no longer exists', 409, {
           code: 'WALKTHROUGH_SESSION_MISSING',
         })
       }
-      throw new ChangeWalkthroughError(getErrorMessage(error) || 'Failed to send the refine prompt', 502)
+      throw new OutputError(getErrorMessage(error) || 'Failed to send the refine prompt', 502)
     }
 
     this.startTimeout(sessionId, source)
@@ -496,18 +496,18 @@ export class ChangeWalkthroughService {
         return
       }
       case 'session.execution.started':
-        this.invalidateCurrentHash(entryKey(event.data.sessionID, DEFAULT_WALKTHROUGH_SOURCE))
+        this.invalidateCurrentHash(entryKey(event.data.sessionID, DEFAULT_CHANGE_SOURCE))
         return
       case 'session.execution.succeeded':
       case 'session.execution.failed':
       case 'session.execution.interrupted':
-        this.invalidateCurrentHash(entryKey(event.data.sessionID, DEFAULT_WALKTHROUGH_SOURCE))
+        this.invalidateCurrentHash(entryKey(event.data.sessionID, DEFAULT_CHANGE_SOURCE))
         this.finishWalkthroughSession(event.data.sessionID)
         return
       case 'session.revert.staged':
       case 'session.revert.committed':
       case 'session.revert.cleared':
-        this.invalidateCurrentHash(entryKey(event.data.sessionID, DEFAULT_WALKTHROUGH_SOURCE))
+        this.invalidateCurrentHash(entryKey(event.data.sessionID, DEFAULT_CHANGE_SOURCE))
         return
       default:
         return
@@ -583,7 +583,7 @@ export class ChangeWalkthroughService {
     }
   }
 
-  private startTimeout(sessionId: string, source: WalkthroughSource): void {
+  private startTimeout(sessionId: string, source: ChangeSource): void {
     const key = entryKey(sessionId, source)
     this.clearTimeout(key)
     const timer = setTimeout(() => {
@@ -605,8 +605,8 @@ export class ChangeWalkthroughService {
     this.timers.delete(key)
   }
 
-  private async expireGeneration(sessionId: string, source: WalkthroughSource): Promise<void> {
-    const record = getChangeWalkthrough(this.db, sessionId, walkthroughSourceKey(source))
+  private async expireGeneration(sessionId: string, source: ChangeSource): Promise<void> {
+    const record = getChangeWalkthrough(this.db, sessionId, changeSourceKey(source))
     if (!record || (record.status !== 'generating' && record.executionStartedAt === null)) {
       return
     }
@@ -628,7 +628,7 @@ export class ChangeWalkthroughService {
     const updated = updateChangeWalkthrough(
       this.db,
       record.sessionId,
-      walkthroughSourceKey(record.source),
+      changeSourceKey(record.source),
       record.status === 'generating' ? ['generating'] : ['ready', 'failed', 'cancelled'],
       patch,
       {
@@ -661,7 +661,7 @@ export class ChangeWalkthroughService {
   ): { walkthrough: ChangeWalkthrough; generationId: string } {
     const found = getChangeWalkthroughByWalkthroughSession(this.db, walkthroughSessionId)
     if (!found) {
-      throw new ChangeWalkthroughError('This session is not a walkthrough session', 404, {
+      throw new OutputError('This session is not a walkthrough session', 404, {
         code: 'WALKTHROUGH_NOT_A_WALKTHROUGH_SESSION',
       })
     }
@@ -699,27 +699,27 @@ export class ChangeWalkthroughService {
     return changes
   }
 
-  private async readChanges(session: SessionInfo, source: WalkthroughSource): Promise<FileDiffInfo[]> {
+  private async readChanges(session: SessionInfo, source: ChangeSource): Promise<FileDiffInfo[]> {
     try {
-      return await readWalkthroughChanges({
+      return await readChanges({
         client: this.openCodeClient,
         session,
         source,
         gitEnv: this.gitAuthService.getGitEnvironment(true),
       })
     } catch (error) {
-      if (error instanceof ChangeWalkthroughError) {
+      if (error instanceof OutputError) {
         throw error
       }
-      throw new ChangeWalkthroughError(getErrorMessage(error) || 'Failed to read session changes', 502, {
-        code: 'WALKTHROUGH_CHANGES_UNAVAILABLE',
+      throw new OutputError(getErrorMessage(error) || 'Failed to read session changes', 502, {
+        code: 'OUTPUT_CHANGES_UNAVAILABLE',
       })
     }
   }
 
   private async readCurrentDiffHash(
     session: SessionInfo,
-    source: WalkthroughSource,
+    source: ChangeSource,
     key: string,
   ): Promise<string | null> {
     if (source.kind === 'session') {
@@ -793,7 +793,7 @@ export class ChangeWalkthroughService {
 
   private async fetchPullRequestChanges(
     session: SessionInfo,
-    source: Extract<WalkthroughSource, { kind: 'pullRequest' }>,
+    source: Extract<ChangeSource, { kind: 'pullRequest' }>,
   ): Promise<void> {
     const directory = session.location.directory
     const repo = await resolveRepoForDirectory(this.db, directory)
@@ -818,9 +818,9 @@ export class ChangeWalkthroughService {
       return await this.openCodeClient.api.session.get({ sessionID: sessionId })
     } catch (error) {
       if (isSessionNotFoundError(error)) {
-        throw new ChangeWalkthroughError('Session not found', 404)
+        throw new OutputError('Session not found', 404)
       }
-      throw new ChangeWalkthroughError(getErrorMessage(error) || 'Failed to read session', 502)
+      throw new OutputError(getErrorMessage(error) || 'Failed to read session', 502)
     }
   }
 
@@ -850,7 +850,7 @@ export class ChangeWalkthroughService {
     try {
       resolved = await resolveOpenCodeModel(this.openCodeClient, getOpenCodeGlobalConfigPath())
     } catch (error) {
-      throw new ChangeWalkthroughError(
+      throw new OutputError(
         getErrorMessage(error) || 'Failed to resolve the walkthrough model',
         502,
         { code: 'WALKTHROUGH_MODEL_UNAVAILABLE' },

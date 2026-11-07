@@ -38,7 +38,7 @@ import { FileReferenceText } from './FileReferenceText'
 import { ShellPreview, ToolDetails, useToolDetailsState } from './ToolDetails'
 import { ToolContentFiles } from './ToolContentFiles'
 import { TRANSCRIPT_DETAIL_CLASS, TRANSCRIPT_ROW_CLASS } from './transcriptStyles'
-import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
+import type { ChangeSource } from '@opencode-manager/shared/schemas'
 
 function BoundedPre({ content, className }: { content: string; className: string }) {
   const clamped = useMemo(() => clampDisplayText(content), [content])
@@ -54,7 +54,7 @@ interface ToolCallPartProps {
   shellOutcome?: ShellNoticeOutcome
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
-  onOpenWalkthrough?: (source?: WalkthroughSource) => void
+  onOpenWalkthrough?: (source?: ChangeSource) => void
 }
 
 function toolInput(part: SessionMessageAssistantTool): Record<string, unknown> | undefined {

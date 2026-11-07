@@ -522,9 +522,9 @@ describe('ChangesWalkthroughSheet', () => {
   })
 
   it.each([
-    ['WALKTHROUGH_NO_CHANGES', 'This session has no changes to walk through', 'This session has no changes to walk through'],
-    ['WALKTHROUGH_NO_CHANGES', 'The staged changes contain no changes to walk through', 'The staged changes contain no changes to walk through'],
-    ['WALKTHROUGH_NO_TEXT_CHANGES', '', 'This session has no text changes to walk through'],
+    ['OUTPUT_NO_CHANGES', 'This session has no changes to walk through', 'This session has no changes to walk through'],
+    ['OUTPUT_NO_CHANGES', 'The staged changes contain no changes to walk through', 'The staged changes contain no changes to walk through'],
+    ['OUTPUT_NO_TEXT_CHANGES', '', 'This session has no text changes to walk through'],
   ])('renders the %s message for the selected source inline', async (code, serverMessage, shown) => {
     const user = userEvent.setup()
     mocks.getChangeWalkthrough.mockResolvedValue(state({ walkthrough: null, currentDiffHash: null }))
@@ -548,8 +548,8 @@ describe('ChangesWalkthroughSheet', () => {
   })
 
   it.each([
-    ['WALKTHROUGH_NO_CHANGES', 'This session has no changes to walk through'],
-    ['WALKTHROUGH_NO_TEXT_CHANGES', 'This session has no text changes to walk through'],
+    ['OUTPUT_NO_CHANGES', 'This session has no changes to walk through'],
+    ['OUTPUT_NO_TEXT_CHANGES', 'This session has no text changes to walk through'],
   ])('recovers from a prior %s error once changes appear and the dialog is reopened', async (code, serverMessage) => {
     const user = userEvent.setup()
     let generated = false

@@ -3,19 +3,19 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import type { FileDiffInfo, SessionInfo } from '@opencode-manager/shared/opencode'
-import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
+import type { ChangeSource } from '@opencode-manager/shared/schemas'
 import {
-  DEFAULT_WALKTHROUGH_SOURCE,
-  parseWalkthroughSourceKey,
-  walkthroughSourceKey,
+  DEFAULT_CHANGE_SOURCE,
+  parseChangeSourceKey,
+  changeSourceKey,
 } from '@opencode-manager/shared/schemas'
-import { ChangeWalkthroughError } from '../../src/services/change-walkthrough-error'
+import { OutputError } from '../../../src/services/outputs/output-error'
 import {
   planPullRequestFetch,
-  readWalkthroughChanges,
-} from '../../src/services/walkthrough-sources'
-import type { OpenCodeClient } from '../../src/services/opencode/client'
-import { cloneOrigin, createCommittedRepo, createOrigin, git, uniqueName } from '../helpers/git-fixtures'
+  readChanges,
+} from '../../../src/services/outputs/change-sources'
+import type { OpenCodeClient } from '../../../src/services/opencode/client'
+import { cloneOrigin, createCommittedRepo, createOrigin, git, uniqueName } from '../../helpers/git-fixtures'
 
 const TEST_SESSION_ID = 'ses_test'
 const workspaceRoot = mkdtempSync(path.join(tmpdir(), 'walkthrough-sources-'))
@@ -36,8 +36,8 @@ function sessionAt(directory: string): SessionInfo {
   return { id: TEST_SESSION_ID, title: 'Test', location: { directory } } as SessionInfo
 }
 
-function readAt(directory: string, source: WalkthroughSource): Promise<FileDiffInfo[]> {
-  return readWalkthroughChanges({
+function readAt(directory: string, source: ChangeSource): Promise<FileDiffInfo[]> {
+  return readChanges({
     client: {} as OpenCodeClient,
     session: sessionAt(directory),
     source,
@@ -45,7 +45,7 @@ function readAt(directory: string, source: WalkthroughSource): Promise<FileDiffI
   })
 }
 
-describe('readWalkthroughChanges', () => {
+describe('readChanges', () => {
   it('delegates the session source to the session diff', async () => {
     const changes: FileDiffInfo[] = [
       { file: 'src/a.ts', patch: '@@ -1 +1 @@\n-a\n+b', additions: 1, deletions: 1, status: 'modified' },
@@ -57,10 +57,10 @@ describe('readWalkthroughChanges', () => {
       },
     } as unknown as OpenCodeClient
 
-    const result = await readWalkthroughChanges({
+    const result = await readChanges({
       client,
       session: sessionAt('/not/a/repo'),
-      source: DEFAULT_WALKTHROUGH_SOURCE,
+      source: DEFAULT_CHANGE_SOURCE,
       gitEnv: GIT_ENV,
     })
 
@@ -199,8 +199,8 @@ describe('readWalkthroughChanges', () => {
 
     const error = await readAt(clone, { kind: 'pullRequest', number: 1, base: 'main' }).catch((thrown) => thrown)
 
-    expect(error).toBeInstanceOf(ChangeWalkthroughError)
-    expect(error).toMatchObject({ status: 502, code: 'WALKTHROUGH_SOURCE_UNAVAILABLE' })
+    expect(error).toBeInstanceOf(OutputError)
+    expect(error).toMatchObject({ status: 502, code: 'OUTPUT_SOURCE_UNAVAILABLE' })
   })
 
   it('prefers the upstream remote when it exists', async () => {
@@ -273,8 +273,8 @@ describe('readWalkthroughChanges', () => {
 
     const error = await readAt(dir, { kind: 'staged' }).catch((thrown) => thrown)
 
-    expect(error).toBeInstanceOf(ChangeWalkthroughError)
-    expect(error).toMatchObject({ status: 409, code: 'WALKTHROUGH_SOURCE_UNAVAILABLE' })
+    expect(error).toBeInstanceOf(OutputError)
+    expect(error).toMatchObject({ status: 409, code: 'OUTPUT_SOURCE_UNAVAILABLE' })
   })
 
   it('rejects a branch source when no base branch exists', async () => {
@@ -283,8 +283,8 @@ describe('readWalkthroughChanges', () => {
 
     const error = await readAt(repo, { kind: 'branch' }).catch((thrown) => thrown)
 
-    expect(error).toBeInstanceOf(ChangeWalkthroughError)
-    expect(error).toMatchObject({ status: 409, code: 'WALKTHROUGH_SOURCE_UNAVAILABLE' })
+    expect(error).toBeInstanceOf(OutputError)
+    expect(error).toMatchObject({ status: 409, code: 'OUTPUT_SOURCE_UNAVAILABLE' })
   })
 
   it('resolves a base branch that only exists as a remote-tracking ref', async () => {
@@ -323,8 +323,8 @@ describe('readWalkthroughChanges', () => {
 
     const error = await readAt(repo, { kind: 'branch', base: 'main' }).catch((thrown) => thrown)
 
-    expect(error).toBeInstanceOf(ChangeWalkthroughError)
-    expect(error).toMatchObject({ status: 502, code: 'WALKTHROUGH_SOURCE_UNAVAILABLE' })
+    expect(error).toBeInstanceOf(OutputError)
+    expect(error).toMatchObject({ status: 502, code: 'OUTPUT_SOURCE_UNAVAILABLE' })
     expect((error as Error).message).toContain('unable to read tree')
   })
 
@@ -404,14 +404,14 @@ describe('readWalkthroughChanges', () => {
 
     const error = await readAt(repo, { kind: 'unstaged' }).catch((thrown) => thrown)
 
-    expect(error).toBeInstanceOf(ChangeWalkthroughError)
-    expect(error).toMatchObject({ status: 413, code: 'WALKTHROUGH_DIFF_TOO_LARGE' })
+    expect(error).toBeInstanceOf(OutputError)
+    expect(error).toMatchObject({ status: 413, code: 'OUTPUT_DIFF_TOO_LARGE' })
   })
 })
 
-describe('walkthroughSourceKey', () => {
+describe('changeSourceKey', () => {
   it('round-trips every source kind', () => {
-    const sources: WalkthroughSource[] = [
+    const sources: ChangeSource[] = [
       { kind: 'session' },
       { kind: 'uncommitted' },
       { kind: 'staged' },
@@ -423,14 +423,14 @@ describe('walkthroughSourceKey', () => {
     ]
 
     for (const source of sources) {
-      expect(parseWalkthroughSourceKey(walkthroughSourceKey(source))).toEqual(source)
+      expect(parseChangeSourceKey(changeSourceKey(source))).toEqual(source)
     }
   })
 
   it('rejects invalid keys', () => {
-    expect(parseWalkthroughSourceKey('branch:-x')).toBeNull()
-    expect(parseWalkthroughSourceKey('pr:0:')).toBeNull()
-    expect(parseWalkthroughSourceKey('pr:abc:main')).toBeNull()
-    expect(parseWalkthroughSourceKey('nonsense')).toBeNull()
+    expect(parseChangeSourceKey('branch:-x')).toBeNull()
+    expect(parseChangeSourceKey('pr:0:')).toBeNull()
+    expect(parseChangeSourceKey('pr:abc:main')).toBeNull()
+    expect(parseChangeSourceKey('nonsense')).toBeNull()
   })
 })

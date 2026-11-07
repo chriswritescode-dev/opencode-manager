@@ -1,9 +1,9 @@
 import { Hono } from 'hono'
 import {
-  DEFAULT_WALKTHROUGH_SOURCE,
+  DEFAULT_CHANGE_SOURCE,
   GenerateChangeWalkthroughRequestSchema,
   RefineChangeWalkthroughRequestSchema,
-  parseWalkthroughSourceKey,
+  parseChangeSourceKey,
 } from '@opencode-manager/shared/schemas'
 import type { ChangeWalkthroughService } from '../services/change-walkthroughs'
 import { handleServiceError, parseJsonBody } from '../utils/route-helpers'
@@ -18,7 +18,7 @@ export function createChangeWalkthroughRoutes(service: ChangeWalkthroughService)
 
   app.get('/:sessionId', async (c) => {
     const sourceParam = c.req.query('source')
-    const source = sourceParam === undefined ? DEFAULT_WALKTHROUGH_SOURCE : parseWalkthroughSourceKey(sourceParam)
+    const source = sourceParam === undefined ? DEFAULT_CHANGE_SOURCE : parseChangeSourceKey(sourceParam)
     if (!source) {
       return c.json({ error: 'Invalid walkthrough source' }, 400)
     }
@@ -61,7 +61,7 @@ export function createChangeWalkthroughRoutes(service: ChangeWalkthroughService)
 
   app.delete('/:sessionId', async (c) => {
     const sourceParam = c.req.query('source')
-    const source = sourceParam === undefined ? DEFAULT_WALKTHROUGH_SOURCE : parseWalkthroughSourceKey(sourceParam)
+    const source = sourceParam === undefined ? DEFAULT_CHANGE_SOURCE : parseChangeSourceKey(sourceParam)
     if (!source) {
       return c.json({ error: 'Invalid walkthrough source' }, 400)
     }

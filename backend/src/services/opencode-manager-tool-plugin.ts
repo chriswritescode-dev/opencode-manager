@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import {
   ASSISTANT_NOTIFICATION_LIMITS,
-  DEFAULT_WALKTHROUGH_SOURCE,
+  DEFAULT_CHANGE_SOURCE,
   MANAGER_PROMPT_CLIENT_METADATA_KEY,
   MANAGER_PROMPT_CLIENTS,
   MANAGER_TOOL_ACTIONS,
@@ -9,8 +9,8 @@ import {
   PublishWalkthroughParamsSchema,
   ShowArtifactParamsSchema,
   WalkthroughChangesParamsSchema,
-  WalkthroughSourceSchema,
-  walkthroughSourceKey,
+  ChangeSourceSchema,
+  changeSourceKey,
 } from '@opencode-manager/shared/schemas'
 
 const MANAGER_TOOL_REQUEST_TIMEOUT_MS = 60000
@@ -79,7 +79,7 @@ const ManagerToolRequestParamsSchema = z
 
 const ManagerToolWalkthroughParamsSchema = z
   .object({
-    source: WalkthroughSourceSchema.optional().describe('The change source to walk through. Defaults to the changes in this session.'),
+    source: ChangeSourceSchema.optional().describe('The change source to walk through. Defaults to the changes in this session.'),
   })
   .strict()
   .describe("Start a separate walkthrough session that builds an interactive walkthrough UI for this session's changes and waits until it is ready, which can take several minutes. It opens in the user's Manager walkthrough panel when this session is open on desktop; otherwise the user can open it from this tool call.")
@@ -185,9 +185,9 @@ var DESKTOP_CLIENT = ${JSON.stringify(DESKTOP_PROMPT_CLIENT)}
 
 var MOBILE_OUTPUT_INSTRUCTIONS = ${JSON.stringify(MANAGER_MOBILE_OUTPUT_INSTRUCTIONS)}
 
-var DEFAULT_WALKTHROUGH_SOURCE = ${JSON.stringify(DEFAULT_WALKTHROUGH_SOURCE)}
+var DEFAULT_CHANGE_SOURCE = ${JSON.stringify(DEFAULT_CHANGE_SOURCE)}
 
-var walkthroughSourceKey = ${walkthroughSourceKey.toString()}
+var changeSourceKey = ${changeSourceKey.toString()}
 
 var MOBILE_SESSIONS = new Set()
 
@@ -322,11 +322,11 @@ var ACTIONS = {
   },
   open_walkthrough: {
     run: async function (params, context) {
-      var source = params.source === undefined ? DEFAULT_WALKTHROUGH_SOURCE : params.source
+      var source = params.source === undefined ? DEFAULT_CHANGE_SOURCE : params.source
       var body = params.source === undefined ? undefined : { source: params.source }
       var statePath = '/change-walkthroughs/' + encodeURIComponent(context.sessionID)
       var state = await postInternalApi(statePath, body, context.signal)
-      var pollPath = statePath + '?source=' + encodeURIComponent(walkthroughSourceKey(source))
+      var pollPath = statePath + '?source=' + encodeURIComponent(changeSourceKey(source))
       while (state.generating === true) {
         await waitForWalkthroughPoll(context.signal)
         state = await getInternalApi(pollPath, context.signal)

@@ -4,7 +4,7 @@ import type { SessionMessageAssistantTool } from '@opencode-manager/shared/openc
 import { useSettings } from '@/hooks/useSettings'
 import { useToolCallPermission } from '@/contexts/EventContext'
 import { explorationFailureCount, explorationLabel, isExplorationComplete } from '@/lib/explorationGroups'
-import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
+import type { ChangeSource } from '@opencode-manager/shared/schemas'
 import { MessagePart } from './MessagePart'
 
 interface ExplorationGroupProps {
@@ -15,7 +15,7 @@ interface ExplorationGroupProps {
   repoLocalPath?: string
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
-  onOpenWalkthrough?: (source?: WalkthroughSource) => void
+  onOpenWalkthrough?: (source?: ChangeSource) => void
 }
 
 type MemberProps = Omit<ExplorationGroupProps, 'parts'> & { part: SessionMessageAssistantTool }

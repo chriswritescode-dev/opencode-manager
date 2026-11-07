@@ -8,11 +8,11 @@ import {
   getWalkthroughHelperSessionIds,
   refineChangeWalkthrough,
 } from '@/api/changeWalkthroughs'
-import { walkthroughSourceKey } from '@opencode-manager/shared/schemas'
+import { changeSourceKey } from '@opencode-manager/shared/schemas'
 import type {
   ChangeWalkthroughState,
   GenerateChangeWalkthroughRequest,
-  WalkthroughSource,
+  ChangeSource,
 } from '@opencode-manager/shared/schemas'
 
 const GENERATING_POLL_INTERVAL_MS = 2_000
@@ -49,9 +49,9 @@ export function useWalkthroughHelperSessionIds(): ReadonlySet<string> {
 export function useChangeWalkthrough(
   sessionId: string | undefined,
   enabled: boolean,
-  source: WalkthroughSource,
+  source: ChangeSource,
 ) {
-  const sourceKey = walkthroughSourceKey(source)
+  const sourceKey = changeSourceKey(source)
   const queryKey = changeWalkthroughQueryKey(sessionId ?? '', sourceKey)
   return useQuery({
     queryKey,
@@ -63,9 +63,9 @@ export function useChangeWalkthrough(
   })
 }
 
-export function useGenerateChangeWalkthrough(sessionId: string | undefined, source: WalkthroughSource) {
+export function useGenerateChangeWalkthrough(sessionId: string | undefined, source: ChangeSource) {
   const queryClient = useQueryClient()
-  const sourceKey = walkthroughSourceKey(source)
+  const sourceKey = changeSourceKey(source)
 
   return useMutation({
     mutationFn: async (request: GenerateChangeWalkthroughRequest) => {
@@ -80,9 +80,9 @@ export function useGenerateChangeWalkthrough(sessionId: string | undefined, sour
   })
 }
 
-export function useRefineChangeWalkthrough(sessionId: string | undefined, source: WalkthroughSource) {
+export function useRefineChangeWalkthrough(sessionId: string | undefined, source: ChangeSource) {
   const queryClient = useQueryClient()
-  const sourceKey = walkthroughSourceKey(source)
+  const sourceKey = changeSourceKey(source)
 
   return useMutation({
     mutationFn: async (text: string) => {
@@ -94,9 +94,9 @@ export function useRefineChangeWalkthrough(sessionId: string | undefined, source
   })
 }
 
-export function useCancelChangeWalkthrough(sessionId: string | undefined, source: WalkthroughSource) {
+export function useCancelChangeWalkthrough(sessionId: string | undefined, source: ChangeSource) {
   const queryClient = useQueryClient()
-  const sourceKey = walkthroughSourceKey(source)
+  const sourceKey = changeSourceKey(source)
 
   return useMutation({
     mutationFn: async () => {

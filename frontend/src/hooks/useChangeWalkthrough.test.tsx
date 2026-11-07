@@ -9,7 +9,7 @@ import {
   useGenerateChangeWalkthrough,
   useRefineChangeWalkthrough,
 } from './useChangeWalkthrough'
-import { DEFAULT_WALKTHROUGH_SOURCE } from '@opencode-manager/shared/schemas'
+import { DEFAULT_CHANGE_SOURCE } from '@opencode-manager/shared/schemas'
 import type { ChangeWalkthrough, ChangeWalkthroughState } from '@opencode-manager/shared/schemas'
 
 const mocks = vi.hoisted(() => ({
@@ -69,7 +69,7 @@ describe('useGenerateChangeWalkthrough', () => {
     mocks.generateChangeWalkthrough.mockReturnValue(pending.promise)
 
     const { result, rerender } = renderHook(
-      ({ sessionId }: { sessionId: string }) => useGenerateChangeWalkthrough(sessionId, DEFAULT_WALKTHROUGH_SOURCE),
+      ({ sessionId }: { sessionId: string }) => useGenerateChangeWalkthrough(sessionId, DEFAULT_CHANGE_SOURCE),
       { initialProps: { sessionId: 'ses_A' }, wrapper: createWrapper(queryClient) },
     )
 
@@ -108,7 +108,7 @@ describe('useChangeWalkthrough', () => {
         .mockResolvedValueOnce(state({ generating: true }))
         .mockResolvedValueOnce(state({ walkthrough: walkthroughForA }))
 
-      const { result } = renderHook(() => useChangeWalkthrough('ses_A', true, DEFAULT_WALKTHROUGH_SOURCE), {
+      const { result } = renderHook(() => useChangeWalkthrough('ses_A', true, DEFAULT_CHANGE_SOURCE), {
         wrapper: createWrapper(queryClient),
       })
 
@@ -137,7 +137,7 @@ describe('useChangeWalkthrough', () => {
         .mockResolvedValueOnce(state({ walkthrough: walkthroughForA, running: true }))
         .mockResolvedValueOnce(state({ walkthrough: walkthroughForA }))
 
-      const { result } = renderHook(() => useChangeWalkthrough('ses_A', true, DEFAULT_WALKTHROUGH_SOURCE), {
+      const { result } = renderHook(() => useChangeWalkthrough('ses_A', true, DEFAULT_CHANGE_SOURCE), {
         wrapper: createWrapper(queryClient),
       })
 
@@ -199,7 +199,7 @@ describe('useRefineChangeWalkthrough', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     mocks.refineChangeWalkthrough.mockResolvedValue(state({ generating: true }))
 
-    const { result } = renderHook(() => useRefineChangeWalkthrough('ses_A', DEFAULT_WALKTHROUGH_SOURCE), {
+    const { result } = renderHook(() => useRefineChangeWalkthrough('ses_A', DEFAULT_CHANGE_SOURCE), {
       wrapper: createWrapper(queryClient),
     })
 
@@ -231,7 +231,7 @@ describe('useCancelChangeWalkthrough', () => {
     mocks.cancelChangeWalkthrough.mockResolvedValue(undefined)
     mocks.getChangeWalkthrough.mockResolvedValue(state())
 
-    const { result } = renderHook(() => useCancelChangeWalkthrough('ses_A', DEFAULT_WALKTHROUGH_SOURCE), {
+    const { result } = renderHook(() => useCancelChangeWalkthrough('ses_A', DEFAULT_CHANGE_SOURCE), {
       wrapper: createWrapper(queryClient),
     })
 

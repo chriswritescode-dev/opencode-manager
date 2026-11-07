@@ -23,7 +23,7 @@ import {
   buildWalkthroughSessionPermissions,
   buildWalkthroughSessionPrompt,
 } from '../../src/services/change-walkthroughs'
-import { computeChangesHash } from '../../src/services/walkthrough-outline'
+import { computeChangesHash } from '../../src/services/outputs/change-outline'
 
 const SESSION_ID = 'ses_walkthrough'
 
@@ -377,7 +377,7 @@ describe('ChangeWalkthroughService', () => {
 
     await expect(service.startGeneration(SESSION_ID, {})).rejects.toMatchObject({
       status: 409,
-      code: 'WALKTHROUGH_NO_CHANGES',
+      code: 'OUTPUT_NO_CHANGES',
     })
     expect(fake.createCalls).toHaveLength(0)
   })
@@ -389,7 +389,7 @@ describe('ChangeWalkthroughService', () => {
 
     await expect(service.startGeneration(SESSION_ID, {})).rejects.toMatchObject({
       status: 409,
-      code: 'WALKTHROUGH_NO_TEXT_CHANGES',
+      code: 'OUTPUT_NO_TEXT_CHANGES',
     })
     expect(fake.createCalls).toHaveLength(0)
   })
@@ -437,7 +437,7 @@ describe('ChangeWalkthroughService', () => {
 
     await expect(service.startGeneration(SESSION_ID, {})).rejects.toMatchObject({
       status: 502,
-      code: 'WALKTHROUGH_CHANGES_UNAVAILABLE',
+      code: 'OUTPUT_CHANGES_UNAVAILABLE',
     })
     expect(fake.createCalls).toHaveLength(0)
   })
@@ -1015,7 +1015,7 @@ describe('ChangeWalkthroughService', () => {
 
       await expect(service.readChangesForWalkthroughSession('ses_walk_1', 'nope.ts')).rejects.toMatchObject({
         status: 404,
-        code: 'WALKTHROUGH_FILE_NOT_CHANGED',
+        code: 'OUTPUT_FILE_NOT_CHANGED',
       })
     })
 

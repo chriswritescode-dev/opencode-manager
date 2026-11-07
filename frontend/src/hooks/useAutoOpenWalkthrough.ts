@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { SessionMessageInfo } from '@opencode-manager/shared/opencode'
-import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
+import type { ChangeSource } from '@opencode-manager/shared/schemas'
 import { collectOpenWalkthroughCalls } from '@/lib/walkthroughTool'
 
 interface UseAutoOpenWalkthroughOptions {
@@ -8,7 +8,7 @@ interface UseAutoOpenWalkthroughOptions {
   messages: SessionMessageInfo[]
   enabled: boolean
   loading: boolean
-  onOpen: (source?: WalkthroughSource) => void
+  onOpen: (source?: ChangeSource) => void
 }
 
 /**

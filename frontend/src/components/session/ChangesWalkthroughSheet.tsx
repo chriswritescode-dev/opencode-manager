@@ -15,13 +15,13 @@ import {
   useRefineChangeWalkthrough,
 } from '@/hooks/useChangeWalkthrough'
 import {
-  DEFAULT_WALKTHROUGH_SOURCE,
-  describeWalkthroughSource,
-  toWalkthroughSource,
-  walkthroughSourceKey,
+  DEFAULT_CHANGE_SOURCE,
+  describeChangeSource,
+  toChangeSource,
+  changeSourceKey,
   WALKTHROUGH_REFINE_MAX_CHARS,
 } from '@opencode-manager/shared/schemas'
-import type { ChangeWalkthrough, WalkthroughSource } from '@opencode-manager/shared/schemas'
+import type { ChangeWalkthrough, ChangeSource } from '@opencode-manager/shared/schemas'
 import { formatOpenCodeModelRef, type ModelRef } from '@opencode-manager/shared/opencode'
 
 interface WalkthroughErrorLike {
@@ -35,7 +35,7 @@ function errorCode(error: unknown): string | undefined {
 
 function isNoChangesError(error: unknown): boolean {
   const code = errorCode(error)
-  return code === 'WALKTHROUGH_NO_CHANGES' || code === 'WALKTHROUGH_NO_TEXT_CHANGES'
+  return code === 'OUTPUT_NO_CHANGES' || code === 'OUTPUT_NO_TEXT_CHANGES'
 }
 
 function walkthroughErrorMessage(error: unknown): string {
@@ -61,10 +61,10 @@ interface ChangesWalkthroughContextValue {
   refine: (text: string) => void
   refining: boolean
   onOpenSession?: (walkthroughSessionId: string) => void
-  source: WalkthroughSource
-  setSource: (source: WalkthroughSource) => void
-  sourceKind: WalkthroughSource['kind']
-  setSourceKind: (kind: WalkthroughSource['kind']) => void
+  source: ChangeSource
+  setSource: (source: ChangeSource) => void
+  sourceKind: ChangeSource['kind']
+  setSourceKind: (kind: ChangeSource['kind']) => void
   baseInput: string
   setBaseInput: (base: string) => void
   numberInput: string
@@ -80,7 +80,7 @@ function useChangesWalkthrough(): ChangesWalkthroughContextValue {
   return value
 }
 
-const WALKTHROUGH_SOURCE_OPTIONS: { value: WalkthroughSource['kind']; label: string }[] = [
+const WALKTHROUGH_SOURCE_OPTIONS: { value: ChangeSource['kind']; label: string }[] = [
   { value: 'session', label: 'This session' },
   { value: 'uncommitted', label: 'Uncommitted' },
   { value: 'staged', label: 'Staged' },
@@ -94,17 +94,17 @@ export const ChangesWalkthroughSourcePicker = memo(function ChangesWalkthroughSo
   const { sourceKind, setSourceKind, baseInput, setSource } = useChangesWalkthrough()
 
   const handleKindChange = useCallback(
-    (next: WalkthroughSource['kind']) => {
+    (next: ChangeSource['kind']) => {
       setSourceKind(next)
       if (next === 'pullRequest') return
-      const nextSource = toWalkthroughSource({ kind: next, base: baseInput })
+      const nextSource = toChangeSource({ kind: next, base: baseInput })
       if (nextSource) setSource(nextSource)
     },
     [baseInput, setSourceKind, setSource],
   )
 
   return (
-    <Select value={sourceKind} onValueChange={(value) => handleKindChange(value as WalkthroughSource['kind'])}>
+    <Select value={sourceKind} onValueChange={(value) => handleKindChange(value as ChangeSource['kind'])}>
       <SelectTrigger
         aria-label="Changes to walk through"
         className="h-7 w-auto gap-1 px-2 text-xs md:text-xs"
@@ -128,7 +128,7 @@ const WalkthroughSourceInputs = memo(function WalkthroughSourceInputs() {
     useChangesWalkthrough()
 
   const commitInputs = useCallback(() => {
-    const next = toWalkthroughSource({ kind: sourceKind, base: baseInput, number: Number(numberInput) })
+    const next = toChangeSource({ kind: sourceKind, base: baseInput, number: Number(numberInput) })
     if (next) setSource(next)
   }, [sourceKind, baseInput, numberInput, setSource])
 
@@ -169,7 +169,7 @@ const WalkthroughSourceInputs = memo(function WalkthroughSourceInputs() {
  */
 export interface WalkthroughSourceRequest {
   sessionId: string
-  source?: WalkthroughSource
+  source?: ChangeSource
 }
 
 interface ChangesWalkthroughProviderProps {
@@ -190,11 +190,11 @@ export function ChangesWalkthroughProvider({
   onOpenSession,
   children,
 }: ChangesWalkthroughProviderProps) {
-  const [source, setSource] = useState<WalkthroughSource>(DEFAULT_WALKTHROUGH_SOURCE)
-  const [sourceKind, setSourceKind] = useState<WalkthroughSource['kind']>(DEFAULT_WALKTHROUGH_SOURCE.kind)
+  const [source, setSource] = useState<ChangeSource>(DEFAULT_CHANGE_SOURCE)
+  const [sourceKind, setSourceKind] = useState<ChangeSource['kind']>(DEFAULT_CHANGE_SOURCE.kind)
   const [baseInput, setBaseInput] = useState('')
   const [numberInput, setNumberInput] = useState('')
-  const sourceKey = walkthroughSourceKey(source)
+  const sourceKey = changeSourceKey(source)
   const stateQuery = useChangeWalkthrough(sessionId, active, source)
   const generate = useGenerateChangeWalkthrough(sessionId, source)
   const cancel = useCancelChangeWalkthrough(sessionId, source)
@@ -211,10 +211,10 @@ export function ChangesWalkthroughProvider({
   const error =
     generate.error ?? refineMutation.error ?? stateQuery.error ?? (generating ? null : state?.error ?? null)
 
-  const selectedSource = toWalkthroughSource({ kind: sourceKind, base: baseInput, number: Number(numberInput) })
+  const selectedSource = toChangeSource({ kind: sourceKind, base: baseInput, number: Number(numberInput) })
   const sourcePending =
     sourceKind === 'pullRequest' &&
-    (selectedSource === null || walkthroughSourceKey(selectedSource) !== sourceKey)
+    (selectedSource === null || changeSourceKey(selectedSource) !== sourceKey)
 
   useEffect(() => {
     resetGenerate()
@@ -383,7 +383,7 @@ export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
         ) : (
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Build an interactive walkthrough of {describeWalkthroughSource(source)}.
+              Build an interactive walkthrough of {describeChangeSource(source)}.
             </p>
             <Button onClick={generate}>Generate walkthrough</Button>
           </div>

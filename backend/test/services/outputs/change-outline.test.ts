@@ -2,23 +2,23 @@ import { describe, expect, it } from 'vitest'
 import type { FileDiffInfo } from '@opencode-manager/shared/opencode'
 import {
   MECHANICAL_TEXT_BUDGET,
-  WALKTHROUGH_DIFF_MAX_CHARS,
-  WALKTHROUGH_HUNK_MAX_CHARS,
-  WALKTHROUGH_OUTLINE_LINE_MAX_CHARS,
-  WALKTHROUGH_OUTLINE_PREVIEW_LINES,
-  type WalkthroughHunk,
+  CHANGES_TEXT_MAX_CHARS,
+  CHANGE_HUNK_MAX_CHARS,
+  CHANGES_OUTLINE_LINE_MAX_CHARS,
+  CHANGES_OUTLINE_PREVIEW_LINES,
+  type ChangeHunk,
 } from '@opencode-manager/shared/schemas'
 import {
-  buildWalkthroughInput,
-  buildWalkthroughOutline,
+  buildChangesInput,
+  buildChangesOutline,
   computeChangesHash,
   computeHunkId,
   formatHunkBlock,
   formatHunkOutline,
-  formatWalkthroughFileChanges,
-  formatWalkthroughOutline,
+  formatChangedFile,
+  formatChangesOutline,
   isMechanicalChangePath,
-} from '../../src/services/walkthrough-outline'
+} from '../../../src/services/outputs/change-outline'
 
 function change(file: string, patch: string, status: FileDiffInfo['status'] = 'modified'): FileDiffInfo {
   return { file, patch, additions: 1, deletions: 1, status }
@@ -28,7 +28,7 @@ function hunkPatch(line: number): string {
   return `@@ -${line},2 +${line},2 @@\n-const a${line} = 1;\n+const a${line} = 2;`
 }
 
-function bigHunk(index: number, size = WALKTHROUGH_HUNK_MAX_CHARS): string {
+function bigHunk(index: number, size = CHANGE_HUNK_MAX_CHARS): string {
   return `@@ -${index},1 +${index},1 @@\n+${'x'.repeat(size)}_${index}`
 }
 
@@ -44,7 +44,7 @@ function longPatch(count: number, offset = 0): string {
   return Array.from({ length: count }, (_, index) => longHunk(offset + index)).join('\n')
 }
 
-function hunkFixture(file: string, text: string, status: FileDiffInfo['status'] = 'modified'): WalkthroughHunk {
+function hunkFixture(file: string, text: string, status: FileDiffInfo['status'] = 'modified'): ChangeHunk {
   return {
     id: computeHunkId(file, status, text),
     file,
@@ -115,9 +115,9 @@ describe('isMechanicalChangePath', () => {
   })
 })
 
-describe('buildWalkthroughInput', () => {
+describe('buildChangesInput', () => {
   it('assigns a distinct content id and the file to each hunk', () => {
-    const { hunks, omittedFiles } = buildWalkthroughInput([
+    const { hunks, omittedFiles } = buildChangesInput([
       change('src/a.ts', `${hunkPatch(1)}\n${hunkPatch(10)}`),
       change('src/b.ts', hunkPatch(1)),
     ])
@@ -130,13 +130,13 @@ describe('buildWalkthroughInput', () => {
   })
 
   it('keeps a hunk id when an earlier hunk in the file changes', () => {
-    const before = buildWalkthroughInput([
+    const before = buildChangesInput([
       change(
         'src/a.ts',
         '@@ -1,2 +1,2 @@\n-const a = 1;\n+const a = 2;\n@@ -10,2 +10,2 @@\n-const b = 1;\n+const b = 2;',
       ),
     ])
-    const after = buildWalkthroughInput([
+    const after = buildChangesInput([
       change(
         'src/a.ts',
         '@@ -1,3 +1,3 @@\n-const a = 1;\n+const a = 2;\n+const extra = 3;\n@@ -11,2 +11,2 @@\n-const b = 1;\n+const b = 2;',
@@ -150,7 +150,7 @@ describe('buildWalkthroughInput', () => {
   })
 
   it('suffixes duplicate hunk content', () => {
-    const { hunks } = buildWalkthroughInput([change('src/a.ts', `${hunkPatch(1)}\n${hunkPatch(1)}`)])
+    const { hunks } = buildChangesInput([change('src/a.ts', `${hunkPatch(1)}\n${hunkPatch(1)}`)])
 
     expect(hunks).toHaveLength(2)
     expect(hunks[0]!.id).not.toBe(hunks[1]!.id)
@@ -158,7 +158,7 @@ describe('buildWalkthroughInput', () => {
   })
 
   it('omits files with no hunks as binary', () => {
-    const { hunks, omittedFiles } = buildWalkthroughInput([
+    const { hunks, omittedFiles } = buildChangesInput([
       change('assets/logo.png', 'diff --git a/assets/logo.png b/assets/logo.png\nBinary files differ'),
       change('src/a.ts', hunkPatch(1)),
     ])
@@ -168,15 +168,15 @@ describe('buildWalkthroughInput', () => {
   })
 
   it('truncates an oversized hunk and marks it', () => {
-    const longLine = `+${'x'.repeat(WALKTHROUGH_HUNK_MAX_CHARS + 100)}`
-    const { hunks } = buildWalkthroughInput([change('src/a.ts', `@@ -1 +1 @@\n${longLine}`)])
+    const longLine = `+${'x'.repeat(CHANGE_HUNK_MAX_CHARS + 100)}`
+    const { hunks } = buildChangesInput([change('src/a.ts', `@@ -1 +1 @@\n${longLine}`)])
 
     expect(hunks[0]!.truncated).toBe(true)
     expect(hunks[0]!.text).toContain('[hunk truncated]')
   })
 
   it('separates mechanical hunks from the prompt hunks', () => {
-    const { hunks, mechanicalHunks, omittedFiles } = buildWalkthroughInput([
+    const { hunks, mechanicalHunks, omittedFiles } = buildChangesInput([
       change('src/a.ts', hunkPatch(1)),
       change('pnpm-lock.yaml', hunkPatch(2)),
     ])
@@ -188,7 +188,7 @@ describe('buildWalkthroughInput', () => {
 
   it('keeps mechanical hunk text within the budget and summarizes every file with counts', () => {
     const oversizedPatch = Array.from({ length: 40 }, (_, index) => bigHunk(index)).join('\n')
-    const { mechanicalHunks, omittedFiles } = buildWalkthroughInput([
+    const { mechanicalHunks, omittedFiles } = buildChangesInput([
       { file: 'pnpm-lock.yaml', patch: oversizedPatch, additions: 1200, deletions: 800, status: 'modified' },
       { file: 'src/__snapshots__/a.ts.snap', patch: hunkPatch(1), additions: 2, deletions: 3, status: 'modified' },
     ])
@@ -207,7 +207,7 @@ describe('buildWalkthroughInput', () => {
   })
 
   it('stores mechanical hunk text and counts while within the budget', () => {
-    const { mechanicalHunks } = buildWalkthroughInput([
+    const { mechanicalHunks } = buildChangesInput([
       {
         file: 'pnpm-lock.yaml',
         patch: `${hunkPatch(1)}\n${hunkPatch(2)}`,
@@ -225,7 +225,7 @@ describe('buildWalkthroughInput', () => {
   })
 
   it('omits a binary mechanical file as binary', () => {
-    const { mechanicalHunks, omittedFiles } = buildWalkthroughInput([
+    const { mechanicalHunks, omittedFiles } = buildChangesInput([
       change('pnpm-lock.yaml', 'diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml\nBinary files differ'),
     ])
 
@@ -234,7 +234,7 @@ describe('buildWalkthroughInput', () => {
   })
 
   it('labels a pure rename as renamed', () => {
-    const { omittedFiles } = buildWalkthroughInput([
+    const { omittedFiles } = buildChangesInput([
       change(
         'src/new.ts',
         'diff --git a/src/old.ts b/src/new.ts\nsimilarity index 100%\nrename from src/old.ts\nrename to src/new.ts',
@@ -245,7 +245,7 @@ describe('buildWalkthroughInput', () => {
   })
 
   it('labels a mode-only change as modeChange', () => {
-    const { omittedFiles } = buildWalkthroughInput([
+    const { omittedFiles } = buildChangesInput([
       change('script.sh', 'diff --git a/script.sh b/script.sh\nold mode 100644\nnew mode 100755'),
     ])
 
@@ -285,23 +285,23 @@ describe('formatHunkOutline', () => {
     const text = `@@ -1,8 +1,8 @@\n${Array.from({ length: 8 }, (_, index) => `+line${index}`).join('\n')}`
     const hunk = hunkFixture('src/a.ts', text)
 
-    expect(formatHunkOutline(hunk).split('\n')).toHaveLength(1 + WALKTHROUGH_OUTLINE_PREVIEW_LINES)
+    expect(formatHunkOutline(hunk).split('\n')).toHaveLength(1 + CHANGES_OUTLINE_PREVIEW_LINES)
   })
 
   it('truncates a long changed line to the line max', () => {
     const hunk = hunkFixture('src/a.ts', `@@ -1 +1 @@\n+${'x'.repeat(200)}`)
     const line = formatHunkOutline(hunk).split('\n')[1]!
 
-    expect(line).toHaveLength(WALKTHROUGH_OUTLINE_LINE_MAX_CHARS)
+    expect(line).toHaveLength(CHANGES_OUTLINE_LINE_MAX_CHARS)
   })
 })
 
-describe('buildWalkthroughOutline', () => {
+describe('buildChangesOutline', () => {
   it('packs every text hunk when the prefix is empty', () => {
-    const input = buildWalkthroughInput(
+    const input = buildChangesInput(
       Array.from({ length: 300 }, (_, index) => change(`src/f${index}.ts`, hunkPatch(index))),
     )
-    const { hunks, omittedFiles, outline } = buildWalkthroughOutline(input, 0)
+    const { hunks, omittedFiles, outline } = buildChangesOutline(input, 0)
 
     expect(omittedFiles).toEqual([])
     expect(hunks).toHaveLength(300)
@@ -311,10 +311,10 @@ describe('buildWalkthroughOutline', () => {
   })
 
   it('omits trailing files as budget and never half-includes a file', () => {
-    const input = buildWalkthroughInput(
+    const input = buildChangesInput(
       Array.from({ length: 400 }, (_, index) => change(`src/f${index}.ts`, longPatch(3, index * 3))),
     )
-    const { omittedFiles, outline } = buildWalkthroughOutline(input, 0)
+    const { omittedFiles, outline } = buildChangesOutline(input, 0)
 
     expect(omittedFiles.some((file) => file.reason === 'budget')).toBe(true)
 
@@ -340,8 +340,8 @@ describe('buildWalkthroughOutline', () => {
   })
 
   it('falls back to header-only outlines when a single file does not fit at the default preview depth', () => {
-    const input = buildWalkthroughInput([change('src/huge.ts', longPatch(100))])
-    const { hunks, omittedFiles, outline } = buildWalkthroughOutline(input, 0)
+    const input = buildChangesInput([change('src/huge.ts', longPatch(100))])
+    const { hunks, omittedFiles, outline } = buildChangesOutline(input, 0)
 
     expect(hunks).toHaveLength(100)
     expect(omittedFiles).toEqual([])
@@ -351,11 +351,11 @@ describe('buildWalkthroughOutline', () => {
   })
 
   it('keeps mechanical hunks out of the outline', () => {
-    const input = buildWalkthroughInput([
+    const input = buildChangesInput([
       change('src/a.ts', hunkPatch(1)),
       change('pnpm-lock.yaml', hunkPatch(2)),
     ])
-    const { omittedFiles, outline } = buildWalkthroughOutline(input, 0)
+    const { omittedFiles, outline } = buildChangesOutline(input, 0)
 
     expect(input.mechanicalHunks).toHaveLength(1)
     expect(outline).not.toContain(input.mechanicalHunks[0]!.id)
@@ -364,36 +364,36 @@ describe('buildWalkthroughOutline', () => {
   })
 
   it('admits less content behind a larger prefix', () => {
-    const input = buildWalkthroughInput(
+    const input = buildChangesInput(
       Array.from({ length: 800 }, (_, index) => change(`src/f${index}.ts`, hunkPatch(index))),
     )
 
-    const withoutPrefix = buildWalkthroughOutline(input, 0)
-    const withPrefix = buildWalkthroughOutline(input, 20_000)
+    const withoutPrefix = buildChangesOutline(input, 0)
+    const withPrefix = buildChangesOutline(input, 20_000)
 
     expect(withPrefix.hunks.length).toBeLessThan(withoutPrefix.hunks.length)
     expect(withPrefix.omittedFiles.some((file) => file.reason === 'budget')).toBe(true)
-    expect(buildWalkthroughOutline(input, 0).outline.length).toBeLessThanOrEqual(WALKTHROUGH_DIFF_MAX_CHARS)
+    expect(buildChangesOutline(input, 0).outline.length).toBeLessThanOrEqual(CHANGES_TEXT_MAX_CHARS)
   })
 
   it('bounds the included hunks and omits the remaining files as budget', () => {
-    const input = buildWalkthroughInput(
+    const input = buildChangesInput(
       Array.from({ length: 200 }, (_, index) => change(`src/f${index}.ts`, longPatch(6, index * 6))),
     )
-    const { hunks, omittedFiles, outline } = buildWalkthroughOutline(input, 0)
+    const { hunks, omittedFiles, outline } = buildChangesOutline(input, 0)
 
     expect(hunks.length).toBeLessThan(input.hunks.length)
     expect(omittedFiles.filter((file) => file.reason === 'budget').length).toBeGreaterThan(0)
     expect(omittedFiles.every((file) => file.reason === 'budget')).toBe(true)
-    expect(outline.length).toBeLessThanOrEqual(WALKTHROUGH_DIFF_MAX_CHARS)
+    expect(outline.length).toBeLessThanOrEqual(CHANGES_TEXT_MAX_CHARS)
   })
 
   it('never half-includes a file', () => {
-    const input = buildWalkthroughInput([
+    const input = buildChangesInput([
       change('src/small.ts', hunkPatch(1)),
       change('src/huge.ts', longPatch(2000)),
     ])
-    const { outline } = buildWalkthroughOutline(input, 0)
+    const { outline } = buildChangesOutline(input, 0)
 
     const hugeIds = input.hunks.filter((hunk) => hunk.file === 'src/huge.ts').map((hunk) => hunk.id)
     expect(hugeIds.length).toBeGreaterThan(0)
@@ -406,32 +406,32 @@ describe('buildWalkthroughOutline', () => {
       { length: 300 },
       (_, index) => `@@ -${index + 1} +${index + 1} @@\n+line${index}`,
     ).join('\n')
-    const input = buildWalkthroughInput([
+    const input = buildChangesInput([
       change('src/small.ts', hunkPatch(1)),
       change(longPath, manyHunks),
     ])
-    const { hunks, omittedFiles, outline } = buildWalkthroughOutline(input, 0)
+    const { hunks, omittedFiles, outline } = buildChangesOutline(input, 0)
 
     expect(hunks.length).toBeGreaterThan(0)
     expect(omittedFiles).toEqual([{ file: longPath, reason: 'budget' }])
-    expect(outline.length).toBeLessThanOrEqual(WALKTHROUGH_DIFF_MAX_CHARS)
+    expect(outline.length).toBeLessThanOrEqual(CHANGES_TEXT_MAX_CHARS)
   })
 
   it('retries at a shallower preview depth so every file fits', () => {
-    const input = buildWalkthroughInput(
+    const input = buildChangesInput(
       Array.from({ length: 70 }, (_, index) => change(`src/f${index}.ts`, longPatch(1, index))),
     )
-    const { hunks, omittedFiles } = buildWalkthroughOutline(input, 0)
+    const { hunks, omittedFiles } = buildChangesOutline(input, 0)
 
     expect(omittedFiles).toEqual([])
     expect(hunks).toHaveLength(70)
   })
 })
 
-describe('formatWalkthroughOutline', () => {
+describe('formatChangesOutline', () => {
   it('renders the header, the mechanical listing and the outline', () => {
     const changes = [change('src/a.ts', hunkPatch(1)), change('pnpm-lock.yaml', hunkPatch(2))]
-    const text = formatWalkthroughOutline({
+    const text = formatChangesOutline({
       title: 'My session',
       sourceDescription: 'the changes in this session',
       changes,
@@ -440,7 +440,7 @@ describe('formatWalkthroughOutline', () => {
     expect(text).toContain('# My session')
     expect(text).toContain('the changes in this session')
     expect(text).toContain('2 files, 1 text hunks.')
-    expect(text).toContain("Call walkthrough_changes with { file } for a file's full hunks.")
+    expect(text).toContain("Call read_output_input with { file } for a file's full hunks.")
     expect(text).toContain('## Mechanical files')
     expect(text).toContain('- pnpm-lock.yaml (modified, +1/-1)')
     expect(text).toContain('## Outline')
@@ -456,7 +456,7 @@ describe('formatWalkthroughOutline', () => {
         'diff --git a/src/old.ts b/src/new.ts\nsimilarity index 100%\nrename from src/old.ts\nrename to src/new.ts',
       ),
     ]
-    const text = formatWalkthroughOutline({
+    const text = formatChangesOutline({
       title: 'My session',
       sourceDescription: 'the changes in this session',
       changes,
@@ -472,23 +472,23 @@ describe('formatWalkthroughOutline', () => {
       { length: 4000 },
       (_, index) => change(`src/f${index}.ts`, longPatch(3, index * 3)),
     )
-    const text = formatWalkthroughOutline({
+    const text = formatChangesOutline({
       title: 'My session',
       sourceDescription: 'the changes in this session',
       changes,
     })
 
-    expect(text.length).toBeLessThanOrEqual(WALKTHROUGH_DIFF_MAX_CHARS + '\n[output truncated]'.length)
+    expect(text.length).toBeLessThanOrEqual(CHANGES_TEXT_MAX_CHARS + '\n[output truncated]'.length)
   })
 })
 
-describe('formatWalkthroughFileChanges', () => {
+describe('formatChangedFile', () => {
   it('returns the full hunks for a known file', () => {
     const changes = [
       change('src/a.ts', `${hunkPatch(1)}\n${hunkPatch(10)}`),
       change('src/b.ts', hunkPatch(20)),
     ]
-    const text = formatWalkthroughFileChanges(changes, 'src/a.ts')!
+    const text = formatChangedFile(changes, 'src/a.ts')!
 
     expect(text).toContain(hunkPatch(1))
     expect(text).toContain(hunkPatch(10))
@@ -500,12 +500,12 @@ describe('formatWalkthroughFileChanges', () => {
   it('returns null for an unknown file', () => {
     const changes = [change('src/a.ts', hunkPatch(1))]
 
-    expect(formatWalkthroughFileChanges(changes, 'src/nope.ts')).toBeNull()
+    expect(formatChangedFile(changes, 'src/nope.ts')).toBeNull()
   })
 
   it('returns the text of a mechanical file within the budget', () => {
     const changes = [change('pnpm-lock.yaml', hunkPatch(1))]
-    const text = formatWalkthroughFileChanges(changes, 'pnpm-lock.yaml')!
+    const text = formatChangedFile(changes, 'pnpm-lock.yaml')!
 
     expect(text).toContain(hunkPatch(1))
     expect(text).toContain('```diff')
@@ -516,7 +516,7 @@ describe('formatWalkthroughFileChanges', () => {
     const changes = [
       { file: 'pnpm-lock.yaml', patch: oversized, additions: 1200, deletions: 800, status: 'modified' },
     ] as FileDiffInfo[]
-    const text = formatWalkthroughFileChanges(changes, 'pnpm-lock.yaml')!
+    const text = formatChangedFile(changes, 'pnpm-lock.yaml')!
 
     expect(text).toBe('pnpm-lock.yaml (modified, +1200/-800)')
     expect(text).not.toContain('@@')
@@ -524,9 +524,9 @@ describe('formatWalkthroughFileChanges', () => {
 
   it('truncates to the budget plus the truncation marker', () => {
     const changes = [change('src/a.ts', longPatch(2000))]
-    const text = formatWalkthroughFileChanges(changes, 'src/a.ts')!
+    const text = formatChangedFile(changes, 'src/a.ts')!
 
-    expect(text.length).toBe(WALKTHROUGH_DIFF_MAX_CHARS + '\n[output truncated]'.length)
+    expect(text.length).toBe(CHANGES_TEXT_MAX_CHARS + '\n[output truncated]'.length)
     expect(text.endsWith('\n[output truncated]')).toBe(true)
   })
 })

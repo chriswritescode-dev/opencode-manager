@@ -1,11 +1,11 @@
 import { fetchWrapper, fetchWrapperVoid } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
-import { walkthroughSourceKey } from '@opencode-manager/shared/schemas'
+import { changeSourceKey } from '@opencode-manager/shared/schemas'
 import type {
   ChangeWalkthroughState,
   GenerateChangeWalkthroughRequest,
   RefineChangeWalkthroughRequest,
-  WalkthroughSource,
+  ChangeSource,
 } from '@opencode-manager/shared/schemas'
 
 function walkthroughUrl(sessionId: string): string {
@@ -21,10 +21,10 @@ export async function getWalkthroughHelperSessionIds(): Promise<string[]> {
 
 export async function getChangeWalkthrough(
   sessionId: string,
-  source: WalkthroughSource,
+  source: ChangeSource,
 ): Promise<ChangeWalkthroughState> {
   return fetchWrapper<ChangeWalkthroughState>(walkthroughUrl(sessionId), {
-    params: { source: walkthroughSourceKey(source) },
+    params: { source: changeSourceKey(source) },
   })
 }
 
@@ -52,10 +52,10 @@ export async function refineChangeWalkthrough(
 
 export async function cancelChangeWalkthrough(
   sessionId: string,
-  source: WalkthroughSource,
+  source: ChangeSource,
 ): Promise<void> {
   await fetchWrapperVoid(walkthroughUrl(sessionId), {
     method: 'DELETE',
-    params: { source: walkthroughSourceKey(source) },
+    params: { source: changeSourceKey(source) },
   })
 }

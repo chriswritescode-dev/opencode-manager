@@ -3,11 +3,11 @@ import {
   ChangeWalkthroughSchema,
   WalkthroughGenerationErrorSchema,
   WALKTHROUGH_GENERATION_TIMEOUT_MS,
-  parseWalkthroughSourceKey,
-  walkthroughSourceKey,
+  parseChangeSourceKey,
+  changeSourceKey,
   type ChangeWalkthrough,
   type WalkthroughGenerationError,
-  type WalkthroughSource,
+  type ChangeSource,
   type WalkthroughStatus,
 } from '@opencode-manager/shared/schemas'
 
@@ -45,7 +45,7 @@ export interface ChangeWalkthroughUpdateOptions {
 
 export interface ClaimChangeWalkthroughGenerationInput {
   sessionId: string
-  source: WalkthroughSource
+  source: ChangeSource
   diffHash: string
   generationId: string
   artifactPath: string
@@ -77,7 +77,7 @@ function parseStoredError(raw: string | null): WalkthroughGenerationError | null
 }
 
 function mapRow(row: ChangeWalkthroughRow): ChangeWalkthrough | null {
-  const source = parseWalkthroughSourceKey(row.source_key)
+  const source = parseChangeSourceKey(row.source_key)
   if (!source) {
     return null
   }
@@ -149,7 +149,7 @@ export function claimChangeWalkthroughGeneration(
     WHERE change_walkthroughs.status != 'generating' OR change_walkthroughs.updated_at < ?
   `).run(
     input.sessionId,
-    walkthroughSourceKey(input.source),
+    changeSourceKey(input.source),
     input.diffHash,
     input.generationId,
     input.artifactPath,

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
 import type { ChangeWalkthroughState } from '@opencode-manager/shared/schemas'
 import { createChangeWalkthroughRoutes } from '../../src/routes/change-walkthroughs'
-import { ChangeWalkthroughError } from '../../src/services/change-walkthrough-error'
+import { OutputError } from '../../src/services/outputs/output-error'
 import type { ChangeWalkthroughService } from '../../src/services/change-walkthroughs'
 
 const SESSION_ID = 'ses_walkthrough'
@@ -73,7 +73,7 @@ describe('change walkthrough routes', () => {
   })
 
   it('GET maps a service error', async () => {
-    getState.mockRejectedValueOnce(new ChangeWalkthroughError('Session not found', 404))
+    getState.mockRejectedValueOnce(new OutputError('Session not found', 404))
 
     const res = await app.request('/change-walkthroughs/ses_missing')
 
@@ -109,13 +109,13 @@ describe('change walkthrough routes', () => {
 
   it('POST returns 409 with the service code', async () => {
     startGeneration.mockRejectedValueOnce(
-      new ChangeWalkthroughError('No changes', 409, { code: 'WALKTHROUGH_NO_TEXT_CHANGES' }),
+      new OutputError('No changes', 409, { code: 'OUTPUT_NO_TEXT_CHANGES' }),
     )
 
     const res = await app.request(`/change-walkthroughs/${SESSION_ID}`, { method: 'POST' })
 
     expect(res.status).toBe(409)
-    await expect(res.json()).resolves.toMatchObject({ code: 'WALKTHROUGH_NO_TEXT_CHANGES' })
+    await expect(res.json()).resolves.toMatchObject({ code: 'OUTPUT_NO_TEXT_CHANGES' })
   })
 
   it('POST rejects malformed JSON with 400', async () => {
@@ -141,7 +141,7 @@ describe('change walkthrough routes', () => {
   })
 
   it('POST returns 404 for a missing session', async () => {
-    startGeneration.mockRejectedValueOnce(new ChangeWalkthroughError('Session not found', 404))
+    startGeneration.mockRejectedValueOnce(new OutputError('Session not found', 404))
 
     const res = await app.request('/change-walkthroughs/ses_missing', { method: 'POST' })
 
@@ -221,7 +221,7 @@ describe('change walkthrough routes', () => {
 
   it('POST refine maps a service error', async () => {
     refine.mockRejectedValueOnce(
-      new ChangeWalkthroughError('The walkthrough is still being built', 409, { code: 'WALKTHROUGH_BUSY' }),
+      new OutputError('The walkthrough is still being built', 409, { code: 'WALKTHROUGH_BUSY' }),
     )
 
     const res = await app.request(`/change-walkthroughs/${SESSION_ID}/refine`, {
