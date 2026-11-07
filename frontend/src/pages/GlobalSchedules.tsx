@@ -32,7 +32,7 @@ import { Combobox } from '@/components/ui/combobox'
 import { getRepoPath, getServerProjectPath } from '@/lib/navigation'
 
 type StatusFilter = 'all' | 'enabled' | 'disabled'
-type ScheduleModeFilter = 'all' | 'cron' | 'interval'
+type ScheduleModeFilter = 'all' | 'cron' | 'interval' | 'once'
 type SortOption = 'nextRun' | 'name' | 'repo'
 
 function jobBucket(job: ScheduleJobWithRepo): string {
@@ -201,9 +201,7 @@ export function GlobalSchedules() {
     }
 
     if (scheduleModeFilter !== 'all') {
-      filtered = filtered.filter((job) =>
-        scheduleModeFilter === 'cron' ? job.scheduleMode === 'cron' : job.scheduleMode === 'interval'
-      )
+      filtered = filtered.filter((job) => job.scheduleMode === scheduleModeFilter)
     }
 
     if (repoFilter !== 'all') {
@@ -249,6 +247,7 @@ export function GlobalSchedules() {
     { value: 'all', label: 'All Modes' },
     { value: 'cron', label: 'Cron' },
     { value: 'interval', label: 'Interval' },
+    { value: 'once', label: 'Once' },
   ], [])
 
   const sortOptions = useMemo(() => [

@@ -29,6 +29,7 @@ describe('schedule permission config persistence', () => {
     intervalMinutes: 60,
     cronExpression: null,
     timezone: null,
+    runAt: null,
     agentSlug: null,
     prompt: 'Run a permission test',
     model: null,

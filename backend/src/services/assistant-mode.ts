@@ -403,7 +403,7 @@ List all schedule jobs for a specific repo.
 ### POST /repos/:repoId/schedules
 Create a new schedule job.
 
-Body matches \`CreateScheduleJobRequest\` schema (discriminated union with \`scheduleMode: 'interval' | 'cron'\`).
+Body matches \`CreateScheduleJobRequest\` schema (discriminated union with \`scheduleMode: 'interval' | 'cron' | 'once'\`). \`once\` takes \`runAt\` (\`YYYY-MM-DDTHH:mm\` wall time) and \`timezone\`, must be in the future when enabled, and turns itself off when its timed run starts; \`Run now\` does not use it up.
 
 Optional \`workspaceMode\` sets where runs execute: \`worktree\` (default, a fresh worktree removed after each run), \`kept-worktree\` (a fresh worktree kept after each run), or \`shared-worktree\` (one worktree and branch reused by every run). Kept and shared worktrees are listed with \`GET /repos/:repoId/schedules/:jobId/worktrees\`. Removing schedule worktrees is done by the user in the Manager UI.
 

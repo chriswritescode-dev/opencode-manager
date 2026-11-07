@@ -7,8 +7,13 @@ export type ScheduleRunTriggerSource = z.infer<typeof ScheduleRunTriggerSourceSc
 export const ScheduleRunStatusSchema = z.enum(['running', 'completed', 'failed', 'cancelled'])
 export type ScheduleRunStatus = z.infer<typeof ScheduleRunStatusSchema>
 
-export const ScheduleModeSchema = z.enum(['interval', 'cron'])
+export const ScheduleModeSchema = z.enum(['interval', 'cron', 'once'])
 export type ScheduleMode = z.infer<typeof ScheduleModeSchema>
+
+/**
+ * A wall-clock date and time read in the schedule's `timezone`.
+ */
+export const ScheduleRunAtSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, 'Use YYYY-MM-DDTHH:mm')
 
 /**
  * Where a scheduled run executes. `worktree` gives every run a fresh worktree that is
@@ -199,6 +204,7 @@ export const ScheduleJobSchema = z.object({
   scheduleMode: ScheduleModeSchema,
   intervalMinutes: z.number().int().min(5).max(10080).nullable(),
   cronExpression: z.string().nullable(),
+  runAt: z.string().nullable(),
   timezone: z.string().nullable(),
   agentSlug: z.string().nullable(),
   prompt: z.string(),
@@ -270,6 +276,11 @@ export const CreateScheduleJobRequestSchema = z.discriminatedUnion('scheduleMode
     cronExpression: z.string().min(1).max(200),
     timezone: z.string().min(1).max(120),
   }),
+  ScheduleJobBaseRequestSchema.extend({
+    scheduleMode: z.literal('once'),
+    runAt: ScheduleRunAtSchema,
+    timezone: z.string().min(1).max(120),
+  }),
 ])
 export type CreateScheduleJobRequest = z.infer<typeof CreateScheduleJobRequestSchema>
 
@@ -286,6 +297,7 @@ export const UpdateScheduleJobRequestSchema = z.object({
   scheduleMode: ScheduleModeSchema.optional(),
   intervalMinutes: z.number().int().min(5).max(10080).nullable().optional(),
   cronExpression: z.string().min(1).max(200).nullable().optional(),
+  runAt: ScheduleRunAtSchema.nullable().optional(),
   timezone: z.string().min(1).max(120).nullable().optional(),
   agentSlug: z.string().min(1).max(100).nullable().optional(),
   prompt: z.string().min(1).max(20000).optional(),

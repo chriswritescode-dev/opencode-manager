@@ -44,6 +44,7 @@ import migration202610231200 from './202610231200-push-subscription-session-id'
 import migration202610251900 from './202610251900-schedule-sandbox-config'
 import migration202610271800 from './202610271800-schedule-show-in-inbox'
 import migration202610291200 from './202610291200-drop-session-goals'
+import migration202611071200 from './202611071200-schedule-run-at'
 
 export const allMigrations: Migration[] = [
   migration001,
@@ -91,4 +92,5 @@ export const allMigrations: Migration[] = [
   migration202610251900,
   migration202610271800,
   migration202610291200,
+  migration202611071200,
 ]

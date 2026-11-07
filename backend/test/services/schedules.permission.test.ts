@@ -119,6 +119,7 @@ const baseJob: ScheduleJob = {
   intervalMinutes: 60,
   cronExpression: null,
   timezone: null,
+  runAt: null,
   agentSlug: null,
   prompt: 'Review the repository and summarize the current state.',
   model: null,

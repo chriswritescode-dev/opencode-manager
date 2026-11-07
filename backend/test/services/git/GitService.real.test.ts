@@ -40,6 +40,7 @@ function scheduleJobInput(name: string, branch: string): ScheduleJobPersistenceI
     intervalMinutes: 60,
     cronExpression: null,
     timezone: null,
+    runAt: null,
     agentSlug: null,
     prompt: 'do work',
     model: null,

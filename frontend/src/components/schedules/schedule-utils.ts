@@ -27,6 +27,7 @@ export const schedulePresetOptions = [
   { label: 'Weekdays', value: 'weekdays' },
   { label: 'Weekly', value: 'weekly' },
   { label: 'Monthly', value: 'monthly' },
+  { label: 'Once', value: 'once' },
   { label: 'Advanced', value: 'advanced' },
 ] as const
 
@@ -90,6 +91,29 @@ export function getLocalTimeZone(): string {
   } catch {
     return 'UTC'
   }
+}
+
+export function getDefaultOnceRunAt(now: Date = new Date()): string {
+  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+
+  return `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}T09:00`
+}
+
+const ONCE_RUN_AT_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/
+
+export function formatOnceRunAt(runAt: string): string {
+  const match = runAt.match(ONCE_RUN_AT_PATTERN)
+  if (!match) {
+    return runAt
+  }
+
+  const [, year, month, day, hour, minute] = match
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'UTC',
+  }).format(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute)))
 }
 
 function isNumericToken(value: string): boolean {
@@ -164,6 +188,7 @@ export function detectSchedulePreset(job?: ScheduleJob): {
   weeklyDays: string[]
   monthlyDay: string
   cronExpression: string
+  runAt: string
   timezone: string
 } {
   const defaultTimezone = job?.timezone ?? getLocalTimeZone()
@@ -175,7 +200,17 @@ export function detectSchedulePreset(job?: ScheduleJob): {
     weeklyDays: ['1'],
     monthlyDay: '1',
     cronExpression: job?.cronExpression ?? '0 9 * * 1-5',
+    runAt: getDefaultOnceRunAt(),
     timezone: defaultTimezone,
+  }
+
+  if (job?.scheduleMode === 'once') {
+    return {
+      ...defaults,
+      preset: 'once',
+      runAt: job.runAt ?? defaults.runAt,
+      timezone: job.timezone ?? getLocalTimeZone(),
+    }
   }
 
   if (!job || job.scheduleMode === 'interval') {
@@ -299,6 +334,10 @@ export function formatCronHumanText(cronExpression: string | null): string | nul
 }
 
 export function formatScheduleSummary(job: ScheduleJob): string {
+  if (job.scheduleMode === 'once') {
+    return `Once · ${formatOnceRunAt(job.runAt ?? '')}${job.timezone ? ` - ${job.timezone}` : ''}`
+  }
+
   if (job.scheduleMode === 'cron') {
     return `${formatCronHumanText(job.cronExpression) ?? (job.cronExpression ?? 'Custom cron')}${job.timezone ? ` - ${job.timezone}` : ''}`
   }
@@ -307,6 +346,10 @@ export function formatScheduleSummary(job: ScheduleJob): string {
 }
 
 export function formatScheduleShortLabel(job: ScheduleJob): string {
+  if (job.scheduleMode === 'once') {
+    return `Once · ${formatOnceRunAt(job.runAt ?? '')}`
+  }
+
   if (job.scheduleMode === 'cron') {
     return formatCronHumanText(job.cronExpression) ?? 'Custom cron'
   }
@@ -322,8 +365,13 @@ export function formatDraftScheduleSummary(input: {
   weeklyDays: string[]
   monthlyDay: string
   cronExpression: string
+  runAt: string
   timezone: string
 }): string {
+  if (input.preset === 'once') {
+    return input.runAt.trim() ? `Runs once on ${formatOnceRunAt(input.runAt)} - ${input.timezone.trim() || 'UTC'}, then turns off.` : 'Choose a date and time'
+  }
+
   if (input.preset === 'interval') {
     const parsedInterval = Number.parseInt(input.intervalMinutes, 10)
     return formatIntervalLabel(Number.isNaN(parsedInterval) ? null : parsedInterval)
@@ -345,6 +393,18 @@ export function toUpdateScheduleRequest(data: CreateScheduleJobRequest): UpdateS
       agentSlug: data.agentSlug ?? null,
       model: data.model ?? null,
       intervalMinutes: null,
+      runAt: null,
+    }
+  }
+
+  if (data.scheduleMode === 'once') {
+    return {
+      ...data,
+      description: data.description ?? null,
+      agentSlug: data.agentSlug ?? null,
+      model: data.model ?? null,
+      intervalMinutes: null,
+      cronExpression: null,
     }
   }
 
@@ -354,6 +414,7 @@ export function toUpdateScheduleRequest(data: CreateScheduleJobRequest): UpdateS
     agentSlug: data.agentSlug ?? null,
     model: data.model ?? null,
     cronExpression: null,
+    runAt: null,
     timezone: null,
   }
 }

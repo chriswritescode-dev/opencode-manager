@@ -17,6 +17,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   buildCronExpressionFromPreset,
   detectSchedulePreset,
+  getDefaultOnceRunAt,
   getLocalTimeZone,
   type SchedulePreset,
 } from '@/components/schedules/schedule-utils'
@@ -64,6 +65,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   const [weeklyDays, setWeeklyDays] = useState<string[]>(['1'])
   const [monthlyDay, setMonthlyDay] = useState('1')
   const [cronExpression, setCronExpression] = useState('0 9 * * 1-5')
+  const [runAt, setRunAt] = useState(getDefaultOnceRunAt())
   const [timezone, setTimezone] = useState(getLocalTimeZone())
   const [agentSlug, setAgentSlug] = useState('')
   const [model, setModel] = useState('')
@@ -183,6 +185,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     setWeeklyDays(scheduleDefaults.weeklyDays)
     setMonthlyDay(scheduleDefaults.monthlyDay)
     setCronExpression(scheduleDefaults.cronExpression)
+    setRunAt(scheduleDefaults.runAt)
     setTimezone(scheduleDefaults.timezone)
     setAgentSlug(job?.agentSlug ?? '')
     setModel(job?.model ?? '')
@@ -275,6 +278,16 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
       } : {}),
     }
 
+    if (schedulePreset === 'once') {
+      onSubmit({
+        ...baseFields,
+        scheduleMode: 'once',
+        runAt,
+        timezone: timezone.trim() || 'UTC',
+      })
+      return
+    }
+
     if (schedulePreset !== 'interval') {
       onSubmit({
         ...baseFields,
@@ -295,6 +308,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   const isScheduleConfigInvalid =
     (schedulePreset === 'advanced' && (!cronExpression.trim() || !timezone.trim())) ||
     ((schedulePreset === 'daily' || schedulePreset === 'weekdays' || schedulePreset === 'weekly' || schedulePreset === 'monthly') && !timezone.trim()) ||
+    (schedulePreset === 'once' && (!runAt || !timezone.trim())) ||
     (schedulePreset === 'weekly' && weeklyDays.length === 0)
 
   const missingRequirements = [
@@ -393,6 +407,8 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
             onMonthlyDayChange={setMonthlyDay}
             cronExpression={cronExpression}
             onCronExpressionChange={setCronExpression}
+            runAt={runAt}
+            onRunAtChange={setRunAt}
             timezone={timezone}
             onTimezoneChange={setTimezone}
           />

@@ -27,6 +27,8 @@ type TimingTabProps = {
   onMonthlyDayChange: (value: string) => void
   cronExpression: string
   onCronExpressionChange: (value: string) => void
+  runAt: string
+  onRunAtChange: (value: string) => void
   timezone: string
   onTimezoneChange: (value: string) => void
 }
@@ -46,6 +48,8 @@ export function TimingTab({
   onMonthlyDayChange,
   cronExpression,
   onCronExpressionChange,
+  runAt,
+  onRunAtChange,
   timezone,
   onTimezoneChange,
 }: TimingTabProps) {
@@ -120,6 +124,17 @@ export function TimingTab({
             <div className="space-y-2">
               <Label htmlFor="schedule-timezone">Timezone</Label>
               <Input id="schedule-timezone" value={timezone} onChange={(event) => onTimezoneChange(event.target.value)} placeholder={getLocalTimeZone()} />
+            </div>
+          </div>
+        ) : schedulePreset === 'once' ? (
+          <div className="grid gap-4 rounded-lg border border-border bg-card p-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="schedule-run-at">Date and time</Label>
+              <Input id="schedule-run-at" type="datetime-local" value={runAt} onChange={(event) => onRunAtChange(event.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="schedule-once-timezone">Timezone</Label>
+              <Input id="schedule-once-timezone" value={timezone} onChange={(event) => onTimezoneChange(event.target.value)} placeholder={getLocalTimeZone()} />
             </div>
           </div>
         ) : schedulePreset === 'weekly' ? (
@@ -216,8 +231,8 @@ export function TimingTab({
 
         <div className="rounded-lg border border-border bg-muted/40 p-4">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Schedule Preview</p>
-          <p className="mt-2 text-sm font-medium break-words">{formatDraftScheduleSummary({ preset: schedulePreset, intervalMinutes, timeOfDay, hourlyMinute, weeklyDays, monthlyDay, cronExpression, timezone })}</p>
-          {schedulePreset !== 'interval' && (
+          <p className="mt-2 text-sm font-medium break-words">{formatDraftScheduleSummary({ preset: schedulePreset, intervalMinutes, timeOfDay, hourlyMinute, weeklyDays, monthlyDay, cronExpression, runAt, timezone })}</p>
+          {schedulePreset !== 'interval' && schedulePreset !== 'once' && (
             <p className="mt-2 text-xs text-muted-foreground font-mono break-all">
               {buildCronExpressionFromPreset({ preset: schedulePreset, intervalMinutes, timeOfDay, hourlyMinute, weeklyDays, monthlyDay, cronExpression })}
             </p>

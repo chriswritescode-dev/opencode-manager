@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   createScheduleRun: vi.fn(),
   deleteScheduleJob: vi.fn(),
   deleteScheduleRunById: vi.fn(),
+  disableScheduleJob: vi.fn(),
   deleteScheduleRunsByIds: vi.fn(),
   listScheduleRunArtifactsByJob: vi.fn(),
   cleanupOrphanedSchedules: vi.fn(),
@@ -57,6 +58,7 @@ vi.mock('../../src/db/schedules', () => ({
   createScheduleRun: mocks.createScheduleRun,
   deleteScheduleJob: mocks.deleteScheduleJob,
   deleteScheduleRunById: mocks.deleteScheduleRunById,
+  disableScheduleJob: mocks.disableScheduleJob,
   deleteScheduleRunsByIds: mocks.deleteScheduleRunsByIds,
   listScheduleRunArtifactsByJob: mocks.listScheduleRunArtifactsByJob,
   cleanupOrphanedSchedules: mocks.cleanupOrphanedSchedules,
@@ -107,11 +109,11 @@ vi.mock('../../src/utils/logger', () => ({
 }))
 
 const mockCronStop = vi.fn()
-const mockCronInstances: Array<{ callback: () => void; options: Record<string, unknown>; pattern: string; stop: typeof mockCronStop }> = []
+const mockCronInstances: Array<{ callback: () => void; nextRun: () => null; options: Record<string, unknown>; pattern: string | Date; stop: typeof mockCronStop }> = []
 
 vi.mock('croner', () => ({
-  Cron: vi.fn().mockImplementation((pattern: string, options: Record<string, unknown>, callback: () => void) => {
-    const instance = { pattern, options, callback, stop: mockCronStop }
+  Cron: vi.fn().mockImplementation((pattern: string | Date, options: Record<string, unknown>, callback: () => void) => {
+    const instance = { pattern, options, callback, nextRun: vi.fn(() => null), stop: mockCronStop }
     mockCronInstances.push(instance)
     return instance
   }),
@@ -194,6 +196,7 @@ const job: ScheduleJob = {
   intervalMinutes: 60,
   cronExpression: null,
   timezone: null,
+  runAt: null,
   agentSlug: null,
   prompt: 'Review the repository and summarize the current state.',
   model: null,
@@ -1635,6 +1638,118 @@ describe('ScheduleService', () => {
       expect(mocks.updateScheduleJob).toHaveBeenCalled()
     })
   })
+
+  describe('once schedules', () => {
+    function onceScheduleJob(overrides: Partial<ScheduleJob> = {}): ScheduleJob {
+      return { ...job, scheduleMode: 'once', intervalMinutes: null, runAt: '2026-03-09T13:00', ...overrides }
+    }
+
+    it('disables a once job before starting its timed run', async () => {
+      const scheduledJob = onceScheduleJob()
+      const disabledJob = { ...scheduledJob, enabled: false, nextRunAt: null }
+      mocks.getScheduleJobById.mockReturnValue(scheduledJob)
+      mocks.disableScheduleJob.mockReturnValue(disabledJob)
+      mocks.updateScheduleRunMetadata.mockReturnValue({
+        ...baseRun,
+        sessionId: 'ses-run-1',
+        sessionTitle: 'Scheduled: Weekly engineering summary',
+      })
+      const onChange = vi.fn()
+      const stub = createStubScheduleApi({
+        sessionID: 'ses-run-1',
+        messages: [assistantMessage('Once done.', { completed: true })],
+      })
+      const service = makeService(stub.api)
+      service.setJobChangeHandler(onChange)
+
+      await service.runJob(42, 7, 'schedule')
+
+      expect(mocks.disableScheduleJob).toHaveBeenCalledWith(expect.anything(), 42, 7)
+      expect(onChange).toHaveBeenCalledWith(disabledJob, 7)
+      expect(mocks.disableScheduleJob.mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(stub.api.session.create).mock.invocationCallOrder[0]!,
+      )
+      expect(mocks.updateScheduleRunMetadata).toHaveBeenCalledWith(
+        expect.anything(),
+        42,
+        7,
+        5,
+        expect.objectContaining({ logText: expect.stringContaining('2026-03-09T13:00') }),
+      )
+    })
+
+    it('derives the next run time from the reloaded job when a once job changes mid-run', async () => {
+      const startedSnapshot = onceScheduleJob({ nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0) })
+      const reenabledJob = onceScheduleJob({
+        enabled: true,
+        runAt: '2026-03-10T13:00',
+        nextRunAt: Date.UTC(2026, 2, 10, 13, 0, 0),
+      })
+      mocks.getScheduleJobById.mockReturnValueOnce(startedSnapshot).mockReturnValue(reenabledJob)
+      mocks.disableScheduleJob.mockReturnValue({ ...startedSnapshot, enabled: false, nextRunAt: null })
+      mocks.updateScheduleRunMetadata.mockReturnValue({
+        ...baseRun,
+        sessionId: 'ses-run-1',
+        sessionTitle: 'Scheduled: Weekly engineering summary',
+      })
+      mocks.computeNextRunAtForJob.mockReturnValue(Date.UTC(2026, 2, 10, 13, 0, 0))
+      const stub = createStubScheduleApi({
+        sessionID: 'ses-run-1',
+        messages: [assistantMessage('Once done.', { completed: true })],
+      })
+      const service = makeService(stub.api)
+
+      await service.runJob(42, 7, 'schedule')
+
+      await vi.waitFor(() => {
+        expect(mocks.updateScheduleJobRunState).toHaveBeenCalledWith(
+          expect.anything(),
+          42,
+          7,
+          expect.objectContaining({ nextRunAt: Date.UTC(2026, 2, 10, 13, 0, 0) }),
+        )
+      })
+
+      expect(mocks.computeNextRunAtForJob).toHaveBeenCalledWith(reenabledJob, expect.any(Number))
+      expect(mocks.computeNextRunAtForJob).not.toHaveBeenCalledWith(startedSnapshot, expect.anything())
+    })
+
+    it('keeps a once job enabled for a manual run', async () => {
+      mocks.getScheduleJobById.mockReturnValue(onceScheduleJob())
+      mocks.updateScheduleRunMetadata.mockReturnValue({ ...baseRun, sessionId: 'ses-run-1' })
+      const stub = createStubScheduleApi({
+        sessionID: 'ses-run-1',
+        messages: [assistantMessage('Manual done.', { completed: true })],
+      })
+      const service = makeService(stub.api)
+
+      await service.runJob(42, 7, 'manual')
+
+      expect(mocks.disableScheduleJob).not.toHaveBeenCalled()
+      await vi.waitFor(() => {
+        expect(mocks.updateScheduleJobRunState).toHaveBeenCalledWith(
+          expect.anything(),
+          42,
+          7,
+          expect.objectContaining({ nextRunAt: job.nextRunAt }),
+        )
+      })
+    })
+
+    it('does not disable a cron job on a timed run', async () => {
+      mocks.getScheduleJobById.mockReturnValue({ ...job, scheduleMode: 'cron', intervalMinutes: null, cronExpression: '0 9 * * *' })
+      mocks.updateScheduleRunMetadata.mockReturnValue({ ...baseRun, sessionId: 'ses-run-1' })
+      const stub = createStubScheduleApi({
+        sessionID: 'ses-run-1',
+        messages: [assistantMessage('Cron done.', { completed: true })],
+      })
+      const service = makeService(stub.api)
+
+      await service.runJob(42, 7, 'schedule')
+
+      expect(mocks.disableScheduleJob).not.toHaveBeenCalled()
+    })
+  })
 })
 
 describe('ScheduleService startup cancellation', () => {
@@ -2567,6 +2682,7 @@ describe('ScheduleRunner', () => {
       intervalMinutes: 60,
       cronExpression: null,
       timezone: null,
+      runAt: null,
       agentSlug: null,
       prompt: 'Test',
       model: null,
@@ -2608,6 +2724,7 @@ describe('ScheduleRunner', () => {
       cronExpression: '0 9 * * *',
       timezone: 'America/New_York',
       intervalMinutes: null,
+      runAt: null,
       agentSlug: null,
       prompt: 'Test',
       model: null,
@@ -2647,6 +2764,7 @@ describe('ScheduleRunner', () => {
       intervalMinutes: 60,
       cronExpression: null,
       timezone: null,
+      runAt: null,
       agentSlug: null,
       prompt: 'Test',
       model: null,
@@ -2685,6 +2803,7 @@ describe('ScheduleRunner', () => {
       intervalMinutes: 30,
       cronExpression: null,
       timezone: null,
+      runAt: null,
       agentSlug: null,
       prompt: 'Test',
       model: null,
@@ -2723,6 +2842,7 @@ describe('ScheduleRunner', () => {
       intervalMinutes: 60,
       cronExpression: null,
       timezone: null,
+      runAt: null,
       agentSlug: null,
       prompt: 'Test',
       model: null,
@@ -2752,6 +2872,63 @@ describe('ScheduleRunner', () => {
 
     expect(mockCronStop).toHaveBeenCalled()
     expect(mockCronInstances).toHaveLength(2)
+  })
+
+  it('registers a future once job as a single one-time cron', () => {
+    const futureRunAt = Date.now() + 3_600_000
+    const onceJob: ScheduleJob = {
+      ...job,
+      scheduleMode: 'once',
+      intervalMinutes: null,
+      runAt: '2026-03-09T13:00',
+      nextRunAt: futureRunAt,
+    }
+    const service = makeService(createStubScheduleApi().api)
+    const runner = new ScheduleRunner(service)
+
+    runner.registerJob(onceJob)
+
+    expect(mockCronInstances).toHaveLength(1)
+    expect(mockCronInstances[0]?.pattern).toBeInstanceOf(Date)
+    expect((mockCronInstances[0]?.pattern as Date).getTime()).toBe(futureRunAt)
+    expect(mockCronInstances[0]?.options).toEqual({ protect: true })
+  })
+
+  it('runs a past once job immediately without registering a cron', async () => {
+    const onceJob: ScheduleJob = {
+      ...job,
+      scheduleMode: 'once',
+      intervalMinutes: null,
+      runAt: '2026-03-09T13:00',
+      nextRunAt: Date.now() - 60_000,
+    }
+    const service = makeService(createStubScheduleApi().api)
+    const runSpy = vi.spyOn(service, 'runJobForJob').mockResolvedValue(baseRun)
+    const runner = new ScheduleRunner(service)
+
+    runner.registerJob(onceJob)
+
+    await vi.waitFor(() => expect(runSpy).toHaveBeenCalledWith(onceJob, 'schedule'))
+    expect(mockCronInstances).toHaveLength(0)
+  })
+
+  it('skips a disabled once job', () => {
+    const onceJob: ScheduleJob = {
+      ...job,
+      enabled: false,
+      scheduleMode: 'once',
+      intervalMinutes: null,
+      runAt: '2026-03-09T13:00',
+      nextRunAt: Date.now() + 3_600_000,
+    }
+    const service = makeService(createStubScheduleApi().api)
+    const runSpy = vi.spyOn(service, 'runJobForJob').mockResolvedValue(baseRun)
+    const runner = new ScheduleRunner(service)
+
+    runner.registerJob(onceJob)
+
+    expect(mockCronInstances).toHaveLength(0)
+    expect(runSpy).not.toHaveBeenCalled()
   })
 })
 

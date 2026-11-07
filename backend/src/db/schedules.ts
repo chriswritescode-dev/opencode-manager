@@ -33,6 +33,7 @@ interface ScheduleJobRow {
   schedule_mode: ScheduleMode | null
   interval_minutes: number | null
   cron_expression: string | null
+  run_at: string | null
   timezone: string | null
   agent_slug: string | null
   prompt: string
@@ -142,6 +143,7 @@ function rowToScheduleJob(row: ScheduleJobRow): ScheduleJob {
     scheduleMode: row.schedule_mode ?? 'interval',
     intervalMinutes: row.interval_minutes,
     cronExpression: row.cron_expression,
+    runAt: row.run_at ?? null,
     timezone: row.timezone,
     agentSlug: row.agent_slug,
     prompt: row.prompt,
@@ -245,7 +247,7 @@ export function createScheduleJob(
   const now = Date.now()
   const stmt = db.prepare(`
     INSERT INTO schedule_jobs (
-      repo_id, server_id, directory, name, description, enabled, show_in_inbox, schedule_mode, interval_minutes, cron_expression, timezone, agent_slug, prompt, model, skill_metadata,
+      repo_id, server_id, directory, name, description, enabled, show_in_inbox, schedule_mode, interval_minutes, cron_expression, timezone, run_at, agent_slug, prompt, model, skill_metadata,
       permission_config,
       mcp_servers,
       branch,
@@ -253,7 +255,7 @@ export function createScheduleJob(
       sandbox_config,
       created_at, updated_at, last_run_at, next_run_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   const result = stmt.run(
@@ -268,6 +270,7 @@ export function createScheduleJob(
     input.intervalMinutes,
     input.cronExpression,
     input.timezone,
+    input.runAt,
     input.agentSlug ?? null,
     input.prompt,
     input.model ?? null,
@@ -300,7 +303,7 @@ export function updateScheduleJob(db: Database, repoId: number | null, jobId: nu
 
   const stmt = db.prepare(`
     UPDATE schedule_jobs
-    SET name = ?, description = ?, enabled = ?, show_in_inbox = ?, schedule_mode = ?, interval_minutes = ?, cron_expression = ?, timezone = ?,
+    SET name = ?, description = ?, enabled = ?, show_in_inbox = ?, schedule_mode = ?, interval_minutes = ?, cron_expression = ?, timezone = ?, run_at = ?,
         agent_slug = ?, prompt = ?, model = ?, skill_metadata = ?, permission_config = ?, mcp_servers = ?, branch = ?, workspace_mode = ?, sandbox_config = ?, directory = ?, updated_at = ?, next_run_at = ?
     WHERE repo_id IS ? AND id = ?
   `)
@@ -314,6 +317,7 @@ export function updateScheduleJob(db: Database, repoId: number | null, jobId: nu
     input.intervalMinutes,
     input.cronExpression,
     input.timezone,
+    input.runAt,
     input.agentSlug,
     input.prompt,
     input.model,
@@ -330,6 +334,12 @@ export function updateScheduleJob(db: Database, repoId: number | null, jobId: nu
     jobId,
   )
 
+  return getScheduleJobById(db, repoId, jobId)
+}
+
+export function disableScheduleJob(db: Database, repoId: number | null, jobId: number): ScheduleJob | null {
+  db.prepare('UPDATE schedule_jobs SET enabled = 0, next_run_at = NULL, updated_at = ? WHERE repo_id IS ? AND id = ?')
+    .run(Date.now(), repoId, jobId)
   return getScheduleJobById(db, repoId, jobId)
 }
 

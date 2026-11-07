@@ -26,6 +26,7 @@ import {
   deleteScheduleJob,
   deleteScheduleRunById,
   deleteScheduleRunsByIds,
+  disableScheduleJob,
   getScheduleJobById,
   getRunningScheduleRunByJob,
   getScheduleRunById,
@@ -122,6 +123,16 @@ function buildSessionTitle(job: ScheduleJob): string {
 
 type SkillAttachment = { id: string }
 
+function formatScheduleLabel(job: ScheduleJob): string {
+  if (job.scheduleMode === 'cron') {
+    return `${job.cronExpression ?? ''} (${job.timezone ?? 'UTC'})`
+  }
+  if (job.scheduleMode === 'once') {
+    return `${job.runAt ?? ''} (${job.timezone ?? 'UTC'})`
+  }
+  return `every ${job.intervalMinutes ?? 0} minutes`
+}
+
 function buildRunLog(input: {
   job: ScheduleJob
   triggerSource: ScheduleRunTriggerSource
@@ -131,9 +142,7 @@ function buildRunLog(input: {
   errorText?: string | null
   finishedAt: number
 }): string {
-  const scheduleLabel = input.job.scheduleMode === 'cron'
-    ? `${input.job.cronExpression ?? ''} (${input.job.timezone ?? 'UTC'})`
-    : `every ${input.job.intervalMinutes ?? 0} minutes`
+  const scheduleLabel = formatScheduleLabel(input.job)
 
   const lines = [
     `Job: ${input.job.name}`,
@@ -168,9 +177,7 @@ function buildRunStartedLog(input: {
   sessionId: string
   sessionTitle: string
 }): string {
-  const scheduleLabel = input.job.scheduleMode === 'cron'
-    ? `${input.job.cronExpression ?? ''} (${input.job.timezone ?? 'UTC'})`
-    : `every ${input.job.intervalMinutes ?? 0} minutes`
+  const scheduleLabel = formatScheduleLabel(input.job)
 
   return [
     `Job: ${input.job.name}`,
@@ -951,6 +958,13 @@ export class ScheduleService {
       createdAt: startedAt,
     })
 
+    if (triggerSource === 'schedule' && job.scheduleMode === 'once') {
+      const disabledJob = disableScheduleJob(this.db, repoId, jobId)
+      if (disabledJob) {
+        this.onJobChange?.(disabledJob, jobId)
+      }
+    }
+
     const abort = new AbortController()
     ScheduleService.activeRuns.set(jobId, { runId: run.id, abort })
     let repo: Repo | null = null
@@ -1087,10 +1101,7 @@ export class ScheduleService {
       })
 
       try {
-        updateScheduleJobRunState(this.db, repoId, jobId, {
-          lastRunAt: finishedAt,
-          nextRunAt: triggerSource === 'manual' ? job.nextRunAt : computeNextRunAtForJob(job, finishedAt),
-        })
+        this.recordRunFinished(repoId, job, triggerSource, finishedAt)
       } catch (updateError) {
         logger.error(`Failed to update job state for job ${jobId}:`, updateError)
       }
@@ -1340,10 +1351,7 @@ export class ScheduleService {
         }),
       })
 
-      updateScheduleJobRunState(this.db, input.repoId, input.job.id, {
-        lastRunAt: finishedAt,
-        nextRunAt: input.triggerSource === 'manual' ? input.job.nextRunAt : computeNextRunAtForJob(input.job, finishedAt),
-      })
+      this.recordRunFinished(input.repoId, input.job, input.triggerSource, finishedAt)
     } finally {
       await ScheduleService.awaitCancelDecision(input.job.id, input.runId)
       input.sessionMonitor.dispose()
@@ -1436,10 +1444,7 @@ export class ScheduleService {
         })
       }
 
-      updateScheduleJobRunState(this.db, input.repoId, input.job.id, {
-        lastRunAt: finishedAt,
-        nextRunAt: input.triggerSource === 'manual' ? input.job.nextRunAt : computeNextRunAtForJob(input.job, finishedAt),
-      })
+      this.recordRunFinished(input.repoId, input.job, input.triggerSource, finishedAt)
     } catch (error) {
       if ((await ScheduleService.awaitCancelDecision(input.job.id, input.runId)) !== 'resume') {
         return
@@ -1470,10 +1475,7 @@ export class ScheduleService {
         }),
       })
 
-      updateScheduleJobRunState(this.db, input.repoId, input.job.id, {
-        lastRunAt: finishedAt,
-        nextRunAt: input.triggerSource === 'manual' ? input.job.nextRunAt : computeNextRunAtForJob(input.job, finishedAt),
-      })
+      this.recordRunFinished(input.repoId, input.job, input.triggerSource, finishedAt)
     } finally {
       await ScheduleService.awaitCancelDecision(input.job.id, input.runId)
       input.sessionMonitor.dispose()
@@ -1574,13 +1576,27 @@ export class ScheduleService {
       }),
     })
 
-    updateScheduleJobRunState(this.db, run.repoId, run.jobId, {
-      lastRunAt: finishedAt,
-      nextRunAt: run.triggerSource === 'manual' ? job.nextRunAt : computeNextRunAtForJob(job, finishedAt),
-    })
+    this.recordRunFinished(run.repoId, job, run.triggerSource, finishedAt)
 
     await this.teardownRunResources(run.repoId, run.jobId, run.id, job, repo, run.sessionId)
     ScheduleService.releaseActiveRun(job.id, run.id)
+  }
+
+  /**
+   * Records that a run finished, deriving the next run time from the job as it exists now rather than
+   * the snapshot captured when the run started, so edits made mid-run are not clobbered.
+   */
+  private recordRunFinished(
+    repoId: number | null,
+    fallbackJob: ScheduleJob,
+    triggerSource: ScheduleRunTriggerSource,
+    finishedAt: number,
+  ): void {
+    const current = getScheduleJobById(this.db, repoId, fallbackJob.id) ?? fallbackJob
+    updateScheduleJobRunState(this.db, repoId, fallbackJob.id, {
+      lastRunAt: finishedAt,
+      nextRunAt: triggerSource === 'manual' ? current.nextRunAt : computeNextRunAtForJob(current, finishedAt),
+    })
   }
 
   private async interruptCancelledSession(client: OpenCodeClient, sessionId: string): Promise<void> {
@@ -1964,6 +1980,26 @@ export class ScheduleRunner {
       })
       this.cronJobs.set(job.id, cron)
       logger.info(`Cron job created for ${job.id}: next run at ${cron.nextRun()?.toISOString()}`)
+      return
+    }
+
+    if (job.scheduleMode === 'once') {
+      if (!job.nextRunAt) {
+        logger.warn(`Job ${job.id} (${job.name}) has no nextRunAt, skipping registration`)
+        return
+      }
+
+      if (job.nextRunAt <= Date.now()) {
+        void this.executeJob(job)
+        return
+      }
+
+      const cron = new Cron(new Date(job.nextRunAt), { protect: true }, () => {
+        logger.info(`Once job triggered for job ${job.id}: ${job.name}`)
+        void this.executeJob(job)
+      })
+      this.cronJobs.set(job.id, cron)
+      logger.info(`Once job created for ${job.id}: next run at ${cron.nextRun()?.toISOString()}`)
       return
     }
 
