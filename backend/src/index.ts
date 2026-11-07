@@ -39,6 +39,7 @@ import { createAuth } from './auth'
 import { createAuthMiddleware } from './auth/middleware'
 import { createPromptTemplateRoutes } from './routes/prompt-templates'
 import { createSessionPinRoutes } from './routes/session-pins'
+import { createChatRoutes } from './routes/chats'
 import { createSessionPermissionModeRoutes } from './routes/session-permission-modes'
 import { createSessionSandboxRoutes } from './routes/session-sandbox'
 import { createMultiRunRoutes } from './routes/multi-runs'
@@ -69,6 +70,7 @@ import { SessionAncestry } from './services/session-ancestry'
 import { GoalOutcomeTracker } from './services/goal-outcomes'
 import { MultiRunService } from './services/multi-runs'
 import { ChangeWalkthroughService } from './services/change-walkthroughs'
+import { ChatService } from './services/chats'
 import { opencodeServerManager } from './services/opencode-single-server'
 import { createOpenCodeClient } from './services/opencode/client'
 import { OpenCodeServerRegistry } from './services/opencode-server-registry'
@@ -95,6 +97,7 @@ import { logger } from './utils/logger'
 import { 
   getWorkspacePath, 
   getReposPath, 
+  getChatsPath,
   getConfigPath,
   getAgentsMdPath,
   getDatabasePath,
@@ -220,6 +223,7 @@ try {
 
   await ensureDirectoryExists(getWorkspacePath())
   await ensureDirectoryExists(getReposPath())
+  await ensureDirectoryExists(getChatsPath())
   await ensureDirectoryExists(getConfigPath())
   logger.info('Workspace directories initialized')
 
@@ -305,6 +309,7 @@ const goalOutcomes = new GoalOutcomeTracker()
 
 const multiRunService = new MultiRunService(db, openCodeClient, repoWorkspaces, sessionPermissionModeService, (serverId) => opencodeServerRegistry.getClient(serverId))
 const changeWalkthroughService = new ChangeWalkthroughService(db, openCodeClient, sessionSettingsService, gitAuthService, gitService)
+const chatService = new ChatService(openCodeClient)
 
 sseAggregator.onEvent((directory, event) => {
   sessionSandboxService.handleEvent(directory, event).catch((err) => {
@@ -420,6 +425,7 @@ protectedApi.route('/prompt-templates', createPromptTemplateRoutes(db))
 protectedApi.route('/secrets', createGlobalSecretRoutes(secretsService, 'secret'))
 protectedApi.route('/variables', createGlobalSecretRoutes(secretsService, 'variable'))
 protectedApi.route('/session-pins', createSessionPinRoutes(db))
+protectedApi.route('/chats', createChatRoutes(chatService))
 protectedApi.route('/opencode-servers/:serverId/schedules', createServerScheduleRoutes(scheduleService))
 protectedApi.route('/opencode-servers', createOpenCodeServerTerminalSocketRoutes(resolveServerTerminalService, upgradeWebSocket))
 protectedApi.route('/opencode-servers', createOpenCodeServerTerminalRoutes(resolveServerTerminalService))

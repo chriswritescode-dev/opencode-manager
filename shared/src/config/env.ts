@@ -87,6 +87,7 @@ export const ENV = {
     get BASE_PATH() { return resolveWorkspacePath() },
     get BROWSE_ROOT() { return resolveBrowseRoot() },
     REPOS_DIR: DEFAULTS.WORKSPACE.REPOS_DIR,
+    CHATS_DIR: DEFAULTS.WORKSPACE.CHATS_DIR,
     SCHEDULE_WORKTREES_DIR: DEFAULTS.WORKSPACE.SCHEDULE_WORKTREES_DIR,
     WALKTHROUGHS_DIR: DEFAULTS.WORKSPACE.WALKTHROUGHS_DIR,
     CONFIG_DIR: DEFAULTS.WORKSPACE.CONFIG_DIR,
@@ -148,6 +149,7 @@ export const ENV = {
 export const getWorkspacePath = () => ENV.WORKSPACE.BASE_PATH
 export const getBrowseRootPath = () => ENV.WORKSPACE.BROWSE_ROOT
 export const getReposPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.REPOS_DIR)
+export const getChatsPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CHATS_DIR)
 export const getScheduleWorktreesPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.SCHEDULE_WORKTREES_DIR)
 export const getWalkthroughsPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.WALKTHROUGHS_DIR)
 export const getAssistantModePath = () => path.join(getReposPath(), ASSISTANT_REPO_PATH)

@@ -22,6 +22,10 @@ export function buildSessionPath(
   return `/repos/${repoId}/sessions/${sessionId}${search ? `?${search}` : ''}`
 }
 
+export function buildChatSessionPath(chatId: string, sessionId: string): string {
+  return `/chats/${encodeURIComponent(chatId)}/sessions/${encodeURIComponent(sessionId)}`
+}
+
 export function buildServerSessionPath(serverId: string, sessionId: string): string {
   return `/servers/${encodeURIComponent(serverId)}/sessions/${encodeURIComponent(sessionId)}`
 }
