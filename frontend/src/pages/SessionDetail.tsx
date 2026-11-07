@@ -16,6 +16,7 @@ import type { TerminalTarget } from '@/lib/terminal-target'
 
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { NotFoundState } from "@/components/ui/not-found-state";
+import { parseNetworkError } from '@/lib/opencode-errors';
 import { useSession, useInterruptSession, useUpdateSession, useCreateSession } from "@/hooks/useOpenCode";
 import { useSessionTranscript } from "@/hooks/useSessionTranscript";
 import { useAutoOpenWalkthrough } from "@/hooks/useAutoOpenWalkthrough";
@@ -199,7 +200,7 @@ export function SessionDetail() {
 
   useRepoActivity(repoId, Boolean(repo) && !isRemoteServer && !isChatSession);
 
-  const { data: chat, isLoading: chatLoading } = useChat(chatId);
+  const { data: chat, isLoading: chatLoading, isError: chatFailed, error: chatError } = useChat(chatId);
   const { mutateAsync: deleteChatSessionAsync } = useDeleteChatSession();
 
   const repoDirectory = repo?.fullPath;
@@ -780,6 +781,16 @@ export function SessionDetail() {
           <span className="text-muted-foreground">Loading chat...</span>
         </div>
       </div>
+    );
+  }
+
+  if (isChatSession && chatFailed && !chat) {
+    return (
+      <NotFoundState
+        message={parseNetworkError(chatError).message}
+        backTo="/"
+        backLabel="Back to chats"
+      />
     );
   }
 

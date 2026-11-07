@@ -182,21 +182,21 @@ export function ChatPickerContent({
           onTogglePin={handleTogglePin}
           onRequestDelete={handleRequestDelete}
           registerRef={registerRef}
-        >
-          {hasMore && (
-            <div className="flex justify-center py-4">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  void showMore()
-                }}
-              >
-                Show more
-              </Button>
-            </div>
-          )}
-        </SessionPickerList>
+        />
+
+        {hasMore && (
+          <div className="flex shrink-0 justify-center py-4">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void showMore()
+              }}
+            >
+              Show more
+            </Button>
+          </div>
+        )}
 
         <div className="mt-2 shrink-0 px-4 text-xs text-muted-foreground pointer-coarse:hidden sm:px-0">
           ↑↓ move · Enter open · Ctrl+D delete

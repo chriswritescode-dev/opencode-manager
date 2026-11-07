@@ -13,8 +13,10 @@ import {
   type ListChatsResponse,
 } from '@opencode-manager/shared/schemas'
 import type { OpenCodeClient } from './opencode/client'
+import type { TerminalService } from './terminal'
 import { ensureDirectoryExists } from './file-operations'
 import { canonicalPathSync } from '../utils/fs-safe'
+import { logger } from '../utils/logger'
 
 const CHAT_ID_ATTEMPTS = 5
 
@@ -49,6 +51,7 @@ function formatChatTimestamp(now: Date): string {
 export class ChatService {
   constructor(
     private readonly openCodeClient: OpenCodeClient,
+    private readonly terminals: Pick<TerminalService, 'removeAll'>,
     private readonly root: () => string = getChatsPath,
     private readonly now: () => Date = () => new Date(),
   ) {}
@@ -77,12 +80,24 @@ export class ChatService {
   }
 
   async findByDirectory(directory: string): Promise<Chat | null> {
-    const target = canonicalPathSync(path.resolve(directory))
-    for (const id of await this.listChatIds()) {
-      const chat = this.toChat(id)
-      if (canonicalPathSync(chat.directory) === target) return chat
+    try {
+      const relative = path.relative(
+        canonicalPathSync(this.root()),
+        canonicalPathSync(path.resolve(directory)),
+      )
+      if (
+        !relative ||
+        path.isAbsolute(relative) ||
+        relative.includes(path.sep) ||
+        relative.startsWith('..')
+      ) {
+        return null
+      }
+      if (!ChatIdSchema.safeParse(relative).success) return null
+      return await this.resolve(relative)
+    } catch {
+      return null
     }
-    return null
   }
 
   async create(input: CreateChatRequest): Promise<{ chat: Chat; sessionId: string }> {
@@ -116,17 +131,28 @@ export class ChatService {
     }
 
     await this.openCodeClient.api.session.remove({ sessionID: sessionId })
-    const remaining = await this.openCodeClient.api.session.list({
-      directory: chat.directory,
-      limit: 1,
-    })
+    try {
+      const remaining = await this.openCodeClient.api.session.list({
+        directory: chat.directory,
+        limit: 1,
+      })
 
-    const folderRemoved = remaining.data.length === 0
-    if (folderRemoved) {
+      if (remaining.data.length > 0) {
+        return { deleted: true, folderRemoved: false }
+      }
+
+      try {
+        await this.terminals.removeAll(chat.directory)
+      } catch (error) {
+        logger.warn(`Failed to remove terminals for chat ${chatId}:`, error)
+      }
+
       await fs.rm(chat.directory, { recursive: true, force: true })
+      return { deleted: true, folderRemoved: true }
+    } catch (error) {
+      logger.warn(`Failed to remove folder for chat ${chatId}:`, error)
+      return { deleted: true, folderRemoved: false }
     }
-
-    return { deleted: true, folderRemoved }
   }
 
   private async listChatIds(): Promise<string[]> {

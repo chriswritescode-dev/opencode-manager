@@ -107,7 +107,6 @@ export function useChatSessions(pageSize = 10) {
 
   return {
     rows,
-    chats,
     hasMore: Boolean(folders.hasNextPage),
     showMore: folders.fetchNextPage,
     isLoading: folders.isLoading || sessions.isLoading,

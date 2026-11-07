@@ -1,7 +1,9 @@
 import { useCallback, useMemo } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { listCommands } from '@/api/opencode'
 import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { parseChatSessionRoute } from '@/lib/navigation'
 import { serverScopedKey } from '@/lib/serverScope'
 import type { CommandInfo } from '@opencode-manager/shared/opencode'
 import { getBuiltinCommands } from '@/lib/builtinCommands'
@@ -20,11 +22,13 @@ interface UseCommandsOptions {
 export function useCommands(options: UseCommandsOptions = {}) {
   const { directory, enabled = true } = options
   const serverId = useOpenCodeServerId()
+  const location = useLocation()
+  const isChat = parseChatSessionRoute(location.pathname) !== null
   const recentNames = useRecentCommandsStore((state) => state.names)
 
   const builtinCommands = useMemo(
-    () => getBuiltinCommands(isLocalOpenCodeServer(serverId)),
-    [serverId],
+    () => getBuiltinCommands(isLocalOpenCodeServer(serverId), isChat),
+    [serverId, isChat],
   )
   const sortedBuiltinCommands = useMemo(() => sortCommandsByName([...builtinCommands]), [builtinCommands])
 

@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import { BookOpen, Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, SquareTerminal, Settings, LogOut, Bot, Folder, Home, List, Play, Globe, KeyRound } from 'lucide-react'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
-import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
+import { getAssistantPath, isAssistantPath, parseChatSessionRoute } from '@/lib/navigation'
 
 export interface MoreDrawerItem {
   key: string
@@ -50,10 +50,9 @@ function getBaseItems(): MoreDrawerItem[] {
 const SESSION_DETAIL_PATH = /^\/repos\/(\d+)\/sessions\/[^/]+$/
 const SERVER_SESSION_DETAIL_PATH = /^\/servers\/[^/]+\/sessions\/[^/]+$/
 const SERVER_PROJECT_PATH = /^\/servers\/[^/]+\/projects$/
-const CHAT_SESSION_DETAIL_PATH = /^\/chats\/[^/]+\/sessions\/[^/]+$/
 
 export function isSessionDetailPath(pathname: string): boolean {
-  return SESSION_DETAIL_PATH.test(pathname)
+  return SESSION_DETAIL_PATH.test(pathname) || parseChatSessionRoute(pathname) !== null
 }
 
 const NON_TOOL_ITEM_KEYS = new Set(['home', 'settings', 'logout'])
@@ -179,7 +178,7 @@ function buildRouteNavModel(pathname: string): NavModel {
     }
   }
 
-  if (CHAT_SESSION_DETAIL_PATH.test(pathname)) {
+  if (parseChatSessionRoute(pathname) !== null) {
     return {
       primary: [getAssistantNavItem()],
       items: [

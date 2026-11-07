@@ -46,7 +46,7 @@ vi.mock('@/contexts/EventContext', () => ({
     currentIsFromDifferentSession: false,
   }),
   useEventContext: () => ({
-    getRepoIdForSession: () => null,
+    getLocalSessionPath: () => null,
     sshHostKey: { request: null, respond: vi.fn() },
   }),
 }))

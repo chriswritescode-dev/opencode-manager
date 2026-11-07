@@ -1,6 +1,7 @@
 import { renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
 import { useCommands } from './useCommands'
 import { listCommands } from '../api/opencode'
 import { BUILTIN_COMMANDS } from '@/lib/builtinCommands'
@@ -11,7 +12,7 @@ vi.mock('../api/opencode', () => ({
   listCommands: vi.fn(),
 }))
 
-const createWrapper = (serverId?: string) => {
+const createWrapper = (serverId?: string, initialPath = '/') => {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -19,7 +20,9 @@ const createWrapper = (serverId?: string) => {
   })
   return ({ children }: { children: React.ReactNode }) => (
     <QueryClientProvider client={queryClient}>
-      {serverId ? <OpenCodeServerProvider serverId={serverId}>{children}</OpenCodeServerProvider> : children}
+      <MemoryRouter initialEntries={[initialPath]}>
+        {serverId ? <OpenCodeServerProvider serverId={serverId}>{children}</OpenCodeServerProvider> : children}
+      </MemoryRouter>
     </QueryClientProvider>
   )
 }
@@ -139,7 +142,9 @@ describe('useCommands', () => {
     ])
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 60_000 } } })
     const wrapper = ({ children }: { children: React.ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>{children}</MemoryRouter>
+      </QueryClientProvider>
     )
 
     const { result, rerender } = renderHook(({ directory }) => useCommands({ directory }), {
@@ -190,5 +195,20 @@ describe('useCommands', () => {
     expect(names).toContain('mcp')
     expect(names).toContain('skills')
     expect(names).toContain('walkthrough')
+  })
+
+  it('omits mcp, skills, and walkthrough on a chat session route', () => {
+    const { result } = renderHook(() => useCommands({ enabled: false }), {
+      wrapper: createWrapper(undefined, '/chats/20260101-120000-abcdef/sessions/ses_chat'),
+    })
+
+    const names = result.current.searchCommands('').map(({ item }) => item.name)
+
+    expect(names).not.toContain('mcp')
+    expect(names).not.toContain('skills')
+    expect(names).not.toContain('walkthrough')
+    expect(names).toContain('sessions')
+    expect(names).toContain('models')
+    expect(names).toContain('compact')
   })
 })

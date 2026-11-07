@@ -61,21 +61,19 @@ export function ChatsNavGroup() {
       ) : rows.length === 0 ? (
         <SessionNavStatus>No chats</SessionNavStatus>
       ) : (
-        <>
-          {rows.map((row) => {
-            const item = toChatItem(row)
-            return (
-              <SessionNavRow
-                key={item.key}
-                item={item}
-                isCurrent={isCurrentSessionItem(item, location.pathname)}
-                onSelect={navigate}
-              />
-            )
-          })}
-          {hasMore && <SessionNavLink onClick={showMore}>Show more</SessionNavLink>}
-        </>
+        rows.map((row) => {
+          const item = toChatItem(row)
+          return (
+            <SessionNavRow
+              key={item.key}
+              item={item}
+              isCurrent={isCurrentSessionItem(item, location.pathname)}
+              onSelect={navigate}
+            />
+          )
+        })
       )}
+      {hasMore && <SessionNavLink onClick={showMore}>Show more</SessionNavLink>}
     </RepoNavGroup>
   )
 }

@@ -221,6 +221,20 @@ describe('useSessionPickerNavigation', () => {
       expect(onClose).toHaveBeenCalledTimes(1)
     })
 
+    it('returns to the home route when the open chat session is deleted', () => {
+      const { result, onClose, location } = renderPickerNavigation(
+        ['/chats/20240102120000-aaaaaa/sessions/a?mobileTab=sessions'],
+        { mode: 'push' },
+      )
+
+      act(() => {
+        result.current.onDeleteActiveSession()
+      })
+
+      expect(location()).toBe('/ PUSH')
+      expect(onClose).toHaveBeenCalledTimes(1)
+    })
+
     it('closes the picker without navigating when the session is already open', () => {
       const { result, onClose, location } = renderPickerNavigation(
         ['/repos/1/sessions/a?mobileTab=sessions'],

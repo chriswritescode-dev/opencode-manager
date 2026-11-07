@@ -10,12 +10,13 @@ const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   createSession: vi.fn(),
   useMobile: vi.fn(),
+  preferences: undefined as
+    | { leaderKey?: string; keyboardShortcuts?: Record<string, string>; directShortcuts?: string[] }
+    | undefined,
 }))
 
 vi.mock('@/hooks/useSettings', () => ({
-  useSettings: () => ({
-    preferences: { leaderKey: 'Ctrl+O', keyboardShortcuts: {}, directShortcuts: undefined },
-  }),
+  useSettings: () => ({ preferences: mocks.preferences }),
 }))
 
 vi.mock('@/hooks/useMobile', () => ({
@@ -62,6 +63,11 @@ describe('useGlobalShortcutActions', () => {
     localStorage.clear()
     queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     mocks.useMobile.mockReturnValue(false)
+    mocks.preferences = {
+      leaderKey: 'Ctrl+O',
+      keyboardShortcuts: {},
+      directShortcuts: undefined,
+    }
     mocks.getRepo.mockResolvedValue({ id: 5, fullPath: '/repo/five' })
     mocks.getSession.mockResolvedValue({ id: 'ses_1', location: { directory: '/srv/kitchen' } })
     mocks.createSession.mockResolvedValue({ id: 'session-new' })
@@ -142,6 +148,23 @@ describe('useGlobalShortcutActions', () => {
     pressLeaderFollowUp('t')
     await waitFor(() => expect(location()).toBe('/servers/srv_kitchen/sessions/ses_1'))
     expect(mocks.getRepo).not.toHaveBeenCalled()
+  })
+
+  it('does not fall back to a Manager host for a tool the chat session route lacks', async () => {
+    mocks.preferences = {
+      leaderKey: 'Ctrl+O',
+      keyboardShortcuts: { toggleSourceControl: 'G' },
+      directShortcuts: [],
+    }
+    const { location } = renderHarness('/chats/20240102120000-aaaaaa/sessions/ses_1')
+
+    pressLeaderFollowUp('g')
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(location()).toBe('/chats/20240102120000-aaaaaa/sessions/ses_1')
   })
 
   it('toggles the navigation sidebar instead of the Files panel from the sidebar shortcut', async () => {

@@ -304,7 +304,7 @@ scheduleService.setWorktreeRemovedHandler(async (directory) => {
 const repoWorkspaces = new RepoWorkspaceService(db, openCodeClient, gitAuthService, projectConfigService, terminalService, scheduleService)
 const scheduleRunnerInstance = new ScheduleRunner(scheduleService)
 
-const chatService = new ChatService(openCodeClient)
+const chatService = new ChatService(openCodeClient, terminalService)
 const notificationService = new NotificationService(db, opencodeServerRegistry, chatService)
 const sessionPermissionModeService = new SessionPermissionModeService(db, opencodeServerRegistry, sessionSettingsService, sessionAncestry)
 const goalOutcomes = new GoalOutcomeTracker()

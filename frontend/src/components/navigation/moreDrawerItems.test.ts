@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildMoreItems, buildNavModel, buildToolItems } from './moreDrawerItems'
+import { buildMoreItems, buildNavModel, buildToolItems, isSessionDetailPath } from './moreDrawerItems'
 
 describe('buildMoreItems', () => {
   it('returns Home + All Schedules + Files + Settings + Logout for root path', () => {
@@ -229,6 +229,14 @@ describe('buildToolItems', () => {
 
   it.each(['/schedules', '/repos/42/schedules'])('returns only the Sessions tool on %s', (path) => {
     expect(buildToolItems(path).map((item) => item.key)).toEqual(['sessions'])
+  })
+})
+
+describe('isSessionDetailPath', () => {
+  it('recognizes repo and chat session routes but not linked-server routes', () => {
+    expect(isSessionDetailPath('/repos/42/sessions/abc')).toBe(true)
+    expect(isSessionDetailPath('/chats/20240102120000-aaaaaa/sessions/ses_1')).toBe(true)
+    expect(isSessionDetailPath('/servers/srv_kitchen/sessions/abc')).toBe(false)
   })
 })
 

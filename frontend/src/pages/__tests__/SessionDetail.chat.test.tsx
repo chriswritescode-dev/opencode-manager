@@ -266,4 +266,19 @@ describe('SessionDetail chat session', () => {
     expect(await screen.findByText('Chat not found')).toBeInTheDocument()
     expect(screen.queryByTestId('message-thread')).not.toBeInTheDocument()
   })
+
+  it('shows the load error instead of not-found when the chat request fails', async () => {
+    mocks.useChat.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      error: new Error('Chat request failed'),
+    })
+
+    renderChatSession()
+
+    expect(await screen.findByText('Chat request failed')).toBeInTheDocument()
+    expect(screen.queryByText('Chat not found')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('message-thread')).not.toBeInTheDocument()
+  })
 })

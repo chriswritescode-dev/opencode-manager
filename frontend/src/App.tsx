@@ -122,7 +122,7 @@ export function PermissionDialogWrapper() {
     currentDirectory,
     currentIsFromDifferentSession,
   } = usePermissions()
-  const { getRepoIdForSession } = useEventContext()
+  const { getLocalSessionPath } = useEventContext()
   const isRemotePermission = currentPermission !== null && !isLocalOpenCodeServer(currentPermission.serverId)
   const { data: session } = useQuery(
     sessionQueryOptions(
@@ -133,7 +133,7 @@ export function PermissionDialogWrapper() {
   )
 
   const canOpenCurrentSession = currentPermission !== null
-    && (isRemotePermission || getRepoIdForSession(currentPermission.sessionID) !== null)
+    && (isRemotePermission || getLocalSessionPath(currentPermission.sessionID) !== null)
     && (currentIsFromDifferentSession || viewedSessionId === null)
 
   return (

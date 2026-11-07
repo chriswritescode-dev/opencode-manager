@@ -28,7 +28,7 @@ const roots: string[] = []
 function createApp(root: string) {
   const fake = createFakeClient()
   const app = new Hono()
-  app.route('/chats', createChatRoutes(new ChatService(fake.client, () => root)))
+  app.route('/chats', createChatRoutes(new ChatService(fake.client, { removeAll: vi.fn(async () => undefined) }, () => root)))
   return { app, ...fake }
 }
 

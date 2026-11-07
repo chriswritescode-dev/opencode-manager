@@ -183,7 +183,16 @@ describe('useChatSessions', () => {
     expect(pinnedRow.path).toBe(`/chats/${olderChat.id}/sessions/ses_old_pinned`)
     expect(result.current.rows[1].isPinned).toBe(false)
     expect(result.current.rows[1].path).toBe(`/chats/${newestChat.id}/sessions/ses_new_newer`)
-    expect(result.current.chats.map((entry) => entry.id)).toEqual([newestChat.id, olderChat.id])
+
+    const folders = renderHook(() => useChatFolders(2), {
+      wrapper: createWrapper(queryClient),
+    })
+    await waitFor(() =>
+      expect(folders.result.current.chats.map((entry) => entry.id)).toEqual([
+        newestChat.id,
+        olderChat.id,
+      ]),
+    )
     expect(result.current.hasMore).toBe(false)
   })
 })

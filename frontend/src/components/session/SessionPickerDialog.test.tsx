@@ -1136,6 +1136,19 @@ describe('SessionPickerDialog', () => {
       expect(mocks.showMoreChats).toHaveBeenCalledTimes(1)
     })
 
+    it('shows the show more action even when no chat sessions are visible', async () => {
+      mocks.chatRows = []
+      mocks.chatHasMore = true
+      renderPicker()
+
+      openChatsTab()
+
+      expect(await screen.findByText('No chats yet')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Show more' }))
+
+      expect(mocks.showMoreChats).toHaveBeenCalledTimes(1)
+    })
+
     it('creates a chat from the header action and navigates to its new session', async () => {
       const onNavigate = vi.fn()
       renderPicker({ onNavigate })

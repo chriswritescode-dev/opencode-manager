@@ -243,4 +243,7 @@ describe('buildNotificationUrl', () => {
   it('returns the chat session page for a chat folder', () => {
     expect(buildNotificationUrl(null, 'ses_1', { id: CHAT_ID })).toBe(`/chats/${CHAT_ID}/sessions/ses_1`)
   })
+  it('returns "/" for a chat folder without a session', () => {
+    expect(buildNotificationUrl(null, undefined, { id: CHAT_ID })).toBe('/')
+  })
 })

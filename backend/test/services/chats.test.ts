@@ -17,6 +17,10 @@ interface FakeClient {
   }
 }
 
+interface FakeTerminals {
+  terminals: { removeAll: ReturnType<typeof vi.fn> }
+}
+
 function createFakeClient(): FakeClient {
   const session = {
     create: vi.fn(async () => ({ id: 'ses_new' })),
@@ -28,6 +32,10 @@ function createFakeClient(): FakeClient {
     list: vi.fn(async () => ({ data: [], cursor: {} })),
   }
   return { client: { api: { session } } as unknown as OpenCodeClient, session }
+}
+
+function createFakeTerminals(): FakeTerminals {
+  return { terminals: { removeAll: vi.fn(async () => undefined) } }
 }
 
 function createChatFolder(root: string, id: string): string {
@@ -54,7 +62,13 @@ describe('ChatService', () => {
   it('creates a chat folder matching the id format and leaves it empty', async () => {
     const root = createRoot()
     const fake = createFakeClient()
-    const service = new ChatService(fake.client, () => root, () => new Date('2026-01-02T03:04:05Z'))
+    const { terminals } = createFakeTerminals()
+    const service = new ChatService(
+      fake.client,
+      terminals,
+      () => root,
+      () => new Date('2026-01-02T03:04:05Z'),
+    )
 
     const result = await service.create({ title: 'Hello' })
 
@@ -74,7 +88,7 @@ describe('ChatService', () => {
     const root = createRoot()
     const fake = createFakeClient()
     fake.session.create.mockRejectedValueOnce(new Error('session failed'))
-    const service = new ChatService(fake.client, () => root)
+    const service = new ChatService(fake.client, createFakeTerminals().terminals, () => root)
 
     await expect(service.create({})).rejects.toThrow('session failed')
     expect(readdirSync(root)).toEqual([])
@@ -86,7 +100,11 @@ describe('ChatService', () => {
     for (const id of ids) createChatFolder(root, id)
     createChatFolder(root, 'not-a-chat')
     mkdirSync(path.join(root, '.hidden'))
-    const service = new ChatService(createFakeClient().client, () => root)
+    const service = new ChatService(
+      createFakeClient().client,
+      createFakeTerminals().terminals,
+      () => root,
+    )
 
     const first = await service.list({ limit: 2 })
     expect(first.chats.map((chat) => chat.id)).toEqual([ids[2], ids[1]])
@@ -105,7 +123,11 @@ describe('ChatService', () => {
     const root = createRoot()
     const id = '20260203-040506-abcdef'
     createChatFolder(root, id)
-    const service = new ChatService(createFakeClient().client, () => root)
+    const service = new ChatService(
+      createFakeClient().client,
+      createFakeTerminals().terminals,
+      () => root,
+    )
 
     expect((await service.resolve(id))?.id).toBe(id)
     expect(await service.resolve('20260203-040506-aaaaaa')).toBeNull()
@@ -117,10 +139,33 @@ describe('ChatService', () => {
     const root = createRoot()
     const id = '20260203-040506-abcdef'
     const directory = createChatFolder(root, id)
-    const service = new ChatService(createFakeClient().client, () => root)
+    const service = new ChatService(
+      createFakeClient().client,
+      createFakeTerminals().terminals,
+      () => root,
+    )
 
     expect((await service.findByDirectory(directory))?.id).toBe(id)
     expect(await service.findByDirectory(path.join(root, 'missing'))).toBeNull()
+  })
+
+  it('returns null for paths that are not an existing chat folder directly under the root', async () => {
+    const root = createRoot()
+    const id = '20260203-040506-abcdef'
+    const directory = createChatFolder(root, id)
+    createChatFolder(root, 'not-a-chat')
+    const service = new ChatService(
+      createFakeClient().client,
+      createFakeTerminals().terminals,
+      () => root,
+    )
+
+    expect(await service.findByDirectory(path.join(directory, 'nested'))).toBeNull()
+    expect((await service.findByDirectory(directory + path.sep))?.id).toBe(id)
+    expect(await service.findByDirectory(root)).toBeNull()
+    expect(await service.findByDirectory(path.join(root, 'not-a-chat'))).toBeNull()
+    expect(await service.findByDirectory(path.join(root, '..', 'elsewhere'))).toBeNull()
+    expect(await service.findByDirectory('/unrelated/path')).toBeNull()
   })
 
   it('keeps the folder when another session remains after a delete', async () => {
@@ -128,30 +173,73 @@ describe('ChatService', () => {
     const id = '20260203-040506-abcdef'
     const directory = createChatFolder(root, id)
     const fake = createFakeClient()
+    const { terminals } = createFakeTerminals()
     fake.session.get.mockResolvedValueOnce({ id: 'ses_1', location: { directory } })
     fake.session.list.mockResolvedValueOnce({ data: [{ id: 'ses_fork' }], cursor: {} })
-    const service = new ChatService(fake.client, () => root)
+    const service = new ChatService(fake.client, terminals, () => root)
 
     const result = await service.deleteSession(id, 'ses_1')
 
     expect(result).toEqual({ deleted: true, folderRemoved: false })
     expect(fake.session.remove).toHaveBeenCalledWith({ sessionID: 'ses_1' })
     expect(fake.session.list).toHaveBeenCalledWith({ directory, limit: 1 })
+    expect(terminals.removeAll).not.toHaveBeenCalled()
     expect(existsSync(directory)).toBe(true)
   })
 
-  it('removes the folder when no session remains after a delete', async () => {
+  it('removes terminals before the folder when no session remains after a delete', async () => {
     const root = createRoot()
     const id = '20260203-040506-abcdef'
     const directory = createChatFolder(root, id)
     const fake = createFakeClient()
+    const { terminals } = createFakeTerminals()
+    let folderExistedDuringRemoval = false
+    terminals.removeAll.mockImplementationOnce(async (target: string) => {
+      folderExistedDuringRemoval = target === directory && existsSync(directory)
+    })
     fake.session.get.mockResolvedValueOnce({ id: 'ses_1', location: { directory } })
-    const service = new ChatService(fake.client, () => root)
+    const service = new ChatService(fake.client, terminals, () => root)
+
+    const result = await service.deleteSession(id, 'ses_1')
+
+    expect(result).toEqual({ deleted: true, folderRemoved: true })
+    expect(terminals.removeAll).toHaveBeenCalledWith(directory)
+    expect(folderExistedDuringRemoval).toBe(true)
+    expect(existsSync(directory)).toBe(false)
+  })
+
+  it('removes the folder even when terminal cleanup fails', async () => {
+    const root = createRoot()
+    const id = '20260203-040506-abcdef'
+    const directory = createChatFolder(root, id)
+    const fake = createFakeClient()
+    const { terminals } = createFakeTerminals()
+    terminals.removeAll.mockRejectedValueOnce(new Error('terminal cleanup failed'))
+    fake.session.get.mockResolvedValueOnce({ id: 'ses_1', location: { directory } })
+    const service = new ChatService(fake.client, terminals, () => root)
 
     const result = await service.deleteSession(id, 'ses_1')
 
     expect(result).toEqual({ deleted: true, folderRemoved: true })
     expect(existsSync(directory)).toBe(false)
+  })
+
+  it('reports folderRemoved false without throwing when the remaining-session list fails', async () => {
+    const root = createRoot()
+    const id = '20260203-040506-abcdef'
+    const directory = createChatFolder(root, id)
+    const fake = createFakeClient()
+    const { terminals } = createFakeTerminals()
+    fake.session.get.mockResolvedValueOnce({ id: 'ses_1', location: { directory } })
+    fake.session.list.mockRejectedValueOnce(new Error('list failed'))
+    const service = new ChatService(fake.client, terminals, () => root)
+
+    const result = await service.deleteSession(id, 'ses_1')
+
+    expect(result).toEqual({ deleted: true, folderRemoved: false })
+    expect(fake.session.remove).toHaveBeenCalledWith({ sessionID: 'ses_1' })
+    expect(terminals.removeAll).not.toHaveBeenCalled()
+    expect(existsSync(directory)).toBe(true)
   })
 
   it('rejects a session that belongs to another folder', async () => {
@@ -160,7 +248,7 @@ describe('ChatService', () => {
     createChatFolder(root, id)
     const fake = createFakeClient()
     fake.session.get.mockResolvedValueOnce({ id: 'ses_1', location: { directory: '/tmp/other-chat' } })
-    const service = new ChatService(fake.client, () => root)
+    const service = new ChatService(fake.client, createFakeTerminals().terminals, () => root)
 
     await expect(service.deleteSession(id, 'ses_1')).rejects.toBeInstanceOf(ChatSessionMismatchError)
     expect(fake.session.remove).not.toHaveBeenCalled()
@@ -168,7 +256,7 @@ describe('ChatService', () => {
 
   it('rejects an unknown chat id before touching sessions', async () => {
     const fake = createFakeClient()
-    const service = new ChatService(fake.client, () => createRoot())
+    const service = new ChatService(fake.client, createFakeTerminals().terminals, () => createRoot())
 
     await expect(service.deleteSession('20260203-040506-abcdef', 'ses_1')).rejects.toBeInstanceOf(ChatNotFoundError)
     await expect(service.deleteSession('../escape', 'ses_1')).rejects.toBeInstanceOf(ChatNotFoundError)

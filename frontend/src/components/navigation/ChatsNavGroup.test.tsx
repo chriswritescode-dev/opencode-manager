@@ -217,4 +217,13 @@ describe('ChatsNavGroup', () => {
 
     expect(await screen.findByText('No chats')).toBeTruthy()
   })
+
+  it('keeps Show more available when the loaded chats have no visible sessions', async () => {
+    mocks.sessionsData.splice(0, mocks.sessionsData.length)
+
+    render(<ChatsNavGroup />, { wrapper: createWrapper(['/']) })
+
+    expect(await screen.findByText('No chats')).toBeTruthy()
+    expect(screen.getByText('Show more')).toBeTruthy()
+  })
 })

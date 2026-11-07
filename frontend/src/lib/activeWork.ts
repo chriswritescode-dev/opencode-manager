@@ -3,10 +3,10 @@ import { LOCAL_OPENCODE_SERVER_ID, parseServerDirectoryKey } from '@opencode-man
 import type { ChildOutcome } from '@/lib/backgroundWork'
 import type { SessionStatusType } from '@/stores/sessionStatusStore'
 import { getSessionKey } from '@/lib/sessionKey'
-import { getServerSessionPath, getSessionPath } from '@/lib/navigation'
+import { getChatSessionPath, getServerSessionPath, getSessionPath } from '@/lib/navigation'
 import { getRepoBranchLabel } from '@/lib/utils'
 import { findRepoForDirectory, normalizeDirectory } from '@/components/navigation/sidebar-session-tree'
-import { isWorktreeSibling, type RepoSibling } from '@opencode-manager/shared/utils'
+import { getChatIdFromDirectory, isWorktreeSibling, type RepoSibling } from '@opencode-manager/shared/utils'
 
 /**
  * The plain directory of a session-status directory value when it belongs to the local server,
@@ -43,11 +43,11 @@ export type ActiveWorkState = 'needs-input' | 'running' | 'recent'
 export interface ActiveWorkItem {
   key: string
   session: Session
-  /** The local repo the session runs in; null for a session owned by a linked server. */
+  /** The local repo the session runs in; null for a linked-server or chat session. */
   repo: Repo | null
-  /** The linked server that owns the session; null for a local repo session. */
+  /** The linked server that owns the session; null for a local repo or chat session. */
   serverId: string | null
-  /** The owning linked server's display name; null for a local repo session. */
+  /** The owning linked server's display name; null for a local repo or chat session. */
   serverName: string | null
   state: ActiveWorkState
   updatedAt: number
@@ -335,13 +335,15 @@ export function repoActivityFromIndex(
 
 /**
  * True when some indexed active directory matches no repo, so a session is active in a directory
- * outside the repo list (such as a worktree) and the worktree lookup is worth running.
+ * outside the repo list (such as a worktree) and the worktree lookup is worth running. Chat
+ * directories are ignored because they never resolve to a repo worktree.
  */
 export function hasUnmatchedActiveDirectory(
   index: ReadonlyMap<string, 'needs-input' | 'running'>,
   repos: Repo[],
 ): boolean {
   for (const directory of index.keys()) {
+    if (getChatIdFromDirectory(directory)) continue
     if (!findRepoForDirectory(repos, directory)) return true
   }
   return false
@@ -410,7 +412,8 @@ export function resolveSessionBranch(
 
 /**
  * Whether the worktree lookup is worth running: true when some non-archived session that matches no
- * repo is either updated inside the window or has its root active (needs-input or running).
+ * repo and is not a chat session is either updated inside the window or has its root active
+ * (needs-input or running).
  */
 export function needsWorktreeLookup(input: {
   now: number
@@ -427,6 +430,7 @@ export function needsWorktreeLookup(input: {
   return sessions.some((session) => {
     if (session.time.archived) return false
     if (sessionServers?.has(session.id)) return false
+    if (getChatIdFromDirectory(session.location.directory)) return false
     if (findRepoForDirectory(repos, session.location.directory)) return false
     if (session.time.updated >= windowStart) return true
     const rootID = rootSessionID(session.id, parents)
@@ -437,11 +441,12 @@ export function needsWorktreeLookup(input: {
 /**
  * Groups the given sessions into needs-input, running, and recent roots. A session appears in
  * exactly one group (needs-input over running over recent) and only when it resolves to a local
- * repo or to an owning linked server. A session owned by a linked server keeps its own row in any
- * state, opening on that server instead of a local repo. A recent session in a schedule worktree is
- * omitted so schedules only surface while they need attention. The input may mix roots and children;
- * children never become items, but their latest update time rolls up into the root's `updatedAt` and
- * decides the recent window and ordering.
+ * repo, a workspace chat, or an owning linked server. A session owned by a linked server keeps its
+ * own row in any state, opening on that server instead of a local repo. A chat session keeps its own
+ * row too, opening on its chat route. A recent session in a schedule worktree is omitted so
+ * schedules only surface while they need attention. The input may mix roots and children; children
+ * never become items, but their latest update time rolls up into the root's `updatedAt` and decides
+ * the recent window and ordering.
  */
 export function buildActiveWork(input: {
   now: number
@@ -517,7 +522,28 @@ export function buildActiveWork(input: {
     const directory = normalizeDirectory(session.location.directory)
     const worktree = directory ? worktreeByDirectory.get(directory) : undefined
     const repo = worktree?.ownerRepo ?? findRepoForDirectory(repos, session.location.directory)
-    if (!repo) continue
+
+    if (!repo) {
+      const chatId = getChatIdFromDirectory(session.location.directory)
+      if (!chatId) continue
+      seen.add(session.id)
+      const item: ActiveWorkItem = {
+        key: getSessionKey(session),
+        session,
+        repo: null,
+        serverId: null,
+        serverName: null,
+        state,
+        updatedAt,
+        outcome: outcomes.get(session.id),
+        worktreeBranch: null,
+        path: getChatSessionPath(chatId, session.id),
+      }
+      if (state === 'needs-input') needsInput.push(item)
+      else if (state === 'running') running.push(item)
+      else recent.push(item)
+      continue
+    }
     if (worktree?.isSchedule && state === 'recent') continue
 
     seen.add(session.id)

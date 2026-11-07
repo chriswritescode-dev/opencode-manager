@@ -130,9 +130,7 @@ export function buildNotificationUrl(
   chat?: { id: string } | null
 ): string {
   if (chat) {
-    return sessionId
-      ? buildChatSessionPath(chat.id, sessionId)
-      : `/chats/${encodeURIComponent(chat.id)}`;
+    return sessionId ? buildChatSessionPath(chat.id, sessionId) : "/";
   }
   if (!repo) return "/";
   if (!sessionId) return `/repos/${repo.id}`;
