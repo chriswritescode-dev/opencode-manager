@@ -40,6 +40,7 @@ import { createAuthMiddleware } from './auth/middleware'
 import { createPromptTemplateRoutes } from './routes/prompt-templates'
 import { createSessionPinRoutes } from './routes/session-pins'
 import { createChatRoutes } from './routes/chats'
+import { createChatTerminalRoutes, createChatTerminalSocketRoutes } from './routes/chat-terminals'
 import { createSessionPermissionModeRoutes } from './routes/session-permission-modes'
 import { createSessionSandboxRoutes } from './routes/session-sandbox'
 import { createMultiRunRoutes } from './routes/multi-runs'
@@ -303,13 +304,13 @@ scheduleService.setWorktreeRemovedHandler(async (directory) => {
 const repoWorkspaces = new RepoWorkspaceService(db, openCodeClient, gitAuthService, projectConfigService, terminalService, scheduleService)
 const scheduleRunnerInstance = new ScheduleRunner(scheduleService)
 
-const notificationService = new NotificationService(db, opencodeServerRegistry)
+const chatService = new ChatService(openCodeClient)
+const notificationService = new NotificationService(db, opencodeServerRegistry, chatService)
 const sessionPermissionModeService = new SessionPermissionModeService(db, opencodeServerRegistry, sessionSettingsService, sessionAncestry)
 const goalOutcomes = new GoalOutcomeTracker()
 
 const multiRunService = new MultiRunService(db, openCodeClient, repoWorkspaces, sessionPermissionModeService, (serverId) => opencodeServerRegistry.getClient(serverId))
 const changeWalkthroughService = new ChangeWalkthroughService(db, openCodeClient, sessionSettingsService, gitAuthService, gitService)
-const chatService = new ChatService(openCodeClient)
 
 sseAggregator.onEvent((directory, event) => {
   sessionSandboxService.handleEvent(directory, event).catch((err) => {
@@ -425,7 +426,9 @@ protectedApi.route('/prompt-templates', createPromptTemplateRoutes(db))
 protectedApi.route('/secrets', createGlobalSecretRoutes(secretsService, 'secret'))
 protectedApi.route('/variables', createGlobalSecretRoutes(secretsService, 'variable'))
 protectedApi.route('/session-pins', createSessionPinRoutes(db))
+protectedApi.route('/chats', createChatTerminalSocketRoutes(chatService, terminalService, upgradeWebSocket))
 protectedApi.route('/chats', createChatRoutes(chatService))
+protectedApi.route('/chats', createChatTerminalRoutes(chatService, terminalService))
 protectedApi.route('/opencode-servers/:serverId/schedules', createServerScheduleRoutes(scheduleService))
 protectedApi.route('/opencode-servers', createOpenCodeServerTerminalSocketRoutes(resolveServerTerminalService, upgradeWebSocket))
 protectedApi.route('/opencode-servers', createOpenCodeServerTerminalRoutes(resolveServerTerminalService))
