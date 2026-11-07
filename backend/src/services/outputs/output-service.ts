@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import { randomUUID } from 'node:crypto'
-import { mkdir, rm } from 'node:fs/promises'
+import { copyFile, mkdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 import {
   formatOpenCodeModelRef,
@@ -18,12 +18,15 @@ import {
   describeChangeSource,
   outputParamsKey,
   resolveOutputParams,
+  validateOutputData,
   type GenerateOutputRequest,
   type OutputDefinition,
+  type OutputDefinitionInput,
   type OutputGenerationError,
   type OutputParams,
   type OutputRecord,
   type OutputState,
+  type PublishOutputParams,
   type RefineOutputRequest,
 } from '@opencode-manager/shared/schemas'
 import {
@@ -35,15 +38,20 @@ import {
   listOutputGeneratorSessionIds,
   listOutputs,
   updateOutput,
+  upsertPublishedOutput,
+  type OutputRecordKey,
   type OutputRecordPatch,
 } from '../../db/outputs'
 import { getErrorMessage } from '../../utils/error-utils'
+import { writeFileAtomic } from '../../utils/fs-safe'
 import { ServiceError } from '../../utils/service-error'
 import { logger } from '../../utils/logger'
 import { resolveOpenCodeModel } from '../opencode-models'
 import type { OpenCodeClient } from '../opencode/client'
+import { assertHtmlArtifactFile, resolveSessionArtifactFile } from '../session-artifacts'
 import type { SettingsService } from '../settings'
 import type { SSEEvent } from '../sse-aggregator'
+import { BUILTIN_FINALIZERS } from './builtin-finalizers'
 import { computeChangesHash } from './change-outline'
 import type { OutputDefinitionRegistry } from './definition-registry'
 import { OutputError } from './output-error'
@@ -56,6 +64,21 @@ const EMPTY_INPUT_HASH = computeChangesHash([])
 export interface OutputServiceOptions {
   generationTimeoutMs?: number
   outputsRoot?: string
+}
+
+export interface PublishOutputResult {
+  outputDir: string
+  uncoveredHunkIds: string[]
+}
+
+interface PublishTarget {
+  generatorSessionId: string | null
+  record: OutputRecord | null
+  sessionId: string
+  definitionId: string
+  definition: OutputDefinition
+  params: OutputParams
+  paramsKey: string
 }
 
 interface ResolvedOutputEntry {
@@ -87,6 +110,7 @@ export class OutputService {
   private readonly pendingHashReads = new Map<string, number>()
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly inputSnapshots = new Map<string, FileDiffInfo[]>()
+  private readonly generatorTargets = new Map<string, OutputRecordKey>()
   private readonly entryParams = new Map<string, OutputParams>()
   private readonly generationTimeoutMs: number
   private readonly outputsRoot: string
@@ -227,6 +251,7 @@ export class OutputService {
       )
       if (!recorded) {
         this.inputSnapshots.delete(generatorSessionId)
+        this.generatorTargets.delete(generatorSessionId)
         await this.interruptOutputSession(
           generatorSessionId,
           'Failed to interrupt a cancelled output session',
@@ -234,6 +259,12 @@ export class OutputService {
         await rm(outputDir, { recursive: true, force: true })
         return this.getState(sessionId, request.definitionId, entry.params)
       }
+
+      this.generatorTargets.set(generatorSessionId, {
+        sessionId,
+        definitionId: request.definitionId,
+        paramsKey: entry.paramsKey,
+      })
 
       if (input !== null) {
         this.inputSnapshots.set(generatorSessionId, input)
@@ -252,6 +283,7 @@ export class OutputService {
       const current = getOutput(this.db, sessionId, request.definitionId, entry.paramsKey)
       if (!current || current.status !== 'generating' || current.generatorSessionId !== generatorSessionId) {
         this.inputSnapshots.delete(generatorSessionId)
+        this.generatorTargets.delete(generatorSessionId)
         await this.interruptOutputSession(
           generatorSessionId,
           'Failed to interrupt a cancelled output session',
@@ -264,6 +296,7 @@ export class OutputService {
       this.clearTimeout(entry.key)
       if (generatorSessionId) {
         this.inputSnapshots.delete(generatorSessionId)
+        this.generatorTargets.delete(generatorSessionId)
         await this.interruptOutputSession(
           generatorSessionId,
           'Failed to interrupt a failed output session',
@@ -368,6 +401,123 @@ export class OutputService {
     return this.getState(sessionId, request.definitionId, entry.params)
   }
 
+  async readInput(generatorSessionId: string, file?: string): Promise<string> {
+    const found = getOutputByGeneratorSession(this.db, generatorSessionId)
+    if (!found) {
+      throw new OutputError('This session is not an output session', 404, {
+        code: 'OUTPUT_NOT_A_GENERATOR_SESSION',
+      })
+    }
+
+    const { output } = found
+    const definition = this.registry.get(output.sessionId, output.definitionId)
+    const provider = this.providerFor(definition)
+    if (!provider) {
+      throw new OutputError('This output has no input to read', 404, {
+        code: 'OUTPUT_NOT_A_GENERATOR_SESSION',
+      })
+    }
+
+    const session = await this.readSession(output.sessionId)
+    const input = await this.readGeneratorInput(output, session, provider)
+    return provider.format(
+      input,
+      {
+        title: this.outputTitle(session, definition, output.params),
+        sourceDescription: this.sourceDescription(definition, output.params),
+      },
+      file,
+    )
+  }
+
+  defineSessionOutput(sessionId: string, input: OutputDefinitionInput): OutputDefinition {
+    return this.registry.defineSession(sessionId, input)
+  }
+
+  async publish(callerSessionId: string, params: PublishOutputParams): Promise<PublishOutputResult> {
+    const target = this.resolvePublishTarget(callerSessionId, params)
+    const outputDir = target.record?.outputDir ?? path.join(this.outputsRoot, target.sessionId, randomUUID())
+    await mkdir(outputDir, { recursive: true })
+
+    const { definition } = target
+    let uncoveredHunkIds: string[] = []
+    if (definition.renderer.kind === 'html') {
+      if (params.path === undefined) {
+        throw new OutputError('The path of the HTML file is required', 400, {
+          code: 'OUTPUT_PATH_REQUIRED',
+        })
+      }
+      const indexPath = path.join(outputDir, 'index.html')
+      if (path.resolve(params.path) === path.resolve(indexPath)) {
+        await assertHtmlArtifactFile(indexPath, indexPath)
+      } else {
+        const sourcePath = await resolveSessionArtifactFile(this.openCodeClient, callerSessionId, params.path)
+        await copyFile(sourcePath, indexPath)
+      }
+    } else {
+      if (params.data === undefined) {
+        throw new OutputError('Data is required for this output', 400, { code: 'OUTPUT_DATA_REQUIRED' })
+      }
+      if (!definition.dataSchema) {
+        throw new OutputError('This output has no data schema', 400, { code: 'OUTPUT_DATA_INVALID' })
+      }
+      const validated = validateOutputData(definition.dataSchema, params.data)
+      if (!validated.ok) {
+        throw new OutputError(validated.message, 400, { code: 'OUTPUT_DATA_INVALID' })
+      }
+      let storedData = validated.data
+      if (definition.renderer.kind === 'builtin') {
+        const provider = this.providerFor(definition)
+        if (!provider) {
+          throw new OutputError('This output has no input provider', 502, {
+            code: 'OUTPUT_PROVIDER_UNAVAILABLE',
+          })
+        }
+        const session = await this.readSession(target.sessionId)
+        const changes = target.generatorSessionId !== null && target.record
+          ? await this.readGeneratorInput(target.record, session, provider)
+          : await provider.read(session, target.params)
+        const finalized = BUILTIN_FINALIZERS[definition.renderer.id](validated.data, changes)
+        storedData = finalized.data
+        uncoveredHunkIds = finalized.uncoveredHunkIds
+      }
+      await writeFileAtomic(path.join(outputDir, 'data.json'), JSON.stringify(storedData, null, 2))
+      if (definition.renderer.kind === 'template') {
+        await writeFileAtomic(path.join(outputDir, 'index.html'), definition.renderer.html)
+      }
+    }
+
+    const now = Date.now()
+    if (target.generatorSessionId !== null) {
+      const updated = updateOutput(
+        this.db,
+        { sessionId: target.sessionId, definitionId: target.definitionId, paramsKey: target.paramsKey },
+        ['generating', 'ready', 'failed'],
+        { status: 'ready', publishedAt: now, error: null, updatedAt: now },
+        { generatorSessionId: target.generatorSessionId },
+      )
+      if (!updated) {
+        throw new OutputError('This output was superseded by a newer generation', 409, {
+          code: 'OUTPUT_SUPERSEDED',
+        })
+      }
+    } else {
+      upsertPublishedOutput(this.db, {
+        sessionId: target.sessionId,
+        definitionId: target.definitionId,
+        params: target.params,
+        inputHash: null,
+        generationId: randomUUID(),
+        generatorSessionId: null,
+        outputDir,
+        model: null,
+        now,
+      })
+    }
+
+    return { outputDir, uncoveredHunkIds }
+  }
+
   /** Applies session lifecycle events to the stored output records and their output directories. */
   handleEvent(event: SSEEvent): void {
     switch (event.type) {
@@ -376,6 +526,7 @@ export class OutputService {
         if (this.failDeletedGeneratorSession(sessionID)) {
           return
         }
+        this.generatorTargets.delete(sessionID)
         this.clearSessionState(sessionID)
         for (const provider of new Set(Object.values(this.providers))) {
           provider.deleteSessionRefs(sessionID)
@@ -437,6 +588,103 @@ export class OutputService {
     return `${base} — ${describeChangeSource(parsed.data)}`
   }
 
+  private sourceDescription(definition: OutputDefinition, params: OutputParams): string {
+    const field = definition.params.find((param) => param.type === 'changeSource')
+    if (!field) {
+      return definition.label
+    }
+    const parsed = ChangeSourceSchema.safeParse(params[field.name])
+    return parsed.success ? describeChangeSource(parsed.data) : definition.label
+  }
+
+  private async readGeneratorInput(
+    output: OutputRecord,
+    session: SessionInfo,
+    provider: OutputProvider,
+  ): Promise<FileDiffInfo[]> {
+    if (output.generatorSessionId) {
+      const snapshot = this.inputSnapshots.get(output.generatorSessionId)
+      if (snapshot) {
+        return snapshot
+      }
+    }
+
+    const input = await provider.read(session, output.params)
+    if (output.generatorSessionId && output.executionStartedAt !== null) {
+      const current = getOutputByGeneratorSession(this.db, output.generatorSessionId)
+      if (current?.output.executionStartedAt === output.executionStartedAt) {
+        this.inputSnapshots.set(output.generatorSessionId, input)
+      }
+    }
+    return input
+  }
+
+  private resolvePublishTarget(callerSessionId: string, params: PublishOutputParams): PublishTarget {
+    const found = getOutputByGeneratorSession(this.db, callerSessionId)
+    if (found) {
+      if (params.definitionId !== undefined && params.definitionId !== found.output.definitionId) {
+        throw new OutputError('The output definition does not match this output session', 400, {
+          code: 'OUTPUT_DEFINITION_MISMATCH',
+        })
+      }
+      return {
+        generatorSessionId: callerSessionId,
+        record: found.output,
+        sessionId: found.output.sessionId,
+        definitionId: found.output.definitionId,
+        definition: this.registry.get(found.output.sessionId, found.output.definitionId),
+        params: found.output.params,
+        paramsKey: found.output.paramsKey,
+      }
+    }
+
+    const tracked = this.generatorTargets.get(callerSessionId)
+    if (tracked) {
+      const record = getOutput(this.db, tracked.sessionId, tracked.definitionId, tracked.paramsKey)
+      if (!record || record.generatorSessionId !== callerSessionId) {
+        throw new OutputError('This output was superseded by a newer generation', 409, {
+          code: 'OUTPUT_SUPERSEDED',
+        })
+      }
+      return {
+        generatorSessionId: callerSessionId,
+        record,
+        sessionId: record.sessionId,
+        definitionId: record.definitionId,
+        definition: this.registry.get(record.sessionId, record.definitionId),
+        params: record.params,
+        paramsKey: record.paramsKey,
+      }
+    }
+
+    if (params.definitionId === undefined) {
+      throw new OutputError('definitionId is required', 400, { code: 'OUTPUT_DEFINITION_REQUIRED' })
+    }
+    const definition = this.registry.get(callerSessionId, params.definitionId)
+    if (definition.generation !== 'currentSession') {
+      throw new OutputError('This output is generated in a separate session; start it with open_output', 409, {
+        code: 'OUTPUT_GENERATION_SEPARATE',
+      })
+    }
+
+    let resolved: OutputParams
+    try {
+      resolved = resolveOutputParams(definition, params.params)
+    } catch (error) {
+      throw new OutputError(getErrorMessage(error), 400, { code: 'OUTPUT_PARAMS_INVALID' })
+    }
+    const paramsKey = outputParamsKey(resolved)
+    return {
+      generatorSessionId: null,
+      record: getOutput(this.db, callerSessionId, params.definitionId, paramsKey),
+      sessionId: callerSessionId,
+      definitionId: params.definitionId,
+      definition,
+      params: resolved,
+      paramsKey,
+    }
+  }
+
   private failDeletedGeneratorSession(generatorSessionId: string): boolean {
     const found = getOutputByGeneratorSession(this.db, generatorSessionId)
     if (!found) {
@@ -452,6 +700,7 @@ export class OutputService {
       })
     }
     this.inputSnapshots.delete(generatorSessionId)
+    this.generatorTargets.delete(generatorSessionId)
     return true
   }
 
@@ -479,6 +728,7 @@ export class OutputService {
     for (const record of listOutputs(this.db, sessionId)) {
       if (record.generatorSessionId) {
         this.inputSnapshots.delete(record.generatorSessionId)
+        this.generatorTargets.delete(record.generatorSessionId)
       }
       if ((record.status !== 'generating' && record.executionStartedAt === null) || !record.generatorSessionId) {
         continue
@@ -503,6 +753,11 @@ export class OutputService {
       }
       this.invalidateCurrentHash(key)
       this.clearTimeout(key)
+    }
+    for (const [generatorSessionId, target] of this.generatorTargets) {
+      if (target.sessionId === sessionId) {
+        this.generatorTargets.delete(generatorSessionId)
+      }
     }
   }
 
@@ -587,6 +842,7 @@ export class OutputService {
     )
     if (record.generatorSessionId) {
       this.inputSnapshots.delete(record.generatorSessionId)
+      this.generatorTargets.delete(record.generatorSessionId)
     }
     if (updated) {
       this.clearTimeout(this.entryKey(record.sessionId, record.definitionId, record.paramsKey))
