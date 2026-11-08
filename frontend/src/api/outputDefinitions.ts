@@ -12,6 +12,22 @@ function outputDefinitionUrl(id: string): string {
   return `${OUTPUT_DEFINITIONS_URL}/${encodeURIComponent(id)}`
 }
 
+/** Projects a stored output definition to the input shape accepted by create and put. */
+export function toOutputDefinitionInput(definition: OutputDefinition): OutputDefinitionInput {
+  return {
+    id: definition.id,
+    label: definition.label,
+    description: definition.description,
+    icon: definition.icon,
+    params: definition.params,
+    provider: definition.provider,
+    instructions: definition.instructions,
+    dataSchema: definition.dataSchema,
+    renderer: definition.renderer,
+    generation: definition.generation,
+  }
+}
+
 export async function listOutputDefinitions(sessionId?: string): Promise<OutputDefinition[]> {
   const response = await fetchWrapper<{ definitions: OutputDefinition[] }>(OUTPUT_DEFINITIONS_URL, {
     params: { sessionId },

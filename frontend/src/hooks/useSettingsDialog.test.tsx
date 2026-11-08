@@ -19,6 +19,13 @@ describe('useSettingsDialog', () => {
     expect(result.current.selectedTab).toBe('git')
   })
 
+  it('reads the outputs tab from URL', () => {
+    const { result } = renderHookWithRouter(() => useSettingsDialog(), ['/?settings=open&settingsTab=outputs'])
+    expect(result.current.isOpen).toBe(true)
+    expect(result.current.activeTab).toBe('outputs')
+    expect(result.current.selectedTab).toBe('outputs')
+  })
+
   it('falls back to account and null selectedTab for an unknown settingsTab value', () => {
     const { result } = renderHookWithRouter(() => useSettingsDialog(), ['/?settings=open&settingsTab=log'])
     expect(result.current.isOpen).toBe(true)

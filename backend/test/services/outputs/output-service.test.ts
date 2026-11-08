@@ -516,6 +516,23 @@ describe('OutputService', () => {
     expect(fake.createCalls[0]!.model).toEqual({ providerID: 'openai', id: 'gpt-5' })
   })
 
+  it('ignores the legacy walkthrough model when the output model is explicitly cleared', async () => {
+    new SettingsService(db).updateSettings({
+      outputModel: '',
+      walkthroughModel: 'openai/gpt-5',
+    })
+    sessions[SESSION_ID]!.info = {
+      id: SESSION_ID,
+      title: 'Title',
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+      location: { directory: '/abs/repo' },
+    } as SessionInfo
+
+    await service.startGeneration(SESSION_ID, { definitionId: DEFINITION_ID, model: 'openai/gpt-5-mini' })
+
+    expect(fake.createCalls[0]!.model).toEqual({ providerID: 'openai', id: 'gpt-5-mini' })
+  })
+
   it('uses the request model over the session model', async () => {
     sessions[SESSION_ID]!.info = {
       id: SESSION_ID,

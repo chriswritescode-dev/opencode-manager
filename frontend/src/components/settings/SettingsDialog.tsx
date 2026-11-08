@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { GeneralSettings } from '@/components/settings/GeneralSettings'
+import { OutputsSettings } from '@/components/settings/OutputsSettings'
 import { GitSettings } from '@/components/settings/GitSettings'
 import { OpenCodeServersSettings } from '@/components/settings/OpenCodeServersSettings'
 import { KeyboardShortcuts } from '@/components/settings/KeyboardShortcuts'
@@ -19,7 +20,7 @@ import { VersionSelectDialog } from '@/components/settings/VersionSelectDialog'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { RowActionsMenuContext } from '@/components/ui/settings-list'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Settings2, Keyboard, Code, ChevronLeft, Key, GitBranch, Server, User, Volume2, Bell, X, ScrollText, type LucideIcon } from 'lucide-react'
+import { Settings2, Keyboard, Code, ChevronLeft, Key, GitBranch, Server, User, Volume2, Bell, X, ScrollText, LayoutDashboard, type LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useSettingsDialog, isSettingsContentTab, type SettingsContentTab } from '@/hooks/useSettingsDialog'
 import { DESKTOP_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
@@ -131,6 +132,7 @@ export function SettingsDialog() {
   const menuItems: Array<{ id: SettingsContentTab; icon: LucideIcon; label: string; description: string }> = [
     { id: 'account', icon: User, label: 'Account', description: 'Profile, passkeys, devices, and sign out' },
     { id: 'general', icon: Settings2, label: 'General Settings', description: 'App preferences and behavior' },
+    { id: 'outputs', icon: LayoutDashboard, label: 'Outputs', description: 'Output model and saved output definitions' },
     { id: 'notifications', icon: Bell, label: 'Notifications', description: 'Push notification preferences' },
     { id: 'voice', icon: Volume2, label: 'Voice', description: 'Text-to-speech and speech-to-text settings' },
     { id: 'git', icon: GitBranch, label: 'Git', description: 'Git identity and credentials for repositories' },
@@ -204,6 +206,7 @@ export function SettingsDialog() {
             <div className={`@container min-h-0 min-w-0 flex-1 p-6 ${activeTab === 'logs' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
               <TabsContent key="account" value="account" className="mt-0 px-0 max-w-7xl"><AccountSettings /></TabsContent>
               <TabsContent key="general" value="general" className="mt-0 px-0 max-w-4xl"><GeneralSettings /></TabsContent>
+              <TabsContent key="outputs" value="outputs" className="mt-0 px-0 max-w-7xl"><OutputsSettings /></TabsContent>
               <TabsContent key="notifications" value="notifications" className="mt-0 px-0 max-w-7xl"><NotificationSettings /></TabsContent>
               <TabsContent key="voice" value="voice" className="mt-0 px-0 max-w-7xl"><VoiceSettings /></TabsContent>
               <TabsContent key="git" value="git" className="mt-0 px-0 max-w-7xl"><GitSettings /></TabsContent>
@@ -274,6 +277,7 @@ export function SettingsDialog() {
 
              {mobileView === 'account' && <div key="account"><AccountSettings /></div>}
              {mobileView === 'general' && <div key="general"><GeneralSettings /></div>}
+             {mobileView === 'outputs' && <div key="outputs"><OutputsSettings /></div>}
              {mobileView === 'notifications' && <div key="notifications"><NotificationSettings /></div>}
              {mobileView === 'voice' && <div key="voice"><VoiceSettings /></div>}
              {mobileView === 'git' && <div key="git"><GitSettings /></div>}

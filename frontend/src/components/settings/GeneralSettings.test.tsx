@@ -10,7 +10,6 @@ import { createUseSettingsMock } from '@/test/test-utils'
 
 vi.mock('@/hooks/useSettings')
 vi.mock('@/hooks/useVersionCheck')
-vi.mock('@/components/model/ModelCombobox', () => ({ ModelCombobox: () => null }))
 
 const basePreferences: UserPreferences = {
   theme: 'dark',
@@ -71,8 +70,8 @@ describe('GeneralSettings', () => {
     expect(screen.getByRole('switch', { name: 'Expand tool calls' })).not.toBeChecked()
     expect(screen.getByRole('switch', { name: 'Expand diffs' })).toBeChecked()
 
-    expect(screen.getByRole('heading', { name: 'Change walkthrough' })).toBeInTheDocument()
-    expect(screen.getByText('Walkthrough model')).toBeInTheDocument()
+    expect(screen.queryByText('Change walkthrough')).not.toBeInTheDocument()
+    expect(screen.queryByText('Walkthrough model')).not.toBeInTheDocument()
   })
 
   it('writes the theme and toggle preferences', async () => {

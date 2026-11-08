@@ -53,6 +53,10 @@ vi.mock('@/components/settings/LogsViewer', () => ({
   LogsViewer: () => <div data-testid="logs-settings">Logs Content</div>,
 }))
 
+vi.mock('@/components/settings/OutputsSettings', () => ({
+  OutputsSettings: () => <div data-testid="outputs-settings">Outputs Settings Content</div>,
+}))
+
 vi.mock('@/hooks/useMobile', () => ({
   useSwipeBack: vi.fn(() => ({
     bind: vi.fn(),
@@ -211,6 +215,41 @@ describe('SettingsDialog', () => {
     expect(screen.getByTestId('location-search')).toHaveTextContent('settingsTab=logs')
   })
 
+  it('navigates to the Outputs section and reflects settingsTab=outputs in the URL', () => {
+    function TestWrapper() {
+      const location = useLocation()
+      const navigate = useNavigate()
+
+      const searchParams = new URLSearchParams(location.search)
+      const isOpen = searchParams.get('settings') === 'open'
+
+      return (
+        <>
+          <button onClick={() => navigate('?settings=open')}>Open Settings</button>
+          {isOpen && <span data-testid="dialog-open">Dialog Open</span>}
+          {isOpen && <span data-testid="location-search">{location.search}</span>}
+          <SettingsDialog />
+        </>
+      )
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <TestWrapper />
+      </MemoryRouter>
+    )
+
+    fireEvent.click(screen.getByText('Open Settings'))
+
+    const outputsMenuButton = screen.getByText('Output model and saved output definitions').closest('button')
+    expect(outputsMenuButton).not.toBeNull()
+    fireEvent.click(outputsMenuButton!)
+
+    const mobileContainer = document.querySelector('.sm\\:hidden') as HTMLElement
+    expect(within(mobileContainer).getByTestId('outputs-settings')).toBeInTheDocument()
+    expect(screen.getByTestId('location-search')).toHaveTextContent('settingsTab=outputs')
+  })
+
   it('opens the deep-linked settingsTab on mobile and returns to the menu from it', () => {
     stubMatchMedia(false)
     function TestWrapper() {
@@ -319,6 +358,18 @@ describe('SettingsDialog', () => {
     expect(document.querySelector('.sm\\:hidden')).toBeNull()
   })
 
+  it('mounts the deep-linked Outputs tab content once on desktop', () => {
+    stubMatchMedia(true)
+    render(
+      <MemoryRouter initialEntries={['/?settings=open&settingsTab=outputs']}>
+        <SettingsDialog />
+      </MemoryRouter>
+    )
+
+    expect(screen.getAllByTestId('outputs-settings')).toHaveLength(1)
+    expect(document.querySelector('.sm\\:hidden')).toBeNull()
+  })
+
   it('falls back to the menu for an unknown settingsTab value', () => {
     function TestWrapper() {
       const location = useLocation()
@@ -402,8 +453,8 @@ describe('SettingsDialog', () => {
     expect(tablist).toHaveAttribute('aria-orientation', 'vertical')
 
     const triggers = screen.getAllByRole('tab')
-    expect(triggers).toHaveLength(10)
-    const expected = ['Account', 'General Settings', 'Notifications', 'Voice', 'Git', 'Keyboard Shortcuts', 'Servers', 'OpenCode Config', 'Logs', 'Providers']
+    expect(triggers).toHaveLength(11)
+    const expected = ['Account', 'General Settings', 'Outputs', 'Notifications', 'Voice', 'Git', 'Keyboard Shortcuts', 'Servers', 'OpenCode Config', 'Logs', 'Providers']
     expect(triggers.map((trigger) => trigger.textContent)).toEqual(expected)
 
     const logsTrigger = screen.getByRole('tab', { name: 'Logs' })
