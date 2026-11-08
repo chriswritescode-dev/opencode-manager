@@ -45,7 +45,7 @@ describe('useMobileTabBar', () => {
   })
 
   it('handles all valid MobileSheetKey values', () => {
-    const validKeys = ['sessions', 'files', 'notifications', 'more'] as const
+    const validKeys = ['sessions', 'files', 'notifications'] as const
     validKeys.forEach((key) => {
       const { result } = renderHook(() => useMobileTabBar(), {
         wrapper: createRouterWrapper([`/?mobileTab=${key}`]),
@@ -137,7 +137,7 @@ describe('useMobileTabBar', () => {
         <div>
           <span data-testid="openSheet">{openSheet ?? ''}</span>
           <span data-testid="pathname">{location.pathname}</span>
-          <button onClick={() => open('more')}>open</button>
+          <button onClick={() => open('notifications')}>open</button>
           <button onClick={close}>close</button>
           <button onClick={() => navigate(-1)}>back</button>
         </div>
@@ -164,12 +164,12 @@ describe('useMobileTabBar', () => {
 
     it('closing a deep-linked sheet replaces the entry instead of leaving the route', () => {
       render(
-        <MemoryRouter initialEntries={['/repos/2', '/?mobileTab=more']} initialIndex={1}>
+        <MemoryRouter initialEntries={['/repos/2', '/?mobileTab=notifications']} initialIndex={1}>
           <SheetHarness />
         </MemoryRouter>,
       )
 
-      expect(screen.getByTestId('openSheet').textContent).toBe('more')
+      expect(screen.getByTestId('openSheet').textContent).toBe('notifications')
 
       act(() => { screen.getByText('close').click() })
       expect(screen.getByTestId('openSheet').textContent).toBe('')

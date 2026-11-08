@@ -74,7 +74,7 @@ describe('MobileTabBar', () => {
     expect(screen.getByText('Git')).toBeInTheDocument()
     expect(screen.queryByText('Schedules')).not.toBeInTheDocument()
     const labels = screen.getAllByRole('button').map((button) => button.textContent)
-    expect(labels).toEqual(['Sessions', 'Files', 'Git', 'Assistant', 'More'])
+    expect(labels).toEqual(['Sessions', 'Files', 'Git', 'Assistant'])
   })
 
   it('opens the source control dialog when Git is clicked on repo detail path', async () => {
@@ -226,7 +226,7 @@ describe('MobileTabBar', () => {
       </QueryClientProvider>,
     )
     const labels = screen.getAllByRole('button').map((button) => button.textContent)
-    expect(labels).toEqual(['Sessions', 'Git', 'Assistant', 'More'])
+    expect(labels).toEqual(['Sessions', 'Git', 'Assistant'])
     expect(screen.queryByText('Files')).not.toBeInTheDocument()
     expect(screen.queryByText('Schedules')).not.toBeInTheDocument()
   })
@@ -320,7 +320,6 @@ describe('MobileTabBar', () => {
     expect(screen.getByText('Files')).toBeInTheDocument()
     expect(screen.getByText('Assistant')).toBeInTheDocument()
     expect(screen.getByText('Schedules')).toBeInTheDocument()
-    expect(screen.getByText('More')).toBeInTheDocument()
     expect(screen.queryByText('Git')).not.toBeInTheDocument()
   })
 
@@ -336,7 +335,7 @@ describe('MobileTabBar', () => {
       </QueryClientProvider>,
     )
     const labels = screen.getAllByRole('button').map((button) => button.textContent)
-    expect(labels).toEqual(['Sessions', 'Assistant', 'Schedules', 'More'])
+    expect(labels).toEqual(['Sessions', 'Assistant', 'Schedules'])
     expect(screen.queryByText('Files')).not.toBeInTheDocument()
   })
 
@@ -424,7 +423,7 @@ describe('MobileTabBar', () => {
     expect(container.firstChild).toBeNull()
   })
 
-  it('shows the unread schedule indicator on More when the Schedules tab is replaced by Git', () => {
+  it('shows no unread schedule indicator on Git when the Schedules tab is replaced by Git', () => {
     vi.mocked(useMobile).mockReturnValue(true)
     vi.mocked(useUnreadScheduleRuns).mockReturnValue({
       data: { total: 2, runs: [] },
@@ -440,11 +439,10 @@ describe('MobileTabBar', () => {
     )
 
     expect(screen.queryByText('Schedules')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'More' }).querySelector('[data-unread-badge]')).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Git' }).querySelector('[data-unread-badge]')).toBeNull()
   })
 
-  it('keeps the unread schedule indicator on Schedules and off More when that tab is shown', () => {
+  it('keeps the unread schedule indicator on Schedules when that tab is shown', () => {
     vi.mocked(useMobile).mockReturnValue(true)
     vi.mocked(useUnreadScheduleRuns).mockReturnValue({
       data: { total: 1, runs: [] },
@@ -460,7 +458,6 @@ describe('MobileTabBar', () => {
     )
 
     expect(screen.getByRole('button', { name: 'Schedules' }).querySelector('[data-unread-badge]')).not.toBeNull()
-    expect(screen.getByRole('button', { name: 'More' }).querySelector('[data-unread-badge]')).toBeNull()
   })
 
 })

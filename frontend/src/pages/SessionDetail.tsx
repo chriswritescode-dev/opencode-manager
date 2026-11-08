@@ -51,7 +51,6 @@ import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
 import { compactSession, findRemoteProjectForDirectory, forkSession, listSessionMessages, remoteProjectName } from "@/api/opencode";
 import { useOpenCodeServerId, isLocalOpenCodeServer } from "@/contexts/OpenCodeServerContext";
 import { useRemoteProjects } from "@/hooks/useRemoteProjects";
-import { useSwipeNavigation } from "@/contexts/SwipeNavigationContext";
 import { useOpenCodeServers, useOpenCodeServerStatuses } from "@/hooks/useOpenCodeServers";
 import { serverScopedKey } from "@/lib/serverScope";
 import { useSessionStatus } from "@/stores/sessionStatusStore";
@@ -132,7 +131,6 @@ export function SessionDetail() {
   const { id, sessionId } = useParams<{ id: string; sessionId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const swipeNav = useSwipeNavigation();
   const repoId = Number(id) || 0;
   const isAssistantSession = new URLSearchParams(location.search).get('assistant') === '1';
   const { preferences, updateSettings } = useSettings();
@@ -207,14 +205,6 @@ export function SessionDetail() {
   const remoteProjectBackPath = isRemoteServer && sessionDirectory
     ? getServerProjectPath(serverId, sessionDirectory)
     : '/';
-
-  useEffect(() => {
-    if (!isRemoteServer) return;
-    swipeNav?.setBackTarget(remoteProjectBackPath);
-    return () => {
-      swipeNav?.setBackTarget(null);
-    };
-  }, [isRemoteServer, remoteProjectBackPath, swipeNav]);
 
   const { data: repoSiblings } = useRepoSiblings(!isAssistantSession && !isRemoteServer && repo && !repo.isWorktree ? repoId : undefined);
 

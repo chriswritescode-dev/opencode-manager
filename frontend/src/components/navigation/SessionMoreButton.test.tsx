@@ -3,12 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SessionMoreButton } from './SessionMoreButton'
 
 const mocks = vi.hoisted(() => ({
-  open: vi.fn(),
+  openMenu: vi.fn(),
   useUnreadScheduleRuns: vi.fn(),
 }))
 
-vi.mock('@/hooks/useMobileTabBar', () => ({
-  useMobileTabBar: () => ({ open: mocks.open, openSheet: null, close: vi.fn() }),
+vi.mock('@/hooks/useSideMenu', () => ({
+  useSideMenu: () => ({ openMenu: mocks.openMenu, isOpen: false, page: 'home', project: null, setPage: vi.fn(), closeMenu: vi.fn() }),
 }))
 
 vi.mock('@/hooks/useSchedules', () => ({
@@ -20,7 +20,7 @@ describe('SessionMoreButton', () => {
     vi.clearAllMocks()
   })
 
-  it('shows the unread report count and opens the drawer', () => {
+  it('shows the unread report count and opens the side menu', () => {
     mocks.useUnreadScheduleRuns.mockReturnValue({ data: { runs: [], total: 4, failed: 0 } })
     render(<SessionMoreButton />)
 
@@ -29,7 +29,7 @@ describe('SessionMoreButton', () => {
 
     fireEvent.click(button)
 
-    expect(mocks.open).toHaveBeenCalledWith('more')
+    expect(mocks.openMenu).toHaveBeenCalledWith({ page: 'home' })
   })
 
   it('shows no count when there are no unread reports', () => {

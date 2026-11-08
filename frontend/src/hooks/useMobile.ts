@@ -45,7 +45,7 @@ export interface UseSwipeDismissOptions {
   suspendsRouteSwipe?: boolean
 }
 
-export interface UseRightEdgeSwipeOptions {
+export interface UseLeftEdgeSwipeOptions {
   threshold?: number
   edgeWidth?: number
   enabled?: boolean
@@ -400,12 +400,16 @@ export function useSwipeDismiss(
   return { bind: wrappedBind, swipeProgress, swipeStyles }
 }
 
-export function useRightEdgeSwipe(
+/**
+ * Detects a rightward swipe that starts within the left edge of the viewport and
+ * calls `onOpen` once the touch is released past the threshold.
+ */
+export function useLeftEdgeSwipe(
   onOpen: () => void,
-  options: UseRightEdgeSwipeOptions = {}
+  options: UseLeftEdgeSwipeOptions = {}
 ) {
   const {
-    threshold = 80,
+    threshold = 60,
     edgeWidth = 28,
     enabled = true,
   } = options
@@ -428,7 +432,7 @@ export function useRightEdgeSwipe(
       startY: touch.clientY,
       currentX: touch.clientX,
       isSwiping: false,
-      isEdgeSwipe: window.innerWidth - touch.clientX <= edgeWidth,
+      isEdgeSwipe: touch.clientX <= edgeWidth,
     }
   }, [edgeWidth, enabled, isMobile])
 
@@ -443,7 +447,7 @@ export function useRightEdgeSwipe(
     const deltaY = Math.abs(touch.clientY - state.startY)
 
     if (!state.isSwiping) {
-      if (deltaX < -10 && Math.abs(deltaX) > deltaY * 2) {
+      if (deltaX > 10 && deltaX > deltaY * 2) {
         state.isSwiping = true
       } else {
         return
@@ -458,7 +462,7 @@ export function useRightEdgeSwipe(
     if (!enabled || !isMobile) return
 
     const state = swipeRef.current
-    if (state.isSwiping && state.startX - state.currentX >= threshold) {
+    if (state.isSwiping && state.currentX - state.startX >= threshold) {
       onOpen()
     }
 
@@ -470,6 +474,114 @@ export function useRightEdgeSwipe(
       isEdgeSwipe: false,
     }
   }, [enabled, isMobile, onOpen, threshold])
+
+  const bind = useCallback((element: HTMLElement | null) => {
+    if (!element || !enabled || !isMobile) return undefined
+
+    element.addEventListener('touchstart', handleTouchStart, { passive: true })
+    element.addEventListener('touchmove', handleTouchMove, { passive: false })
+    element.addEventListener('touchend', handleTouchEnd, { passive: true })
+    element.addEventListener('touchcancel', handleTouchEnd, { passive: true })
+
+    return () => {
+      element.removeEventListener('touchstart', handleTouchStart)
+      element.removeEventListener('touchmove', handleTouchMove)
+      element.removeEventListener('touchend', handleTouchEnd)
+      element.removeEventListener('touchcancel', handleTouchEnd)
+    }
+  }, [enabled, handleTouchEnd, handleTouchMove, handleTouchStart, isMobile])
+
+  return { bind }
+}
+
+/**
+ * Detects a leftward swipe on a panel and calls `onClose` once the touch is
+ * released past 60 pixels, leaving gestures that begin on a `[data-row-swipe]`
+ * element or that move mostly vertically to the underlying content.
+ */
+export function usePanelSwipeClose(
+  onClose: () => void,
+  options: { enabled?: boolean } = {}
+) {
+  const { enabled = true } = options
+
+  const isMobile = useMobile()
+  const swipeRef = useRef({
+    startX: 0,
+    startY: 0,
+    currentX: 0,
+    isSwiping: false,
+    isVertical: false,
+    ignore: false,
+  })
+
+  const resetGesture = useCallback(() => {
+    swipeRef.current = {
+      startX: 0,
+      startY: 0,
+      currentX: 0,
+      isSwiping: false,
+      isVertical: false,
+      ignore: false,
+    }
+  }, [])
+
+  const handleTouchStart = useCallback((event: TouchEvent) => {
+    resetGesture()
+    if (!enabled || !isMobile) return
+
+    const touch = event.touches[0]
+    const target = event.target as Element
+    swipeRef.current = {
+      startX: touch.clientX,
+      startY: touch.clientY,
+      currentX: touch.clientX,
+      isSwiping: false,
+      isVertical: false,
+      ignore: !!target.closest('[data-row-swipe]'),
+    }
+  }, [enabled, isMobile, resetGesture])
+
+  const handleTouchMove = useCallback((event: TouchEvent) => {
+    if (!enabled || !isMobile) return
+
+    const state = swipeRef.current
+    if (state.ignore || state.isVertical) return
+
+    const touch = event.touches[0]
+    const deltaX = touch.clientX - state.startX
+    const deltaY = touch.clientY - state.startY
+
+    if (!state.isSwiping) {
+      if (Math.abs(deltaY) > 10 && Math.abs(deltaY) > Math.abs(deltaX)) {
+        state.isVertical = true
+        return
+      }
+
+      if (deltaX < -10 && Math.abs(deltaX) > Math.abs(deltaY) * 2) {
+        state.isSwiping = true
+      } else {
+        return
+      }
+    }
+
+    event.preventDefault()
+    state.currentX = touch.clientX
+  }, [enabled, isMobile])
+
+  const handleTouchEnd = useCallback(() => {
+    if (!enabled || !isMobile) {
+      resetGesture()
+      return
+    }
+
+    const state = swipeRef.current
+    if (!state.ignore && state.isSwiping && state.startX - state.currentX >= 60) {
+      onClose()
+    }
+
+    resetGesture()
+  }, [enabled, isMobile, onClose, resetGesture])
 
   const bind = useCallback((element: HTMLElement | null) => {
     if (!element || !enabled || !isMobile) return undefined

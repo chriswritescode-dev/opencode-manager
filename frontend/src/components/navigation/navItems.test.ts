@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { buildMoreItems, buildNavModel, buildToolItems } from './moreDrawerItems'
+import { buildNavModel, buildToolItems } from './navItems'
 
-describe('buildMoreItems', () => {
+describe('buildNavModel items', () => {
   it('returns Home + All Schedules + Files + Settings + Logout for root path', () => {
-    const items = buildMoreItems('/')
+    const items = buildNavModel('/').items
     expect(items).toHaveLength(5)
     expect(items[0].key).toBe('home')
     expect(items[1].key).toBe('all-schedules')
@@ -13,7 +13,7 @@ describe('buildMoreItems', () => {
   })
 
   it('returns repo-specific items for /repos/:id', () => {
-    const items = buildMoreItems('/repos/42')
+    const items = buildNavModel('/repos/42').items
     expect(items).toHaveLength(13)
     expect(items[0].key).toBe('home')
     expect(items[1].key).toBe('files')
@@ -42,7 +42,7 @@ describe('buildMoreItems', () => {
   })
 
   it('returns session-specific items for /repos/:id/sessions/:sid', () => {
-    const items = buildMoreItems('/repos/42/sessions/abc')
+    const items = buildNavModel('/repos/42/sessions/abc').items
     expect(items).toHaveLength(13)
     expect(items[0].key).toBe('home')
     expect(items[1].key).toBe('files')
@@ -65,7 +65,7 @@ describe('buildMoreItems', () => {
   })
 
   it('returns only the server tools a linked server can serve for /servers/:id/sessions/:sid', () => {
-    const items = buildMoreItems('/servers/srv_kitchen/sessions/abc')
+    const items = buildNavModel('/servers/srv_kitchen/sessions/abc').items
     expect(items.map((item) => item.key)).toEqual([
       'home',
       'mcp',
@@ -78,7 +78,7 @@ describe('buildMoreItems', () => {
   })
 
   it('returns only the server tools a linked server can serve for /servers/:id/projects', () => {
-    const items = buildMoreItems('/servers/srv_kitchen/projects')
+    const items = buildNavModel('/servers/srv_kitchen/projects').items
     expect(items.map((item) => item.key)).toEqual([
       'home',
       'mcp',
@@ -92,7 +92,7 @@ describe('buildMoreItems', () => {
   })
 
   it('omits the Actions item for an Assistant session', () => {
-    const items = buildMoreItems('/repos/0/sessions/abc')
+    const items = buildNavModel('/repos/0/sessions/abc').items
     expect(items).toHaveLength(12)
     expect(items.map((item) => item.key)).not.toContain('actions')
     expect(items[7].key).toBe('terminal')
@@ -104,7 +104,7 @@ describe('buildMoreItems', () => {
   })
 
   it('returns assistant workspace items for /repos/:id/assistant', () => {
-    const items = buildMoreItems('/repos/42/assistant')
+    const items = buildNavModel('/repos/42/assistant').items
     expect(items).toHaveLength(11)
     expect(items[0].key).toBe('home')
     expect(items[1].key).toBe('files')
@@ -123,7 +123,7 @@ describe('buildMoreItems', () => {
   })
 
   it('returns only Home + Settings + Logout for /schedules', () => {
-    const items = buildMoreItems('/schedules')
+    const items = buildNavModel('/schedules').items
     expect(items).toHaveLength(3)
     expect(items[0].key).toBe('home')
     expect(items[1].key).toBe('settings')
@@ -131,7 +131,7 @@ describe('buildMoreItems', () => {
   })
 
   it('returns only Home + Settings + Logout for /repos/:id/schedules', () => {
-    const items = buildMoreItems('/repos/42/schedules')
+    const items = buildNavModel('/repos/42/schedules').items
     expect(items).toHaveLength(3)
     expect(items[0].key).toBe('home')
     expect(items[1].key).toBe('settings')
@@ -139,7 +139,7 @@ describe('buildMoreItems', () => {
   })
 
   it('returns only Home + Settings + Logout for unknown paths', () => {
-    const items = buildMoreItems('/unknown/path')
+    const items = buildNavModel('/unknown/path').items
     expect(items).toHaveLength(3)
     expect(items[0].key).toBe('home')
     expect(items[1].key).toBe('settings')
@@ -159,7 +159,7 @@ describe('buildMoreItems', () => {
     ]
 
     for (const path of paths) {
-      const [first] = buildMoreItems(path)
+      const [first] = buildNavModel(path).items
       expect(first.key).toBe('home')
       expect(first.label).toBe('Home')
       expect(first.to).toBe('/')
@@ -248,11 +248,5 @@ describe('buildNavModel', () => {
     expect(model.primary[0].key).toBe('assistant')
     expect(model.primary[0].to).toBe('/assistant')
     expect(model.primary[0].variant).toBe('secondary')
-  })
-
-  it('preserves backwards compatibility with buildMoreItems', () => {
-    const model = buildNavModel('/repos/42')
-    const items = buildMoreItems('/repos/42')
-    expect(model.items).toEqual(items)
   })
 })

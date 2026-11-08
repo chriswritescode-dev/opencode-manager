@@ -16,10 +16,6 @@ vi.mock('@/components/navigation/NotificationsSheet', () => ({
   NotificationsSheet: ({ isOpen }: { isOpen: boolean }) =>
     isOpen ? <div data-testid="notifications-sheet">NotificationsSheet</div> : null,
 }))
-vi.mock('@/components/navigation/MoreDrawer', () => ({
-  MoreDrawer: ({ isOpen }: { isOpen: boolean }) =>
-    isOpen ? <div data-testid="more-drawer">MoreDrawer</div> : null,
-}))
 
 import { render, screen } from '@testing-library/react'
 import { describe, it, expect, beforeEach } from 'vitest'
@@ -130,20 +126,6 @@ describe('MobileSheetHost', () => {
       </MemoryRouter>,
     )
     expect(screen.getByTestId('notifications-sheet')).toBeInTheDocument()
-  })
-
-  it('renders MoreDrawer when mobileTab=more', () => {
-    vi.mocked(useMobileTabBar).mockReturnValue({
-      openSheet: 'more',
-      open: vi.fn(),
-      close: vi.fn(),
-    })
-    render(
-      <MemoryRouter initialEntries={['/?mobileTab=more']}>
-        <MobileSheetHost />
-      </MemoryRouter>,
-    )
-    expect(screen.getByTestId('more-drawer')).toBeInTheDocument()
   })
 
   it('closes sheet when onClose is called', () => {

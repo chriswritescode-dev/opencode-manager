@@ -23,7 +23,7 @@ import { RepoSecretsContent } from '@/components/secrets/RepoSecretsDialog'
 import { RepoSchedulesContent } from '@/components/schedules/RepoSchedulesContent'
 import type { SkillFileInfo } from '@opencode-manager/shared'
 import type { ModelRef } from '@opencode-manager/shared/opencode'
-import { buildToolItems, toolKeyOf, type MoreDrawerItem } from '@/components/navigation/moreDrawerItems'
+import { buildToolItems, toolKeyOf, type NavItem } from '@/components/navigation/navItems'
 import { isPanelTool, type ToolPanelState, type PanelTool } from '@/hooks/useToolPanel'
 import { useOpenNavItem } from '@/hooks/useOpenNavItem'
 import { ActivityCountPill } from '@/components/activity/ActivityCountPill'
@@ -227,7 +227,7 @@ interface ToolSidePanelProps {
 }
 
 interface RailButtonProps {
-  item: MoreDrawerItem
+  item: NavItem
   active: boolean
   onClick: () => void
   /**
@@ -329,8 +329,8 @@ export function ToolSidePanel({
     }
   }, [activeTool])
 
-  const panelTools: Array<{ item: MoreDrawerItem; tool: PanelTool }> = []
-  const actionItems: MoreDrawerItem[] = []
+  const panelTools: Array<{ item: NavItem; tool: PanelTool }> = []
+  const actionItems: NavItem[] = []
   const terminalWorkspaceTarget: TerminalTarget | undefined =
     terminalTarget ?? (repoId === undefined ? undefined : { kind: 'repo', repoId })
   for (const item of buildToolItems(location.pathname)) {

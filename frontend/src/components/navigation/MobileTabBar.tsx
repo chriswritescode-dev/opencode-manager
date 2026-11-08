@@ -1,6 +1,6 @@
 import { memo, useMemo } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { List, FolderOpen, CalendarClock, Menu, Info, History, Bot, GitCommitHorizontal } from 'lucide-react'
+import { List, FolderOpen, CalendarClock, Info, History, Bot, GitCommitHorizontal } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMobile } from '@/hooks/useMobile'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
@@ -153,14 +153,6 @@ function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideR
           badge: unreadScheduleCount > 0,
         }]
       : []),
-    {
-      key: 'more',
-      label: 'More',
-      icon: Menu,
-      onClick: () => open('more'),
-      active: openSheet === 'more',
-      badge: !showsSchedules && unreadScheduleCount > 0,
-    },
   ]
 }
 

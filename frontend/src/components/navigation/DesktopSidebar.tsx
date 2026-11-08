@@ -10,7 +10,7 @@ import { useSessionPickerRouteScope } from '@/hooks/useSessionPickerRouteScope'
 import { useSessionPickerNavigation } from '@/hooks/useSessionPickerNavigation'
 import { useToolPanelToggle } from '@/hooks/useToolPanel'
 import { useUIState } from '@/stores/uiStateStore'
-import { buildNavModel, type MoreDrawerItem, type NavPrimaryCta } from '@/components/navigation/moreDrawerItems'
+import { buildNavModel, type NavItem, type NavPrimaryCta } from '@/components/navigation/navItems'
 import { SessionPickerDialog } from '@/components/session/SessionPickerDialog'
 import { DesktopSessionTree } from '@/components/navigation/DesktopSessionTree'
 import { LinkedServersNav } from '@/components/navigation/LinkedServersNav'
@@ -65,7 +65,7 @@ export function DesktopSidebar() {
 
   const { primary, items } = buildNavModel(location.pathname)
 
-  const handleItemClick = (item: MoreDrawerItem) => {
+  const handleItemClick = (item: NavItem) => {
     if (openNavItem(item)) return
     if (item.key === 'logout') {
       logout()
@@ -82,7 +82,7 @@ export function DesktopSidebar() {
   }
 
   const footerItems = items.filter((item) => FOOTER_ITEM_KEYS.has(item.key))
-  const collapsedItems: MoreDrawerItem[] = [
+  const collapsedItems: NavItem[] = [
     footerItems[0],
     { key: 'sessions', label: 'Sessions', icon: List },
     ...footerItems.slice(1),
@@ -116,7 +116,7 @@ export function DesktopSidebar() {
         {collapsed ? (
           <>
             <div className="flex flex-col gap-1 p-2 pt-0">
-              {collapsedItems.map((item: MoreDrawerItem) => (
+              {collapsedItems.map((item: NavItem) => (
                 <SidebarItem
                   key={item.key}
                   icon={item.icon}
@@ -143,7 +143,7 @@ export function DesktopSidebar() {
             </section>
 
             <div className="flex gap-1 border-t border-border p-2">
-              {footerItems.map((item: MoreDrawerItem) => (
+              {footerItems.map((item: NavItem) => (
                 <SidebarItem
                   key={item.key}
                   icon={item.icon}

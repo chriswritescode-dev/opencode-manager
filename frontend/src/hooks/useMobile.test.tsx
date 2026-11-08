@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
-import { useRightEdgeSwipe, useSwipeBack, useSwipeDismiss } from './useMobile'
+import { useLeftEdgeSwipe, usePanelSwipeClose, useSwipeBack, useSwipeDismiss } from './useMobile'
 import { SwipeNavigationProvider, useSwipeNavigation } from '@/contexts/SwipeNavigationContext'
 
 describe('useSwipeBack', () => {
@@ -216,7 +216,7 @@ describe('useSwipeBack', () => {
   })
 })
 
-describe('useRightEdgeSwipe', () => {
+describe('useLeftEdgeSwipe', () => {
   const mockOnOpen = vi.fn()
 
   beforeEach(() => {
@@ -228,12 +228,12 @@ describe('useRightEdgeSwipe', () => {
     })
   })
 
-  it('opens when swiping left from the right edge', () => {
+  it('opens when swiping right from the left edge', () => {
     const element = document.createElement('div')
     document.body.appendChild(element)
 
     const { result } = renderHook(() =>
-      useRightEdgeSwipe(mockOnOpen, {
+      useLeftEdgeSwipe(mockOnOpen, {
         enabled: true,
         edgeWidth: 32,
         threshold: 72,
@@ -243,13 +243,13 @@ describe('useRightEdgeSwipe', () => {
     const cleanup = result.current.bind(element)
 
     element.dispatchEvent(new TouchEvent('touchstart', {
-      touches: [{ clientX: 365, clientY: 100 }] as any,
+      touches: [{ clientX: 10, clientY: 100 }] as any,
     }))
     element.dispatchEvent(new TouchEvent('touchmove', {
-      touches: [{ clientX: 285, clientY: 100 }] as any,
+      touches: [{ clientX: 90, clientY: 100 }] as any,
     }))
     element.dispatchEvent(new TouchEvent('touchend', {
-      changedTouches: [{ clientX: 285, clientY: 100 }] as any,
+      changedTouches: [{ clientX: 90, clientY: 100 }] as any,
     }))
 
     expect(mockOnOpen).toHaveBeenCalled()
@@ -258,12 +258,12 @@ describe('useRightEdgeSwipe', () => {
     document.body.removeChild(element)
   })
 
-  it('ignores swipes that do not start on the right edge', () => {
+  it('ignores swipes that do not start on the left edge', () => {
     const element = document.createElement('div')
     document.body.appendChild(element)
 
     const { result } = renderHook(() =>
-      useRightEdgeSwipe(mockOnOpen, {
+      useLeftEdgeSwipe(mockOnOpen, {
         enabled: true,
         edgeWidth: 32,
         threshold: 72,
@@ -273,16 +273,189 @@ describe('useRightEdgeSwipe', () => {
     const cleanup = result.current.bind(element)
 
     element.dispatchEvent(new TouchEvent('touchstart', {
-      touches: [{ clientX: 300, clientY: 100 }] as any,
+      touches: [{ clientX: 120, clientY: 100 }] as any,
     }))
     element.dispatchEvent(new TouchEvent('touchmove', {
-      touches: [{ clientX: 220, clientY: 100 }] as any,
+      touches: [{ clientX: 250, clientY: 100 }] as any,
     }))
     element.dispatchEvent(new TouchEvent('touchend', {
-      changedTouches: [{ clientX: 220, clientY: 100 }] as any,
+      changedTouches: [{ clientX: 250, clientY: 100 }] as any,
     }))
 
     expect(mockOnOpen).not.toHaveBeenCalled()
+
+    cleanup?.()
+    document.body.removeChild(element)
+  })
+
+  it('ignores leftward swipes from the left edge', () => {
+    const element = document.createElement('div')
+    document.body.appendChild(element)
+
+    const { result } = renderHook(() =>
+      useLeftEdgeSwipe(mockOnOpen, {
+        enabled: true,
+        edgeWidth: 32,
+        threshold: 72,
+      })
+    )
+
+    const cleanup = result.current.bind(element)
+
+    element.dispatchEvent(new TouchEvent('touchstart', {
+      touches: [{ clientX: 20, clientY: 100 }] as any,
+    }))
+    element.dispatchEvent(new TouchEvent('touchmove', {
+      touches: [{ clientX: 0, clientY: 100 }] as any,
+    }))
+    element.dispatchEvent(new TouchEvent('touchend', {
+      changedTouches: [{ clientX: 0, clientY: 100 }] as any,
+    }))
+
+    expect(mockOnOpen).not.toHaveBeenCalled()
+
+    cleanup?.()
+    document.body.removeChild(element)
+  })
+})
+
+describe('usePanelSwipeClose', () => {
+  const mockOnClose = vi.fn()
+
+  beforeEach(() => {
+    mockOnClose.mockClear()
+    Object.defineProperty(window, 'innerWidth', {
+      writable: true,
+      configurable: true,
+      value: 375,
+    })
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('closes on a leftward swipe past the threshold', () => {
+    const element = document.createElement('div')
+    document.body.appendChild(element)
+
+    const { result } = renderHook(() => usePanelSwipeClose(mockOnClose, { enabled: true }))
+
+    const cleanup = result.current.bind(element)
+
+    element.dispatchEvent(new TouchEvent('touchstart', {
+      touches: [{ clientX: 300, clientY: 100 }] as any,
+    }))
+    element.dispatchEvent(new TouchEvent('touchmove', {
+      touches: [{ clientX: 200, clientY: 100 }] as any,
+    }))
+    element.dispatchEvent(new TouchEvent('touchend', {
+      changedTouches: [{ clientX: 200, clientY: 100 }] as any,
+    }))
+
+    expect(mockOnClose).toHaveBeenCalled()
+
+    cleanup?.()
+    document.body.removeChild(element)
+  })
+
+  it('does not close on a short leftward swipe', () => {
+    const element = document.createElement('div')
+    document.body.appendChild(element)
+
+    const { result } = renderHook(() => usePanelSwipeClose(mockOnClose, { enabled: true }))
+
+    const cleanup = result.current.bind(element)
+
+    element.dispatchEvent(new TouchEvent('touchstart', {
+      touches: [{ clientX: 300, clientY: 100 }] as any,
+    }))
+    element.dispatchEvent(new TouchEvent('touchmove', {
+      touches: [{ clientX: 260, clientY: 100 }] as any,
+    }))
+    element.dispatchEvent(new TouchEvent('touchend', {
+      changedTouches: [{ clientX: 260, clientY: 100 }] as any,
+    }))
+
+    expect(mockOnClose).not.toHaveBeenCalled()
+
+    cleanup?.()
+    document.body.removeChild(element)
+  })
+
+  it('does not close on a rightward swipe', () => {
+    const element = document.createElement('div')
+    document.body.appendChild(element)
+
+    const { result } = renderHook(() => usePanelSwipeClose(mockOnClose, { enabled: true }))
+
+    const cleanup = result.current.bind(element)
+
+    element.dispatchEvent(new TouchEvent('touchstart', {
+      touches: [{ clientX: 100, clientY: 100 }] as any,
+    }))
+    element.dispatchEvent(new TouchEvent('touchmove', {
+      touches: [{ clientX: 260, clientY: 100 }] as any,
+    }))
+    element.dispatchEvent(new TouchEvent('touchend', {
+      changedTouches: [{ clientX: 260, clientY: 100 }] as any,
+    }))
+
+    expect(mockOnClose).not.toHaveBeenCalled()
+
+    cleanup?.()
+    document.body.removeChild(element)
+  })
+
+  it('ignores gestures that start inside a data-row-swipe element', () => {
+    const element = document.createElement('div')
+    const row = document.createElement('div')
+    row.setAttribute('data-row-swipe', '')
+    element.appendChild(row)
+    document.body.appendChild(element)
+
+    const { result } = renderHook(() => usePanelSwipeClose(mockOnClose, { enabled: true }))
+
+    const cleanup = result.current.bind(element)
+
+    row.dispatchEvent(new TouchEvent('touchstart', {
+      touches: [{ clientX: 300, clientY: 100 }] as any,
+    }))
+    row.dispatchEvent(new TouchEvent('touchmove', {
+      touches: [{ clientX: 200, clientY: 100 }] as any,
+    }))
+    row.dispatchEvent(new TouchEvent('touchend', {
+      changedTouches: [{ clientX: 200, clientY: 100 }] as any,
+    }))
+
+    expect(mockOnClose).not.toHaveBeenCalled()
+
+    cleanup?.()
+    document.body.removeChild(element)
+  })
+
+  it('ignores the gesture when the first movement is mostly vertical', () => {
+    const element = document.createElement('div')
+    document.body.appendChild(element)
+
+    const { result } = renderHook(() => usePanelSwipeClose(mockOnClose, { enabled: true }))
+
+    const cleanup = result.current.bind(element)
+
+    element.dispatchEvent(new TouchEvent('touchstart', {
+      touches: [{ clientX: 300, clientY: 100 }] as any,
+    }))
+    element.dispatchEvent(new TouchEvent('touchmove', {
+      touches: [{ clientX: 290, clientY: 140 }] as any,
+    }))
+    element.dispatchEvent(new TouchEvent('touchmove', {
+      touches: [{ clientX: 200, clientY: 140 }] as any,
+    }))
+    element.dispatchEvent(new TouchEvent('touchend', {
+      changedTouches: [{ clientX: 200, clientY: 140 }] as any,
+    }))
+
+    expect(mockOnClose).not.toHaveBeenCalled()
 
     cleanup?.()
     document.body.removeChild(element)

@@ -20,8 +20,9 @@ vi.mock('@/hooks/usePushSubscriptionSessionSync', () => ({
 }))
 
 vi.mock('@/hooks/useMobile', () => ({
-  useSwipeBack: () => ({ bind: () => () => {} }),
-  useRightEdgeSwipe: () => ({ bind: () => () => {} }),
+  useMobile: () => true,
+  usePanelSwipeClose: () => ({ bind: () => () => {} }),
+  useLeftEdgeSwipe: () => ({ bind: () => () => {} }),
 }))
 
 vi.mock('@/hooks/useMobileTabBar', () => ({

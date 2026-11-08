@@ -1,7 +1,7 @@
 
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
-import { createBrowserRouter, RouterProvider, Outlet, useNavigate, useLocation, useParams, Navigate } from 'react-router-dom'
-import { useEffect, useRef, useCallback, type ReactNode } from 'react'
+import { createBrowserRouter, RouterProvider, Outlet, useNavigate, useParams, Navigate } from 'react-router-dom'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { DEVICE_PAIRING_PATH, LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { Toaster } from 'sonner'
 import { Repos } from './pages/Repos'
@@ -21,11 +21,12 @@ import { VersionNotifier } from './components/VersionNotifier'
 import { PwaUpdatePrompt } from '@/components/PwaUpdatePrompt'
 import { MobileTabBar } from '@/components/navigation/MobileTabBar'
 import { MobileSheetHost } from '@/components/navigation/MobileSheetHost'
+import { SideMenu, useSideMenuOffset } from '@/components/navigation/SideMenu'
 import { RouteErrorBoundary } from '@/components/ui/route-error-boundary'
 import { NotFoundState } from '@/components/ui/not-found-state'
 import { DesktopSidebar } from '@/components/navigation/DesktopSidebar'
-import { useRightEdgeSwipe, useSwipeBack } from './hooks/useMobile'
-import { useMobileTabBar } from '@/hooks/useMobileTabBar'
+import { useLeftEdgeSwipe, useMobile } from './hooks/useMobile'
+import { useSideMenu } from '@/hooks/useSideMenu'
 import { TTSProvider } from './contexts/TTSContext'
 import { ThemeProvider, useThemeMode } from './contexts/ThemeContext'
 import { AuthProvider } from './contexts/AuthContext'
@@ -38,7 +39,7 @@ import { SwipeNavigationProvider, useSwipeNavigation } from '@/contexts/SwipeNav
 import { PermissionRequestDialog } from './components/session/PermissionRequestDialog'
 import { SSHHostKeyDialog } from './components/ssh/SSHHostKeyDialog'
 import { loginLoader, setupLoader, registerLoader, protectedLoader } from './lib/auth-loaders'
-import { getSwipeBackTarget, isSessionDetailRoute } from '@/lib/navigation'
+import { MODAL_TRANSITION_MS } from '@/lib/utils'
 import { onNotificationClick } from '@/lib/serviceWorker'
 import { applyPersistedQueryDefaults } from '@/lib/queryPersistence'
 import { useAuth } from '@/hooks/useAuth'
@@ -207,63 +208,23 @@ function RootLayout() {
 
 export function AppShell() {
   const navigate = useNavigate()
-  const location = useLocation()
   const rootRef = useRef<HTMLDivElement>(null)
-  const { openSheet, open } = useMobileTabBar()
-
+  const isMobile = useMobile()
+  const { isOpen, openMenu } = useSideMenu()
+  const menuOffset = useSideMenuOffset(isMobile)
   const swipeNav = useSwipeNavigation()
 
-  const getRouteSwipeBackTarget = useCallback(
-    () => swipeNav?.backTarget() ?? getSwipeBackTarget(location.pathname, location.search),
-    [swipeNav, location.pathname, location.search]
-  )
-
-  const canSwipeBack = useCallback(
-    () => !swipeNav?.isSuspended() && getRouteSwipeBackTarget() !== null,
-    [swipeNav, getRouteSwipeBackTarget]
-  )
-
-  const handleSwipeBack = useCallback(() => {
-    const target = getRouteSwipeBackTarget()
-    if (target) navigate(target)
-  }, [getRouteSwipeBackTarget, navigate])
-
-  const { bind: bindRouteSwipe } = useSwipeBack(
-    () => {},
-    {
-      enabled: true,
-      suspendsRouteSwipe: false,
-      canBack: canSwipeBack,
-      onBack: handleSwipeBack,
-    }
-  )
-
-  const canOpenMoreWithSwipe = () => {
-    return isSessionDetailRoute(location.pathname) && !openSheet
-  }
-
-  const { bind: bindMoreSwipe } = useRightEdgeSwipe(
-    () => open('more'),
-    {
-      enabled: canOpenMoreWithSwipe(),
-      edgeWidth: 32,
-      threshold: 60,
-    }
+  const { bind: bindLeftEdgeSwipe } = useLeftEdgeSwipe(
+    () => openMenu({ page: 'home' }),
+    { enabled: isMobile && !isOpen && !(swipeNav?.isSuspended() ?? false) }
   )
 
   useEffect(() => {
-    const cleanup = bindRouteSwipe(rootRef.current)
+    const cleanup = bindLeftEdgeSwipe(rootRef.current)
     return () => {
       cleanup?.()
     }
-  }, [bindRouteSwipe])
-
-  useEffect(() => {
-    const cleanup = bindMoreSwipe(rootRef.current)
-    return () => {
-      cleanup?.()
-    }
-  }, [bindMoreSwipe])
+  }, [bindLeftEdgeSwipe])
 
   useEffect(
     () =>
@@ -281,9 +242,16 @@ export function AppShell() {
           <SidebarServerRouteSync />
           <PushSubscriptionSessionSync />
           <ConnectivityMonitor />
-          <div className="flex h-dvh w-full min-w-0 flex-col">
+          <div className="flex h-dvh w-full min-w-0 flex-col overflow-hidden">
             <PwaUpdatePrompt />
-            <div ref={rootRef} className="flex flex-1 min-h-0 w-full min-w-0">
+            <div
+              ref={rootRef}
+              className="flex flex-1 min-h-0 w-full min-w-0"
+              style={{
+                transform: `translateX(${menuOffset})`,
+                transition: `transform ${MODAL_TRANSITION_MS}ms ease-out`,
+              }}
+            >
               <DesktopSidebar />
               <main className="flex-1 min-w-0 min-h-0 flex flex-col">
                 <Outlet />
@@ -292,6 +260,7 @@ export function AppShell() {
           </div>
           <MobileTabBar />
           <MobileSheetHost />
+          <SideMenu />
           <PermissionDialogWrapper />
           <SSHHostKeyDialogWrapper />
           <SettingsDialog />

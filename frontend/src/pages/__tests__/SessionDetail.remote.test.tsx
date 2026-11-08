@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { FetchError } from '@/api/fetchWrapper'
 import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
-import { SwipeNavigationProvider, useSwipeNavigation } from '@/contexts/SwipeNavigationContext'
+import { SwipeNavigationProvider } from '@/contexts/SwipeNavigationContext'
 import { getServerProjectPath } from '@/lib/navigation'
 import { LocationCatcher } from '@/test/test-utils'
 import { MessageThread } from '@/components/message/MessageThread'
@@ -182,24 +182,15 @@ function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } })
 }
 
-type SwipeNavigation = ReturnType<typeof useSwipeNavigation>
-
-function SwipeNavigationProbe({ captured }: { captured: { current: SwipeNavigation } }) {
-  captured.current = useSwipeNavigation()
-  return null
-}
-
 function renderRemoteSession(sessionId = 'ses_remote') {
   const capturedPathname = { current: '' }
   const capturedSearch = { current: '' }
-  const capturedSwipeNavigation = { current: null as SwipeNavigation }
   const rendered = render(
     <OpenCodeServerProvider serverId="srv_kitchen">
       <SwipeNavigationProvider>
         <QueryClientProvider client={createQueryClient()}>
           <MemoryRouter initialEntries={[`/servers/srv_kitchen/sessions/${sessionId}`]}>
             <LocationCatcher capturedSearch={capturedSearch} capturedPathname={capturedPathname} />
-            <SwipeNavigationProbe captured={capturedSwipeNavigation} />
             <Routes>
               <Route path="/" element={null} />
               <Route path="/servers/:serverId/projects" element={null} />
@@ -211,7 +202,7 @@ function renderRemoteSession(sessionId = 'ses_remote') {
     </OpenCodeServerProvider>,
   )
 
-  return { ...rendered, capturedPathname, capturedSearch, capturedSwipeNavigation }
+  return { ...rendered, capturedPathname, capturedSearch }
 }
 
 describe('SessionDetail remote server mode', () => {
@@ -297,20 +288,6 @@ describe('SessionDetail remote server mode', () => {
     const backUrl = new URL(getServerProjectPath('srv_kitchen', '/home/me/app'), 'https://example.com')
     expect(capturedPathname.current).toBe(backUrl.pathname)
     expect(capturedSearch.current).toBe(backUrl.search)
-  })
-
-  it('registers the remote project page as the swipe-back target once the directory resolves', async () => {
-    const { capturedSwipeNavigation, unmount } = renderRemoteSession()
-
-    await waitFor(() => {
-      expect(capturedSwipeNavigation.current?.backTarget()).toBe(
-        getServerProjectPath('srv_kitchen', '/home/me/app'),
-      )
-    })
-
-    unmount()
-
-    expect(capturedSwipeNavigation.current?.backTarget()).toBeNull()
   })
 
   it('falls back to the projects list when the session is not found', async () => {
