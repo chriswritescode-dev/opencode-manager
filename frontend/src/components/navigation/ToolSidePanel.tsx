@@ -16,7 +16,6 @@ import { RepoSkillsContent } from '@/components/repo/RepoSkillsDialog'
 import { RepoSecretsContent } from '@/components/secrets/RepoSecretsDialog'
 import { RepoSchedulesContent } from '@/components/schedules/RepoSchedulesContent'
 import type { SkillFileInfo } from '@opencode-manager/shared'
-import { DEFAULT_OUTPUT_DEFINITION_ID } from '@opencode-manager/shared/schemas'
 import type { ModelRef } from '@opencode-manager/shared/opencode'
 import { buildToolItems, toolKeyOf, type MoreDrawerItem } from '@/components/navigation/moreDrawerItems'
 import { isPanelTool, type ToolPanelState, type PanelTool } from '@/hooks/useToolPanel'
@@ -32,7 +31,7 @@ import { restoreOverlayFocus } from '@/lib/overlayFocus'
 import { useRestoreFocusOnClose } from '@/hooks/useRestoreFocusOnClose'
 import { cn } from '@/lib/utils'
 import { useToolPanelLayout, useToolPanelWidth } from '@/hooks/useToolPanelLayout'
-import { useUrlParams } from '@/hooks/useUrlParams'
+import { useOutputDefinitionParam } from '@/hooks/useOutputDefinitionParam'
 import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 
 interface PanelResizeState {
@@ -292,8 +291,7 @@ export function ToolSidePanel({
   deleteActiveSessionPath,
 }: ToolSidePanelProps) {
   const { activeTool, toggleTool, closePanel } = panel
-  const { searchParams, updateParams } = useUrlParams()
-  const outputDefinitionId = searchParams.get('output') ?? DEFAULT_OUTPUT_DEFINITION_ID
+  const [outputDefinitionId, setOutputDefinitionId] = useOutputDefinitionParam()
   const location = useLocation()
   const openNavItem = useOpenNavItem()
   const routeServerId = useRouteOpenCodeServerId()
@@ -331,13 +329,6 @@ export function ToolSidePanel({
     }
   }, [activeTool])
 
-  const handleOutputDefinitionChange = useCallback(
-    (definitionId: string) => {
-      updateParams((params) => params.set('output', definitionId), 'replace')
-    },
-    [updateParams],
-  )
-
   const panelTools: Array<{ item: MoreDrawerItem; tool: PanelTool }> = []
   const actionItems: MoreDrawerItem[] = []
   const terminalWorkspaceTarget: TerminalTarget | undefined =
@@ -371,7 +362,7 @@ export function ToolSidePanel({
       <OutputsPanel
         sessionId={sessionId}
         definitionId={outputDefinitionId}
-        onDefinitionChange={handleOutputDefinitionChange}
+        onDefinitionChange={setOutputDefinitionId}
         request={outputRequest}
         model={outputModel}
         onOpenSession={onOpenOutputSession}

@@ -14,6 +14,7 @@ import {
   getOutput,
   getOutputByGeneratorSession,
   getOutputDefinitionRow,
+  hasGeneratingOutput,
   insertOutputDefinition,
   listOutputDefinitionRows,
   listOutputGeneratorSessionIds,
@@ -238,6 +239,17 @@ describe('outputs', () => {
 
   it('returns null for an unknown output', () => {
     expect(storedOutput(db)).toBeNull()
+  })
+
+  it('reports whether any output of a definition is generating', () => {
+    expect(hasGeneratingOutput(db, DEFINITION_ID)).toBe(false)
+
+    expect(claimOutputGeneration(db, claimInput())).toBe(true)
+    expect(hasGeneratingOutput(db, DEFINITION_ID)).toBe(true)
+    expect(hasGeneratingOutput(db, 'other')).toBe(false)
+
+    updateOutput(db, outputKey(), ['generating'], { status: 'ready' })
+    expect(hasGeneratingOutput(db, DEFINITION_ID)).toBe(false)
   })
 
   it('finds an output by its generator session id', () => {

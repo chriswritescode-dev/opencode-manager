@@ -3,6 +3,8 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  OUTPUT_DEFINITIONS_QUERY_ROOT,
+  outputDefinitionsQueryKey,
   outputsQueryKey,
   useCancelOutput,
   useGenerateOutput,
@@ -91,6 +93,14 @@ const createWrapper = (queryClient: QueryClient) =>
   ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   )
+
+describe('outputDefinitionsQueryKey', () => {
+  it('builds every definition key on the shared query root', () => {
+    expect(OUTPUT_DEFINITIONS_QUERY_ROOT).toEqual(['output-definitions'])
+    expect(outputDefinitionsQueryKey()).toEqual(['output-definitions', 'global'])
+    expect(outputDefinitionsQueryKey('ses_1')).toEqual(['output-definitions', 'ses_1'])
+  })
+})
 
 describe('useGenerateOutput', () => {
   it('caches the returned state under the originating session when the session changes mid-flight', async () => {

@@ -10,6 +10,7 @@ import {
 import {
   deleteOutputDefinition,
   getOutputDefinitionRow,
+  hasGeneratingOutput,
   insertOutputDefinition,
   listOutputDefinitionRows,
   promoteSessionOutputDefinition,
@@ -79,6 +80,7 @@ export class OutputDefinitionRegistry {
       })
     }
     const definition = this.parseDefinition(input, 'global')
+    this.assertNotGenerating(id)
     upsertOutputDefinition(this.db, { sessionId: '', definition, now: Date.now() })
     return definition
   }
@@ -90,6 +92,7 @@ export class OutputDefinitionRegistry {
         code: 'OUTPUT_DEFINITION_NOT_FOUND',
       })
     }
+    this.assertNotGenerating(id)
     deleteOutputDefinition(this.db, '', id)
   }
 
@@ -121,6 +124,14 @@ export class OutputDefinitionRegistry {
       })
     }
     return { ...stored, origin: 'global' }
+  }
+
+  private assertNotGenerating(id: string): void {
+    if (hasGeneratingOutput(this.db, id)) {
+      throw new OutputError('An output of this definition is still generating', 409, {
+        code: 'OUTPUT_DEFINITION_IN_USE',
+      })
+    }
   }
 
   private assertUserDefinition(id: string, input?: RendererKindInput): void {

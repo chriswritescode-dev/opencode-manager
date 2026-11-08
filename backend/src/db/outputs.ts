@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite'
+import { isRecord } from '@opencode-manager/shared/utils'
 import {
   OUTPUT_GENERATION_TIMEOUT_MS,
   OutputDefinitionSchema,
@@ -134,7 +135,7 @@ function parseStoredOutputError(raw: string | null): OutputGenerationError | nul
 function mapDefinitionRow(row: OutputDefinitionRow): OutputDefinition | null {
   try {
     const stored = JSON.parse(row.definition) as unknown
-    if (typeof stored !== 'object' || stored === null || Array.isArray(stored)) {
+    if (!isRecord(stored)) {
       return null
     }
     const parsed = OutputDefinitionSchema.safeParse({
@@ -437,6 +438,14 @@ export function listOutputGeneratorSessionIds(db: Database): string[] {
     .prepare('SELECT DISTINCT generator_session_id FROM outputs WHERE generator_session_id IS NOT NULL')
     .all() as Array<{ generator_session_id: string }>
   return rows.map((row) => row.generator_session_id)
+}
+
+/** Reports whether any stored output of the definition is still generating. */
+export function hasGeneratingOutput(db: Database, definitionId: string): boolean {
+  const row = db
+    .prepare("SELECT 1 FROM outputs WHERE definition_id = ? AND status = 'generating' LIMIT 1")
+    .get(definitionId)
+  return row !== null && row !== undefined
 }
 
 export function deleteSessionOutputs(db: Database, sessionId: string): void {

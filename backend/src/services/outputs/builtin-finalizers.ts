@@ -1,5 +1,5 @@
 import type { FileDiffInfo } from '@opencode-manager/shared/opencode'
-import type { ChangeHunk, WalkthroughOutputData } from '@opencode-manager/shared/schemas'
+import type { BuiltinOutputRendererId, ChangeHunk, WalkthroughOutputData } from '@opencode-manager/shared/schemas'
 import { buildChangesInput } from './change-outline'
 import { OutputError } from './output-error'
 
@@ -86,6 +86,6 @@ export function finalizeWalkthroughData(
   }
 }
 
-export const BUILTIN_FINALIZERS: Record<'walkthrough', BuiltinOutputFinalizer> = {
+export const BUILTIN_FINALIZERS: Record<BuiltinOutputRendererId, BuiltinOutputFinalizer> = {
   walkthrough: finalizeWalkthroughData,
 }

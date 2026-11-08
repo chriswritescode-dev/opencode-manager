@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import { randomUUID } from 'node:crypto'
-import { copyFile, mkdir, rm } from 'node:fs/promises'
+import { mkdir, readFile, realpath, rm } from 'node:fs/promises'
 import path from 'node:path'
 import {
   formatOpenCodeModelRef,
@@ -111,7 +111,6 @@ export class OutputService {
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly inputSnapshots = new Map<string, FileDiffInfo[]>()
   private readonly generatorTargets = new Map<string, OutputRecordKey>()
-  private readonly entryParams = new Map<string, OutputParams>()
   private readonly generationTimeoutMs: number
   private readonly outputsRoot: string
 
@@ -146,7 +145,7 @@ export class OutputService {
 
     let output = getOutput(this.db, sessionId, definitionId, entry.paramsKey)
     if (this.hasGenerationTimedOut(output)) {
-      await this.expireGeneration(sessionId, definitionId, entry.params)
+      await this.expireGeneration(sessionId, definitionId, entry.paramsKey)
       output = getOutput(this.db, sessionId, definitionId, entry.paramsKey)
     }
 
@@ -291,7 +290,7 @@ export class OutputService {
         return this.getState(sessionId, request.definitionId, entry.params)
       }
 
-      this.startTimeout(sessionId, request.definitionId, entry.params)
+      this.startTimeout(sessionId, request.definitionId, entry.paramsKey)
     } catch (error) {
       this.clearTimeout(entry.key)
       if (generatorSessionId) {
@@ -360,7 +359,7 @@ export class OutputService {
         executionStartedAt: now,
         updatedAt: now,
       },
-      { running: false },
+      { running: false, generatorSessionId: record.generatorSessionId },
     )
     if (!claimed) {
       throw new OutputError('The output is still being built', 409, { code: 'OUTPUT_BUSY' })
@@ -397,7 +396,7 @@ export class OutputService {
       throw new OutputError(getErrorMessage(error) || 'Failed to send the refine prompt', 502)
     }
 
-    this.startTimeout(sessionId, request.definitionId, entry.params)
+    this.startTimeout(sessionId, request.definitionId, entry.paramsKey)
     return this.getState(sessionId, request.definitionId, entry.params)
   }
 
@@ -436,23 +435,26 @@ export class OutputService {
 
   async publish(callerSessionId: string, params: PublishOutputParams): Promise<PublishOutputResult> {
     const target = this.resolvePublishTarget(callerSessionId, params)
-    const outputDir = target.record?.outputDir ?? path.join(this.outputsRoot, target.sessionId, randomUUID())
-    await mkdir(outputDir, { recursive: true })
-
     const { definition } = target
+    const renderer = definition.renderer
+    const outputDir = target.record?.outputDir ?? path.join(this.outputsRoot, target.sessionId, randomUUID())
+    const createdOutputDir = target.record?.outputDir === undefined
+    const indexPath = path.join(outputDir, 'index.html')
+
     let uncoveredHunkIds: string[] = []
-    if (definition.renderer.kind === 'html') {
+    let storedData: unknown = undefined
+    let htmlSourcePath: string | null = null
+    if (renderer.kind === 'html') {
       if (params.path === undefined) {
         throw new OutputError('The path of the HTML file is required', 400, {
           code: 'OUTPUT_PATH_REQUIRED',
         })
       }
-      const indexPath = path.join(outputDir, 'index.html')
       if (path.resolve(params.path) === path.resolve(indexPath)) {
         await assertHtmlArtifactFile(indexPath, indexPath)
       } else {
-        const sourcePath = await resolveSessionArtifactFile(this.openCodeClient, callerSessionId, params.path)
-        await copyFile(sourcePath, indexPath)
+        const resolved = await resolveSessionArtifactFile(this.openCodeClient, callerSessionId, params.path)
+        htmlSourcePath = await realpath(resolved)
       }
     } else {
       if (params.data === undefined) {
@@ -465,8 +467,8 @@ export class OutputService {
       if (!validated.ok) {
         throw new OutputError(validated.message, 400, { code: 'OUTPUT_DATA_INVALID' })
       }
-      let storedData = validated.data
-      if (definition.renderer.kind === 'builtin') {
+      storedData = validated.data
+      if (renderer.kind === 'builtin') {
         const provider = this.providerFor(definition)
         if (!provider) {
           throw new OutputError('This output has no input provider', 502, {
@@ -477,42 +479,68 @@ export class OutputService {
         const changes = target.generatorSessionId !== null && target.record
           ? await this.readGeneratorInput(target.record, session, provider)
           : await provider.read(session, target.params)
-        const finalized = BUILTIN_FINALIZERS[definition.renderer.id](validated.data, changes)
+        const finalized = BUILTIN_FINALIZERS[renderer.id](validated.data, changes)
         storedData = finalized.data
         uncoveredHunkIds = finalized.uncoveredHunkIds
       }
-      await writeFileAtomic(path.join(outputDir, 'data.json'), JSON.stringify(storedData, null, 2))
-      if (definition.renderer.kind === 'template') {
-        await writeFileAtomic(path.join(outputDir, 'index.html'), definition.renderer.html)
-      }
     }
 
-    const now = Date.now()
-    if (target.generatorSessionId !== null) {
-      const updated = updateOutput(
-        this.db,
-        { sessionId: target.sessionId, definitionId: target.definitionId, paramsKey: target.paramsKey },
-        ['generating', 'ready', 'failed'],
-        { status: 'ready', publishedAt: now, error: null, updatedAt: now },
-        { generatorSessionId: target.generatorSessionId },
-      )
-      if (!updated) {
-        throw new OutputError('This output was superseded by a newer generation', 409, {
-          code: 'OUTPUT_SUPERSEDED',
+    await mkdir(outputDir, { recursive: true })
+    try {
+      if (target.generatorSessionId !== null) {
+        const current = getOutput(this.db, target.sessionId, target.definitionId, target.paramsKey)
+        if (!current || current.generatorSessionId !== target.generatorSessionId) {
+          throw new OutputError('This output was superseded by a newer generation', 409, {
+            code: 'OUTPUT_SUPERSEDED',
+          })
+        }
+      }
+
+      if (renderer.kind === 'html') {
+        if (htmlSourcePath !== null) {
+          await writeFileAtomic(indexPath, await readFile(htmlSourcePath))
+        }
+      } else {
+        await writeFileAtomic(path.join(outputDir, 'data.json'), JSON.stringify(storedData, null, 2))
+        if (renderer.kind === 'template') {
+          await writeFileAtomic(indexPath, renderer.html)
+        }
+      }
+
+      const now = Date.now()
+      if (target.generatorSessionId !== null) {
+        const updated = updateOutput(
+          this.db,
+          { sessionId: target.sessionId, definitionId: target.definitionId, paramsKey: target.paramsKey },
+          ['generating', 'ready', 'failed'],
+          { status: 'ready', publishedAt: now, error: null, updatedAt: now },
+          { generatorSessionId: target.generatorSessionId },
+        )
+        if (!updated) {
+          throw new OutputError('This output was superseded by a newer generation', 409, {
+            code: 'OUTPUT_SUPERSEDED',
+          })
+        }
+      } else {
+        upsertPublishedOutput(this.db, {
+          sessionId: target.sessionId,
+          definitionId: target.definitionId,
+          params: target.params,
+          inputHash: null,
+          generationId: randomUUID(),
+          generatorSessionId: null,
+          outputDir,
+          model: null,
+          now,
         })
       }
-    } else {
-      upsertPublishedOutput(this.db, {
-        sessionId: target.sessionId,
-        definitionId: target.definitionId,
-        params: target.params,
-        inputHash: null,
-        generationId: randomUUID(),
-        generatorSessionId: null,
-        outputDir,
-        model: null,
-        now,
-      })
+    } catch (error) {
+      if (createdOutputDir) {
+        await rm(outputDir, { recursive: true, force: true }).catch((cleanupError) => {
+          logger.warn('Failed to remove an unpublished output directory', getErrorMessage(cleanupError))
+        })
+      }
+      throw error
     }
 
     return { outputDir, uncoveredHunkIds }
@@ -776,17 +804,12 @@ export class OutputService {
     }
   }
 
-  private startTimeout(sessionId: string, definitionId: string, params: OutputParams): void {
-    const key = `${sessionId}\0${definitionId}\0${outputParamsKey(params)}`
+  private startTimeout(sessionId: string, definitionId: string, paramsKey: string): void {
+    const key = this.entryKey(sessionId, definitionId, paramsKey)
     this.clearTimeout(key)
-    this.entryParams.set(key, params)
     const timer = setTimeout(() => {
       this.timers.delete(key)
-      const pending = this.entryParams.get(key)
-      if (!pending) {
-        return
-      }
-      void this.expireGeneration(sessionId, definitionId, pending).catch((error) => {
+      void this.expireGeneration(sessionId, definitionId, paramsKey).catch((error) => {
         logger.error('Failed to expire an output generation', error)
       })
     }, this.generationTimeoutMs)
@@ -795,7 +818,6 @@ export class OutputService {
   }
 
   private clearTimeout(key: string): void {
-    this.entryParams.delete(key)
     const timer = this.timers.get(key)
     if (timer === undefined) {
       return
@@ -804,9 +826,8 @@ export class OutputService {
     this.timers.delete(key)
   }
 
-  private async expireGeneration(sessionId: string, definitionId: string, params: OutputParams): Promise<void> {
-    const entry = this.resolveEntry(sessionId, definitionId, params)
-    const record = getOutput(this.db, sessionId, definitionId, entry.paramsKey)
+  private async expireGeneration(sessionId: string, definitionId: string, paramsKey: string): Promise<void> {
+    const record = getOutput(this.db, sessionId, definitionId, paramsKey)
     if (!record || (record.status !== 'generating' && record.executionStartedAt === null)) {
       return
     }

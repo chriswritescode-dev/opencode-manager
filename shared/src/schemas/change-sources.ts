@@ -74,28 +74,6 @@ export function toChangeSource(candidate: {
   }
 }
 
-export function parseChangeSourceKey(key: string): ChangeSource | null {
-  if (key === 'session' || key === 'uncommitted' || key === 'staged' || key === 'unstaged') {
-    return { kind: key }
-  }
-  if (key.startsWith('branch:')) {
-    return toChangeSource({ kind: 'branch', base: key.slice('branch:'.length) })
-  }
-  if (key.startsWith('pr:')) {
-    const rest = key.slice('pr:'.length)
-    const separator = rest.indexOf(':')
-    if (separator < 0) {
-      return null
-    }
-    return toChangeSource({
-      kind: 'pullRequest',
-      number: Number(rest.slice(0, separator)),
-      base: rest.slice(separator + 1),
-    })
-  }
-  return null
-}
-
 function parseChangeSourceCandidate(candidate: unknown): ChangeSource | null {
   const parsed = ChangeSourceSchema.safeParse(candidate)
   return parsed.success ? parsed.data : null

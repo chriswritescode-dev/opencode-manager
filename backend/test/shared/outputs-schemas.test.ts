@@ -4,7 +4,6 @@ import {
   OutputFrameMessageSchema,
   OutputHostMessageSchema,
   WALKTHROUGH_OUTPUT_DEFINITION,
-  parseOutputDataSchema,
   validateOutputData,
 } from '@opencode-manager/shared/schemas'
 
@@ -45,6 +44,35 @@ describe('OutputDefinitionSchema', () => {
       false,
     )
   })
+
+  it('rejects a data schema with an unknown keyword', () => {
+    expect(
+      OutputDefinitionSchema.safeParse({
+        ...WALKTHROUGH_OUTPUT_DEFINITION,
+        dataSchema: { type: 'string', pattern: '^a' },
+      }).success,
+    ).toBe(false)
+  })
+
+  it('rejects a data schema nested deeper than the limit', () => {
+    const result = OutputDefinitionSchema.safeParse({
+      ...WALKTHROUGH_OUTPUT_DEFINITION,
+      dataSchema: nestedObjectSchema(9),
+    })
+
+    expect(result.success).toBe(false)
+    expect(result.error?.issues.some((issue) => issue.message.includes('depth'))).toBe(true)
+  })
+
+  it('rejects a data schema over 32 KiB', () => {
+    const result = OutputDefinitionSchema.safeParse({
+      ...WALKTHROUGH_OUTPUT_DEFINITION,
+      dataSchema: { type: 'string', description: 'a'.repeat(40000) },
+    })
+
+    expect(result.success).toBe(false)
+    expect(result.error?.issues.some((issue) => issue.message.includes('32 KiB'))).toBe(true)
+  })
 })
 
 describe('validateOutputData', () => {
@@ -77,26 +105,6 @@ describe('validateOutputData', () => {
 
     expect(result.ok).toBe(false)
     expect(result.ok === false && result.message).toContain('1 MiB')
-  })
-})
-
-describe('parseOutputDataSchema', () => {
-  it('accepts the builtin definition data schema', () => {
-    expect(parseOutputDataSchema(WALKTHROUGH_OUTPUT_DEFINITION.dataSchema)).toEqual(
-      WALKTHROUGH_OUTPUT_DEFINITION.dataSchema,
-    )
-  })
-
-  it('rejects an unknown keyword', () => {
-    expect(() => parseOutputDataSchema({ type: 'string', pattern: '^a' })).toThrow()
-  })
-
-  it('rejects a schema nested deeper than the limit', () => {
-    expect(() => parseOutputDataSchema(nestedObjectSchema(9))).toThrow(/depth/)
-  })
-
-  it('rejects a schema over 32 KiB', () => {
-    expect(() => parseOutputDataSchema({ type: 'string', description: 'a'.repeat(40000) })).toThrow(/32 KiB/)
   })
 })
 

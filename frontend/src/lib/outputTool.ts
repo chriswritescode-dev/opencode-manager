@@ -1,5 +1,7 @@
 import type { SessionMessageAssistantTool, SessionMessageInfo } from '@opencode-manager/shared/opencode'
 import {
+  ChangeSourceSchema,
+  DEFAULT_OUTPUT_DEFINITION_ID,
   MANAGER_TOOL_NAME,
   MANAGER_TOOL_OPEN_OUTPUT_ACTION,
   MANAGER_TOOL_PUBLISH_OUTPUT_ACTION,
@@ -7,21 +9,20 @@ import {
   OutputParamsSchema,
 } from '@opencode-manager/shared/schemas'
 import type { OutputParams } from '@opencode-manager/shared/schemas'
+import { isRecord } from '@opencode-manager/shared/utils'
 
 const OPEN_OUTPUT_ACTIONS: ReadonlySet<string> = new Set([
   MANAGER_TOOL_OPEN_OUTPUT_ACTION,
   MANAGER_TOOL_PUBLISH_OUTPUT_ACTION,
 ])
 
+const LEGACY_OPEN_WALKTHROUGH_ACTION = 'open_walkthrough'
+
 /** A completed `ocm` call that asks the client to open an output definition. */
 export interface OpenOutputCall {
   id: string
   definitionId: string
   params?: OutputParams
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /**
@@ -32,9 +33,18 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 export function readOpenOutputCall(part: SessionMessageAssistantTool): OpenOutputCall | undefined {
   if (part.name !== MANAGER_TOOL_NAME || part.state.status !== 'completed') return undefined
   const action = part.state.input.action
-  if (typeof action !== 'string' || !OPEN_OUTPUT_ACTIONS.has(action)) return undefined
+  if (typeof action !== 'string') return undefined
   const raw = part.state.input.params
-  if (!isPlainObject(raw)) return undefined
+  if (action === LEGACY_OPEN_WALKTHROUGH_ACTION) {
+    const source = ChangeSourceSchema.safeParse(isRecord(raw) ? raw.source : undefined)
+    return {
+      id: part.id,
+      definitionId: DEFAULT_OUTPUT_DEFINITION_ID,
+      params: source.success ? { source: source.data } : undefined,
+    }
+  }
+  if (!OPEN_OUTPUT_ACTIONS.has(action)) return undefined
+  if (!isRecord(raw)) return undefined
   const definitionId = OutputDefinitionIdSchema.safeParse(raw.definitionId)
   if (!definitionId.success) return undefined
   const params = OutputParamsSchema.safeParse(raw.params)

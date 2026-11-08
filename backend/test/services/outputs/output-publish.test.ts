@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Database } from 'bun:sqlite'
@@ -422,6 +422,18 @@ describe('OutputService publish', () => {
     expect(JSON.parse(readFileSync(path.join(result.outputDir, 'data.json'), 'utf8'))).toEqual({ text: 'hello' })
     expect(readFileSync(path.join(result.outputDir, 'index.html'), 'utf8')).toBe(TEMPLATE_HTML)
     await expect(service.getState('ses_other', 'note')).rejects.toMatchObject({ status: 404 })
+  })
+
+  it('leaves no new output directory when a current-session publish is invalid', async () => {
+    const targetSessionId = 'ses_unpublished'
+    service.defineSessionOutput(targetSessionId, templateDefinitionInput())
+    const targetRoot = path.join(outputsRoot, targetSessionId)
+
+    await expect(
+      service.publish(targetSessionId, { definitionId: 'note', data: { text: 123 } }),
+    ).rejects.toMatchObject({ status: 400, code: 'OUTPUT_DATA_INVALID' })
+
+    expect(existsSync(targetRoot)).toBe(false)
   })
 
   it('copies a current-session html artifact into the output directory', async () => {

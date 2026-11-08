@@ -409,6 +409,25 @@ describe('OutputsSettings', () => {
     expect(mocks.putOutputDefinition).toHaveBeenCalledTimes(1)
   })
 
+  it('reports the failing definition id and refreshes the list when an import fails', async () => {
+    mockUseSettings()
+    mocks.putOutputDefinition.mockRejectedValue(new Error('network down'))
+    const { container } = renderOutputs()
+
+    await screen.findByText('Summary')
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    const file = new File([JSON.stringify([IMPORT_INPUT])], 'output-definitions.json', {
+      type: 'application/json',
+    })
+
+    fireEvent.change(input, { target: { files: [file] } })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Failed to import output definition "imported-output": network down',
+    )
+    await waitFor(() => expect(mocks.listOutputDefinitions).toHaveBeenCalledTimes(2))
+  })
+
   it('asks before replacing an existing definition on import', async () => {
     const user = userEvent.setup()
     mockUseSettings()

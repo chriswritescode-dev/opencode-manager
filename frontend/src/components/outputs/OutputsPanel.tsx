@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import {
   BarChart3,
@@ -47,7 +47,7 @@ import { formatOpenCodeModelRef } from '@opencode-manager/shared/opencode'
 import type { ModelRef } from '@opencode-manager/shared/opencode'
 import { OutputParamsForm } from './OutputParamsForm'
 import { OutputRendererHost } from './OutputRendererHost'
-import { PromoteOutputDialog } from './PromoteOutputDialog'
+import { ConfirmDestructiveDialog } from '@/components/ui/confirm-destructive-dialog'
 
 const OUTPUT_ICON_COMPONENTS: Record<OutputIcon, LucideIcon> = {
   BookOpen,
@@ -107,6 +107,41 @@ function resolveDefinitionParams(
   }
 }
 
+interface RefineOutputFormProps {
+  label: string
+  pending: boolean
+  onRefine: (text: string) => void
+}
+
+function RefineOutputForm({ label, pending, onRefine }: RefineOutputFormProps): ReactNode {
+  const [text, setText] = useState('')
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const trimmed = text.trim()
+    if (trimmed.length === 0 || pending) return
+    onRefine(trimmed)
+    setText('')
+  }
+
+  return (
+    <form className="space-y-2" onSubmit={submit}>
+      <Textarea
+        aria-label={`Refine ${label}`}
+        placeholder={`Ask for a change to the ${label}`}
+        maxLength={OUTPUT_LIMITS.REFINE_MAX_CHARS}
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+      />
+      <div className="flex justify-end">
+        <Button type="submit" size="sm" disabled={text.trim().length === 0 || pending}>
+          {pending ? 'Sending…' : 'Send'}
+        </Button>
+      </div>
+    </form>
+  )
+}
+
 export interface OutputOpenRequest {
   sessionId: string
   definitionId: string
@@ -135,14 +170,17 @@ export function OutputsPanel({
 }: OutputsPanelProps): ReactNode {
   const [params, setParams] = useState<OutputParams>({})
   const [paramsPending, setParamsPending] = useState(false)
-  const [refineText, setRefineText] = useState('')
   const [reload, setReload] = useState(0)
   const [replaceDialogOpen, setReplaceDialogOpen] = useState(false)
   const [promoteError, setPromoteError] = useState<string | null>(null)
   const appliedRequest = useRef<OutputOpenRequest | null>(null)
+  const missingDefinitionIdRef = useRef<string | null>(null)
+  const onOpenFileRef = useRef(onOpenFile)
 
   const definitionsQuery = useOutputDefinitions(sessionId)
   const definitions = definitionsQuery.data ?? []
+  const definitionsLoaded = definitionsQuery.isSuccess
+  const refetchDefinitions = definitionsQuery.refetch
   const listedDefinition = definitions.find((entry) => entry.id === definitionId) ?? null
   const listedResolution = resolveDefinitionParams(listedDefinition, params)
   const stateQuery = useOutputState(
@@ -184,10 +222,20 @@ export function OutputsPanel({
   useEffect(() => {
     setParams({})
     setParamsPending(false)
-    setRefineText('')
     setReload(0)
     setPromoteError(null)
   }, [definitionId])
+
+  useEffect(() => {
+    onOpenFileRef.current = onOpenFile
+  }, [onOpenFile])
+
+  useEffect(() => {
+    if (!definitionsLoaded || listedDefinition !== null) return
+    if (missingDefinitionIdRef.current === definitionId) return
+    missingDefinitionIdRef.current = definitionId
+    void refetchDefinitions()
+  }, [definitionId, definitionsLoaded, listedDefinition, refetchDefinitions])
 
   useEffect(() => {
     if (!request || request === appliedRequest.current) return
@@ -232,13 +280,11 @@ export function OutputsPanel({
       ? getFileApiUrl(`${output.outputDir}/index.html`, { params: { raw: true } })
       : null
 
-  const submitRefine = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const text = refineText.trim()
-    if (text.length === 0 || refine.isPending) return
-    refine.mutate(text)
-    setRefineText('')
-  }
+  const refineOutput = refine.mutate
+  const handleRefine = useCallback((text: string) => refineOutput(text), [refineOutput])
+  const handleOpenFile = useCallback((path: string, line?: number) => {
+    onOpenFileRef.current?.(path, line)
+  }, [])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -429,45 +475,40 @@ export function OutputsPanel({
                   output={output}
                   data={outputData.data ?? null}
                   reloadKey={`${output.publishedAt}:${reload}`}
-                  onOpenFile={onOpenFile}
-                  onRefine={isCurrentSession ? undefined : (text) => refine.mutate(text)}
+                  onOpenFile={handleOpenFile}
+                  onRefine={isCurrentSession ? undefined : handleRefine}
                 />
               </div>
             ) : null}
 
             {published && !isCurrentSession && !generating && !running ? (
-              <form className="space-y-2" onSubmit={submitRefine}>
-                <Textarea
-                  aria-label={`Refine ${labelLower}`}
-                  placeholder={`Ask for a change to the ${labelLower}`}
-                  maxLength={OUTPUT_LIMITS.REFINE_MAX_CHARS}
-                  value={refineText}
-                  onChange={(event) => setRefineText(event.target.value)}
-                />
-                <div className="flex justify-end">
-                  <Button
-                    type="submit"
-                    size="sm"
-                    disabled={refineText.trim().length === 0 || refine.isPending}
-                  >
-                    {refine.isPending ? 'Sending…' : 'Send'}
-                  </Button>
-                </div>
-              </form>
+              <RefineOutputForm
+                key={definitionId}
+                label={labelLower}
+                pending={refine.isPending}
+                onRefine={handleRefine}
+              />
             ) : null}
           </>
         )}
       </div>
 
-      <PromoteOutputDialog
+      <ConfirmDestructiveDialog
         open={replaceDialogOpen}
-        definitionId={definition?.id ?? definitionId}
-        pending={promote.isPending}
-        error={promoteError}
         onOpenChange={setReplaceDialogOpen}
-        onCancel={() => setReplaceDialogOpen(false)}
         onConfirm={() => void saveAsGlobal(true)}
-      />
+        onCancel={() => setReplaceDialogOpen(false)}
+        title={`Replace the global "${definition?.id ?? definitionId}" output?`}
+        description="A global output with this id already exists."
+        confirmLabel="Replace"
+        isPending={promote.isPending}
+      >
+        {promoteError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {promoteError}
+          </p>
+        ) : null}
+      </ConfirmDestructiveDialog>
     </div>
   )
 }

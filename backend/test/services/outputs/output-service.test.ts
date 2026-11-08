@@ -9,10 +9,11 @@ import {
   WALKTHROUGH_OUTPUT_DEFINITION,
   outputParamsKey,
   type OutputDefinition,
+  type OutputDefinitionInput,
   type OutputParams,
   type SchedulePermissionRule,
 } from '@opencode-manager/shared/schemas'
-import { claimOutputGeneration, getOutput, updateOutput } from '../../../src/db/outputs'
+import { claimOutputGeneration, deleteOutputDefinition, getOutput, updateOutput } from '../../../src/db/outputs'
 import { migrate } from '../../../src/db/migration-runner'
 import { allMigrations } from '../../../src/db/migrations'
 import type { OpenCodeClient } from '../../../src/services/opencode/client'
@@ -214,6 +215,21 @@ function sessionAt(directory: string, id: string = SESSION_ID): SessionInfo {
 function outputDirFromPermissions(permissions: SchedulePermissionRule[]): string {
   const rule = permissions.at(-2)!
   return rule.resource.slice(0, -'/*'.length)
+}
+
+function globalDefinitionInput(): OutputDefinitionInput {
+  return {
+    id: 'brief',
+    label: 'Brief',
+    description: '',
+    icon: 'FileText',
+    params: [{ type: 'changeSource', name: 'source', label: 'Changes' }],
+    provider: 'changes',
+    instructions: 'Write a brief.',
+    dataSchema: { type: 'object', properties: { total: { type: 'number' } } },
+    renderer: { kind: 'template', html: '<p>{{total}}</p>' },
+    generation: 'separateSession',
+  }
 }
 
 describe('buildOutputSessionPermissions', () => {
@@ -883,6 +899,25 @@ describe('OutputService', () => {
         const state = await timed.getState(SESSION_ID, DEFINITION_ID)
         expect(state.generating).toBe(false)
         expect(state.error).toMatchObject({ code: 'OUTPUT_TIMEOUT' })
+        expect(fake.interruptCalls).toContain('ses_walk_1')
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('expires a generating record after its global definition is deleted', async () => {
+      vi.useFakeTimers()
+      try {
+        registry.createGlobal(globalDefinitionInput())
+        const timed = createService(1000)
+        await timed.startGeneration(SESSION_ID, { definitionId: 'brief' })
+        deleteOutputDefinition(db, '', 'brief')
+
+        await vi.advanceTimersByTimeAsync(1000)
+
+        const record = getOutput(db, SESSION_ID, 'brief', paramsKey())
+        expect(record?.status).toBe('failed')
+        expect(record?.error).toMatchObject({ code: 'OUTPUT_TIMEOUT' })
         expect(fake.interruptCalls).toContain('ses_walk_1')
       } finally {
         vi.useRealTimers()

@@ -18,6 +18,10 @@ export const OUTPUT_LIMITS = {
 
 export const OUTPUT_GENERATION_TIMEOUT_MS = 15 * 60 * 1000
 
+export const BUILTIN_OUTPUT_RENDERER_IDS = ['walkthrough'] as const
+
+export type BuiltinOutputRendererId = (typeof BUILTIN_OUTPUT_RENDERER_IDS)[number]
+
 export const OUTPUT_ICONS = [
   'BookOpen',
   'FileText',
@@ -279,15 +283,21 @@ function outputDataSchemaDepth(schema: unknown): number {
   return childDepth + 1
 }
 
-export function parseOutputDataSchema(raw: unknown): OutputDataSchema {
-  const json = JSON.stringify(raw) ?? ''
-  if (utf8ByteLength(json) > OUTPUT_LIMITS.DATA_SCHEMA_MAX_BYTES) {
-    throw new Error(`Output data schema exceeds the 32 KiB limit`)
+function refineOutputDataSchemaLimits(schema: OutputDataSchema, ctx: z.RefinementCtx): void {
+  if (utf8ByteLength(JSON.stringify(schema) ?? '') > OUTPUT_LIMITS.DATA_SCHEMA_MAX_BYTES) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['dataSchema'],
+      message: 'Output data schema exceeds the 32 KiB limit',
+    })
   }
-  if (outputDataSchemaDepth(raw) > OUTPUT_LIMITS.DATA_SCHEMA_MAX_DEPTH) {
-    throw new Error(`Output data schema exceeds the maximum depth of ${OUTPUT_LIMITS.DATA_SCHEMA_MAX_DEPTH}`)
+  if (outputDataSchemaDepth(schema) > OUTPUT_LIMITS.DATA_SCHEMA_MAX_DEPTH) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['dataSchema'],
+      message: `Output data schema exceeds the maximum depth of ${OUTPUT_LIMITS.DATA_SCHEMA_MAX_DEPTH}`,
+    })
   }
-  return OutputDataSchemaSchema.parse(raw)
 }
 
 export function validateOutputData(
@@ -308,7 +318,7 @@ export const OutputRendererSchema = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('builtin'),
-      id: z.enum(['walkthrough']),
+      id: z.enum(BUILTIN_OUTPUT_RENDERER_IDS),
     })
     .strict(),
   z
@@ -348,6 +358,9 @@ type OutputDefinitionRefinementInput = {
 }
 
 function refineOutputDefinition(value: OutputDefinitionRefinementInput, ctx: z.RefinementCtx): void {
+  if (value.dataSchema) {
+    refineOutputDataSchemaLimits(value.dataSchema, ctx)
+  }
   if (value.renderer.kind !== 'html' && !value.dataSchema) {
     ctx.addIssue({ code: 'custom', message: 'Data schema is required for this renderer' })
   }

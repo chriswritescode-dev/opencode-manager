@@ -204,6 +204,33 @@ describe('OutputsPanel', () => {
     })
   })
 
+  it('refetches definitions once when the selected definition is missing, then renders it', async () => {
+    const agentDefinition: OutputDefinition = {
+      id: 'agent-report',
+      label: 'Agent report',
+      description: 'A report the agent just defined.',
+      icon: 'FileText',
+      params: [],
+      instructions: 'Write a report.',
+      renderer: { kind: 'html' },
+      generation: 'separateSession',
+      origin: 'session',
+    }
+    mocks.listOutputDefinitions
+      .mockResolvedValueOnce(DEFINITIONS)
+      .mockResolvedValueOnce([...DEFINITIONS, agentDefinition])
+    mocks.getOutputState.mockImplementation(async (_sessionId: string, definitionId: string) =>
+      state(definitionId === agentDefinition.id ? agentDefinition : definitionById(definitionId)),
+    )
+
+    renderPanel({ definitionId: agentDefinition.id })
+
+    expect(
+      await screen.findByRole('button', { name: 'Generate agent report' }),
+    ).toBeInTheDocument()
+    expect(mocks.listOutputDefinitions).toHaveBeenCalledTimes(2)
+  })
+
   it('shows no generation controls for currentSession definitions', async () => {
     renderPanel({ definitionId: 'session-report' })
 

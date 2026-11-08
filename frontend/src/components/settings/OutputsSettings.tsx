@@ -5,14 +5,14 @@ import { Download, Plus, Upload } from 'lucide-react'
 import { UserOutputDefinitionInputSchema } from '@opencode-manager/shared/schemas'
 import type { OutputDefinition, OutputDefinitionInput } from '@opencode-manager/shared/schemas'
 import { Button } from '@/components/ui/button'
+import { ConfirmDestructiveDialog } from '@/components/ui/confirm-destructive-dialog'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { SettingsList, SettingsListRow } from '@/components/ui/settings-list'
 import { ModelCombobox } from '@/components/model/ModelCombobox'
 import { useSettings } from '@/hooks/useSettings'
 import { useAutosavedSetting } from '@/hooks/useAutosavedSetting'
-import { useOutputDefinitions } from '@/hooks/useOutputs'
+import { OUTPUT_DEFINITIONS_QUERY_ROOT, useOutputDefinitions } from '@/hooks/useOutputs'
 import {
   deleteOutputDefinition,
   putOutputDefinition,
@@ -51,19 +51,26 @@ export function OutputsSettings() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteOutputDefinition(id),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['output-definitions'] })
       setDeletingDefinition(null)
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: OUTPUT_DEFINITIONS_QUERY_ROOT })
     },
   })
 
   const importMutation = useMutation({
     mutationFn: async (inputs: OutputDefinitionInput[]) => {
       for (const input of inputs) {
-        await putOutputDefinition(input.id, input)
+        try {
+          await putOutputDefinition(input.id, input)
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Failed to import'
+          throw new Error(`Failed to import output definition "${input.id}": ${message}`)
+        }
       }
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['output-definitions'] })
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: OUTPUT_DEFINITIONS_QUERY_ROOT })
     },
   })
 
@@ -85,7 +92,7 @@ export function OutputsSettings() {
   }
 
   const handleSaved = () => {
-    void queryClient.invalidateQueries({ queryKey: ['output-definitions'] })
+    void queryClient.invalidateQueries({ queryKey: OUTPUT_DEFINITIONS_QUERY_ROOT })
   }
 
   const handleExport = () => {
@@ -287,42 +294,27 @@ export function OutputsSettings() {
         )}
       </DeleteDialog>
 
-      <Dialog open={importDialogOpen} onOpenChange={closeImportDialog}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Replace existing output definitions?</DialogTitle>
-            <DialogDescription>
-              These ids already exist and will be updated: {replacingIds.join(', ')}
-            </DialogDescription>
-          </DialogHeader>
-          {importError && (
-            <p role="alert" className="text-sm text-destructive">
-              {importError}
-            </p>
-          )}
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => closeImportDialog(false)}
-              disabled={importMutation.isPending}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={() => {
-                if (pendingImport) {
-                  void runImport(pendingImport)
-                }
-              }}
-              disabled={importMutation.isPending}
-            >
-              Import
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDestructiveDialog
+        open={importDialogOpen}
+        onOpenChange={closeImportDialog}
+        onConfirm={() => {
+          if (pendingImport) {
+            void runImport(pendingImport)
+          }
+        }}
+        onCancel={() => closeImportDialog(false)}
+        title="Replace existing output definitions?"
+        description={`These ids already exist and will be updated: ${replacingIds.join(', ')}`}
+        confirmLabel="Import"
+        pendingLabel="Importing…"
+        isPending={importMutation.isPending}
+      >
+        {importError && (
+          <p role="alert" className="text-sm text-destructive">
+            {importError}
+          </p>
+        )}
+      </ConfirmDestructiveDialog>
     </div>
   )
 }

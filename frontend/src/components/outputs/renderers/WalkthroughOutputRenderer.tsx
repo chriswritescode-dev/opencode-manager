@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { memo, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { DiffLines } from '@/components/file-browser/DiffLines'
 import { MarkdownRenderer } from '@/components/file-browser/MarkdownRenderer'
@@ -14,13 +14,12 @@ const HUNK_STATUS_LABELS: Record<ChangeHunk['status'], string> = {
 
 const MARKDOWN_CLASS_NAME = 'p-0!'
 
-function HunkView({
-  hunk,
-  onOpenFile,
-}: {
+interface HunkViewProps {
   hunk: ChangeHunk
   onOpenFile?: (path: string, line?: number) => void
-}): ReactNode {
+}
+
+const HunkView = memo(function HunkView({ hunk, onOpenFile }: HunkViewProps): ReactNode {
   const compact = hunk.text.length === 0
   return (
     <div className="overflow-hidden rounded-md border border-border bg-muted/20">
@@ -55,21 +54,22 @@ function HunkView({
       )}
     </div>
   )
-}
+})
 
 /** Built-in renderer for walkthrough outputs: ordered stops, each explaining its hunks. */
-export function WalkthroughOutputRenderer({
+export const WalkthroughOutputRenderer = memo(function WalkthroughOutputRenderer({
   data,
   onOpenFile,
 }: BuiltinOutputRendererProps): ReactNode {
   const stopRefs = useRef<Array<HTMLElement | null>>([])
-  const parsed = WalkthroughOutputDataSchema.safeParse(data)
+  const walkthrough = useMemo(() => {
+    const parsed = WalkthroughOutputDataSchema.safeParse(data)
+    return parsed.success ? parsed.data : null
+  }, [data])
 
-  if (!parsed.success) {
+  if (!walkthrough) {
     return <p className="text-sm text-muted-foreground">This output's data is invalid</p>
   }
-
-  const walkthrough = parsed.data
 
   return (
     <div className="space-y-6">
@@ -147,4 +147,4 @@ export function WalkthroughOutputRenderer({
       )}
     </div>
   )
-}
+})

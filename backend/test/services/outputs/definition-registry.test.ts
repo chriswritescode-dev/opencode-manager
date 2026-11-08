@@ -2,9 +2,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Database } from 'bun:sqlite'
 import {
   WALKTHROUGH_OUTPUT_DEFINITION,
+  outputParamsKey,
   type OutputDefinitionInput,
 } from '@opencode-manager/shared/schemas'
-import { getOutputDefinitionRow, insertOutputDefinition } from '../../../src/db/outputs'
+import {
+  claimOutputGeneration,
+  getOutputDefinitionRow,
+  insertOutputDefinition,
+  updateOutput,
+} from '../../../src/db/outputs'
 import { migrate } from '../../../src/db/migration-runner'
 import { allMigrations } from '../../../src/db/migrations'
 import { OutputDefinitionRegistry } from '../../../src/services/outputs/definition-registry'
@@ -84,6 +90,44 @@ describe('OutputDefinitionRegistry', () => {
     const error = captureError(() => registry.putGlobal(DEFINITION_ID, definitionInput({ id: 'other' })))
     expect(error.status).toBe(400)
     expect(error.code).toBe('OUTPUT_DEFINITION_INVALID')
+  })
+
+  it('refuses to put or delete a global definition while one of its outputs is generating', () => {
+    registry.createGlobal(definitionInput())
+    const paramsKey = outputParamsKey({})
+    expect(
+      claimOutputGeneration(db, {
+        sessionId: SESSION_ID,
+        definitionId: DEFINITION_ID,
+        params: {},
+        inputHash: 'hash-1',
+        generationId: 'gen-1',
+        outputDir: '/workspace/outputs/ses_a/report/gen-1',
+        model: null,
+        now: Date.now(),
+      }),
+    ).toBe(true)
+
+    const mutations = [
+      () => registry.putGlobal(DEFINITION_ID, definitionInput({ label: 'Updated' })),
+      () => registry.deleteGlobal(DEFINITION_ID),
+    ]
+    for (const mutate of mutations) {
+      const error = captureError(mutate)
+      expect(error.status).toBe(409)
+      expect(error.code).toBe('OUTPUT_DEFINITION_IN_USE')
+      expect(error.message).toBe('An output of this definition is still generating')
+    }
+
+    updateOutput(
+      db,
+      { sessionId: SESSION_ID, definitionId: DEFINITION_ID, paramsKey },
+      ['generating'],
+      { status: 'ready' },
+    )
+
+    expect(registry.putGlobal(DEFINITION_ID, definitionInput({ label: 'Updated' })).label).toBe('Updated')
+    expect(() => registry.deleteGlobal(DEFINITION_ID)).not.toThrow()
   })
 
   it('scopes a session definition to its own session', () => {

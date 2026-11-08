@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { UserOutputDefinitionInputSchema } from '@opencode-manager/shared/schemas'
 import type { OutputDefinition, OutputDefinitionInput } from '@opencode-manager/shared/schemas'
+import { isRecord } from '@opencode-manager/shared/utils'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
@@ -99,10 +100,7 @@ export function OutputDefinitionEditor({ open, onOpenChange, editing, onSaved }:
       return
     }
 
-    const base =
-      typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>)
-        : {}
+    const base = isRecord(parsed) ? parsed : {}
 
     const candidate = {
       ...base,

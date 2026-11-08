@@ -20,6 +20,7 @@ import { filterModelSections } from '@/lib/modelSections'
 import { getServerSessionPath, getSessionPath } from '@/lib/navigation'
 import { randomId } from '@/lib/utils'
 import {
+  DEFAULT_OUTPUT_DEFINITION_ID,
   FusionUnavailableDetailsSchema,
   MULTI_RUN_MAX_MODELS,
   type FuseMultiRunRequest,
@@ -71,7 +72,7 @@ export function MultiRunSheet({ target, directory, defaultBaseRef, open, onOpenC
   const [fusionRequestId, setFusionRequestId] = useState(() => randomId())
   const [pendingDiscard, setPendingDiscard] = useState<PendingDiscard | null>(null)
   const [outputSessionId, setOutputSessionId] = useState<string | null>(null)
-  const [outputDefinitionId, setOutputDefinitionId] = useState('walkthrough')
+  const [outputDefinitionId, setOutputDefinitionId] = useState(DEFAULT_OUTPUT_DEFINITION_ID)
 
   const runsQuery = useMultiRuns(target, open)
   const fuse = useFuseMultiRun(target)
@@ -209,7 +210,7 @@ export function MultiRunSheet({ target, directory, defaultBaseRef, open, onOpenC
                     onWalkthrough={
                       target.kind === 'repo'
                         ? (sessionId) => {
-                            setOutputDefinitionId('walkthrough')
+                            setOutputDefinitionId(DEFAULT_OUTPUT_DEFINITION_ID)
                             setOutputSessionId(sessionId)
                           }
                         : undefined

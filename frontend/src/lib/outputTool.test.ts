@@ -29,6 +29,28 @@ const ocmPart = (
   }
 }
 
+const legacyPart = (
+  input: Record<string, Json>,
+  status: 'running' | 'completed' = 'completed',
+): SessionMessageAssistantTool => ({
+  type: 'tool',
+  id: 't1',
+  name: 'ocm',
+  time: { created: 1 },
+  state:
+    status === 'completed'
+      ? {
+          status: 'completed',
+          input: { action: 'open_walkthrough', params: input },
+          content: [{ type: 'text', text: 'Opened the walkthrough.' }],
+        }
+      : {
+          status: 'running',
+          input: { action: 'open_walkthrough', params: input },
+          metadata: {},
+        },
+})
+
 const assistantMessage = (
   id: string,
   content: SessionMessageAssistant['content'],
@@ -115,6 +137,42 @@ describe('readOpenOutputCall', () => {
     expect(
       readOpenOutputCall(ocmPart({ definitionId: 'walkthrough' }, { action: 'show_artifact' })),
     ).toBeUndefined()
+  })
+
+  it('maps a legacy open_walkthrough call to the walkthrough definition with its source', () => {
+    const part = legacyPart({ source: { kind: 'staged' } })
+
+    expect(readOpenOutputCall(part)).toEqual({
+      id: 't1',
+      definitionId: 'walkthrough',
+      params: { source: { kind: 'staged' } },
+    })
+  })
+
+  it('maps a legacy open_walkthrough call without a source to the walkthrough definition', () => {
+    const part = legacyPart({})
+
+    expect(readOpenOutputCall(part)).toEqual({
+      id: 't1',
+      definitionId: 'walkthrough',
+      params: undefined,
+    })
+  })
+
+  it('drops an invalid legacy open_walkthrough source', () => {
+    const part = legacyPart({ source: { kind: 'unknown' } })
+
+    expect(readOpenOutputCall(part)).toEqual({
+      id: 't1',
+      definitionId: 'walkthrough',
+      params: undefined,
+    })
+  })
+
+  it('ignores an unfinished legacy open_walkthrough call', () => {
+    const part = legacyPart({ source: { kind: 'session' } }, 'running')
+
+    expect(readOpenOutputCall(part)).toBeUndefined()
   })
 })
 

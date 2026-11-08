@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { SandboxedHtmlFrame } from '@/components/ui/sandboxed-html-frame'
 import { OUTPUT_LIMITS } from '@opencode-manager/shared/schemas'
+import type { OutputHostMessage } from '@opencode-manager/shared/schemas'
 import { clampFrameHeight, parseFrameMessage, readOutputThemeTokens } from '@/lib/outputBridge'
 
 export interface OutputTemplateFrameProps {
@@ -24,20 +25,33 @@ export function OutputTemplateFrame({
 }: OutputTemplateFrameProps) {
   const frameRef = useRef<HTMLIFrameElement>(null)
   const hasLoadedRef = useRef(false)
+  const onOpenFileRef = useRef(onOpenFile)
+  const onRefineRef = useRef(onRefine)
   const [height, setHeight] = useState<number>(OUTPUT_LIMITS.FRAME_MIN_HEIGHT)
   const [pendingRefine, setPendingRefine] = useState<string | null>(null)
 
+  useEffect(() => {
+    onOpenFileRef.current = onOpenFile
+  }, [onOpenFile])
+
+  useEffect(() => {
+    onRefineRef.current = onRefine
+  }, [onRefine])
+
   const handleLoad = () => {
     hasLoadedRef.current = true
-    frameRef.current?.contentWindow?.postMessage(
-      { type: 'ui/initialize', data, theme: readOutputThemeTokens() },
-      '*',
-    )
+    const message: OutputHostMessage = {
+      type: 'ui/initialize',
+      data,
+      theme: readOutputThemeTokens(),
+    }
+    frameRef.current?.contentWindow?.postMessage(message, '*')
   }
 
   useEffect(() => {
     if (!hasLoadedRef.current) return
-    frameRef.current?.contentWindow?.postMessage({ type: 'ui/data', data }, '*')
+    const message: OutputHostMessage = { type: 'ui/data', data }
+    frameRef.current?.contentWindow?.postMessage(message, '*')
   }, [data])
 
   useEffect(() => {
@@ -51,18 +65,18 @@ export function OutputTemplateFrame({
       }
 
       if (message.type === 'ui/open-file') {
-        onOpenFile?.(message.path, message.line)
+        onOpenFileRef.current?.(message.path, message.line)
         return
       }
 
-      if (onRefine) {
+      if (onRefineRef.current) {
         setPendingRefine(message.text)
       }
     }
 
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
-  }, [onOpenFile, onRefine])
+  }, [])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">

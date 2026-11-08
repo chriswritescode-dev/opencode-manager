@@ -4,11 +4,7 @@ import path from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import type { FileDiffInfo, SessionInfo } from '@opencode-manager/shared/opencode'
 import type { ChangeSource } from '@opencode-manager/shared/schemas'
-import {
-  DEFAULT_CHANGE_SOURCE,
-  parseChangeSourceKey,
-  changeSourceKey,
-} from '@opencode-manager/shared/schemas'
+import { DEFAULT_CHANGE_SOURCE } from '@opencode-manager/shared/schemas'
 import { OutputError } from '../../../src/services/outputs/output-error'
 import {
   planPullRequestFetch,
@@ -406,31 +402,5 @@ describe('readChanges', () => {
 
     expect(error).toBeInstanceOf(OutputError)
     expect(error).toMatchObject({ status: 413, code: 'OUTPUT_DIFF_TOO_LARGE' })
-  })
-})
-
-describe('changeSourceKey', () => {
-  it('round-trips every source kind', () => {
-    const sources: ChangeSource[] = [
-      { kind: 'session' },
-      { kind: 'uncommitted' },
-      { kind: 'staged' },
-      { kind: 'unstaged' },
-      { kind: 'branch' },
-      { kind: 'branch', base: 'develop' },
-      { kind: 'pullRequest', number: 12 },
-      { kind: 'pullRequest', number: 12, base: 'develop' },
-    ]
-
-    for (const source of sources) {
-      expect(parseChangeSourceKey(changeSourceKey(source))).toEqual(source)
-    }
-  })
-
-  it('rejects invalid keys', () => {
-    expect(parseChangeSourceKey('branch:-x')).toBeNull()
-    expect(parseChangeSourceKey('pr:0:')).toBeNull()
-    expect(parseChangeSourceKey('pr:abc:main')).toBeNull()
-    expect(parseChangeSourceKey('nonsense')).toBeNull()
   })
 })

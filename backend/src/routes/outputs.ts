@@ -31,9 +31,6 @@ function readOutputQuery(c: Context): OutputQueryResult {
   } catch {
     return { ok: false, status: 400, error: 'Invalid params JSON' }
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    return { ok: false, status: 400, error: 'Invalid params JSON' }
-  }
 
   const params = OutputParamsSchema.safeParse(parsed)
   if (!params.success) {

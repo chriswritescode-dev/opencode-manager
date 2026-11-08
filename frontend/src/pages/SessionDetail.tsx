@@ -83,8 +83,10 @@ import { OutputSheet } from "@/components/outputs/OutputSheet";
 import type { OutputOpenRequest } from "@/components/outputs/OutputsPanel";
 import { ToolSidePanel } from "@/components/navigation/ToolSidePanel";
 import type { OutputParams } from "@opencode-manager/shared/schemas";
+import { DEFAULT_OUTPUT_DEFINITION_ID } from "@opencode-manager/shared/schemas";
 import { useToolPanel } from "@/hooks/useToolPanel";
 import { useUrlParams } from "@/hooks/useUrlParams";
+import { useOutputDefinitionParam } from "@/hooks/useOutputDefinitionParam";
 
 const OLDER_HISTORY_SCROLL_THRESHOLD_PX = 200
 
@@ -170,13 +172,8 @@ export function SessionDetail() {
   const { docked, showRail } = useToolPanelLayout();
   const sidePanel = useToolPanel(showRail);
   const { activeTool: activePanelTool, toggleTool: togglePanelTool } = sidePanel;
-  const { searchParams, updateParams } = useUrlParams();
-  const outputDefinitionId = searchParams.get('output') ?? 'walkthrough';
-  const setOutputDefinition = useCallback((definitionId: string) => {
-    updateParams((params) => {
-      params.set('output', definitionId)
-    }, 'replace')
-  }, [updateParams]);
+  const { updateParams } = useUrlParams();
+  const [outputDefinitionId, setOutputDefinition] = useOutputDefinitionParam();
   const { keyboardHeight } = useVisualViewport();
   const inputBottomOffset = isMobile ? keyboardHeight : 0;
   const promptOverlayObserverRef = useRef<ResizeObserver | null>(null);
@@ -396,7 +393,7 @@ export function SessionDetail() {
     setRequestedOutput({ sessionId: sessionId ?? '', definitionId, params });
     openDialogParam(updateParams, 'outputs', { output: definitionId });
   }, [sessionId, updateParams]);
-  const handleShowOutputCommand = useCallback(() => handleShowOutput('walkthrough'), [handleShowOutput]);
+  const handleShowOutputCommand = useCallback(() => handleShowOutput(DEFAULT_OUTPUT_DEFINITION_ID), [handleShowOutput]);
   const outputRequest =
     requestedOutput && requestedOutput.sessionId === (sessionId ?? '')
       ? requestedOutput

@@ -2,6 +2,7 @@ import { rmSync } from 'node:fs'
 import path from 'node:path'
 import type { Database } from 'bun:sqlite'
 import { ENV } from '@opencode-manager/shared/config/env'
+import { logger } from '../../utils/logger'
 import type { Migration } from '../migration-runner'
 
 const LEGACY_WALKTHROUGHS_DIR = 'walkthroughs'
@@ -36,7 +37,7 @@ const migration: Migration = {
     try {
       rmSync(path.join(ENV.WORKSPACE.BASE_PATH, LEGACY_WALKTHROUGHS_DIR), { recursive: true, force: true })
     } catch (error) {
-      void error
+      logger.warn('Failed to remove the legacy walkthroughs directory', error)
     }
   },
 

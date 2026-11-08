@@ -21,8 +21,10 @@ export function outputsQueryKey(sessionId: string, definitionId?: string, params
     : (['outputs', sessionId, definitionId, paramsKey] as const)
 }
 
+export const OUTPUT_DEFINITIONS_QUERY_ROOT = ['output-definitions'] as const
+
 export function outputDefinitionsQueryKey(sessionId?: string) {
-  return ['output-definitions', sessionId ?? 'global'] as const
+  return [...OUTPUT_DEFINITIONS_QUERY_ROOT, sessionId ?? 'global'] as const
 }
 
 export function useOutputHelperSessionIds(): ReadonlySet<string> {
@@ -150,8 +152,8 @@ export function usePromoteOutputDefinition(sessionId: string | undefined) {
       const targetSessionId = sessionId!
       return promoteOutputDefinition({ sessionId: targetSessionId, id, replace })
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['output-definitions'] })
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: OUTPUT_DEFINITIONS_QUERY_ROOT })
     },
   })
 }
