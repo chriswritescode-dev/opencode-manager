@@ -433,4 +433,78 @@ describe('OpenCodeEventStream', () => {
 
     expect(transport.openedUrls).toHaveLength(1)
   })
+
+  it('notifies status listeners without opening a connection on their own', () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+    const onStatus = vi.fn()
+
+    stream.subscribeStatus(onStatus)
+    expect(transport.openedUrls).toHaveLength(0)
+    expect(onStatus).not.toHaveBeenCalled()
+
+    stream.subscribeGlobalMonitor({ directories: [], onEvent: vi.fn() })
+    expect(transport.openedUrls).toHaveLength(1)
+
+    transport.openConnection()
+    expect(onStatus).toHaveBeenLastCalledWith(true)
+
+    transport.fail()
+    expect(onStatus).toHaveBeenLastCalledWith(false)
+  })
+
+  it('stops notifying a status listener after it unsubscribes', () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+    const onStatus = vi.fn()
+
+    const unsubscribe = stream.subscribeStatus(onStatus)
+    stream.subscribeGlobalMonitor({ directories: [], onEvent: vi.fn() })
+    transport.openConnection()
+    expect(onStatus).toHaveBeenCalledWith(true)
+
+    onStatus.mockClear()
+    unsubscribe()
+    transport.fail()
+
+    expect(onStatus).not.toHaveBeenCalled()
+  })
+
+  it('reconnects immediately when reconnectNow is called', () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+    const onStatus = vi.fn()
+
+    stream.subscribeStatus(onStatus)
+    stream.subscribeGlobalMonitor({ directories: [], onEvent: vi.fn() })
+    transport.openConnection()
+    expect(transport.openedUrls).toHaveLength(1)
+    expect(transport.closeCount).toBe(0)
+
+    stream.reconnectNow()
+
+    expect(transport.openedUrls).toHaveLength(2)
+    expect(transport.closeCount).toBe(1)
+
+    transport.openConnection()
+    expect(onStatus).toHaveBeenLastCalledWith(true)
+  })
+
+  it('keeps notifying status listeners when one of them throws', () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+    const throwingListener = vi.fn(() => {
+      throw new Error('status listener failed')
+    })
+    const onStatus = vi.fn()
+
+    stream.subscribeStatus(throwingListener)
+    stream.subscribeStatus(onStatus)
+    stream.subscribeGlobalMonitor({ directories: [], onEvent: vi.fn() })
+
+    transport.openConnection()
+
+    expect(throwingListener).toHaveBeenCalledWith(true)
+    expect(onStatus).toHaveBeenCalledWith(true)
+  })
 })

@@ -44,6 +44,7 @@ export class OpenCodeEventStream {
   private connection: { close(): void } | null = null
   private readonly transport: EventStreamTransport
   private subscribers = new Map<string, Subscriber>()
+  private statusListeners = new Set<EventStreamStatusHandler>()
   private directoryRefCounts = new Map<string, number>()
   private pendingDirectories = new Set<string>()
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null
@@ -90,6 +91,25 @@ export class OpenCodeEventStream {
 
   getHealth(): EventStreamHealthState {
     return this.buildHealth()
+  }
+
+  /**
+   * Registers a connection-status listener without adding a directory subscriber, so observing
+   * connectivity never opens a stream on its own. Returns a function that removes the listener.
+   */
+  subscribeStatus(listener: EventStreamStatusHandler): () => void {
+    this.statusListeners.add(listener)
+    return () => {
+      this.statusListeners.delete(listener)
+    }
+  }
+
+  /**
+   * Drops the current connection and reconnects immediately with the base backoff delay, skipping
+   * the scheduled reconnect wait. It has no effect while no subscriber is registered.
+   */
+  reconnectNow(): void {
+    this.reconnect()
   }
 
   private addSubscriber(input: SubscriberInput): string {
@@ -419,6 +439,14 @@ export class OpenCodeEventStream {
     this.subscribers.forEach((subscriber) => {
       try {
         subscriber.onStatusChange?.(connected)
+      } catch {
+        void 0
+      }
+    })
+
+    this.statusListeners.forEach((listener) => {
+      try {
+        listener(connected)
       } catch {
         void 0
       }

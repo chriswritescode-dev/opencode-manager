@@ -62,6 +62,7 @@ vi.mock('@/contexts/KeyboardShortcutsContext', () => ({
 vi.mock('@/contexts/OpenCodeServerContext', () => ({
   OpenCodeServerProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   isLocalOpenCodeServer: () => true,
+  useRouteOpenCodeServerId: () => 'local',
 }))
 
 vi.mock('@/lib/serviceWorker', () => ({

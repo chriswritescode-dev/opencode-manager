@@ -32,7 +32,7 @@ import { AuthProvider } from './contexts/AuthContext'
 import { QueryCachePersistenceProvider } from './contexts/QueryCachePersistenceContext'
 import { KeyboardShortcutsProvider } from './contexts/KeyboardShortcutsContext'
 import { EventProvider, usePermissions, useEventContext } from '@/contexts/EventContext'
-import { OpenCodeServerProvider, isLocalOpenCodeServer } from '@/contexts/OpenCodeServerContext'
+import { OpenCodeServerProvider, isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { RepoWorktreesProvider } from '@/contexts/RepoWorktreesContext'
 import { SwipeNavigationProvider, useSwipeNavigation } from '@/contexts/SwipeNavigationContext'
 import { PermissionRequestDialog } from './components/session/PermissionRequestDialog'
@@ -47,6 +47,7 @@ import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 import { useGlobalShortcutActions } from '@/hooks/useGlobalShortcutActions'
 import { useSidebarServerRouteSync } from '@/hooks/useSidebarServerSelection'
 import { usePushSubscriptionSessionSync } from '@/hooks/usePushSubscriptionSessionSync'
+import { installConnectivityMonitor, useConnectivityStore } from '@/stores/connectivityStore'
 import { sessionQueryOptions } from '@/hooks/useOpenCode'
 import { RestartServerDialog } from '@/components/settings/RestartServerDialog'
 
@@ -166,6 +167,19 @@ function PushSubscriptionSessionSync() {
   return null
 }
 
+function ConnectivityMonitor() {
+  const { user } = useAuth()
+  const serverId = useRouteOpenCodeServerId()
+
+  useEffect(() => installConnectivityMonitor(), [])
+
+  useEffect(() => {
+    useConnectivityStore.getState().clearInterrupted()
+  }, [user?.id, serverId])
+
+  return null
+}
+
 function ServerScope({ children }: { children: ReactNode }) {
   const { serverId } = useParams<{ serverId: string }>()
 
@@ -266,6 +280,7 @@ export function AppShell() {
           <GlobalShortcuts />
           <SidebarServerRouteSync />
           <PushSubscriptionSessionSync />
+          <ConnectivityMonitor />
           <div className="flex h-dvh w-full min-w-0 flex-col">
             <PwaUpdatePrompt />
             <div ref={rootRef} className="flex flex-1 min-h-0 w-full min-w-0">

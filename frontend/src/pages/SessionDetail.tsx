@@ -70,7 +70,7 @@ import { SourceControlPanel, RemoteSourceControlPanel } from "@/components/sourc
 import { TerminalPanel } from "@/components/terminal/TerminalPanel";
 import { PreviewPanel } from "@/components/preview/PreviewPanel";
 import { SessionSendErrorBanner } from "@/components/session/SessionSendErrorBanner";
-import { ReconnectingBanner } from "@/components/session/ReconnectingBanner";
+import { ConnectivityPill } from "@/components/session/ConnectivityPill";
 import { SessionDetailsSheet } from "@/components/session/SessionDetailsSheet";
 import { BackgroundWorkBar } from "@/components/session/BackgroundWorkBar";
 import { SessionGoalBar } from "@/components/session/SessionGoalBar";
@@ -873,11 +873,11 @@ export function SessionDetail() {
             <SessionMoreButton />
           </Header.Actions>
         </Header>
-        <ReconnectingBanner key={sessionId} connected={streamConnected} />
       </div>
 
       <div className="flex flex-1 min-h-0">
       <div className="relative flex-1 min-w-0 overflow-hidden flex flex-col">
+        <ConnectivityPill serverOffline={isRemoteServer && !remoteServerConnected} />
         <div key={sessionId} data-testid="session-message-scroll" ref={attachMessageContainer} onScroll={handleMessageScroll} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + PROMPT_OVERLAY_CLEARANCE_PX }}>
           {isTranscriptLoading ? (
             <MessageSkeleton />

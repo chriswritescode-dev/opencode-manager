@@ -239,23 +239,15 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
     })
     eventStreamSubscriptionRef.current = subscription
 
-    const handleReconnect = () => {
-      subscription.reconnect()
-    }
-
     const handleVisibilityChange = () => {
       subscription.reportVisibility(document.visibilityState === 'visible', sessionIdRef.current, serverId)
     }
 
     document.addEventListener('visibilitychange', handleVisibilityChange)
-    window.addEventListener('focus', handleReconnect)
-    window.addEventListener('online', handleReconnect)
 
     return () => {
       mountedRef.current = false
       document.removeEventListener('visibilitychange', handleVisibilityChange)
-      window.removeEventListener('focus', handleReconnect)
-      window.removeEventListener('online', handleReconnect)
       subscription.reportVisibility(false, undefined, serverId)
       subscription.dispose()
       if (eventStreamSubscriptionRef.current === subscription) {

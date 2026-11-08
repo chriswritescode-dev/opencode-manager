@@ -9,6 +9,7 @@ import { clearShellExitRecord } from '@/lib/backgroundWork'
 import { useSessionStatus } from '../stores/sessionStatusStore'
 import { useSendErrorStore } from '../stores/sendErrorStore'
 import { showToast } from '@/lib/toast'
+import { openCodeEventStream } from '@/lib/opencode-event-stream'
 
 vi.mock('@/lib/toast', () => ({
   showToast: {
@@ -121,7 +122,7 @@ describe('useSSE', () => {
     await waitFor(() => expect(result.current.isConnected).toBe(false))
 
     act(() => {
-      window.dispatchEvent(new Event('focus'))
+      openCodeEventStream.reconnectNow()
     })
 
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(2))
@@ -138,6 +139,45 @@ describe('useSSE', () => {
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'shells'] })
       expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['opencode', 'session-reconcile'] })
     })
+
+    unmount()
+  })
+
+  it('does not reconnect from passive window focus or online events', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+
+    const { result, unmount } = renderHook(
+      () => useSSE('/repo', 'session-1'),
+      { wrapper: createWrapper(queryClient) }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    await connect(0, 'client-1')
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+    act(() => {
+      MockEventSource.instances[0].onerror?.()
+    })
+
+    await waitFor(() => expect(result.current.isConnected).toBe(false))
+    await act(async () => {})
+
+    act(() => {
+      window.dispatchEvent(new Event('focus'))
+      window.dispatchEvent(new Event('online'))
+    })
+
+    expect(MockEventSource.instances).toHaveLength(1)
+
+    act(() => {
+      openCodeEventStream.reconnectNow()
+    })
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(2))
 
     unmount()
   })
