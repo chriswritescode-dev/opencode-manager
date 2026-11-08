@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import path from "path";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
@@ -10,6 +11,11 @@ export default defineConfig(({ mode }) => {
 
   return {
     envDir: path.resolve(__dirname, ".."),
+    define: {
+      "import.meta.env.VITE_APP_VERSION": JSON.stringify(
+        JSON.parse(readFileSync(path.resolve(__dirname, "../package.json"), "utf8")).version,
+      ),
+    },
     plugins: [
       react(),
       tailwindcss(),
