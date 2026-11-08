@@ -8,6 +8,7 @@ import { AUTH_SOCKET_IP_HEADER } from './client-ip'
 import { devicePairing } from './device-pairing'
 import { closeSessionConnections } from '../services/session-connections'
 import { deletePushSubscriptionsForSession } from '../db/push-subscriptions'
+import { deleteExpoPushTokensForSessions } from '../db/expo-push-tokens'
 
 export type AuthInstance = ReturnType<typeof createAuth>
 
@@ -84,7 +85,10 @@ export function createAuth(db: Database) {
         },
       }),
       devicePairing({
-        onDeviceRevoked: (sessionId) => deletePushSubscriptionsForSession(db, sessionId),
+        onDeviceRevoked: (sessionId) => {
+          deletePushSubscriptionsForSession(db, sessionId)
+          deleteExpoPushTokensForSessions(db, [sessionId])
+        },
       }),
     ],
     session: {

@@ -5,6 +5,7 @@ import { applyClientIpHeaders, resolveSocketIp } from '../auth/client-ip'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { logger } from '../utils/logger'
 import { deletePushSubscriptionsForSessions } from '../db/push-subscriptions'
+import { deleteExpoPushTokensForSessions } from '../db/expo-push-tokens'
 
 export function createAuthRoutes(auth: AuthInstance): Hono {
   const app = new Hono()
@@ -44,7 +45,9 @@ export async function syncAdminFromEnv(auth: AuthInstance, db: Database): Promis
 
       const sessions = await ctx.internalAdapter.listSessions(existingAdmin.id)
       await ctx.internalAdapter.deleteUserSessions(existingAdmin.id)
-      deletePushSubscriptionsForSessions(db, sessions.map((session) => session.id))
+      const sessionIds = sessions.map((session) => session.id)
+      deletePushSubscriptionsForSessions(db, sessionIds)
+      deleteExpoPushTokensForSessions(db, sessionIds)
       logger.info(`Admin password reset from environment for ${adminEmail}`)
       logger.warn('Remove ADMIN_PASSWORD_RESET=true from environment after password reset')
     }

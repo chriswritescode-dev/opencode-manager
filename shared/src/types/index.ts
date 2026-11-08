@@ -59,6 +59,8 @@ import {
   PushSubscriptionRequestSchema,
   PushSubscriptionRecordSchema,
   PushNotificationPayloadSchema,
+  ExpoPushTokenRequestSchema,
+  ExpoPushTokenRecordSchema,
 } from '../schemas/notifications'
 import {
   AssistantNotificationPrioritySchema,
@@ -122,6 +124,8 @@ export type NotificationPreferences = z.infer<typeof NotificationPreferencesSche
 export type PushSubscriptionRequest = z.infer<typeof PushSubscriptionRequestSchema>
 export type PushSubscriptionRecord = z.infer<typeof PushSubscriptionRecordSchema>
 export type PushNotificationPayload = z.infer<typeof PushNotificationPayloadSchema>
+export type ExpoPushTokenRequest = z.infer<typeof ExpoPushTokenRequestSchema>
+export type ExpoPushTokenRecord = z.infer<typeof ExpoPushTokenRecordSchema>
 
 export type AssistantNotificationPriority = z.infer<typeof AssistantNotificationPrioritySchema>
 export type AssistantNotificationRequest = z.infer<typeof AssistantNotificationRequestSchema>

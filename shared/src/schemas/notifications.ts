@@ -54,6 +54,26 @@ export const PushSubscriptionRecordSchema = z.object({
   lastUsedAt: z.number().nullable(),
 });
 
+export const EXPO_PUSH_TOKEN_PATTERN = /^Expo(nent)?PushToken\[.+\]$/
+
+export const ExpoPushTokenRequestSchema = z.object({
+  token: z.string().regex(EXPO_PUSH_TOKEN_PATTERN),
+  deviceName: z.string().optional(),
+})
+
+export const ExpoPushTokenDeleteRequestSchema = z.object({
+  token: z.string().min(1),
+})
+
+export const ExpoPushTokenRecordSchema = z.object({
+  id: z.number(),
+  userId: z.string(),
+  token: z.string(),
+  deviceName: z.string().nullable(),
+  createdAt: z.number(),
+  lastUsedAt: z.number().nullable(),
+})
+
 export const PushNotificationPayloadSchema = z.object({
   title: z.string(),
   body: z.string(),

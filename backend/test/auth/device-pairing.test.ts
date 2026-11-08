@@ -327,6 +327,31 @@ describe('devicePairing', () => {
     ])
   })
 
+  it('removes only the revoked device expo push tokens', async () => {
+    const creatorHeaders = await signUp()
+    const phoneHeaders = await pairPhone(creatorHeaders, 'Chris iPhone')
+    const creatorSession = await auth.api.getSession({ headers: creatorHeaders })
+    const phoneSession = await auth.api.getSession({ headers: phoneHeaders })
+    expect(phoneSession).not.toBeNull()
+
+    const insertToken = db.prepare(
+      `INSERT INTO expo_push_tokens (user_id, token, device_name, session_id, created_at, last_used_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    insertToken.run('default', 'ExpoPushToken[phone]', 'Chris iPhone', phoneSession!.session.id, 1, 1)
+    insertToken.run('default', 'ExpoPushToken[desktop]', 'Desktop', creatorSession!.session.id, 1, 1)
+    insertToken.run('default', 'ExpoPushToken[legacy]', 'Legacy', null, 1, 1)
+
+    const response = await auth.handler(
+      deviceRequest(REVOKE_URL, 'POST', creatorHeaders, { id: phoneSession!.session.id }),
+    )
+
+    expect(response.status).toBe(200)
+    const tokens = (db.prepare('SELECT token FROM expo_push_tokens ORDER BY token').all() as Array<{ token: string }>)
+      .map((row) => row.token)
+    expect(tokens).toEqual(['ExpoPushToken[desktop]', 'ExpoPushToken[legacy]'])
+  })
+
   it('refuses to revoke the current session', async () => {
     const creatorHeaders = await signUp()
     const creatorSession = await auth.api.getSession({ headers: creatorHeaders })
