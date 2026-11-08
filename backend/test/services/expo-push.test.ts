@@ -237,6 +237,53 @@ describe('ExpoPushService.checkDueReceipts', () => {
     db.close()
   })
 
+  it('keeps a due receipt the response omits and checks it on the next sweep', async () => {
+    const db = freshDb()
+    const now = 5_000
+    insertExpoPushReceipts(
+      db,
+      [
+        { receiptId: 'receipt-answered', token: 'ExpoPushToken[answered]', checkAfter: 0 },
+        { receiptId: 'receipt-pending', token: 'ExpoPushToken[pending]', checkAfter: 0 },
+      ],
+      now,
+    )
+    const firstSweep = new ExpoPushService(
+      db,
+      fakeClient({
+        getPushNotificationReceiptsAsync: async (): Promise<Record<string, ExpoPushReceipt>> => ({
+          'receipt-answered': { status: 'ok' },
+        }),
+      }),
+      () => now,
+    )
+
+    expect(await firstSweep.checkDueReceipts()).toEqual({ checked: 1, pruned: 0 })
+    expect(db.prepare('SELECT receipt_id FROM expo_push_receipts').all()).toEqual([
+      { receipt_id: 'receipt-pending' },
+    ])
+
+    registerToken(db, 'ExpoPushToken[pending]', now)
+    const getReceipts = vi.fn(async (): Promise<Record<string, ExpoPushReceipt>> => ({
+      'receipt-pending': {
+        status: 'error',
+        message: 'Device not registered',
+        details: { error: 'DeviceNotRegistered' },
+      },
+    }))
+    const secondSweep = new ExpoPushService(
+      db,
+      fakeClient({ getPushNotificationReceiptsAsync: getReceipts }),
+      () => now,
+    )
+
+    expect(await secondSweep.checkDueReceipts()).toEqual({ checked: 1, pruned: 1 })
+    expect(getReceipts).toHaveBeenCalledWith(['receipt-pending'])
+    expect(countOf(db, 'expo_push_receipts')).toBe(0)
+    expect(countOf(db, 'expo_push_tokens')).toBe(0)
+    db.close()
+  })
+
   it('prunes tokens reported as DeviceNotRegistered and deletes checked receipts', async () => {
     const db = freshDb()
     const now = 5_000

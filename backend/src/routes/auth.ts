@@ -46,8 +46,10 @@ export async function syncAdminFromEnv(auth: AuthInstance, db: Database): Promis
       const sessions = await ctx.internalAdapter.listSessions(existingAdmin.id)
       await ctx.internalAdapter.deleteUserSessions(existingAdmin.id)
       const sessionIds = sessions.map((session) => session.id)
-      deletePushSubscriptionsForSessions(db, sessionIds)
-      deleteExpoPushTokensForSessions(db, sessionIds)
+      db.transaction(() => {
+        deletePushSubscriptionsForSessions(db, sessionIds)
+        deleteExpoPushTokensForSessions(db, sessionIds)
+      })()
       logger.info(`Admin password reset from environment for ${adminEmail}`)
       logger.warn('Remove ADMIN_PASSWORD_RESET=true from environment after password reset')
     }

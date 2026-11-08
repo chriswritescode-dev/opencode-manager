@@ -110,9 +110,11 @@ export class ExpoPushService {
       })
     }
 
-    insertExpoPushReceipts(this.db, receipts, this.now())
-    deleteExpoPushTokensByValue(this.db, expiredTokens)
-    markExpoPushTokensUsed(this.db, deliveredTokens, this.now())
+    this.db.transaction(() => {
+      insertExpoPushReceipts(this.db, receipts, this.now())
+      deleteExpoPushTokensByValue(this.db, expiredTokens)
+      markExpoPushTokensUsed(this.db, deliveredTokens, this.now())
+    })()
 
     return { delivered, expired, failed }
   }
@@ -143,8 +145,9 @@ export class ExpoPushService {
         if (token) expiredTokens.push(token)
       }
 
-      deleteExpoPushReceipts(this.db, chunk)
-      checked += chunk.length
+      const answered = chunk.filter((receiptId) => receipts[receiptId] !== undefined)
+      deleteExpoPushReceipts(this.db, answered)
+      checked += answered.length
     }
 
     const pruned = deleteExpoPushTokensByValue(this.db, expiredTokens)

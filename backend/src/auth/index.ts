@@ -86,8 +86,10 @@ export function createAuth(db: Database) {
       }),
       devicePairing({
         onDeviceRevoked: (sessionId) => {
-          deletePushSubscriptionsForSession(db, sessionId)
-          deleteExpoPushTokensForSessions(db, [sessionId])
+          db.transaction(() => {
+            deletePushSubscriptionsForSession(db, sessionId)
+            deleteExpoPushTokensForSessions(db, [sessionId])
+          })()
         },
       }),
     ],

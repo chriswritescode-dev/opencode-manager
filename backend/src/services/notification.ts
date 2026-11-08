@@ -405,7 +405,11 @@ export class NotificationService {
 
       if (!shouldNotify(notifPrefs)) continue;
 
-      await this.sendToUser(userId, payload);
+      try {
+        await this.sendToUser(userId, payload);
+      } catch (error) {
+        logger.error(`Push delivery failed for user ${userId}:`, error);
+      }
     }
   }
 
@@ -416,6 +420,7 @@ export class NotificationService {
   ): Promise<void> {
     const config = EVENT_CONFIG[event.type];
     if (!config) return;
+    if (this.getAllUserIds().length === 0) return;
 
     const sessionId = resolveEventSessionId(event);
     if (sessionId && sseAggregator.isSessionBeingViewed(sessionId, serverId)) return;
@@ -551,7 +556,7 @@ export class NotificationService {
   countReachableDevices(userId: string): { webPush: number; expo: number } {
     return {
       webPush: this.isConfigured() ? this.getSubscriptions(userId).length : 0,
-      expo: listExpoPushTokens(this.db, userId).length,
+      expo: this.getExpoTokens(userId).length,
     };
   }
 
@@ -561,7 +566,7 @@ export class NotificationService {
   ): Promise<{ delivered: number; expired: number; failed: number; total: number }> {
     const configured = this.isConfigured();
     const subscriptions = configured ? this.getSubscriptions(userId) : [];
-    const expoTokens = listExpoPushTokens(this.db, userId);
+    const expoTokens = this.getExpoTokens(userId);
     const expiredEndpoints: string[] = [];
     let delivered = 0
     let failed = 0
