@@ -8,10 +8,6 @@ export function createInternalNotificationRoutes(notificationService: Notificati
   const limiter = new TokenBucketRateLimiter({ capacity: 10, refillPerMs: 60_000 })
 
   app.post('/send', async (c) => {
-    if (!notificationService.isConfigured()) {
-      return c.json({ error: 'Push notifications are not configured (missing VAPID env)' }, 503)
-    }
-
     const token = (c.req.header('authorization') ?? '').slice('Bearer '.length)
     const limit = limiter.tryConsume(token || 'anon')
     if (!limit.allowed) {
