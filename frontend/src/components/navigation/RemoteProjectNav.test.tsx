@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { IsRestoringProvider, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { OpenCodeProject } from '@/api/opencode'
+import { getServerProjectPath } from '@/lib/navigation'
 import { RemoteProjectNavList } from './RemoteProjectNav'
 
 type SessionFixture = {
@@ -248,7 +249,7 @@ describe('RemoteProjectNavList', () => {
     fireEvent.click(await screen.findByRole('button', { name: /^Alpha/ }))
 
     expect(screen.getByTestId('location')).toHaveTextContent(
-      '/servers/srv_kitchen/projects?directory=%2Fprojects%2Falpha',
+      getServerProjectPath('srv_kitchen', '/projects/alpha'),
     )
   })
 
@@ -288,7 +289,7 @@ describe('RemoteProjectNavList', () => {
     fireEvent.click(await screen.findByText('All sessions'))
 
     expect(screen.getByTestId('location')).toHaveTextContent(
-      '/servers/srv_kitchen/projects?directory=%2Fprojects%2Falpha',
+      getServerProjectPath('srv_kitchen', '/projects/alpha'),
     )
   })
 

@@ -1,24 +1,21 @@
 import { ASSISTANT_REPO_ID, buildServerSessionPath, buildSessionPath } from '@opencode-manager/shared/utils';
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas';
+import { getProjectHubPath } from './projectTarget';
 
 export function getAssistantPath(): string {
   return '/assistant';
 }
 
 export function getAssistantSessionListPath(): string {
-  return '/assistant';
+  return getProjectHubPath({ kind: 'repo', repoId: ASSISTANT_REPO_ID });
 }
 
 export function isAssistantPath(pathname: string): boolean {
   return pathname === '/assistant' || /^\/repos\/[^/]+\/assistant$/.test(pathname);
 }
 
-function isAssistantRepo(repoId: number | string): boolean {
-  return String(repoId) === String(ASSISTANT_REPO_ID);
-}
-
 export function getRepoPath(repoId: number | string): string {
-  return isAssistantRepo(repoId) ? getAssistantPath() : `/repos/${repoId}`;
+  return getProjectHubPath({ kind: 'repo', repoId: Number(repoId) });
 }
 
 export function getSessionPath(repoId: number | string, sessionId: string, options?: { repoTab?: string; serverId?: string }): string {
@@ -33,7 +30,7 @@ export function getServerSessionPath(serverId: string, sessionId: string): strin
 }
 
 export function getServerProjectPath(serverId: string, directory: string): string {
-  return `/servers/${encodeURIComponent(serverId)}/projects?directory=${encodeURIComponent(directory)}`;
+  return getProjectHubPath({ kind: 'server', serverId, directory });
 }
 
 export function parseServerProjectRoute(
@@ -101,14 +98,10 @@ export function parseRepoRoute(pathname: string): { repoId: number | null; secti
 }
 
 export function getSessionListPath(repoId: string | number, isAssistantSession: boolean, tab?: string): string {
-  if (isAssistantSession) {
-    return getAssistantSessionListPath();
-  }
-  const base = `/repos/${String(repoId)}`;
-  if (tab && tab !== 'repo') {
-    return `${base}?repoTab=${tab}`;
-  }
-  return base;
+  return getProjectHubPath(
+    { kind: 'repo', repoId: isAssistantSession ? ASSISTANT_REPO_ID : Number(repoId) },
+    { worktrees: tab === 'workspaces' },
+  );
 }
 
 function isSafeInternalPath(path: string): boolean {

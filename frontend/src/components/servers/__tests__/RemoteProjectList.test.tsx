@@ -3,6 +3,8 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { getServerProjectPath } from '@/lib/navigation'
+import { LocationCatcher } from '@/test/test-utils'
 import { RemoteProjectList } from '../RemoteProjectList'
 
 const mocks = vi.hoisted(() => ({
@@ -129,9 +131,12 @@ function createQueryClient() {
 }
 
 function renderProjectList(serverId = 'srv_kitchen', queryClient = createQueryClient()) {
-  return render(
+  const capturedPathname: { current: string } = { current: '' }
+  const capturedSearch: { current: string } = { current: '' }
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/']}>
+        <LocationCatcher capturedSearch={capturedSearch} capturedPathname={capturedPathname} />
         <Routes>
           <Route path="/" element={<RemoteProjectList serverId={serverId} />} />
           <Route path="/servers/:serverId/projects" element={<div data-testid="project-route" />} />
@@ -140,6 +145,7 @@ function renderProjectList(serverId = 'srv_kitchen', queryClient = createQueryCl
       </MemoryRouter>
     </QueryClientProvider>,
   )
+  return { ...view, capturedPathname, capturedSearch }
 }
 
 describe('RemoteProjectList', () => {
@@ -237,13 +243,15 @@ describe('RemoteProjectList', () => {
 
   it('opens the remote project page when a project card is clicked', async () => {
     const user = userEvent.setup()
-    renderProjectList()
+    const { capturedPathname, capturedSearch } = renderProjectList()
 
     await user.click(await screen.findByText('App'))
 
+    const destination = new URL(getServerProjectPath('srv_kitchen', '/home/me/app'), 'https://example.com')
     await waitFor(() => {
-      expect(screen.getByTestId('project-route')).toBeInTheDocument()
+      expect(capturedPathname.current).toBe(destination.pathname)
     })
+    expect(capturedSearch.current).toBe(destination.search)
   })
 
   it('creates a session in a project directory from the actions menu and navigates to it', async () => {

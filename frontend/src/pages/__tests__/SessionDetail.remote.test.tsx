@@ -294,8 +294,9 @@ describe('SessionDetail remote server mode', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Go back' }))
 
-    expect(capturedPathname.current).toBe('/servers/srv_kitchen/projects')
-    expect(capturedSearch.current).toBe('?directory=%2Fhome%2Fme%2Fapp')
+    const backUrl = new URL(getServerProjectPath('srv_kitchen', '/home/me/app'), 'https://example.com')
+    expect(capturedPathname.current).toBe(backUrl.pathname)
+    expect(capturedSearch.current).toBe(backUrl.search)
   })
 
   it('registers the remote project page as the swipe-back target once the directory resolves', async () => {
@@ -550,7 +551,7 @@ describe('SessionDetail remote server mode', () => {
       | undefined
 
     expect(panelProps?.deleteActiveSessionPath).toBe(
-      '/servers/srv_kitchen/projects?directory=%2Fhome%2Fme%2Fapp',
+      getServerProjectPath('srv_kitchen', '/home/me/app'),
     )
   })
 

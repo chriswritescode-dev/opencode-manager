@@ -9,8 +9,8 @@ describe('getAssistantPath', () => {
 });
 
 describe('getAssistantSessionListPath', () => {
-  it('returns /assistant', () => {
-    expect(getAssistantSessionListPath()).toBe('/assistant');
+  it('returns the Assistant hub path', () => {
+    expect(getAssistantSessionListPath()).toBe('/?menu=sessions&menuProject=repo:0');
   });
 });
 
@@ -37,27 +37,28 @@ describe('isAssistantPath', () => {
 });
 
 describe('getSessionListPath', () => {
-  it('returns repo path for non-assistant sessions', () => {
-    expect(getSessionListPath(42, false)).toBe('/repos/42');
-    expect(getSessionListPath('123', false)).toBe('/repos/123');
+  it('returns the repo hub path for non-assistant sessions', () => {
+    expect(getSessionListPath(42, false)).toBe('/?menu=sessions&menuProject=repo:42');
+    expect(getSessionListPath('123', false)).toBe('/?menu=sessions&menuProject=repo:123');
   });
 
-  it('returns assistant session list path for assistant sessions', () => {
-    expect(getSessionListPath(42, true)).toBe('/assistant');
-    expect(getSessionListPath('123', true)).toBe('/assistant');
+  it('returns the Assistant hub path for assistant sessions', () => {
+    expect(getSessionListPath(42, true)).toBe('/?menu=sessions&menuProject=repo:0');
+    expect(getSessionListPath('123', true)).toBe('/?menu=sessions&menuProject=repo:0');
   });
 
-  it('includes tab param when tab is workspaces', () => {
-    expect(getSessionListPath(42, false, 'workspaces')).toBe('/repos/42?repoTab=workspaces');
+  it('includes the workspaces tab when tab is workspaces', () => {
+    expect(getSessionListPath(42, false, 'workspaces')).toBe(
+      '/?menu=sessions&menuProject=repo:42&repoTab=workspaces',
+    );
+    expect(getSessionListPath(42, true, 'workspaces')).toBe(
+      '/?menu=sessions&menuProject=repo:0&repoTab=workspaces',
+    );
   });
 
-  it('omits tab param for repo/default tab', () => {
-    expect(getSessionListPath(42, false, 'repo')).toBe('/repos/42');
-    expect(getSessionListPath(42, false, undefined)).toBe('/repos/42');
-  });
-
-  it('ignores tab param for assistant sessions', () => {
-    expect(getSessionListPath(42, true, 'workspaces')).toBe('/assistant');
+  it('omits the tab param for repo/default tab', () => {
+    expect(getSessionListPath(42, false, 'repo')).toBe('/?menu=sessions&menuProject=repo:42');
+    expect(getSessionListPath(42, false, undefined)).toBe('/?menu=sessions&menuProject=repo:42');
   });
 });
 
@@ -104,9 +105,10 @@ describe('linked server paths', () => {
 });
 
 describe('getRepoPath', () => {
-  it('routes the assistant repo to the assistant page and others to their repo page', () => {
-    expect(getRepoPath(0)).toBe('/assistant');
-    expect(getRepoPath(5)).toBe('/repos/5');
+  it('routes every repo, including the Assistant, to its hub path', () => {
+    expect(getRepoPath(0)).toBe('/?menu=sessions&menuProject=repo:0');
+    expect(getRepoPath(5)).toBe('/?menu=sessions&menuProject=repo:5');
+    expect(getRepoPath('5')).toBe('/?menu=sessions&menuProject=repo:5');
   });
 });
 
@@ -142,12 +144,12 @@ describe('parseRepoRoute', () => {
 });
 
 describe('linked server project paths', () => {
-  it('builds a project path with encoded server id and directory', () => {
+  it('builds a hub path with the encoded server id and directory', () => {
     expect(getServerProjectPath('srv_kitchen', '/home/me/app')).toBe(
-      '/servers/srv_kitchen/projects?directory=%2Fhome%2Fme%2Fapp'
+      '/?menu=sessions&menuProject=server:srv_kitchen:%252Fhome%252Fme%252Fapp'
     );
     expect(getServerProjectPath('srv a/b', '/srv/my app')).toBe(
-      '/servers/srv%20a%2Fb/projects?directory=%2Fsrv%2Fmy%20app'
+      '/?menu=sessions&menuProject=server:srv%2520a%252Fb:%252Fsrv%252Fmy%2520app'
     );
   });
 
@@ -255,29 +257,39 @@ describe('isSessionDetailRoute', () => {
 
 describe('getSwipeBackTarget', () => {
   describe('session detail routes', () => {
-    it('returns repo path for normal session detail', () => {
-      expect(getSwipeBackTarget('/repos/42/sessions/abc', '')).toBe('/repos/42');
-      expect(getSwipeBackTarget('/repos/123/sessions/xyz-789', '')).toBe('/repos/123');
+    it('returns the repo hub path for a normal session detail', () => {
+      expect(getSwipeBackTarget('/repos/42/sessions/abc', '')).toBe(
+        '/?menu=sessions&menuProject=repo:42'
+      );
+      expect(getSwipeBackTarget('/repos/123/sessions/xyz-789', '')).toBe(
+        '/?menu=sessions&menuProject=repo:123'
+      );
     });
 
-    it('returns assistant session list path for assistant session detail with assistant=1', () => {
+    it('returns the Assistant hub path for assistant session detail with assistant=1', () => {
       expect(getSwipeBackTarget('/repos/42/sessions/abc', '?assistant=1')).toBe(
-        '/assistant'
+        '/?menu=sessions&menuProject=repo:0'
       );
       expect(getSwipeBackTarget('/repos/123/sessions/xyz', '?assistant=1')).toBe(
-        '/assistant'
+        '/?menu=sessions&menuProject=repo:0'
       );
     });
 
-    it('returns repo path when assistant param is not 1', () => {
-      expect(getSwipeBackTarget('/repos/42/sessions/abc', '?assistant=0')).toBe('/repos/42');
-      expect(getSwipeBackTarget('/repos/42/sessions/abc', '?other=value')).toBe('/repos/42');
+    it('returns the repo hub path when assistant param is not 1', () => {
+      expect(getSwipeBackTarget('/repos/42/sessions/abc', '?assistant=0')).toBe(
+        '/?menu=sessions&menuProject=repo:42'
+      );
+      expect(getSwipeBackTarget('/repos/42/sessions/abc', '?other=value')).toBe(
+        '/?menu=sessions&menuProject=repo:42'
+      );
     });
 
-    it('preserves tab param in back target', () => {
-      expect(getSwipeBackTarget('/repos/42/sessions/abc', '?repoTab=workspaces')).toBe('/repos/42?repoTab=workspaces');
+    it('preserves the workspaces tab in the back target', () => {
+      expect(getSwipeBackTarget('/repos/42/sessions/abc', '?repoTab=workspaces')).toBe(
+        '/?menu=sessions&menuProject=repo:42&repoTab=workspaces'
+      );
       expect(getSwipeBackTarget('/repos/42/sessions/abc', '?repoTab=workspaces&assistant=1')).toBe(
-        '/assistant'
+        '/?menu=sessions&menuProject=repo:0&repoTab=workspaces'
       );
     });
   });

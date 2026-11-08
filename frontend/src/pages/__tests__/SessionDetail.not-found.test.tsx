@@ -189,11 +189,12 @@ describe('SessionDetail not-found handling', () => {
       error: new FetchError('Expected a string starting with "ses"', 400),
     })
 
-    const { capturedPathname } = renderSessionDetail()
+    const { capturedPathname, capturedSearch } = renderSessionDetail()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Back to sessions' }))
 
-    expect(capturedPathname.current).toBe('/repos/1')
+    expect(capturedPathname.current).toBe('/')
+    expect(capturedSearch.current).toBe('?menu=sessions&menuProject=repo:1')
     expect(mocks.PromptInput).not.toHaveBeenCalled()
   })
 

@@ -139,7 +139,7 @@ const repoC = createRepo({ id: 3, fullPath: '/repos/c', name: 'Gamma', lastAcces
 
 function LocationDisplay() {
   const location = useLocation()
-  return <div data-testid="location">{location.pathname}</div>
+  return <div data-testid="location">{`${location.pathname}${location.search}`}</div>
 }
 
 function createWrapper(initialEntries: string[]) {
@@ -256,7 +256,7 @@ describe('DesktopSessionTree', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Beta' }))
 
-    expect(screen.getByTestId('location').textContent).toBe('/repos/2')
+    expect(screen.getByTestId('location').textContent).toBe('/?menu=sessions&menuProject=repo:2')
   })
 
   it('navigates to a session and marks it current', async () => {
@@ -280,7 +280,7 @@ describe('DesktopSessionTree', () => {
 
     await user.click(await screen.findByText('All sessions'))
 
-    expect(screen.getByTestId('location').textContent).toBe('/repos/1')
+    expect(screen.getByTestId('location').textContent).toBe('/?menu=sessions&menuProject=repo:1')
   })
 
   it('hides All sessions when there is no next page', async () => {
@@ -327,7 +327,7 @@ describe('DesktopSessionTree', () => {
     expect(fetchedDirectories()).not.toContain('/repos/d')
 
     await user.click(screen.getByRole('button', { name: 'Delta' }))
-    expect(screen.getByTestId('location').textContent).toBe('/repos/4')
+    expect(screen.getByTestId('location').textContent).toBe('/?menu=sessions&menuProject=repo:4')
   })
 
   it('searches as you type across ready repos and clears with Escape', async () => {

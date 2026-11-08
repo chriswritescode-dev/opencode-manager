@@ -8,6 +8,7 @@ import type { ActiveWorkGroups, ActiveWorkItem } from '@/lib/activeWork'
 import { DEFAULT_ACTIVITY_WINDOW_MINUTES } from '@/api/types/settings'
 import { KeyboardShortcutsProvider } from '@/contexts/KeyboardShortcutsContext'
 import { useSidebarServerStore } from '@/stores/sidebarServerStore'
+import { getServerProjectPath, getSessionListPath } from '@/lib/navigation'
 import { LocationCatcher, stubMatchMedia } from '@/test/test-utils'
 import { makeRepo, makeSession } from '@/test/fixtures/session-picker'
 import { SessionPickerSheet } from './SessionPickerSheet'
@@ -290,7 +291,9 @@ describe('SessionPickerSheet', () => {
     fireEvent.mouseDown(screen.getByRole('tab', { name: 'Projects' }))
     fireEvent.click(await screen.findByText('Alpha'))
 
-    expect(location()).toBe('/servers/srv_kitchen/projects?directory=%2Fprojects%2Falpha REPLACE')
+    expect(location()).toBe(
+      `${getServerProjectPath('srv_kitchen', '/projects/alpha')} REPLACE`,
+    )
   })
 
   it('follows the sidebar server selection to list that server', async () => {
@@ -462,7 +465,7 @@ describe('SessionPickerSheet', () => {
     fireEvent.keyDown(combobox, { key: 'd', ctrlKey: true })
 
     await waitFor(() => expect(mocks.deleteSessionMock).toHaveBeenCalled())
-    expect(location()).toBe('/repos/1?repoTab=changes REPLACE')
+    expect(location()).toBe(`${getSessionListPath(1, false, 'changes')} REPLACE`)
   })
 
   it('does not resolve the remote session directory while the sheet is closed', async () => {

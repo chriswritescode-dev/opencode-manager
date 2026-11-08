@@ -3,6 +3,7 @@ import { act, renderHook } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import type { Repo, Session } from '@/api/types'
+import { getSessionListPath, withQueryParam } from '@/lib/navigation'
 import { LocationCatcher } from '@/test/test-utils'
 import {
   useSessionPickerNavigation,
@@ -144,7 +145,7 @@ describe('useSessionPickerNavigation', () => {
         result.current.onSelectRepo(createRepo(2))
       })
 
-      expect(location()).toBe('/repos/2 PUSH')
+      expect(location()).toBe('/?menu=sessions&menuProject=repo:2 PUSH')
     })
 
     it('pushes a prepared path with the panel param and keeps the picker open', () => {
@@ -201,7 +202,9 @@ describe('useSessionPickerNavigation', () => {
         result.current.onDeleteActiveSession()
       })
 
-      expect(location()).toBe('/repos/1?repoTab=changes&panel=sessions PUSH')
+      expect(location()).toBe(
+        `${withQueryParam(getSessionListPath(1, false, 'changes'), 'panel', 'sessions')} PUSH`,
+      )
       expect(onClose).not.toHaveBeenCalled()
     })
   })

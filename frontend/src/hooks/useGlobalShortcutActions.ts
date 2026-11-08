@@ -5,7 +5,6 @@ import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { repoQueryOptions } from '@/lib/repoQuery'
 import { buildToolItems, toolKeyOf } from '@/components/navigation/moreDrawerItems'
 import { useShortcutActions } from '@/contexts/KeyboardShortcutsContext'
-import { dialogSearch } from '@/hooks/useDialogParam'
 import { sessionQueryOptions, useCreateSession } from '@/hooks/useOpenCode'
 import { useMobile } from '@/hooks/useMobile'
 import { useSettingsDialog } from '@/hooks/useSettingsDialog'
@@ -19,12 +18,12 @@ import {
 import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import {
   getAssistantPath,
-  getRepoPath,
   getServerSessionPath,
   getSessionPath,
   isAssistantPath,
   parseRepoRoute,
   parseServerSessionRoute,
+  withQueryParam,
 } from '@/lib/navigation'
 
 /**
@@ -76,8 +75,8 @@ export function useGlobalShortcutActions(): void {
       return
     }
     if (isRemoteRoute || tool === 'files') return
-    const host = repoId !== null ? getRepoPath(repoId) : getAssistantPath()
-    navigate(`${host}${dialogSearch(tool)}`)
+    const host = repoId !== null && repoId !== ASSISTANT_REPO_ID ? `/repos/${repoId}` : getAssistantPath()
+    navigate(withQueryParam(host, 'dialog', tool))
   }, [toolItems, isMobile, togglePanelTool, updateParams, navigate, repoId, isRemoteRoute])
 
   const newSession = sessionDirectory && !createSession.isPending

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { getServerProjectPath } from '@/lib/navigation'
 import { LocationCatcher } from '@/test/test-utils'
 import { GlobalSchedules } from '../GlobalSchedules'
 
@@ -359,9 +360,12 @@ describe('GlobalSchedules run history', () => {
     })
 
     await waitFor(() => {
-      expect(capturedPathname.current).toBe('/servers/srv_kitchen/projects')
+      const destination = new URL(getServerProjectPath('srv_kitchen', '/home/me/app'), 'https://example.com')
+      expect(capturedPathname.current).toBe(destination.pathname)
     })
-    expect(capturedSearch.current).toBe('?directory=%2Fhome%2Fme%2Fapp')
+    expect(capturedSearch.current).toBe(
+      new URL(getServerProjectPath('srv_kitchen', '/home/me/app'), 'https://example.com').search,
+    )
   })
 
   it('keeps the jobs tab visible with the empty state when there are no jobs', () => {
