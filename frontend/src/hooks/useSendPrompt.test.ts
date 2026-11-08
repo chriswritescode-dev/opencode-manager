@@ -41,14 +41,18 @@ vi.mock('../lib/toast', () => ({
   showToast: { error: vi.fn() },
 }))
 
-vi.mock('../lib/opencode-errors', () => ({
-  parseNetworkError: vi.fn((err) => ({
-    title: 'Error',
-    message: err.message,
-    isRetryable: false,
-  })),
-  isGatewayTimeout: vi.fn((err) => err?.statusCode === 524),
-}))
+vi.mock('../lib/opencode-errors', async () => {
+  const actual = await vi.importActual<typeof import('../lib/opencode-errors')>('../lib/opencode-errors')
+  return {
+    ...actual,
+    parseNetworkError: vi.fn((err) => ({
+      title: 'Error',
+      message: err.message,
+      isRetryable: false,
+    })),
+    isGatewayTimeout: vi.fn((err) => err?.statusCode === 524),
+  }
+})
 
 vi.mock('../stores/sendErrorStore', () => ({
   useSendErrorStore: {
@@ -347,6 +351,26 @@ describe('useSendPrompt', () => {
       sessionID: 'session-lost',
       failedPrompt: 'keep this prompt',
       kind: 'network',
+    }))
+  })
+
+  it('stores a non-connectivity send error without the network kind', async () => {
+    mocks.sendPrompt.mockRejectedValueOnce(new FetchError('Bad Request', 400))
+
+    const { result } = renderHookWithProviders()
+
+    await expect(
+      result.current.mutateAsync({
+        sessionID: 'session-bad-request',
+        text: 'invalid prompt',
+      })
+    ).rejects.toThrow('Bad Request')
+
+    expect(mocks.clearStatus).toHaveBeenCalledWith('session-bad-request')
+    expect(mocks.setError).toHaveBeenCalledWith(expect.objectContaining({
+      sessionID: 'session-bad-request',
+      failedPrompt: 'invalid prompt',
+      kind: undefined,
     }))
   })
 

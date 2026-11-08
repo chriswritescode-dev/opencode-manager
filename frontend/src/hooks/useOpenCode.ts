@@ -25,7 +25,7 @@ import { useOpenCodeServerId } from "@/contexts/OpenCodeServerContext";
 import { serverScopedKey } from "@/lib/serverScope";
 import type { ModelRef, SessionInfo } from "@opencode-manager/shared/opencode";
 import { isSameModelRef } from "@opencode-manager/shared/opencode";
-import { parseNetworkError, isGatewayTimeout } from "../lib/opencode-errors";
+import { parseNetworkError, isGatewayTimeout, isConnectivityError } from "../lib/opencode-errors";
 import { showToast } from "../lib/toast";
 import { useSendErrorStore } from "../stores/sendErrorStore";
 import { useSessionStatus, useChildLifecycleForSession } from "../stores/sessionStatusStore";
@@ -531,7 +531,7 @@ export const useSendPrompt = (directory?: string) => {
         message: parsed.message,
         detail: error instanceof FetchError ? error.detail : undefined,
         failedPrompt: text || undefined,
-        kind: 'network',
+        kind: isConnectivityError(error) ? 'network' : undefined,
       });
     },
     onSuccess: (_inbox, variables) => {

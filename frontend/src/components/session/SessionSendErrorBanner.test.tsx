@@ -99,6 +99,18 @@ describe('SessionSendErrorBanner', () => {
     expect(screen.queryByText('Connection Failed')).not.toBeInTheDocument()
   })
 
+  it('renders a non-network error while reconnecting', () => {
+    useSendErrorStore.getState().setError({
+      sessionID: 'test-session',
+      title: 'Bad Request',
+      message: 'Invalid prompt',
+    })
+
+    render(<SessionSendErrorBanner sessionId="test-session" isConnected={false} isReconnecting={true} />)
+    expect(screen.getByText('Bad Request')).toBeInTheDocument()
+    expect(screen.getByText('Invalid prompt')).toBeInTheDocument()
+  })
+
   it('renders a network-kind error when connected and stable', () => {
     useSendErrorStore.getState().setError({
       sessionID: 'test-session',
