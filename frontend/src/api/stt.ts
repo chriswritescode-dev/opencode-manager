@@ -1,5 +1,6 @@
 import { API_BASE_URL } from '@/config'
 import { fetchWrapper, FetchError } from './fetchWrapper'
+import { managerFetch } from './managerFetch'
 
 export interface STTModelsResponse {
   models: string[]
@@ -67,7 +68,7 @@ export const sttApi = {
     signal?.addEventListener('abort', onAbort, { once: true })
 
     try {
-      const response = await fetch(urlObj.toString(), {
+      const response = await managerFetch(urlObj.toString(), {
         method: 'POST',
         body: formData,
         signal: controller.signal,

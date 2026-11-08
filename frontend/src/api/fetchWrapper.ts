@@ -1,5 +1,6 @@
 import { FetchError } from '@opencode-manager/shared'
 import type { ApiErrorResponse } from '@opencode-manager/shared'
+import { managerFetch } from './managerFetch'
 
 export { FetchError }
 
@@ -79,7 +80,7 @@ async function fetchWithTimeout(
   const timeoutId = timeout > 0 ? setTimeout(() => controller.abort(), timeout) : null
 
   try {
-    const response = await fetch(urlObj.toString(), {
+    const response = await managerFetch(urlObj.toString(), {
       credentials: 'include',
       ...fetchOptions,
       signal: controller.signal,

@@ -12,6 +12,7 @@ import { FolderOpen, Upload, RefreshCw, X } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
 import { useMobile } from '@/hooks/useMobile'
 import { getFileApiUrl, useFile } from '@/api/files'
+import { managerFetch } from '@/api/managerFetch'
 
 export interface FileBrowserHandle {
   goBack: () => void
@@ -163,7 +164,7 @@ useEffect(() => {
     setError(null)
     
     try {
-      const response = await fetch(getFileApiUrl(path))
+      const response = await managerFetch(getFileApiUrl(path))
       if (!response.ok) {
         throw new Error(`Failed to load files: ${response.statusText}`)
       }
@@ -241,7 +242,7 @@ useEffect(() => {
   const openFilePath = useCallback(async (path: string) => {
     setLoading(true)
     try {
-      const response = await fetch(getFileApiUrl(path))
+      const response = await managerFetch(getFileApiUrl(path))
       if (!response.ok) {
         throw new Error(`Failed to load file: ${response.statusText}`)
       }
@@ -300,7 +301,7 @@ useEffect(() => {
     formData.append('relativePath', item.relativePath)
     
     try {
-      const response = await fetch(getFileApiUrl(currentPath), {
+      const response = await managerFetch(getFileApiUrl(currentPath), {
         method: 'POST',
         body: formData,
       })
@@ -370,7 +371,7 @@ useEffect(() => {
 
   const handleCreateFile = useCallback(async (name: string, type: 'file' | 'folder') => {
     try {
-      const response = await fetch(getFileApiUrl([currentPath, name].filter(Boolean).join('/')), {
+      const response = await managerFetch(getFileApiUrl([currentPath, name].filter(Boolean).join('/')), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type, content: type === 'file' ? '' : undefined }),
@@ -388,7 +389,7 @@ useEffect(() => {
 
   const handleDelete = useCallback(async (path: string) => {
     try {
-      const response = await fetch(getFileApiUrl(path), {
+      const response = await managerFetch(getFileApiUrl(path), {
         method: 'DELETE',
       })
       
@@ -405,7 +406,7 @@ useEffect(() => {
 
   const handleRename = useCallback(async (oldPath: string, newPath: string) => {
     try {
-      const response = await fetch(getFileApiUrl(oldPath), {
+      const response = await managerFetch(getFileApiUrl(oldPath), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newPath }),

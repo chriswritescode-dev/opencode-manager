@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { FetchError } from '@opencode-manager/shared'
-import { parseNetworkError, isGatewayTimeout } from './opencode-errors'
+import { isConnectivityError, parseNetworkError, isGatewayTimeout } from './opencode-errors'
 
 describe('parseNetworkError', () => {
   it('classifies TypeError("Failed to fetch") as Connection Failed', () => {
@@ -91,6 +91,33 @@ describe('parseNetworkError', () => {
       message: 'The request took too long to complete. Please try again.',
       isRetryable: true,
     })
+  })
+})
+
+describe('isConnectivityError', () => {
+  it('returns true for a fetch network TypeError', () => {
+    expect(isConnectivityError(new TypeError('Failed to fetch'))).toBe(true)
+  })
+
+  it('returns true for a FetchError with statusCode 0', () => {
+    expect(isConnectivityError(new FetchError('Network unreachable', 0))).toBe(true)
+  })
+
+  it('returns false for a FetchError carrying an HTTP status', () => {
+    expect(isConnectivityError(new FetchError('Bad gateway', 502))).toBe(false)
+    expect(isConnectivityError(new FetchError('Request timeout', 408, 'TIMEOUT'))).toBe(false)
+  })
+
+  it('returns false for aborts', () => {
+    expect(isConnectivityError(new DOMException('The operation was aborted.', 'AbortError'))).toBe(false)
+    const abort = new Error('The operation was aborted.')
+    abort.name = 'AbortError'
+    expect(isConnectivityError(abort)).toBe(false)
+  })
+
+  it('returns false for other errors and values', () => {
+    expect(isConnectivityError(new Error('boom'))).toBe(false)
+    expect(isConnectivityError(undefined)).toBe(false)
   })
 })
 

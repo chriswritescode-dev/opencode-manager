@@ -2,6 +2,7 @@ import { ClientError, createOpenCodeApi, openCodeErrorStatus, type OpenCodeApi }
 import { FetchError } from '@opencode-manager/shared'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { API_BASE_URL, OPENCODE_API_ENDPOINT } from '@/config'
+import { managerFetch } from './managerFetch'
 
 const openCodeApis = new Map<string, OpenCodeApi>()
 
@@ -18,7 +19,7 @@ export function getOpenCodeApi(serverId: string = LOCAL_OPENCODE_SERVER_ID): Ope
 
   const api = createOpenCodeApi({
     baseUrl: new URL(openCodeApiBaseUrl(serverId), window.location.origin).toString(),
-    fetch: (input, init) => fetch(input, { ...init, credentials: 'include' }),
+    fetch: (input, init) => managerFetch(input, init),
   })
   openCodeApis.set(serverId, api)
   return api

@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Download, X, Edit3, Save, X as XIcon, WrapText, Eye, Code, ExternalLink, Maximize2 } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
 import { getFileApiUrl } from '@/api/files'
+import { managerFetch } from '@/api/managerFetch'
 import { saveFileFromUrl } from '@/lib/download'
 import { VirtualizedTextView, type VirtualizedTextViewHandle } from '@/components/ui/virtualized-text-view'
 import { SandboxedHtmlFrame } from '@/components/ui/sandboxed-html-frame'
@@ -124,7 +125,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
   }
 
   const saveFileContent = useCallback(async (content: string) => {
-    const response = await fetch(getFileApiUrl(file.path), {
+    const response = await managerFetch(getFileApiUrl(file.path), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'file', content }),

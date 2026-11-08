@@ -4,6 +4,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { API_BASE_URL } from '@/config'
 import { TTSContext, type TTSState, type TTSConfig, type TTSEndReason, type SpeakMessageOptions } from './tts-context'
 import { sanitizeForTTS } from '@/lib/utils'
+import { managerFetch } from '@/api/managerFetch'
 import { getWebSpeechSynthesizer, isWebSpeechSupported } from '@/lib/webSpeechSynthesizer'
 
 export {
@@ -242,7 +243,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
     if (playbackIdRef.current !== playbackId) return null
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/tts/synthesize`, {
+      const response = await managerFetch(`${API_BASE_URL}/api/tts/synthesize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),

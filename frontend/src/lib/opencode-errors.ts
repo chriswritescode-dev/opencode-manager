@@ -11,6 +11,18 @@ export function isGatewayTimeout(error: unknown): boolean {
   return error instanceof FetchError && error.statusCode === 524
 }
 
+/**
+ * Returns true when a request failed without reaching the Manager, either as a
+ * fetch network error or as a {@link FetchError} with no HTTP status.
+ */
+export function isConnectivityError(error: unknown): boolean {
+  if ((error instanceof DOMException || error instanceof Error) && error.name === 'AbortError') {
+    return false
+  }
+  if (error instanceof TypeError) return true
+  return error instanceof FetchError && error.statusCode === 0
+}
+
 export function parseNetworkError(error: unknown): ParsedError {
   if (error instanceof Error) {
     if (error instanceof FetchError) {

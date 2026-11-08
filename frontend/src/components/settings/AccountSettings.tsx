@@ -13,6 +13,7 @@ import { passkey, changePassword } from '@/lib/auth-client'
 import { ConnectDeviceSettings } from './ConnectDeviceSettings'
 import { PairedDevicesSettings } from './PairedDevicesSettings'
 import { RemoteAccessHeadersSettings } from './RemoteAccessHeadersSettings'
+import { managerFetch } from '@/api/managerFetch'
 
 interface Passkey {
   id: string
@@ -37,7 +38,7 @@ export function AccountSettings() {
   const { data: passkeys, isLoading: passkeysLoading } = useQuery({
     queryKey: ['passkeys'],
     queryFn: async () => {
-      const response = await fetch('/api/auth/passkey/list-user-passkeys', {
+      const response = await managerFetch('/api/auth/passkey/list-user-passkeys', {
         credentials: 'include',
       })
       if (!response.ok) return []
