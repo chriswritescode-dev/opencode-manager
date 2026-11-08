@@ -1,160 +1,11 @@
 import { memo, useMemo } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
-import { List, FolderOpen, CalendarClock, Info, History, Bot, GitCommitHorizontal } from 'lucide-react'
+import { useLocation } from 'react-router-dom'
+import { CalendarClock, Info, History } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMobile } from '@/hooks/useMobile'
-import { useMobileTabBar } from '@/hooks/useMobileTabBar'
-import { useUrlParams } from '@/hooks/useUrlParams'
 import { useScheduleUrlState, type ScheduleTab } from '@/hooks/useScheduleUrlState'
-import { useUnreadScheduleRuns } from '@/hooks/useSchedules'
-import { useSidebarServerSelection } from '@/hooks/useSidebarServerSelection'
-import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
-import {
-  getAssistantPath,
-  isAssistantPath,
-  parseRepoRoute,
-  parseServerProjectRoute,
-} from '@/lib/navigation'
-import { openDialogParam } from '@/hooks/useDialogParam'
-
-interface TabDef {
-  key: string
-  label: string
-  icon: React.ElementType
-  onClick: () => void
-  active: boolean
-  badge?: boolean
-}
-
-interface GlobalTabsArgs {
-  pathname: string
-  openSheet: ReturnType<typeof useMobileTabBar>['openSheet']
-  open: ReturnType<typeof useMobileTabBar>['open']
-  close: ReturnType<typeof useMobileTabBar>['close']
-  navigate: ReturnType<typeof useNavigate>
-  isInsideRepo: boolean
-  repoId: number | null
-  serverScope: ServerRouteScope
-  updateParams: ReturnType<typeof useUrlParams>['updateParams']
-  unreadScheduleCount: number
-  localServerSelected: boolean
-}
-
-type TabBarMode = 'hidden' | 'global' | 'schedule'
-
-type ServerRouteScope = 'project' | null
-
-interface MobileTabRouteState {
-  mode: TabBarMode
-  isInsideRepo: boolean
-  repoId: number | null
-  serverScope: ServerRouteScope
-}
-
-function getServerRouteScope(pathname: string, search: string): ServerRouteScope {
-  return parseServerProjectRoute(pathname, search) ? 'project' : null
-}
-
-function getMobileTabRouteState(pathname: string, search: string): MobileTabRouteState {
-  if (isAssistantPath(pathname)) {
-    return { mode: 'global', isInsideRepo: false, repoId: null, serverScope: null }
-  }
-
-  if (pathname === '/' || pathname === '/schedules') {
-    return { mode: 'global', isInsideRepo: false, repoId: null, serverScope: null }
-  }
-
-  const serverScope = getServerRouteScope(pathname, search)
-  if (serverScope !== null) {
-    return { mode: 'global', isInsideRepo: false, repoId: null, serverScope }
-  }
-
-  const { repoId, section: repoSection } = parseRepoRoute(pathname)
-
-  if (repoId === null) {
-    return { mode: 'hidden', isInsideRepo: false, repoId: null, serverScope: null }
-  }
-
-  switch (repoSection) {
-    case null:
-      return { mode: 'global', isInsideRepo: true, repoId, serverScope: null }
-    case 'schedules':
-      return { mode: 'schedule', isInsideRepo: true, repoId, serverScope: null }
-    default:
-      return { mode: 'hidden', isInsideRepo: false, repoId, serverScope: null }
-  }
-}
-
-function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideRepo, repoId, serverScope, updateParams, unreadScheduleCount, localServerSelected }: GlobalTabsArgs): TabDef[] {
-  const openRepoDialog = (dialog: string) => {
-    openDialogParam(updateParams, dialog)
-  }
-
-  const inRepo = isInsideRepo && repoId !== null
-  const inServerRoute = serverScope !== null
-  const filesAreScoped = inRepo || isAssistantPath(pathname)
-  const showsFiles = !inServerRoute && (filesAreScoped || localServerSelected)
-  const showsGit = inRepo || serverScope === 'project'
-  const showsSchedules = !inRepo && serverScope !== 'project'
-
-  const handleFilesClick = () => {
-    if (filesAreScoped) {
-      openRepoDialog('files')
-    } else {
-      open('files')
-    }
-  }
-
-  const handleAssistantClick = () => {
-    close()
-    navigate(getAssistantPath())
-  }
-
-  return [
-    {
-      key: 'sessions',
-      label: 'Sessions',
-      icon: List,
-      onClick: () => open('sessions'),
-      active: openSheet === 'sessions' || (pathname === '/' && !openSheet),
-    },
-    ...(showsFiles
-      ? [{
-          key: 'files',
-          label: 'Files',
-          icon: FolderOpen,
-          onClick: handleFilesClick,
-          active: openSheet === 'files',
-        }]
-      : []),
-    ...(showsGit
-      ? [{
-          key: 'source-control',
-          label: 'Git',
-          icon: GitCommitHorizontal,
-          onClick: () => openRepoDialog('sourceControl'),
-          active: false,
-        }]
-      : []),
-    {
-      key: 'assistant',
-      label: 'Assistant',
-      icon: Bot,
-      onClick: handleAssistantClick,
-      active: isAssistantPath(pathname) && !openSheet,
-    },
-    ...(showsSchedules
-      ? [{
-          key: 'schedules',
-          label: 'Schedules',
-          icon: CalendarClock,
-          onClick: () => navigate('/schedules'),
-          active: pathname === '/schedules' && !openSheet,
-          badge: unreadScheduleCount > 0,
-        }]
-      : []),
-  ]
-}
+import { projectTargetFromRoute } from '@/lib/projectTarget'
+import { getMobileTabRouteState, useTabDestinations, type TabDef } from './tabDestinations'
 
 function buildScheduleTabs(scheduleTab: ScheduleTab, setScheduleTab: (tab: ScheduleTab) => void): TabDef[] {
   return [
@@ -182,13 +33,15 @@ function buildScheduleTabs(scheduleTab: ScheduleTab, setScheduleTab: (tab: Sched
   ]
 }
 
-interface TabBarRowProps {
+interface TabStripProps {
   tabs: TabDef[]
+  className?: string
 }
 
-const TabBarRow = memo(function TabBarRow({ tabs }: TabBarRowProps) {
+/** Presentational tab row shared by the phone tab bar and the side menu tab strip. */
+export const TabStrip = memo(function TabStrip({ tabs, className }: TabStripProps) {
   return (
-    <div className="fixed bottom-0 inset-x-0 z-40 flex border-t border-border bg-card/90 backdrop-blur-sm pb-safe">
+    <div className={cn('flex border-t border-border bg-card/90 backdrop-blur-sm', className)}>
       {tabs.map((tab) => {
         const Icon = tab.icon
         return (
@@ -223,50 +76,19 @@ const TabBarRow = memo(function TabBarRow({ tabs }: TabBarRowProps) {
 
 export const MobileTabBar = memo(function MobileTabBar() {
   const { pathname, search } = useLocation()
-  const navigate = useNavigate()
-  const { openSheet, open, close } = useMobileTabBar()
-  const { updateParams } = useUrlParams()
   const { scheduleTab, setScheduleTab } = useScheduleUrlState()
-  const { data: unreadRuns } = useUnreadScheduleRuns()
   const isMobile = useMobile()
-  const [selectedServerId] = useSidebarServerSelection()
-  const localServerSelected = selectedServerId === LOCAL_OPENCODE_SERVER_ID
-  const routeState = useMemo(() => getMobileTabRouteState(pathname, search), [pathname, search])
-  const unreadScheduleCount = unreadRuns?.total ?? 0
+  const routeMode = useMemo(() => getMobileTabRouteState(pathname, search), [pathname, search])
+  const target = useMemo(() => projectTargetFromRoute(pathname, search), [pathname, search])
+  const destinations = useTabDestinations(target, { inMenu: false })
 
   const tabs = useMemo<TabDef[]>(
-    () => (routeState.mode === 'schedule'
-      ? buildScheduleTabs(scheduleTab, setScheduleTab)
-      : buildGlobalTabs({
-        pathname,
-        openSheet,
-        open,
-        close,
-        navigate,
-        isInsideRepo: routeState.isInsideRepo,
-        repoId: routeState.repoId,
-        serverScope: routeState.serverScope,
-        updateParams,
-        unreadScheduleCount,
-        localServerSelected,
-      })),
-    [
-      routeState,
-      scheduleTab,
-      setScheduleTab,
-      pathname,
-      openSheet,
-      open,
-      close,
-      navigate,
-      updateParams,
-      unreadScheduleCount,
-      localServerSelected,
-    ],
+    () => (routeMode === 'schedule' ? buildScheduleTabs(scheduleTab, setScheduleTab) : destinations),
+    [routeMode, scheduleTab, setScheduleTab, destinations],
   )
 
   if (!isMobile) return null
-  if (routeState.mode === 'hidden') return null
+  if (routeMode === 'hidden') return null
 
-  return <TabBarRow tabs={tabs} />
+  return <TabStrip tabs={tabs} className="fixed bottom-0 inset-x-0 z-40 pb-safe" />
 })

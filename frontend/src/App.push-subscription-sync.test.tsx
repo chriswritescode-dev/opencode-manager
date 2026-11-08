@@ -3,6 +3,7 @@ import { render } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import type { ReactNode } from 'react'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>()
@@ -72,7 +73,11 @@ vi.mock('@/lib/serviceWorker', () => ({
 
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ isAuthenticated: true }) }))
 vi.mock('@/hooks/useGlobalShortcutActions', () => ({ useGlobalShortcutActions: vi.fn() }))
-vi.mock('@/hooks/useSidebarServerSelection', () => ({ useSidebarServerRouteSync: vi.fn() }))
+vi.mock('@/hooks/useSidebarServerSelection', () => ({
+  useSidebarServerRouteSync: vi.fn(),
+  useSidebarServerSelection: () => [LOCAL_OPENCODE_SERVER_ID, vi.fn()],
+}))
+vi.mock('@/hooks/useSchedules', () => ({ useUnreadScheduleRuns: () => ({ data: undefined }) }))
 vi.mock('@/hooks/useOpenCodeFailureToast', () => ({ useOpenCodeFailureToast: vi.fn() }))
 vi.mock('@/hooks/useOpenCode', () => ({
   sessionQueryOptions: () => ({ queryKey: ['session'], queryFn: async () => null, enabled: false }),

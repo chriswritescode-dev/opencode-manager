@@ -158,7 +158,7 @@ describe('MobileTabBar', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('mobileTab=files')
   })
 
-  it('navigates to /assistant when assistant is clicked from repo context', async () => {
+  it('opens the side menu on the assistant project when assistant is clicked from repo context', async () => {
     vi.mocked(useMobile).mockReturnValue(true)
     const queryClient = new QueryClient()
     const user = userEvent.setup()
@@ -177,10 +177,12 @@ describe('MobileTabBar', () => {
     )
 
     await user.click(screen.getByRole('button', { name: 'Assistant' }))
-    expect(screen.getByTestId('location')).toHaveTextContent('/assistant')
+    expect(screen.getByTestId('location')).toHaveTextContent('/repos/123')
+    expect(screen.getByTestId('location')).toHaveTextContent('menu=sessions')
+    expect(screen.getByTestId('location')).toHaveTextContent('menuProject=repo%3A0')
   })
 
-  it('navigates to assistant route when assistant is clicked without repo id', async () => {
+  it('opens the side menu on the assistant project when assistant is clicked without repo id', async () => {
     vi.mocked(useMobile).mockReturnValue(true)
     const queryClient = new QueryClient()
     const user = userEvent.setup()
@@ -199,7 +201,9 @@ describe('MobileTabBar', () => {
     )
 
     await user.click(screen.getByRole('button', { name: 'Assistant' }))
-    expect(screen.getByTestId('location')).toHaveTextContent('/assistant')
+    expect(screen.getByTestId('location')).toHaveTextContent('/schedules')
+    expect(screen.getByTestId('location')).toHaveTextContent('menu=sessions')
+    expect(screen.getByTestId('location')).toHaveTextContent('menuProject=repo%3A0')
   })
 
   it('hides the tab bar on a linked server page path', () => {
@@ -255,7 +259,7 @@ describe('MobileTabBar', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('dialog=sourceControl')
   })
 
-  it('opens the sessions sheet from the Sessions tab on a linked server project page', async () => {
+  it('opens the sessions side menu from the Sessions tab on a linked server project page', async () => {
     vi.mocked(useMobile).mockReturnValue(true)
     const queryClient = new QueryClient()
     const user = userEvent.setup()
@@ -274,7 +278,8 @@ describe('MobileTabBar', () => {
     )
 
     await user.click(screen.getByRole('button', { name: 'Sessions' }))
-    expect(screen.getByTestId('location')).toHaveTextContent('mobileTab=sessions')
+    expect(screen.getByTestId('location')).toHaveTextContent('menu=sessions')
+    expect(screen.getByTestId('location')).toHaveTextContent('menuProject=server%3A')
   })
 
   it('does not render tab bar on a linked server session path', () => {
@@ -368,12 +373,12 @@ describe('MobileTabBar', () => {
     expect(sessionsButton).toHaveClass('border-primary')
   })
 
-  it('Sessions tab is active when openSheet is sessions regardless of pathname', () => {
+  it('Sessions tab is active when menu is sessions regardless of pathname', () => {
     vi.mocked(useMobile).mockReturnValue(true)
     const queryClient = new QueryClient()
     render(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/repos/123?mobileTab=sessions']}>
+        <MemoryRouter initialEntries={['/repos/123?menu=sessions']}>
           <MobileTabBar />
         </MemoryRouter>
       </QueryClientProvider>,

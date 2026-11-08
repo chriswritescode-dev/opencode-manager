@@ -3,16 +3,19 @@ import { vi } from 'vitest'
 vi.mock('@/hooks/useNotificationsAction', () => ({ useNotificationsAction: vi.fn() }))
 vi.mock('@/hooks/useAuth', () => ({ useAuth: vi.fn() }))
 vi.mock('@/api/repos', () => ({ getRepo: vi.fn() }))
+vi.mock('@/hooks/useSchedules', () => ({ useUnreadScheduleRuns: vi.fn(() => ({ data: undefined })) }))
 
 import { useEffect } from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, useLocation } from 'react-router-dom'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { SideMenu } from './SideMenu'
 import { useAuth } from '@/hooks/useAuth'
 import { useNotificationsAction } from '@/hooks/useNotificationsAction'
 import { getRepo } from '@/api/repos'
+import { useSidebarServerStore } from '@/stores/sidebarServerStore'
 
 function LocationSpy({ search }: { search: { current: string } }) {
   const location = useLocation()
@@ -66,6 +69,7 @@ describe('SideMenu', () => {
       logout: vi.fn(),
     } as unknown as ReturnType<typeof useAuth>)
     vi.mocked(getRepo).mockReturnValue(new Promise(() => {}))
+    useSidebarServerStore.setState({ serverId: LOCAL_OPENCODE_SERVER_ID })
   })
 
   it('opens the menu from the menu URL param', () => {
@@ -123,11 +127,38 @@ describe('SideMenu', () => {
   })
 
   it('opens a dialog row and closes the menu in one URL update', async () => {
-    const search = renderSideMenu('/?menu=home')
+    const search = renderSideMenu('/repos/1?menu=home')
+
+    fireEvent.click(screen.getByRole('button', { name: 'MCP' }))
+
+    await waitFor(() => expect(search.current).toContain('dialog=mcp'))
+    expect(search.current).not.toContain('menu=')
+  })
+
+  it('pins the project tabs and drops their menu rows on a repo session route', () => {
+    renderSideMenu('/repos/1/sessions/abc?menu=home')
+
+    expect(screen.getAllByRole('button', { name: 'Files' })).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Git' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Assistant' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Source Control' })).not.toBeInTheDocument()
+  })
+
+  it('follows the menu project in the pinned tab strip', () => {
+    renderSideMenu('/repos/1/sessions/abc?menu=home&menuProject=repo:0')
+
+    expect(screen.getAllByRole('button', { name: 'Files' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Schedules' })).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Git' })).not.toBeInTheDocument()
+  })
+
+  it('opens the menu project Files dialog from the pinned tab and keeps the menu project', async () => {
+    const search = renderSideMenu('/repos/1/sessions/abc?menu=home&menuProject=repo:2')
 
     fireEvent.click(screen.getByRole('button', { name: 'Files' }))
 
     await waitFor(() => expect(search.current).toContain('dialog=files'))
+    expect(search.current).toContain('menuProject=repo%3A2')
     expect(search.current).not.toContain('menu=')
   })
 

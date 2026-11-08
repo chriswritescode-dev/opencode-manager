@@ -14,6 +14,8 @@ import { useSideMenu } from '@/hooks/useSideMenu'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { NotificationsBadge } from '@/components/notifications/NotificationsBadge'
 import { buildNavModel, isManagerOnlyNavItem, type NavItem } from './navItems'
+import { TabStrip } from './MobileTabBar'
+import { getMobileTabRouteState, useTabDestinations } from './tabDestinations'
 
 export interface SideMenuContentProps {
   variant: 'overlay' | 'docked'
@@ -22,6 +24,8 @@ export interface SideMenuContentProps {
 }
 
 const ACCOUNT_ITEM_KEYS: ReadonlySet<string> = new Set(['settings', 'logout'])
+
+const TAB_ROW_KEYS: ReadonlySet<string> = new Set(['files', 'source-control', 'schedules'])
 
 const ITEM_GROUPS: ReadonlyArray<{ label: string; keys: ReadonlySet<string> }> = [
   { label: 'Workspace', keys: new Set(['files', 'source-control', 'terminal', 'preview', 'walkthrough']) },
@@ -75,6 +79,7 @@ function MenuRow({ icon: Icon, label, onClick, danger, trailing }: MenuRowProps)
 export function SideMenuContent({ variant, fullWidth, onClose }: SideMenuContentProps) {
   const location = useLocation()
   const { project, page, setPage } = useSideMenu()
+  const menuTabs = useTabDestinations(project, { inMenu: true })
   const { updateParams } = useUrlParams()
   const { logout } = useAuth()
   const { count, destructive, label, press } = useNotificationsAction()
@@ -136,11 +141,13 @@ export function SideMenuContent({ variant, fullWidth, onClose }: SideMenuContent
 
   const items = buildNavModel(navPathForProject(project)).items
   const visibleItems = (project?.kind === 'server' ? items.filter((item) => !isManagerOnlyNavItem(item)) : items)
+    .filter((item) => !TAB_ROW_KEYS.has(item.key))
     .filter((item) => item.key !== 'logout' || location.pathname === '/')
   const groupedKeys = new Set([...ACCOUNT_ITEM_KEYS, ...ITEM_GROUPS.flatMap(({ keys }) => [...keys])])
   const navigationItems = visibleItems.filter((item) => !groupedKeys.has(item.key))
   const accountItems = visibleItems.filter((item) => ACCOUNT_ITEM_KEYS.has(item.key))
   const itemsInGroup = (keys: ReadonlySet<string>) => visibleItems.filter((item) => keys.has(item.key))
+  const showTabStrip = variant === 'docked' || getMobileTabRouteState(location.pathname, location.search) === 'hidden'
 
   return (
     <div data-variant={variant} className="flex min-h-0 flex-1 flex-col">
@@ -234,6 +241,9 @@ export function SideMenuContent({ variant, fullWidth, onClose }: SideMenuContent
           </div>
         )}
       </div>
+      {showTabStrip && (
+        <TabStrip tabs={menuTabs} className="shrink-0 pb-[calc(env(safe-area-inset-bottom)+0.25rem)]" />
+      )}
     </div>
   )
 }
