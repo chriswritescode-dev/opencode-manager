@@ -465,6 +465,10 @@ describe('hasUnmatchedActiveDirectory', () => {
   it('is false for an empty index', () => {
     expect(hasUnmatchedActiveDirectory(new Map(), [repoA])).toBe(false)
   })
+
+  it('is false when the only indexed directory is a chat root', () => {
+    expect(hasUnmatchedActiveDirectory(indexFor('/workspace/chats/20260101-120000-abcdef'), [repoA])).toBe(false)
+  })
 })
 
 describe('buildActiveWork', () => {
@@ -513,6 +517,20 @@ describe('buildActiveWork', () => {
     const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [repoA], sessions, parents: new Map(), roots: emptyRoots, outcomes: new Map() })
 
     expect(groups.recent).toEqual([])
+  })
+
+  it('emits a chat root with its chat path and no repo or server', () => {
+    const chatId = '20260101-120000-abcdef'
+    const sessions = [createSession('chat-root', NOW - 1000, `/workspace/chats/${chatId}`)]
+
+    const groups = buildActiveWork({ now: NOW, windowMs: WINDOW_MS, repos: [repoA], sessions, parents: new Map(), roots: emptyRoots, outcomes: new Map() })
+
+    expect(groups.recent.map((item) => item.session.id)).toEqual(['chat-root'])
+    expect(groups.recent[0].repo).toBeNull()
+    expect(groups.recent[0].serverId).toBeNull()
+    expect(groups.recent[0].serverName).toBeNull()
+    expect(groups.recent[0].worktreeBranch).toBeNull()
+    expect(groups.recent[0].path).toBe(`/chats/${chatId}/sessions/chat-root`)
   })
 
   it('resolves a repo by local path and trims trailing slashes', () => {
@@ -773,6 +791,17 @@ describe('needsWorktreeLookup', () => {
       needsWorktreeLookup({
         ...base,
         sessions: [createSession('matched', NOW - 1000, '/repos/a')],
+        parents: new Map(),
+        roots: emptyRoots,
+      }),
+    ).toBe(false)
+  })
+
+  it('returns false for a chat session updated inside the window', () => {
+    expect(
+      needsWorktreeLookup({
+        ...base,
+        sessions: [createSession('chat-root', NOW - 1000, '/workspace/chats/20260101-120000-abcdef')],
         parents: new Map(),
         roots: emptyRoots,
       }),

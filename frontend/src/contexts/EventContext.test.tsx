@@ -231,12 +231,12 @@ function createWrapper(queryClient = createTestQueryClient(), initialPath = '/')
 }
 
 function CacheResolutionHarness({ sessionID }: { sessionID: string }) {
-  const { getRepoIdForSession } = useEventContext()
-  const repoId = getRepoIdForSession(sessionID)
+  const { getLocalSessionPath } = useEventContext()
+  const sessionPath = getLocalSessionPath(sessionID)
 
   return (
     <div>
-      <div data-testid="repo-id">{repoId ?? 'none'}</div>
+      <div data-testid="session-path">{sessionPath ?? 'none'}</div>
     </div>
   )
 }
@@ -1440,7 +1440,7 @@ describe('EventProvider permissions and forms', () => {
     render(<CacheResolutionHarness sessionID="ses-infinite" />, { wrapper: createWrapper(queryClient) })
 
     await waitFor(() => {
-      expect(screen.getByTestId('repo-id')).toHaveTextContent('123')
+      expect(screen.getByTestId('session-path')).toHaveTextContent('/repos/123/sessions/ses-infinite')
     })
   })
 
@@ -1463,7 +1463,30 @@ describe('EventProvider permissions and forms', () => {
     render(<CacheResolutionHarness sessionID="ses-detail" />, { wrapper: createWrapper(queryClient) })
 
     await waitFor(() => {
-      expect(screen.getByTestId('repo-id')).toHaveTextContent('123')
+      expect(screen.getByTestId('session-path')).toHaveTextContent('/repos/123/sessions/ses-detail')
+    })
+  })
+
+  it('resolves a chat session to its chat route without a repo', async () => {
+    const chatId = '20260101-120000-abcdef'
+    const directory = `/workspace/chats/${chatId}`
+    const queryClient = createTestQueryClient()
+
+    queryClient.setQueryData(
+      ['opencode', 'session', 'ses-chat', directory],
+      {
+        id: 'ses-chat',
+        projectID: 'proj-1',
+        title: 'Chat Session',
+        location: { directory },
+        time: { created: 1000, updated: 1000 },
+      },
+    )
+
+    render(<CacheResolutionHarness sessionID="ses-chat" />, { wrapper: createWrapper(queryClient) })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-path')).toHaveTextContent(`/chats/${chatId}/sessions/ses-chat`)
     })
   })
 
@@ -1499,7 +1522,7 @@ describe('EventProvider permissions and forms', () => {
     render(<CacheResolutionHarness sessionID="ses-second" />, { wrapper: createWrapper(queryClient) })
 
     await waitFor(() => {
-      expect(screen.getByTestId('repo-id')).toHaveTextContent('456')
+      expect(screen.getByTestId('session-path')).toHaveTextContent('/repos/456/sessions/ses-second')
     })
   })
 

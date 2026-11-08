@@ -8,6 +8,7 @@ import {
   getSessionListPath,
   getSessionPath,
   parseActivePickerSession,
+  parseChatSessionRoute,
   parseRepoRoute,
   withQueryParam,
 } from '@/lib/navigation'
@@ -50,6 +51,7 @@ export function useSessionPickerNavigation({
   const navigate = useNavigate()
   const { pathname, search } = useLocation()
   const currentRepoId = parseRepoRoute(pathname).repoId
+  const isChatSessionRoute = parseChatSessionRoute(pathname) !== null
   const { sessionId: activeSessionID, serverId: activeServerId } = parseActivePickerSession(pathname)
   const searchParams = new URLSearchParams(search)
   const isAssistantSession = searchParams.get('assistant') === '1'
@@ -99,6 +101,10 @@ export function useSessionPickerNavigation({
       open(deleteActiveSessionPath)
       return
     }
+    if (isChatSessionRoute) {
+      open('/')
+      return
+    }
     if (currentRepoId === null) {
       if (!isPanelMode) onClose()
       return
@@ -108,6 +114,7 @@ export function useSessionPickerNavigation({
     currentRepoId,
     deleteActiveSessionPath,
     isAssistantSession,
+    isChatSessionRoute,
     isPanelMode,
     onClose,
     open,

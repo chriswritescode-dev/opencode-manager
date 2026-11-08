@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SessionDetailsSheet, type SessionDetailsSheetProps } from './SessionDetailsSheet'
@@ -249,5 +249,22 @@ describe('SessionDetailsSheet', () => {
 
     expect(screen.getByRole('dialog')).toHaveAccessibleName('Session details')
     expect(screen.getByText('feat/header')).toBeInTheDocument()
+  })
+
+  it('confirms the optional delete action', async () => {
+    const user = userEvent.setup()
+    const onDeleteSession = vi.fn(() => Promise.resolve())
+    renderSheet({ onDeleteSession })
+
+    await user.click(screen.getByRole('button', { name: 'Delete chat session' }))
+    await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+    await waitFor(() => expect(onDeleteSession).toHaveBeenCalledTimes(1))
+  })
+
+  it('omits the delete action without a delete handler', () => {
+    renderSheet()
+
+    expect(screen.queryByRole('button', { name: 'Delete chat session' })).not.toBeInTheDocument()
   })
 })

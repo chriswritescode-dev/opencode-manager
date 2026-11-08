@@ -5,6 +5,7 @@ import { SessionStatusIndicator } from '@/components/ui/session-status-indicator
 import { RepoActivityIndicator } from '@/components/activity/RepoActivityIndicator'
 import { useForms, usePermissions } from '@/contexts/EventContext'
 import { useCreateSession } from '@/hooks/useOpenCode'
+import { useCreateChat } from '@/hooks/useChats'
 import { useRepoSiblings } from '@/hooks/useRepoSiblings'
 import { useSidebarRepoGroups } from '@/hooks/useSidebarRepoGroups'
 import { buildWorktreeActivity, type ActiveWorktree } from '@/lib/activeWork'
@@ -298,6 +299,40 @@ export function RepoSessionNavList({
   )
 }
 
+interface GroupActionButtonProps {
+  title: string
+  ariaLabel: string
+  isPending: boolean
+  onClick: () => void
+}
+
+function GroupActionButton({ title, ariaLabel, isPending, onClick }: GroupActionButtonProps) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={ariaLabel}
+      aria-busy={isPending}
+      disabled={isPending}
+      onClick={onClick}
+      className="group/new flex w-11 shrink-0 cursor-pointer items-center justify-center outline-none disabled:cursor-default"
+    >
+      <span
+        className={cn(
+          'flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
+          'group-hover/new:bg-accent group-hover/new:text-primary',
+          'group-focus-visible/new:ring-[3px] group-focus-visible/new:ring-ring/50',
+          'group-data-[current=true]/repo:bg-primary group-data-[current=true]/repo:text-primary-foreground',
+          'group-data-[current=true]/repo:group-hover/new:bg-primary/90 group-data-[current=true]/repo:group-hover/new:text-primary-foreground',
+          'group-disabled/new:opacity-60',
+        )}
+      >
+        {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+      </span>
+    </button>
+  )
+}
+
 interface NewSessionButtonProps {
   directory: string
   label: string
@@ -321,31 +356,26 @@ export function NewSessionButton({
     serverId,
   )
 
-  const isCreating = createSession.isPending
+  return (
+    <GroupActionButton
+      title="New session"
+      ariaLabel={`New session in ${label}`}
+      isPending={createSession.isPending}
+      onClick={() => createSession.mutate({ agent: undefined })}
+    />
+  )
+}
+
+export function NewChatButton({ onOpenSession }: { onOpenSession: (path: string) => void }) {
+  const createChat = useCreateChat(onOpenSession)
 
   return (
-    <button
-      type="button"
-      title="New session"
-      aria-label={`New session in ${label}`}
-      aria-busy={isCreating}
-      disabled={isCreating}
-      onClick={() => createSession.mutate({ agent: undefined })}
-      className="group/new flex w-11 shrink-0 cursor-pointer items-center justify-center outline-none disabled:cursor-default"
-    >
-      <span
-        className={cn(
-          'flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
-          'group-hover/new:bg-accent group-hover/new:text-primary',
-          'group-focus-visible/new:ring-[3px] group-focus-visible/new:ring-ring/50',
-          'group-data-[current=true]/repo:bg-primary group-data-[current=true]/repo:text-primary-foreground',
-          'group-data-[current=true]/repo:group-hover/new:bg-primary/90 group-data-[current=true]/repo:group-hover/new:text-primary-foreground',
-          'group-disabled/new:opacity-60',
-        )}
-      >
-        {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-      </span>
-    </button>
+    <GroupActionButton
+      title="New chat"
+      ariaLabel="New chat"
+      isPending={createChat.isPending}
+      onClick={() => createChat.mutate({})}
+    />
   )
 }
 

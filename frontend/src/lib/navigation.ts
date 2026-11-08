@@ -1,4 +1,4 @@
-import { ASSISTANT_REPO_ID, buildServerSessionPath, buildSessionPath } from '@opencode-manager/shared/utils';
+import { ASSISTANT_REPO_ID, buildChatSessionPath, buildServerSessionPath, buildSessionPath } from '@opencode-manager/shared/utils';
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas';
 
 export function getAssistantPath(): string {
@@ -30,6 +30,10 @@ export function getSessionPath(repoId: number | string, sessionId: string, optio
 
 export function getServerSessionPath(serverId: string, sessionId: string): string {
   return buildServerSessionPath(serverId, sessionId);
+}
+
+export function getChatSessionPath(chatId: string, sessionId: string): string {
+  return buildChatSessionPath(chatId, sessionId);
 }
 
 export function getServerProjectPath(serverId: string, directory: string): string {
@@ -65,6 +69,15 @@ export function parseServerSessionRoute(pathname: string): { serverId: string; s
   return { serverId, sessionId };
 }
 
+export function parseChatSessionRoute(pathname: string): { chatId: string; sessionId: string } | null {
+  const match = /^\/chats\/([^/]+)\/sessions\/([^/]+)$/.exec(pathname);
+  if (!match) return null;
+  const chatId = decodePathSegment(match[1]);
+  const sessionId = decodePathSegment(match[2]);
+  if (chatId === null || sessionId === null) return null;
+  return { chatId, sessionId };
+}
+
 /**
  * Reads the session route in view, whether it belongs to the local server or a linked one.
  *
@@ -76,6 +89,10 @@ export function parseActivePickerSession(pathname: string): { sessionId?: string
   if (repoRoute.sessionId) {
     return { sessionId: repoRoute.sessionId, serverId: LOCAL_OPENCODE_SERVER_ID };
   }
+  const chatSessionRoute = parseChatSessionRoute(pathname);
+  if (chatSessionRoute) {
+    return { sessionId: chatSessionRoute.sessionId, serverId: LOCAL_OPENCODE_SERVER_ID };
+  }
   const serverSessionRoute = parseServerSessionRoute(pathname);
   if (!serverSessionRoute) return {};
   return { sessionId: serverSessionRoute.sessionId, serverId: serverSessionRoute.serverId };
@@ -83,7 +100,9 @@ export function parseActivePickerSession(pathname: string): { sessionId?: string
 
 export function isSessionDetailRoute(pathname: string): boolean {
   const normalizedPathname = pathname.replace(/\/+$/, '');
-  return /^\/repos\/[^/]+\/sessions\/[^/]+$/.test(normalizedPathname) || parseServerSessionRoute(normalizedPathname) !== null;
+  return /^\/repos\/[^/]+\/sessions\/[^/]+$/.test(normalizedPathname)
+    || parseServerSessionRoute(normalizedPathname) !== null
+    || parseChatSessionRoute(normalizedPathname) !== null;
 }
 
 export function parseRepoRoute(pathname: string): { repoId: number | null; section: string | null; sessionId: string | null } {
@@ -141,6 +160,11 @@ export function getSwipeBackTarget(pathname: string, search = ''): string | null
 
   const serverSession = parseServerSessionRoute(pathname);
   if (serverSession) {
+    return '/';
+  }
+
+  const chatSession = parseChatSessionRoute(pathname);
+  if (chatSession) {
     return '/';
   }
 

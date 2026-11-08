@@ -5,7 +5,7 @@ import type { PermissionRequest } from '@opencode-manager/shared/opencode'
 
 const mocks = vi.hoisted(() => ({
   usePermissions: vi.fn(),
-  getRepoIdForSession: vi.fn(),
+  getLocalSessionPath: vi.fn(),
   sessionQueryOptions: vi.fn(),
   navigateToCurrent: vi.fn(),
   PermissionRequestDialog: vi.fn(),
@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/contexts/EventContext', () => ({
   usePermissions: mocks.usePermissions,
-  useEventContext: () => ({ getRepoIdForSession: mocks.getRepoIdForSession }),
+  useEventContext: () => ({ getLocalSessionPath: mocks.getLocalSessionPath }),
 }))
 
 vi.mock('@/hooks/useOpenCode', () => ({ sessionQueryOptions: mocks.sessionQueryOptions }))
@@ -89,19 +89,19 @@ describe('PermissionDialogWrapper', () => {
     mocks.PermissionRequestDialog.mockReturnValue(<div data-testid="permission-dialog" />)
   })
 
-  it('offers the session for a linked-server permission without a Manager repo lookup', () => {
-    mocks.getRepoIdForSession.mockReturnValue(null)
+  it('offers the session for a linked-server permission without a local path lookup', () => {
+    mocks.getLocalSessionPath.mockReturnValue(null)
 
     const props = renderWrapper(remotePermission)
 
     expect(props.permission).toEqual(remotePermission)
     expect(props.onOpenSession).toBe(mocks.navigateToCurrent)
-    expect(mocks.getRepoIdForSession).not.toHaveBeenCalled()
+    expect(mocks.getLocalSessionPath).not.toHaveBeenCalled()
     expect(mocks.sessionQueryOptions).toHaveBeenCalledWith('ses_remote', '/srv/app', 'srv_kitchen')
   })
 
   it('resolves the remote session title from the permission server', async () => {
-    mocks.getRepoIdForSession.mockReturnValue(null)
+    mocks.getLocalSessionPath.mockReturnValue(null)
 
     renderWrapper(remotePermission)
 
@@ -111,18 +111,28 @@ describe('PermissionDialogWrapper', () => {
     })
   })
 
-  it('offers the session for a local permission resolved through its Manager repo', () => {
-    mocks.getRepoIdForSession.mockReturnValue(12)
+  it('offers the session for a local permission resolved through its repo', () => {
+    mocks.getLocalSessionPath.mockReturnValue('/repos/12/sessions/ses_local')
 
     const props = renderWrapper(localPermission)
 
     expect(props.onOpenSession).toBe(mocks.navigateToCurrent)
-    expect(mocks.getRepoIdForSession).toHaveBeenCalledWith('ses_local')
+    expect(mocks.getLocalSessionPath).toHaveBeenCalledWith('ses_local')
     expect(mocks.sessionQueryOptions).toHaveBeenCalledWith('ses_local', '/srv/app', 'local')
   })
 
-  it('hides the session action for a local permission without a Manager repo', () => {
-    mocks.getRepoIdForSession.mockReturnValue(null)
+  it('offers the session for a local permission resolved through its chat', () => {
+    const chatId = '20260101-120000-abcdef'
+    mocks.getLocalSessionPath.mockReturnValue(`/chats/${chatId}/sessions/ses_local`)
+
+    const props = renderWrapper(localPermission)
+
+    expect(props.onOpenSession).toBe(mocks.navigateToCurrent)
+    expect(mocks.getLocalSessionPath).toHaveBeenCalledWith('ses_local')
+  })
+
+  it('hides the session action for a local permission without a repo or chat', () => {
+    mocks.getLocalSessionPath.mockReturnValue(null)
 
     const props = renderWrapper(localPermission)
 

@@ -38,6 +38,8 @@ const {
   sessionPinsData,
   sessionsHasNextPage,
   searchError,
+  listChatsMock,
+  createChatMock,
 } = vi.hoisted(() => ({
   listReposMock: vi.fn(),
   getRepoSiblingsMock: vi.fn(),
@@ -51,6 +53,8 @@ const {
   sessionPinsData: { current: [] as SessionPinFixture[] },
   sessionsHasNextPage: { current: false },
   searchError: { current: false },
+  listChatsMock: vi.fn(),
+  createChatMock: vi.fn(),
 }))
 
 vi.mock('@/api/repos', async (importOriginal) => {
@@ -62,6 +66,11 @@ vi.mock('@/api/opencode', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/opencode')>()
   return { ...actual, getSession: getSessionMock }
 })
+
+vi.mock('@/api/chats', () => ({
+  listChats: listChatsMock,
+  createChat: createChatMock,
+}))
 
 vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/hooks/useOpenCode')>()
@@ -187,6 +196,9 @@ describe('DesktopSessionTree', () => {
     sessionPinsData.current = []
     sessionsHasNextPage.current = false
     searchError.current = false
+    listChatsMock.mockReset()
+    listChatsMock.mockResolvedValue({ chats: [] })
+    createChatMock.mockReset()
   })
 
   it('lists every repo by last access, even inside a repo, with no Recent section', async () => {
@@ -197,8 +209,66 @@ describe('DesktopSessionTree', () => {
       .getAllByRole('button', { name: /^Show sessions in / })
       .map((button) => button.getAttribute('aria-label'))
 
-    expect(names).toEqual(['Show sessions in Gamma', 'Show sessions in Alpha', 'Show sessions in Beta'])
+    expect(names).toEqual([
+      'Show sessions in Chats',
+      'Show sessions in Gamma',
+      'Show sessions in Alpha',
+      'Show sessions in Beta',
+    ])
     expect(screen.queryByText('Recent')).toBeNull()
+  })
+
+  it('puts the Chats group above the Assistant and every repository', async () => {
+    listReposMock.mockResolvedValue([
+      repoA,
+      createRepo({ id: 0, fullPath: '/assistant', name: 'Assistant' }),
+    ])
+
+    render(<DesktopSessionTree />, { wrapper: createWrapper(['/']) })
+
+    await screen.findByText('Assistant')
+    const names = screen
+      .getAllByRole('button', { name: /^Show sessions in / })
+      .map((button) => button.getAttribute('aria-label'))
+
+    expect(names).toEqual([
+      'Show sessions in Chats',
+      'Show sessions in Assistant',
+      'Show sessions in Alpha',
+    ])
+  })
+
+  it('opens the newest chat from the Chats group header', async () => {
+    const user = userEvent.setup()
+    listChatsMock.mockResolvedValue({
+      chats: [
+        {
+          id: '20240103120000-aaaaaa',
+          directory: '/chats/a',
+          filesPath: '/chats/a',
+          createdAt: 1000,
+        },
+      ],
+    })
+    sessionsData.push(createSession('chat1', '/chats/a'))
+
+    render(<DesktopSessionTree />, { wrapper: createWrapper(['/']) })
+
+    await screen.findByRole('button', { name: /^Session chat1/ })
+    await user.click(screen.getByRole('button', { name: 'Chats' }))
+
+    expect(screen.getByTestId('location').textContent).toBe(
+      '/chats/20240103120000-aaaaaa/sessions/chat1',
+    )
+  })
+
+  it('shows no Chats group for a linked server', async () => {
+    useSidebarServerStore.setState({ serverId: 'srv_remote' })
+
+    render(<DesktopSessionTree />, { wrapper: createWrapper(['/']) })
+
+    expect(await screen.findByText('Server not found')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Show sessions in Chats' })).toBeNull()
   })
 
   it('opens the active repo by default and lazily fetches only its sessions', async () => {

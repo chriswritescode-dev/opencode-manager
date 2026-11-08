@@ -3,7 +3,7 @@ import { spawnSync } from 'child_process'
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { ENV, getAssistantOpenCodeDir, getForgeWorktreesPath, getOpenCodeAgentTmpPath, getOpenCodeGlobalSkillsPath, getOpenCodeToolOutputPath, getOpenCodeWorktreesPath, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
+import { ENV, getAssistantOpenCodeDir, getChatsPath, getForgeWorktreesPath, getOpenCodeAgentTmpPath, getOpenCodeGlobalSkillsPath, getOpenCodeToolOutputPath, getOpenCodeWorktreesPath, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
 import { unwrapSandboxExecCommand } from '@opencode-manager/shared/utils'
 import {
   SESSION_SANDBOX_NAME_PATTERN,
@@ -35,6 +35,7 @@ import {
   sandboxDockerDataVolumeName,
   sandboxMountRoots,
   sandboxNetworkPolicyMismatch,
+  sandboxProjectRoots,
   sandboxVmMountRoots,
   sessionSandboxName,
   type SandboxVmSpec,
@@ -241,6 +242,14 @@ describe('sandbox command builders', () => {
     expect(entrypointIndex).toBeGreaterThan(-1)
     expect(args[entrypointIndex + 1]).toBe('/usr/bin/env')
     expect(args.indexOf(ENV.SANDBOX.IMAGE)).toBeGreaterThan(entrypointIndex + 1)
+  })
+
+  it('includes the chats root in the sandbox project roots', () => {
+    const roots = sandboxProjectRoots()
+
+    expect(roots).toContain(getChatsPath())
+    expect(roots).toContain(getReposPath())
+    expect(sandboxMountRoots()).toContain(getChatsPath())
   })
 
   it('mounts only the worktree, skills, tool-output, and agent tmp directories from outside the repo roots', () => {

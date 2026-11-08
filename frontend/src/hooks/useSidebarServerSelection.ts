@@ -3,11 +3,13 @@ import { useLocation, useMatch } from 'react-router-dom'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { useAuth } from '@/hooks/useAuth'
 import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
-import { isAssistantPath, parseRepoRoute } from '@/lib/navigation'
+import { isAssistantPath, parseChatSessionRoute, parseRepoRoute } from '@/lib/navigation'
 import { useSidebarServerStore } from '@/stores/sidebarServerStore'
 
 function isLocalRoute(pathname: string): boolean {
-  return parseRepoRoute(pathname).repoId !== null || isAssistantPath(pathname)
+  return parseRepoRoute(pathname).repoId !== null
+    || isAssistantPath(pathname)
+    || parseChatSessionRoute(pathname) !== null
 }
 
 /**

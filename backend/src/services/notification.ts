@@ -25,13 +25,17 @@ import { getScheduleRunBySessionId, isQuietScheduleRunSession } from "../db/sche
 import { ensurePushSubscriptionsTable } from "../db/push-subscriptions";
 import { isAuthSessionActive } from "../db/auth-sessions";
 import type { Repo } from "../types/repo";
-import { buildServerSessionPath, buildSessionPath } from "@opencode-manager/shared/utils";
+import { buildChatSessionPath, buildServerSessionPath, buildSessionPath } from "@opencode-manager/shared/utils";
 import { sessionIDFromEvent } from "@opencode-manager/shared/opencode";
 import { resolveRepoForDirectory } from "./repo";
 import type { SessionGoalOutcome } from "./goal-outcomes";
 
 export interface NotificationServerRegistry {
   get(serverId: string): Pick<OpenCodeServer, "name" | "enabled"> | null;
+}
+
+export interface ChatDirectoryResolver {
+  findByDirectory(directory: string): Promise<{ id: string } | null>;
 }
 
 interface VapidConfig {
@@ -122,8 +126,12 @@ export function buildScheduleRunReportUrl(runId: number): string {
 
 export function buildNotificationUrl(
   repo: Pick<Repo, "id"> | null,
-  sessionId: string | undefined
+  sessionId: string | undefined,
+  chat?: { id: string } | null
 ): string {
+  if (chat) {
+    return sessionId ? buildChatSessionPath(chat.id, sessionId) : "/";
+  }
   if (!repo) return "/";
   if (!sessionId) return `/repos/${repo.id}`;
   return buildSessionPath(repo.id, sessionId);
@@ -132,6 +140,7 @@ export function buildNotificationUrl(
 export function buildEventNotificationPayload(
   event: Pick<SSEEvent, "type" | "data">,
   context: {
+    displayName?: string;
     repoName?: string;
     repoId?: number;
     serverId?: string;
@@ -147,7 +156,7 @@ export function buildEventNotificationPayload(
   const title = config.titleFn(event.data);
 
   const detail = config.bodyFn(event.data);
-  const displayName = context.repoName ?? context.serverName;
+  const displayName = context.displayName ?? context.repoName ?? context.serverName;
   const rawBody = displayName
     ? `${displayName} · ${detail}`
     : detail;
@@ -185,7 +194,8 @@ export class NotificationService {
 
   constructor(
     private db: Database,
-    private serverRegistry: NotificationServerRegistry | null = null
+    private serverRegistry: NotificationServerRegistry | null = null,
+    private chatService: ChatDirectoryResolver | null = null
   ) {
     this.settingsService = new SettingsService(db);
     ensurePushSubscriptionsTable(db);
@@ -393,12 +403,16 @@ export class NotificationService {
     }
 
     const repo = directory ? await resolveRepoForDirectory(this.db, directory) : null;
+    const chat = !repo && directory
+      ? (await this.chatService?.findByDirectory(directory)) ?? null
+      : null;
     const repoId = repo?.id;
     const repoName = repo ? getRepoName(repo) : undefined;
     const reportUrl = RUN_OUTCOME_EVENTS.has(event.type) ? this.getScheduleRunReportUrl(sessionId) : null;
-    const url = reportUrl ?? buildNotificationUrl(repo, sessionId);
+    const url = reportUrl ?? buildNotificationUrl(repo, sessionId, chat);
 
     const payload = buildEventNotificationPayload(event, {
+      displayName: repoName ?? (chat ? "Chat" : undefined),
       repoName,
       repoId,
       sessionId,
@@ -454,9 +468,12 @@ export class NotificationService {
     const repo = !isRemote && outcome.directory
       ? await resolveRepoForDirectory(this.db, outcome.directory)
       : null;
+    const chat = !isRemote && !repo && outcome.directory
+      ? (await this.chatService?.findByDirectory(outcome.directory)) ?? null
+      : null;
     const server = isRemote ? this.serverRegistry?.get(outcome.serverId) ?? null : null;
     const repoName = repo ? getRepoName(repo) : undefined;
-    const displayName = repoName ?? server?.name;
+    const displayName = repoName ?? (chat ? "Chat" : undefined) ?? server?.name;
 
     const payload: PushNotificationPayload = {
       title: getGoalStatusTitle(goal.status),
@@ -474,7 +491,7 @@ export class NotificationService {
         serverName: server?.name,
         url: isRemote
           ? buildServerSessionPath(outcome.serverId, outcome.sessionId)
-          : buildNotificationUrl(repo, outcome.sessionId),
+          : buildNotificationUrl(repo, outcome.sessionId, chat),
       },
     };
 

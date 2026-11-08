@@ -9,11 +9,14 @@ import { X, CornerUpLeft, GitBranch, ArrowDown, Server } from "lucide-react";
 import { SquareFill } from "@/components/ui/square-fill";
 import { Header } from "@/components/ui/header";
 import { Badge } from "@/components/ui/badge";
-import { getServerProjectPath, getSessionListPath, getSessionPath } from '@/lib/navigation'
+import { getChatSessionPath, getServerProjectPath, getSessionListPath, getSessionPath } from '@/lib/navigation'
 import { FetchError } from '@/api/fetchWrapper'
+import { useChat, useDeleteChatSession } from '@/hooks/useChats'
+import type { TerminalTarget } from '@/lib/terminal-target'
 
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { NotFoundState } from "@/components/ui/not-found-state";
+import { parseNetworkError } from '@/lib/opencode-errors';
 import { useSession, useInterruptSession, useUpdateSession, useCreateSession } from "@/hooks/useOpenCode";
 import { useSessionTranscript } from "@/hooks/useSessionTranscript";
 import { useAutoOpenWalkthrough } from "@/hooks/useAutoOpenWalkthrough";
@@ -129,12 +132,13 @@ function isSessionNotFoundError(error: unknown): boolean {
 export function SessionDetail() {
   const serverId = useOpenCodeServerId();
   const isRemoteServer = !isLocalOpenCodeServer(serverId);
-  const { id, sessionId } = useParams<{ id: string; sessionId: string }>();
+  const { id, chatId, sessionId } = useParams<{ id?: string; chatId?: string; sessionId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
   const swipeNav = useSwipeNavigation();
+  const isChatSession = chatId !== undefined;
   const repoId = Number(id) || 0;
-  const isAssistantSession = new URLSearchParams(location.search).get('assistant') === '1';
+  const isAssistantSession = !isChatSession && new URLSearchParams(location.search).get('assistant') === '1';
   const { preferences, updateSettings } = useSettings();
   const { open: openSettings, openTab: openSettingsTab } = useSettingsDialog();
   const messageContainerRef = useRef<HTMLDivElement>(null);
@@ -191,10 +195,13 @@ export function SessionDetail() {
 
   const { data: repo, isLoading: repoLoading } = useQuery({
     ...repoQueryOptions(repoId),
-    enabled: id !== undefined && !isRemoteServer,
+    enabled: id !== undefined && !isRemoteServer && !isChatSession,
   });
 
-  useRepoActivity(repoId, Boolean(repo) && !isRemoteServer);
+  useRepoActivity(repoId, Boolean(repo) && !isRemoteServer && !isChatSession);
+
+  const { data: chat, isLoading: chatLoading, isError: chatFailed, error: chatError } = useChat(chatId);
+  const { mutateAsync: deleteChatSessionAsync } = useDeleteChatSession();
 
   const repoDirectory = repo?.fullPath;
   const [resolvedSessionDirectory, setResolvedSessionDirectory] = useState<{ sessionId: string; directory: string } | null>(null);
@@ -203,7 +210,9 @@ export function SessionDetail() {
       ? resolvedSessionDirectory.directory
       : undefined
   );
-  const sessionDirectory = isRemoteServer ? resolvedDirectory : resolvedDirectory ?? repoDirectory;
+  const sessionDirectory = isChatSession
+    ? chat?.directory
+    : isRemoteServer ? resolvedDirectory : resolvedDirectory ?? repoDirectory;
   const remoteProjectBackPath = isRemoteServer && sessionDirectory
     ? getServerProjectPath(serverId, sessionDirectory)
     : '/';
@@ -216,7 +225,7 @@ export function SessionDetail() {
     };
   }, [isRemoteServer, remoteProjectBackPath, swipeNav]);
 
-  const { data: repoSiblings } = useRepoSiblings(!isAssistantSession && !isRemoteServer && repo && !repo.isWorktree ? repoId : undefined);
+  const { data: repoSiblings } = useRepoSiblings(!isChatSession && !isAssistantSession && !isRemoteServer && repo && !repo.isWorktree ? repoId : undefined);
 
   const { servers: linkedServers } = useOpenCodeServers({ enabled: isRemoteServer });
 
@@ -230,8 +239,8 @@ export function SessionDetail() {
   const remoteProjectDisplayName = remoteProject ? remoteProjectName(remoteProject) : undefined;
 
   const sessionBranch = useMemo(
-    () => (repo && !isAssistantSession ? resolveSessionBranch(repo, sessionDirectory, repoSiblings) : null),
-    [repo, isAssistantSession, sessionDirectory, repoSiblings],
+    () => (repo && !isAssistantSession && !isChatSession ? resolveSessionBranch(repo, sessionDirectory, repoSiblings) : null),
+    [repo, isAssistantSession, isChatSession, sessionDirectory, repoSiblings],
   );
 
   const { data: remoteVcsInfo } = useVcsInfo(sessionDirectory, serverId, { enabled: isRemoteServer });
@@ -364,7 +373,7 @@ export function SessionDetail() {
   }, [lastAssistantMessage, transcriptStatus])
   const hasIncompleteMessages = lastAssistantMessage ? lastAssistantMessage.time.completed === undefined : false;
   const isStreamingResponse = hasIncompleteMessages && isSessionActive;
-  const workspaceBasePath = repo?.localPath;
+  const workspaceBasePath = isChatSession ? chat?.filesPath : repo?.localPath;
 
   useAutoPlayLastResponse({
     sessionId: sessionId ?? '',
@@ -400,7 +409,7 @@ export function SessionDetail() {
   useAutoOpenWalkthrough({
     sessionId,
     messages,
-    enabled: docked && !isRemoteServer,
+    enabled: docked && !isRemoteServer && !isChatSession,
     loading: messagesLoading,
     onOpen: handleShowWalkthrough,
   });
@@ -446,16 +455,22 @@ export function SessionDetail() {
     retry: false,
   })
 
+  const buildSessionRoute = useCallback((targetSessionId: string) => (
+    chatId !== undefined
+      ? getChatSessionPath(chatId, targetSessionId)
+      : getSessionPath(repoId, targetSessionId, { serverId })
+  ), [chatId, repoId, serverId]);
+
   const handleNewSession = useCallback(async () => {
     try {
       const newSession = await createSessionAsync({ agent: undefined });
       if (newSession?.id) {
-        navigate(getSessionPath(repoId, newSession.id, { serverId }));
+        navigate(buildSessionRoute(newSession.id));
       }
     } catch {
       showToast.error('Failed to create new session');
     }
-  }, [createSessionAsync, navigate, repoId, serverId]);
+  }, [createSessionAsync, navigate, buildSessionRoute]);
 
   const { mutateAsync: undoMessageAsync } = useUndoMessage({
     sessionId: sessionId ?? '',
@@ -514,7 +529,7 @@ export function SessionDetail() {
       const forkedSession = await forkSession(sessionId, messageID, serverId);
       if (forkedSession?.id) {
         setMessagePickerMode(null);
-        navigate(getSessionPath(repoId, forkedSession.id, { serverId }));
+        navigate(buildSessionRoute(forkedSession.id));
         if (messageID) {
           const chosenMessage = forkPickerMessages?.find((message) => message.id === messageID);
           if (chosenMessage?.type === 'user') {
@@ -526,7 +541,7 @@ export function SessionDetail() {
     } catch (error) {
       showToast.error(`Fork failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }, [sessionId, forkPickerMessages, navigate, repoId, serverId]);
+  }, [sessionId, serverId, forkPickerMessages, navigate, buildSessionRoute]);
 
   const openTimelinePicker = useCallback(() => setMessagePickerMode('timeline'), []);
 
@@ -542,13 +557,17 @@ export function SessionDetail() {
   }, []);
 
   const handleCloseSession = useCallback(() => {
+    if (isChatSession) {
+      navigate('/')
+      return
+    }
     if (isRemoteServer) {
       navigate(remoteProjectBackPath)
       return
     }
     const tab = new URLSearchParams(location.search).get('repoTab') ?? undefined;
     navigate(getSessionListPath(repoId, isAssistantSession, tab))
-  }, [navigate, repoId, isAssistantSession, isRemoteServer, remoteProjectBackPath, location.search])
+  }, [navigate, repoId, isAssistantSession, isChatSession, isRemoteServer, remoteProjectBackPath, location.search])
 
   const handleOpenModelDialog = useCallback(() => {
     promptInputRef.current?.openModelPicker();
@@ -561,13 +580,19 @@ export function SessionDetail() {
   };
 
   const handleFileClick = useCallback((filePath: string) => {
-    setSelectedFilePath(getWorkspaceFilePath(filePath, {
-      directory: sessionDirectory,
-      repoFullPath: repo?.fullPath,
-      repoLocalPath: repo?.localPath,
-    }))
+    setSelectedFilePath(getWorkspaceFilePath(filePath, isChatSession
+      ? {
+        directory: sessionDirectory,
+        repoFullPath: chat?.directory,
+        repoLocalPath: chat?.filesPath,
+      }
+      : {
+        directory: sessionDirectory,
+        repoFullPath: repo?.fullPath,
+        repoLocalPath: repo?.localPath,
+      }))
     setFileBrowserOpen(true)
-  }, [repo?.fullPath, repo?.localPath, sessionDirectory, setFileBrowserOpen]);
+  }, [chat?.directory, chat?.filesPath, isChatSession, repo?.fullPath, repo?.localPath, sessionDirectory, setFileBrowserOpen]);
 
   const renameSession = useCallback(async (title: string) => {
     if (!sessionId) throw new Error('No active session');
@@ -586,6 +611,12 @@ export function SessionDetail() {
     }
   }, [renameSession]);
 
+  const handleDeleteChatSession = useCallback(async () => {
+    if (!chatId || !sessionId || !chat?.directory) return;
+    await deleteChatSessionAsync({ chatId, sessionId, directory: chat.directory });
+    navigate('/');
+  }, [chat?.directory, chatId, deleteChatSessionAsync, navigate, sessionId]);
+
   const handleFileBrowserClose = useCallback(() => setFileBrowserOpen(false), [setFileBrowserOpen]);
 
   const filesVisible = fileBrowserOpen || sidePanel.activeTool === 'files';
@@ -594,14 +625,14 @@ export function SessionDetail() {
   }, [filesVisible]);
 
   const handleChildSessionClick = useCallback((childSessionId: string) => {
-    navigate(getSessionPath(repoId, childSessionId, { serverId }))
-  }, [navigate, repoId, serverId]);
+    navigate(buildSessionRoute(childSessionId))
+  }, [navigate, buildSessionRoute]);
 
   const handleParentSessionClick = useCallback(() => {
     if (session?.parentID) {
-      navigate(getSessionPath(repoId, session.parentID, { serverId }))
+      navigate(buildSessionRoute(session.parentID))
     }
-  }, [navigate, repoId, session?.parentID, serverId]);
+  }, [navigate, session?.parentID, buildSessionRoute]);
 
   const handleToggleDetails = useCallback(() => {
     const newValue = !preferences?.expandToolCalls
@@ -742,7 +773,32 @@ export function SessionDetail() {
     return <Navigate to="/" replace />;
   }
 
-  if (!isAssistantSession && !isRemoteServer && repoLoading) {
+  if (isChatSession && chatLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-background via-background to-background">
+        <div className="flex flex-col items-center gap-2">
+          <div className="w-8 h-8 animate-spin rounded-full border-2 border-muted border-t-foreground" />
+          <span className="text-muted-foreground">Loading chat...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (isChatSession && chatFailed && !chat) {
+    return (
+      <NotFoundState
+        message={parseNetworkError(chatError).message}
+        backTo="/"
+        backLabel="Back to chats"
+      />
+    );
+  }
+
+  if (isChatSession && !chat) {
+    return <NotFoundState message="Chat not found" backTo="/" backLabel="Back to chats" />;
+  }
+
+  if (!isAssistantSession && !isRemoteServer && !isChatSession && repoLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-background via-background to-background">
         <div className="flex flex-col items-center gap-2">
@@ -753,7 +809,7 @@ export function SessionDetail() {
     );
   }
 
-  if (!isAssistantSession && !isRemoteServer && !repo) {
+  if (!isAssistantSession && !isRemoteServer && !isChatSession && !repo) {
     return <NotFoundState message="Repository not found" backTo="/" backLabel="Back to repositories" />;
   }
 
@@ -762,8 +818,8 @@ export function SessionDetail() {
     return (
       <NotFoundState
         message="Session not found"
-        backTo={isRemoteServer ? remoteProjectBackPath : getSessionListPath(repoId, isAssistantSession, listTab)}
-        backLabel={isRemoteServer ? 'Back to projects' : 'Back to sessions'}
+        backTo={isChatSession ? '/' : isRemoteServer ? remoteProjectBackPath : getSessionListPath(repoId, isAssistantSession, listTab)}
+        backLabel={isChatSession ? 'Back to chats' : isRemoteServer ? 'Back to projects' : 'Back to sessions'}
       />
     );
   }
@@ -792,15 +848,24 @@ export function SessionDetail() {
   }
 
   const linkedServer = linkedServers.find((candidate) => candidate.id === serverId);
-  const projectDisplayName = isRemoteServer
-    ? remoteProjectDisplayName ?? (sessionDirectory ? getDirectoryName(sessionDirectory) : 'Project')
-    : isAssistantSession || !repo
-      ? 'Assistant'
-      : getRepoDisplayName(repo);
+  const projectDisplayName = isChatSession
+    ? 'Chat'
+    : isRemoteServer
+      ? remoteProjectDisplayName ?? (sessionDirectory ? getDirectoryName(sessionDirectory) : 'Project')
+      : isAssistantSession || !repo
+        ? 'Assistant'
+        : getRepoDisplayName(repo);
   const tabFromUrl = new URLSearchParams(location.search).get('repoTab') ?? undefined;
-  const sessionBackPath = isRemoteServer
-    ? remoteProjectBackPath
-    : getSessionListPath(repoId, isAssistantSession, tabFromUrl);
+  const sessionBackPath = isChatSession
+    ? '/'
+    : isRemoteServer
+      ? remoteProjectBackPath
+      : getSessionListPath(repoId, isAssistantSession, tabFromUrl);
+  const terminalTarget: TerminalTarget = chatId !== undefined
+    ? { kind: 'chat', chatId }
+    : isRemoteServer
+      ? { kind: 'server', serverId }
+      : { kind: 'repo', repoId };
 
   return (
     <div
@@ -865,10 +930,10 @@ export function SessionDetail() {
           </div>
           <Header.Actions className="gap-2 sm:gap-4">
             <div className="flex items-center gap-1">
-              {!isAssistantSession && !isRemoteServer && (
+              {!isAssistantSession && !isRemoteServer && !isChatSession && (
                 <ProjectActionsMenu repoId={repoId} directory={sessionDirectory} />
               )}
-              <PendingActionsGroup showScheduleReports={!isRemoteServer} />
+              <PendingActionsGroup showScheduleReports={!isRemoteServer && !isChatSession} />
             </div>
             <SessionMoreButton />
           </Header.Actions>
@@ -885,14 +950,14 @@ export function SessionDetail() {
             <MessageThread 
               sessionID={sessionId} 
               directory={sessionDirectory}
-              repoFullPath={repo?.fullPath}
-              repoLocalPath={repo?.localPath}
+              repoFullPath={isChatSession ? chat?.directory : repo?.fullPath}
+              repoLocalPath={isChatSession ? chat?.filesPath : repo?.localPath}
               messages={messages}
               pending={pendingPrompts}
               isSessionBusy={isSessionActive}
               onFileClick={isRemoteServer ? undefined : handleFileClick}
               onChildSessionClick={handleChildSessionClick}
-              onOpenWalkthrough={isRemoteServer ? undefined : handleShowWalkthrough}
+              onOpenWalkthrough={isRemoteServer || isChatSession ? undefined : handleShowWalkthrough}
               onUndoMessage={handleUndoMessage}
               model={modelRef ? formatOpenCodeModelRef(modelRef) : undefined}
             />
@@ -1019,19 +1084,19 @@ export function SessionDetail() {
       {showRail && (
         <ToolSidePanel
           panel={sidePanel}
-          repoId={isRemoteServer ? undefined : repoId}
+          repoId={isRemoteServer || isChatSession ? undefined : repoId}
           sessionId={sessionId}
           directory={sessionDirectory}
           filesBasePath={workspaceBasePath}
-          currentBranch={repo?.currentBranch || repo?.branch || "main"}
+          currentBranch={isChatSession ? undefined : repo?.currentBranch || repo?.branch || "main"}
           selectedFilePath={selectedFilePath}
-          repoDirectory={isRemoteServer ? sessionDirectory : repoDirectory}
-          terminalTarget={isRemoteServer ? { kind: 'server', serverId } : { kind: 'repo', repoId }}
+          repoDirectory={isRemoteServer || isChatSession ? sessionDirectory : repoDirectory}
+          terminalTarget={terminalTarget}
           onSkillLoaded={handleSkillLoaded}
           walkthroughSourceRequest={walkthroughSourceRequest}
           walkthroughModel={modelRef}
           walkthroughOnOpenSession={handleChildSessionClick}
-          deleteActiveSessionPath={isRemoteServer ? remoteProjectBackPath : undefined}
+          deleteActiveSessionPath={isChatSession ? '/' : isRemoteServer ? remoteProjectBackPath : undefined}
         />
       )}
       </div>
@@ -1043,9 +1108,10 @@ export function SessionDetail() {
         serverName={linkedServer?.name}
         remote={isRemoteServer}
         project={projectDisplayName}
-        branch={headerBranch}
+        branch={isChatSession ? null : headerBranch}
         directory={sessionDirectory}
         onRename={renameSession}
+        onDeleteSession={isChatSession ? handleDeleteChatSession : undefined}
       />
 
       {sideQuestion && sessionId && (
@@ -1080,12 +1146,12 @@ export function SessionDetail() {
           onClose={handleFileBrowserClose}
           basePath={workspaceBasePath}
           repoName={projectDisplayName}
-          repoId={repoId}
+          repoId={isChatSession ? undefined : repoId}
           initialSelectedFile={selectedFilePath}
         />
       )}
 
-      {sessionId && (
+      {!isChatSession && sessionId && (
         <RepoSkillsDialog
           open={!docked && skillsDialogOpen}
           onOpenChange={setSkillsDialogOpen}
@@ -1096,7 +1162,7 @@ export function SessionDetail() {
         />
       )}
 
-      {!isRemoteServer && sessionId && (
+      {!isRemoteServer && !isChatSession && sessionId && (
         <ChangesWalkthroughSheet
           sessionId={sessionId}
           open={!docked && walkthroughOpen}
@@ -1107,13 +1173,15 @@ export function SessionDetail() {
         />
       )}
 
-      <RepoMcpDialog
-        open={!docked && mcpDialogOpen}
-        onOpenChange={setMcpDialogOpen}
-        directory={isRemoteServer ? sessionDirectory : repoDirectory}
-      />
+      {!isChatSession && (
+        <RepoMcpDialog
+          open={!docked && mcpDialogOpen}
+          onOpenChange={setMcpDialogOpen}
+          directory={isRemoteServer ? sessionDirectory : repoDirectory}
+        />
+      )}
 
-      {!isAssistantSession && !isRemoteServer && (
+      {!isAssistantSession && !isRemoteServer && !isChatSession && (
         <RepoActionsDialog
           repoId={repoId}
           directory={sessionDirectory}
@@ -1122,27 +1190,29 @@ export function SessionDetail() {
         />
       )}
 
-      {isRemoteServer
-        ? sessionDirectory && (
-          <RemoteSourceControlPanel
-            serverId={serverId}
-            directory={sessionDirectory}
-            isOpen={!docked && sourceControlOpen}
-            onClose={() => setSourceControlOpen(false)}
-          />
-        )
-        : (
-          <SourceControlPanel
-            repoId={repoId}
-            isOpen={!docked && sourceControlOpen}
-            onClose={() => setSourceControlOpen(false)}
-            currentBranch={repo?.currentBranch || repo?.branch || "main"}
-            repoName={projectDisplayName}
-          />
-        )}
+      {!isChatSession && (
+        isRemoteServer
+          ? sessionDirectory && (
+            <RemoteSourceControlPanel
+              serverId={serverId}
+              directory={sessionDirectory}
+              isOpen={!docked && sourceControlOpen}
+              onClose={() => setSourceControlOpen(false)}
+            />
+          )
+          : (
+            <SourceControlPanel
+              repoId={repoId}
+              isOpen={!docked && sourceControlOpen}
+              onClose={() => setSourceControlOpen(false)}
+              currentBranch={repo?.currentBranch || repo?.branch || "main"}
+              repoName={projectDisplayName}
+            />
+          )
+      )}
 
       <TerminalPanel
-        target={isRemoteServer ? { kind: 'server', serverId } : { kind: 'repo', repoId }}
+        target={terminalTarget}
         directory={sessionDirectory}
         isOpen={!docked && terminalOpen}
         onClose={() => setTerminalOpen(false)}
@@ -1156,7 +1226,7 @@ export function SessionDetail() {
         />
       )}
 
-      {!isRemoteServer && (
+      {!isRemoteServer && !isChatSession && (
         <ResetPermissionsDialog
           open={resetPermissionsOpen}
           onOpenChange={setResetPermissionsOpen}

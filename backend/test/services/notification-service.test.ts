@@ -5,7 +5,7 @@ import { allMigrations } from '../../src/db/migrations'
 import { createRepo } from '../../src/db/queries'
 import { createScheduleJob, createScheduleRun, updateScheduleRunMetadata } from '../../src/db/schedules'
 import { buildCreateSchedulePersistenceInput } from '../../src/services/schedule-config'
-import { NotificationService, type NotificationServerRegistry } from '../../src/services/notification'
+import { NotificationService, type ChatDirectoryResolver, type NotificationServerRegistry } from '../../src/services/notification'
 import { SettingsService } from '../../src/services/settings'
 import { sseAggregator, type SSEEvent } from '../../src/services/sse-aggregator'
 import type { PushNotificationPayload } from '@opencode-manager/shared/types'
@@ -14,6 +14,8 @@ import type { SessionGoalOutcome } from '../../src/services/goal-outcomes'
 import { CreateScheduleJobRequestSchema, type ScheduleJob } from '@opencode-manager/shared/schemas'
 
 const DIRECTORY = '/abs/repo'
+const CHAT_ID = '20260304-050607-abcdef'
+const CHAT_DIRECTORY = '/abs/chat'
 const USER_ID = 'user-1'
 
 const sendResult = { delivered: 0, expired: 0, failed: 0, total: 0 }
@@ -53,6 +55,7 @@ function permissionAskedEvent(sessionID: string): SSEEvent {
 function createService(
   db = new Database(':memory:'),
   registry: NotificationServerRegistry | null = null,
+  chatService: ChatDirectoryResolver | null = null,
 ): NotificationService {
   migrate(db, allMigrations)
   createRepo(db, {
@@ -64,7 +67,7 @@ function createService(
     isLocal: true,
   })
 
-  const service = new NotificationService(db, registry)
+  const service = new NotificationService(db, registry, chatService)
   vi.spyOn(service, 'isConfigured').mockReturnValue(true)
   service.saveSubscription(USER_ID, 'https://push.example.com/sub-1', 'p256dh-key', 'auth-key')
   new SettingsService(db).updateSettings(
@@ -212,6 +215,23 @@ describe('NotificationService.handleSSEEvent session routing', () => {
     await service.handleSSEEvent(DIRECTORY, permissionAskedEvent('ses_perm'))
 
     expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it('links a session in a chat folder to the chat route with a Chat prefix', async () => {
+    const findByDirectory = vi.fn(async (directory: string) =>
+      directory === CHAT_DIRECTORY ? { id: CHAT_ID } : null,
+    )
+    const service = createService(undefined, null, { findByDirectory })
+    const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
+
+    await service.handleSSEEvent(CHAT_DIRECTORY, formCreatedEvent('ses_chat'))
+
+    expect(findByDirectory).toHaveBeenCalledTimes(1)
+    expect(findByDirectory).toHaveBeenCalledWith(CHAT_DIRECTORY)
+    expect(send).toHaveBeenCalledTimes(1)
+    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    expect(payload.data?.url).toBe(`/chats/${CHAT_ID}/sessions/ses_chat`)
+    expect(payload.body.startsWith('Chat · ')).toBe(true)
   })
 })
 
@@ -490,5 +510,25 @@ describe('NotificationService goal outcomes', () => {
     })
 
     expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it('links a goal outcome in a chat folder to the chat route with a Chat prefix', async () => {
+    const findByDirectory = vi.fn(async (directory: string) =>
+      directory === CHAT_DIRECTORY ? { id: CHAT_ID } : null,
+    )
+    const service = createService(undefined, null, { findByDirectory })
+    const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
+
+    await service.notifyGoalOutcome({
+      ...goalOutcome,
+      sessionId: 'ses_chat_goal',
+      directory: CHAT_DIRECTORY,
+    })
+
+    expect(findByDirectory).toHaveBeenCalledWith(CHAT_DIRECTORY)
+    expect(send).toHaveBeenCalledTimes(1)
+    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    expect(payload.data?.url).toBe(`/chats/${CHAT_ID}/sessions/ses_chat_goal`)
+    expect(payload.body.startsWith('Chat · ')).toBe(true)
   })
 })

@@ -23,6 +23,7 @@ import {
   getServerSessionPath,
   getSessionPath,
   isAssistantPath,
+  parseChatSessionRoute,
   parseRepoRoute,
   parseServerSessionRoute,
 } from '@/lib/navigation'
@@ -39,6 +40,7 @@ export function useGlobalShortcutActions(): void {
   const isMobile = useMobile()
   const serverId = useRouteOpenCodeServerId()
   const isRemoteRoute = !isLocalOpenCodeServer(serverId)
+  const isChatSessionRoute = parseChatSessionRoute(pathname) !== null
 
   const repoId = isAssistantPath(pathname) ? ASSISTANT_REPO_ID : parseRepoRoute(pathname).repoId
 
@@ -75,10 +77,10 @@ export function useGlobalShortcutActions(): void {
       togglePanelTool(tool)
       return
     }
-    if (isRemoteRoute || tool === 'files') return
+    if (isRemoteRoute || isChatSessionRoute || tool === 'files') return
     const host = repoId !== null ? getRepoPath(repoId) : getAssistantPath()
     navigate(`${host}${dialogSearch(tool)}`)
-  }, [toolItems, isMobile, togglePanelTool, updateParams, navigate, repoId, isRemoteRoute])
+  }, [toolItems, isMobile, togglePanelTool, updateParams, navigate, repoId, isRemoteRoute, isChatSessionRoute])
 
   const newSession = sessionDirectory && !createSession.isPending
     ? () => createSession.mutate({})

@@ -12,6 +12,7 @@ import { buildEventNotificationPayload, buildNotificationUrl } from '../../src/s
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 
 const ctx = { repoName: 'oc-manager', repoId: 1, sessionId: 'ses_1', directory: '/abs/repo', url: '/repos/1/sessions/ses_1' }
+const CHAT_ID = '20260304-050607-abcdef'
 
 describe('OpenCode goal labels', () => {
   it('titles each OpenCode goal status', () => {
@@ -238,5 +239,11 @@ describe('buildNotificationUrl', () => {
   })
   it('appends ?assistant=1 for the assistant repo session', () => {
     expect(buildNotificationUrl({ id: ASSISTANT_REPO_ID }, 'ses_1')).toBe('/repos/0/sessions/ses_1?assistant=1')
+  })
+  it('returns the chat session page for a chat folder', () => {
+    expect(buildNotificationUrl(null, 'ses_1', { id: CHAT_ID })).toBe(`/chats/${CHAT_ID}/sessions/ses_1`)
+  })
+  it('returns "/" for a chat folder without a session', () => {
+    expect(buildNotificationUrl(null, undefined, { id: CHAT_ID })).toBe('/')
   })
 })

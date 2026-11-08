@@ -203,12 +203,13 @@ describe('SessionPickerSheet', () => {
     Reflect.deleteProperty(window, 'matchMedia')
   })
 
-  it('renders the picker in a bottom sheet with Activity, Sessions and Projects tabs', () => {
+  it('renders the picker in a bottom sheet with Activity, Sessions, Chats and Projects tabs', () => {
     renderSheet(['/'])
 
     expect(screen.getByRole('dialog', { name: 'Sessions' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Activity' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Sessions', selected: true })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Chats' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Projects' })).toBeInTheDocument()
     expect(screen.getByTestId('linked-servers-nav')).toBeInTheDocument()
   })
@@ -267,6 +268,7 @@ describe('SessionPickerSheet', () => {
     expect(mocks.lastAllDirectories).toBe(true)
     expect(screen.getByTestId('linked-servers-nav')).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: 'This project' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Chats' })).not.toBeInTheDocument()
 
     fireEvent.click(row)
 
