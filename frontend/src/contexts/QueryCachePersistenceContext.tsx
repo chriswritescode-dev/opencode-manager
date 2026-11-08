@@ -5,6 +5,7 @@ import {
   persistQueryClientSave,
 } from '@tanstack/react-query-persist-client'
 import { useAuth } from '@/hooks/useAuth'
+import { clearOfflineTranscripts } from '@/lib/offlineTranscripts'
 import {
   PERSISTED_CACHE_MAX_AGE_MS,
   PERSIST_THROTTLE_MS,
@@ -27,9 +28,11 @@ export interface QueryCachePersistenceProviderProps {
  * Restores the allowlisted part of the React Query cache for the signed-in account and keeps it
  * persisted while that account stays signed in.
  *
- * This provider owns the cache teardown. Signing out or switching accounts clears both the in-memory
- * client and the persisted cache here, and the persister drops any save still queued for the account
- * that just left, so a trailing write cannot recreate the previous account's cache.
+ * This provider owns the cache teardown. Signing out clears the in-memory client, the persisted cache,
+ * and the stored offline transcript snapshots here, while switching accounts clears only the
+ * in-memory client and the persisted cache because snapshots are isolated by owner key. The persister
+ * drops any save still queued for the account that just left, so a trailing write cannot recreate the
+ * previous account's cache.
  *
  * The restore starts only once the session resolves to a signed-in user and uses
  * `"<origin>|<userId>"` as the persister buster, so a cache written for another origin or account is
@@ -78,6 +81,7 @@ export function QueryCachePersistenceProvider({
     if (buster === null) {
       setRestoredBuster(null)
       void Promise.resolve(activePersister.removeClient()).catch(() => {})
+      void clearOfflineTranscripts()
       queryClient.clear()
       previousUserIdRef.current = null
       return

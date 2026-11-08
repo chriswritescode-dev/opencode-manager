@@ -36,6 +36,28 @@ const serverStatusMocks = vi.hoisted(() => ({
   useOpenCodeServerStatuses: vi.fn(),
 }))
 
+const authMocks = vi.hoisted(() => ({
+  useAuth: vi.fn(),
+}))
+
+const offlineMocks = vi.hoisted(() => ({
+  offlineTranscriptOwner: vi.fn(),
+  loadOfflineTranscript: vi.fn(),
+  markOfflineTranscriptOpened: vi.fn(),
+  saveOfflineTranscript: vi.fn(),
+}))
+
+vi.mock('@/hooks/useAuth', () => ({
+  useAuth: authMocks.useAuth,
+}))
+
+vi.mock('@/lib/offlineTranscripts', () => ({
+  offlineTranscriptOwner: offlineMocks.offlineTranscriptOwner,
+  loadOfflineTranscript: offlineMocks.loadOfflineTranscript,
+  markOfflineTranscriptOpened: offlineMocks.markOfflineTranscriptOpened,
+  saveOfflineTranscript: offlineMocks.saveOfflineTranscript,
+}))
+
 vi.mock('@/hooks/useOpenCodeServers', () => ({
   useOpenCodeServerStatuses: serverStatusMocks.useOpenCodeServerStatuses,
 }))
@@ -142,6 +164,11 @@ function createRemoteWrapper(queryClient: QueryClient) {
 describe('useSessionTranscript', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    authMocks.useAuth.mockReturnValue({ user: { id: 'user-1' } })
+    offlineMocks.offlineTranscriptOwner.mockImplementation((userId: string) => 'owner-' + userId)
+    offlineMocks.loadOfflineTranscript.mockResolvedValue(null)
+    offlineMocks.markOfflineTranscriptOpened.mockResolvedValue(undefined)
+    offlineMocks.saveOfflineTranscript.mockResolvedValue(undefined)
     serverStatusMocks.useOpenCodeServerStatuses.mockReturnValue({ statusById: {} })
     mocks.readSessionSnapshot.mockReset()
     mocks.readSessionSnapshot.mockResolvedValue({
@@ -1173,5 +1200,176 @@ describe('useSessionTranscript', () => {
       expect(tool.state.status).toBe('streaming')
       expect(tool.state.status === 'streaming' ? tool.state.input : '').toBe('{"command":')
     })
+  })
+
+  it('shows a stored snapshot when the network read fails', async () => {
+    mocks.readSessionSnapshot.mockRejectedValue(new TypeError('Failed to fetch'))
+    offlineMocks.loadOfflineTranscript.mockResolvedValue({
+      transcript: { messages: seededMessages, pending: [], status: 'idle' },
+      nextCursor: 'cursor_offline',
+    })
+    const queryClient = createQueryClient()
+    const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => expect(result.current.messages).toEqual(seededMessages))
+    expect(result.current.status).toBe('idle')
+    expect(result.current.isLoading).toBe(false)
+    expect(offlineMocks.loadOfflineTranscript).toHaveBeenCalledWith({
+      owner: 'owner-user-1',
+      serverId: 'local',
+      sessionId: SESSION_ID,
+    })
+    expect(offlineMocks.markOfflineTranscriptOpened).toHaveBeenCalledWith({
+      owner: 'owner-user-1',
+      serverId: 'local',
+      sessionId: SESSION_ID,
+    })
+    expect(offlineMocks.markOfflineTranscriptOpened.mock.invocationCallOrder[0]).toBeLessThan(
+      offlineMocks.loadOfflineTranscript.mock.invocationCallOrder[0] ?? 0,
+    )
+  })
+
+  it('does not overwrite a fresher cached transcript with the stored snapshot', async () => {
+    const fresher: SessionMessageInfo = {
+      id: messageID(500),
+      type: 'synthetic',
+      text: 'Cached',
+      time: { created: 50000 },
+    }
+    const stored = deferred<TranscriptCache>()
+    offlineMocks.loadOfflineTranscript.mockReturnValue(stored.promise)
+    const queryClient = createQueryClient()
+    queryClient.setQueryData<TranscriptCache>(sessionTranscriptQueryKey(SESSION_ID), {
+      transcript: { messages: [fresher], pending: [], status: 'idle' },
+    })
+    const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => expect(result.current.messages).toEqual(seededMessages))
+    expect(offlineMocks.loadOfflineTranscript).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      stored.resolve({
+        transcript: {
+          messages: [
+            { id: messageID(600), type: 'synthetic', text: 'Stored', time: { created: 60000 } },
+          ],
+          pending: [],
+          status: 'idle',
+        },
+        nextCursor: 'cursor_stored',
+      })
+    })
+
+    expect(result.current.messages).toEqual(seededMessages)
+  })
+
+  it('writes one snapshot when a run finishes and none while streaming', async () => {
+    mocks.readSessionSnapshot.mockResolvedValue({
+      messages: seededMessages,
+      pending: [],
+      status: 'busy',
+    })
+    const queryClient = createQueryClient()
+    const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => expect(result.current.status).toBe('busy'))
+
+    act(() => {
+      textStreamSequence.slice(1, 3).forEach((event) => testTransport().message(event))
+    })
+    await act(async () => {})
+
+    expect(offlineMocks.saveOfflineTranscript).not.toHaveBeenCalled()
+
+    act(() => {
+      testTransport().message({
+        id: eventID(190),
+        created: 19000,
+        type: 'session.status',
+        data: { sessionID: SESSION_ID, status: { type: 'idle' } },
+      })
+    })
+
+    await waitFor(() => expect(result.current.status).toBe('idle'))
+    expect(offlineMocks.saveOfflineTranscript).toHaveBeenCalledTimes(1)
+    const saved = offlineMocks.saveOfflineTranscript.mock.calls[0]?.[0] as {
+      owner: string
+      serverId: string
+      sessionId: string
+      cache: TranscriptCache
+    }
+    expect(saved).toMatchObject({
+      owner: 'owner-user-1',
+      serverId: 'local',
+      sessionId: SESSION_ID,
+    })
+    expect(saved.cache.transcript.status).toBe('idle')
+  })
+
+  it('saves the current cache when the hook unmounts', async () => {
+    const queryClient = createQueryClient()
+    const { result, unmount } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => expect(result.current.messages).toHaveLength(2))
+
+    unmount()
+
+    expect(offlineMocks.saveOfflineTranscript).toHaveBeenCalledTimes(1)
+    const saved = offlineMocks.saveOfflineTranscript.mock.calls[0]?.[0] as {
+      cache: TranscriptCache
+    }
+    expect(saved.cache.transcript.messages).toEqual(seededMessages)
+  })
+
+  it('keeps cached messages when a refresh fails', async () => {
+    const queryClient = createQueryClient()
+    const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => expect(result.current.messages).toHaveLength(2))
+    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1)
+
+    mocks.readSessionSnapshot.mockRejectedValue(new TypeError('Failed to fetch'))
+
+    await act(async () => {
+      testTransport().resync()
+    })
+
+    await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2))
+    expect(result.current.messages).toEqual(seededMessages)
+    expect(result.current.isLoading).toBe(false)
+  })
+
+  it('loads the stored snapshot for the signed-in user', async () => {
+    const queryClient = createQueryClient()
+    const first = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => expect(first.result.current.messages).toHaveLength(2))
+    first.unmount()
+
+    authMocks.useAuth.mockReturnValue({ user: { id: 'user-2' } })
+    const second = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() =>
+      expect(offlineMocks.loadOfflineTranscript).toHaveBeenLastCalledWith({
+        owner: 'owner-user-2',
+        serverId: 'local',
+        sessionId: SESSION_ID,
+      }),
+    )
+    second.unmount()
   })
 })

@@ -13,7 +13,14 @@ const mocks = vi.hoisted(() => ({
   useAuth: vi.fn(),
 }))
 
+const offlineMocks = vi.hoisted(() => ({
+  clearOfflineTranscripts: vi.fn(),
+}))
+
 vi.mock('@/hooks/useAuth', () => ({ useAuth: mocks.useAuth }))
+vi.mock('@/lib/offlineTranscripts', () => ({
+  clearOfflineTranscripts: offlineMocks.clearOfflineTranscripts,
+}))
 
 interface AuthStub {
   user: { id: string; email: string; name: string } | null
@@ -126,6 +133,8 @@ beforeEach(() => {
   restoringValue = undefined
   restoringHistory = []
   mocks.useAuth.mockReset()
+  offlineMocks.clearOfflineTranscripts.mockReset()
+  offlineMocks.clearOfflineTranscripts.mockResolvedValue(undefined)
   localStorage.clear()
 })
 
@@ -229,6 +238,35 @@ describe('QueryCachePersistenceProvider', () => {
 
     await waitFor(() => expect(store.has(QUERY_CACHE_STORAGE_KEY)).toBe(false))
     expect(client.getQueryData(['repos'])).toBeUndefined()
+  })
+
+  it('clears stored offline transcripts on sign-out', async () => {
+    const { storage } = createStorage()
+    seed(storage, queryCacheBuster('user-1'))
+    const persister = createTestPersister(storage)
+    const client = createClient()
+
+    const view = render(tree(signedIn(), persister, client))
+    await waitFor(() => expect(client.getQueryData(['repos'])).toEqual([{ id: 1 }]))
+
+    view.rerender(tree(signedOut(), persister, client))
+
+    await waitFor(() => expect(offlineMocks.clearOfflineTranscripts).toHaveBeenCalled())
+  })
+
+  it('keeps stored offline transcripts when the signed-in user changes', async () => {
+    const { storage } = createStorage()
+    seed(storage, queryCacheBuster('user-1'))
+    const persister = createTestPersister(storage)
+    const client = createClient()
+
+    const view = render(tree(signedIn('user-1'), persister, client))
+    await waitFor(() => expect(client.getQueryData(['repos'])).toEqual([{ id: 1 }]))
+
+    view.rerender(tree(signedIn('user-2'), persister, client))
+    await settle()
+
+    expect(offlineMocks.clearOfflineTranscripts).not.toHaveBeenCalled()
   })
 
   it('clears the in-memory cache when the validated user changes', async () => {

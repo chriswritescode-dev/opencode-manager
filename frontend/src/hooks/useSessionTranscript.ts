@@ -13,12 +13,20 @@ import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
 import { serverScopedKey } from '@/lib/serverScope'
 import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import { useOpenCodeServerStatuses } from '@/hooks/useOpenCodeServers'
+import { useAuth } from '@/hooks/useAuth'
+import {
+  loadOfflineTranscript,
+  markOfflineTranscriptOpened,
+  offlineTranscriptOwner,
+  saveOfflineTranscript,
+} from '@/lib/offlineTranscripts'
 import {
   applySessionEvents,
   emptySessionTranscript,
   eventsReplayableOverSnapshot,
   mergeNewestPage,
   type SessionSnapshot,
+  type SessionTranscript,
   type TranscriptCache,
 } from '@/lib/session-projection'
 
@@ -39,6 +47,11 @@ export function useSessionTranscript(sessionID: string, directory: string) {
   const serverId = useOpenCodeServerId()
   const isRemoteServer = !isLocalOpenCodeServer(serverId)
   const queryClient = useQueryClient()
+  const { user } = useAuth()
+  const offlineOwner = useMemo(
+    () => (user?.id ? offlineTranscriptOwner(user.id) : null),
+    [user?.id],
+  )
   const queryKey = useMemo(
     () => serverScopedKey(sessionTranscriptQueryKey(sessionID), serverId),
     [sessionID, serverId],
@@ -51,6 +64,11 @@ export function useSessionTranscript(sessionID: string, directory: string) {
   const newestReadGenerationRef = useRef(0)
   const cursorGenerationRef = useRef(0)
   const latestNewestReadRef = useRef<Promise<TranscriptCache> | null>(null)
+  const previousStatusRef = useRef<{
+    sessionID: string
+    serverId: string
+    status: SessionTranscript['status'] | null
+  } | null>(null)
   const [isStreamConnected, setIsStreamConnected] = useState(false)
   const { statusById } = useOpenCodeServerStatuses({ enabled: isRemoteServer })
   const isStreamHealthy = isStreamConnected && (!isRemoteServer || statusById[serverId]?.connected === true)
@@ -110,6 +128,51 @@ export function useSessionTranscript(sessionID: string, directory: string) {
       !(error instanceof FetchError && (error.statusCode === 400 || error.statusCode === 404))
       && failureCount < 3,
   })
+
+  /**
+   * Seeds the cache from the stored snapshot for the signed-in user, without
+   * overwriting a fresher transcript that is already cached.
+   */
+  useEffect(() => {
+    if (!offlineOwner || !sessionID) return
+
+    let cancelled = false
+    void (async () => {
+      await markOfflineTranscriptOpened({ owner: offlineOwner, serverId, sessionId: sessionID })
+      const snapshot = await loadOfflineTranscript({ owner: offlineOwner, serverId, sessionId: sessionID })
+      if (cancelled || !snapshot) return
+      if (queryClient.getQueryData<TranscriptCache>(queryKey) !== undefined) return
+      queryClient.setQueryData<TranscriptCache>(queryKey, snapshot, { updatedAt: 0 })
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [offlineOwner, queryClient, queryKey, serverId, sessionID])
+
+  const transcriptStatus = query.data?.transcript.status ?? null
+
+  /**
+   * Persists the transcript once a session transitions out of a running state,
+   * tagging the transition with its session so switching sessions is not one.
+   */
+  useEffect(() => {
+    const previous = previousStatusRef.current
+    previousStatusRef.current = { sessionID, serverId, status: transcriptStatus }
+    if (!offlineOwner || transcriptStatus !== 'idle') return
+    if (
+      !previous ||
+      previous.sessionID !== sessionID ||
+      previous.serverId !== serverId ||
+      previous.status === null ||
+      previous.status === 'idle'
+    ) {
+      return
+    }
+    const cache = queryClient.getQueryData<TranscriptCache>(queryKey)
+    if (!cache) return
+    void saveOfflineTranscript({ owner: offlineOwner, serverId, sessionId: sessionID, cache })
+  }, [offlineOwner, queryClient, queryKey, serverId, sessionID, transcriptStatus])
 
   const fetchOlder = useCallback(async () => {
     const cursor = queryClient.getQueryData<TranscriptCache>(queryKey)?.nextCursor
@@ -201,9 +264,15 @@ export function useSessionTranscript(sessionID: string, directory: string) {
       connectedRef.current = null
       queuedEventsRef.current = []
       newestReadRef.current = null
+      if (offlineOwner) {
+        const cache = queryClient.getQueryData<TranscriptCache>(queryKey)
+        if (cache) {
+          void saveOfflineTranscript({ owner: offlineOwner, serverId, sessionId: sessionID, cache })
+        }
+      }
       subscription.dispose()
     }
-  }, [directory, queryClient, queryKey, readNewestPage, sessionID, serverId])
+  }, [directory, offlineOwner, queryClient, queryKey, readNewestPage, sessionID, serverId])
 
   return {
     messages: query.data?.transcript.messages ?? [],
