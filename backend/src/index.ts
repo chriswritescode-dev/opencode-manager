@@ -300,6 +300,7 @@ const repoWorkspaces = new RepoWorkspaceService(db, openCodeClient, gitAuthServi
 const scheduleRunnerInstance = new ScheduleRunner(scheduleService)
 
 const notificationService = new NotificationService(db, opencodeServerRegistry)
+notificationService.getExpoPushService().startReceiptSweep()
 const sessionPermissionModeService = new SessionPermissionModeService(db, opencodeServerRegistry, sessionSettingsService, sessionAncestry)
 const goalOutcomes = new GoalOutcomeTracker()
 
@@ -329,6 +330,12 @@ sseAggregator.onServerEvent((serverId, directory, event) => {
   }
 })
 
+sseAggregator.onServerEvent((serverId, directory, event) => {
+  notificationService.handleSSEEvent(directory, event, serverId).catch((err) => {
+    logger.error('Push notification dispatch error:', err)
+  })
+})
+
 notificationService.addEventSuppressor((event, sessionId, serverId) =>
   sessionPermissionModeService.suppressesPermissionNotification(event, sessionId, serverId),
 )
@@ -351,11 +358,6 @@ if (ENV.VAPID.PUBLIC_KEY && ENV.VAPID.PRIVATE_KEY) {
     publicKey: ENV.VAPID.PUBLIC_KEY,
     privateKey: ENV.VAPID.PRIVATE_KEY,
     subject: ENV.VAPID.SUBJECT || 'mailto:push@localhost',
-  })
-  sseAggregator.onServerEvent((serverId, directory, event) => {
-    notificationService.handleSSEEvent(directory, event, serverId).catch((err) => {
-      logger.error('Push notification dispatch error:', err)
-    })
   })
 }
 

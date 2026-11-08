@@ -23,7 +23,16 @@ import { sseAggregator, type SSEEvent } from "./sse-aggregator";
 import { getRepoName } from "../db/queries";
 import { getScheduleRunBySessionId, isQuietScheduleRunSession } from "../db/schedules";
 import { ensurePushSubscriptionsTable } from "../db/push-subscriptions";
+import {
+  deleteExpoPushToken,
+  ensureExpoPushTokensTable,
+  listExpoPushTokenUserIds,
+  listExpoPushTokens,
+  upsertExpoPushToken,
+} from "../db/expo-push-tokens";
 import { isAuthSessionActive } from "../db/auth-sessions";
+import { ExpoPushService } from "./expo-push";
+import type { ExpoPushTokenRecord } from "@opencode-manager/shared";
 import type { Repo } from "../types/repo";
 import { buildServerSessionPath, buildSessionPath } from "@opencode-manager/shared/utils";
 import { sessionIDFromEvent } from "@opencode-manager/shared/opencode";
@@ -185,10 +194,16 @@ export class NotificationService {
 
   constructor(
     private db: Database,
-    private serverRegistry: NotificationServerRegistry | null = null
+    private serverRegistry: NotificationServerRegistry | null = null,
+    private expoPush: ExpoPushService = new ExpoPushService(db)
   ) {
     this.settingsService = new SettingsService(db);
     ensurePushSubscriptionsTable(db);
+    ensureExpoPushTokensTable(db);
+  }
+
+  getExpoPushService(): ExpoPushService {
+    return this.expoPush;
   }
 
   configureVapid(config: VapidConfig): void {
@@ -277,6 +292,28 @@ export class NotificationService {
     };
   }
 
+  /**
+   * Registers an Expo device token, returning null when the session that reported it was revoked or
+   * expired before the write. The session check and the upsert share one synchronous transaction.
+   */
+  saveExpoToken(
+    userId: string,
+    token: string,
+    deviceName?: string | null,
+    sessionId?: string | null
+  ): ExpoPushTokenRecord | null {
+    return this.db.transaction(() => {
+      if (sessionId && !isAuthSessionActive(this.db, sessionId)) return null;
+      return upsertExpoPushToken(this.db, {
+        userId,
+        token,
+        deviceName,
+        sessionId,
+        now: Date.now(),
+      });
+    })();
+  }
+
   removeSubscription(endpoint: string, userId?: string): boolean {
     if (userId) {
       const result = this.db
@@ -323,11 +360,28 @@ export class NotificationService {
     }));
   }
 
+  removeExpoToken(token: string, userId?: string): boolean {
+    return deleteExpoPushToken(this.db, token, userId);
+  }
+
+  getExpoTokens(userId: string): ExpoPushTokenRecord[] {
+    return listExpoPushTokens(this.db, userId);
+  }
+
   getAllUserIds(): string[] {
     const rows = this.db
       .prepare("SELECT DISTINCT user_id FROM push_subscriptions")
       .all() as Array<{ user_id: string }>;
-    return rows.map((r) => r.user_id);
+    const userIds = rows.map((r) => r.user_id);
+    const knownUserIds = new Set(userIds);
+
+    for (const userId of listExpoPushTokenUserIds(this.db)) {
+      if (knownUserIds.has(userId)) continue;
+      knownUserIds.add(userId);
+      userIds.push(userId);
+    }
+
+    return userIds;
   }
 
   /** Returns the run report URL when the session was started by a scheduled run. */
@@ -341,8 +395,6 @@ export class NotificationService {
     payload: PushNotificationPayload,
     shouldNotify: (preferences: NotificationPreferences) => boolean
   ): Promise<void> {
-    if (!this.isConfigured()) return;
-
     const userIds = this.getAllUserIds();
     if (userIds.length === 0) return;
 
@@ -485,8 +537,10 @@ export class NotificationService {
     );
   }
 
-  async sendTestNotification(userId: string): Promise<void> {
-    await this.sendToUser(userId, {
+  async sendTestNotification(
+    userId: string
+  ): Promise<{ delivered: number; expired: number; failed: number; total: number }> {
+    return this.sendToUser(userId, {
       title: "Test Notification",
       body: "Push notifications are working correctly",
       tag: "test",
@@ -494,55 +548,71 @@ export class NotificationService {
     });
   }
 
+  countReachableDevices(userId: string): { webPush: number; expo: number } {
+    return {
+      webPush: this.isConfigured() ? this.getSubscriptions(userId).length : 0,
+      expo: listExpoPushTokens(this.db, userId).length,
+    };
+  }
+
   async sendToUser(
     userId: string,
     payload: PushNotificationPayload
   ): Promise<{ delivered: number; expired: number; failed: number; total: number }> {
-    const subscriptions = this.getSubscriptions(userId);
+    const configured = this.isConfigured();
+    const subscriptions = configured ? this.getSubscriptions(userId) : [];
+    const expoTokens = listExpoPushTokens(this.db, userId);
     const expiredEndpoints: string[] = [];
     let delivered = 0
     let failed = 0
 
-    await Promise.allSettled(
-      subscriptions.map(async (sub) => {
-        try {
-          await webpush.sendNotification(
-            {
-              endpoint: sub.endpoint,
-              keys: { p256dh: sub.p256dh, auth: sub.auth },
-            },
-            JSON.stringify(payload)
-          );
+    if (configured) {
+      await Promise.allSettled(
+        subscriptions.map(async (sub) => {
+          try {
+            await webpush.sendNotification(
+              {
+                endpoint: sub.endpoint,
+                keys: { p256dh: sub.p256dh, auth: sub.auth },
+              },
+              JSON.stringify(payload)
+            );
 
-          this.db
-            .prepare(
-              "UPDATE push_subscriptions SET last_used_at = ? WHERE id = ?"
-            )
-            .run(Date.now(), sub.id);
-          
-          delivered++
-        } catch (error) {
-          const statusCode = (error as { statusCode?: number }).statusCode;
+            this.db
+              .prepare(
+                "UPDATE push_subscriptions SET last_used_at = ? WHERE id = ?"
+              )
+              .run(Date.now(), sub.id);
+            
+            delivered++
+          } catch (error) {
+            const statusCode = (error as { statusCode?: number }).statusCode;
 
-          if (statusCode === 404 || statusCode === 410) {
-            expiredEndpoints.push(sub.endpoint);
-          } else {
-            logger.error(`Push delivery failed for ${sub.endpoint.slice(0, 50)}:`, error);
-            failed++
+            if (statusCode === 404 || statusCode === 410) {
+              expiredEndpoints.push(sub.endpoint);
+            } else {
+              logger.error(`Push delivery failed for ${sub.endpoint.slice(0, 50)}:`, error);
+              failed++
+            }
           }
-        }
-      })
-    );
+        })
+      );
 
-    for (const endpoint of expiredEndpoints) {
-      this.removeSubscription(endpoint);
+      for (const endpoint of expiredEndpoints) {
+        this.removeSubscription(endpoint);
+      }
     }
 
+    const expo = await this.expoPush.send(
+      expoTokens.map((t) => t.token),
+      payload
+    );
+
     return {
-      delivered,
-      expired: expiredEndpoints.length,
-      failed,
-      total: subscriptions.length,
+      delivered: delivered + expo.delivered,
+      expired: expiredEndpoints.length + expo.expired,
+      failed: failed + expo.failed,
+      total: (configured ? subscriptions.length : 0) + expoTokens.length,
     }
   }
 }
