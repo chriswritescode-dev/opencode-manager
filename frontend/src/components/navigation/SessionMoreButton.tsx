@@ -1,6 +1,6 @@
 import { MoreVertical } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { ScheduleReportsBadge } from '@/components/notifications/ScheduleReportsBadge'
+import { NotificationsBadge } from '@/components/notifications/NotificationsBadge'
 import { useUnreadScheduleRuns } from '@/hooks/useSchedules'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 
@@ -19,7 +19,7 @@ export function SessionMoreButton() {
       aria-label={total > 0 ? `More, ${total} unread reports` : 'More'}
     >
       <MoreVertical className="w-5 h-5" />
-      <ScheduleReportsBadge total={total} failed={failed} />
+      <NotificationsBadge count={total} destructive={failed > 0} />
     </Button>
   )
 }

@@ -117,6 +117,21 @@ describe('MobileSheetHost', () => {
     expect(screen.getByTestId('notifications-sheet')).toBeInTheDocument()
   })
 
+  it('renders NotificationsSheet on desktop layouts', () => {
+    vi.mocked(useMobile).mockReturnValue(false)
+    vi.mocked(useMobileTabBar).mockReturnValue({
+      openSheet: 'notifications',
+      open: vi.fn(),
+      close: vi.fn(),
+    })
+    render(
+      <MemoryRouter initialEntries={['/?mobileTab=notifications']}>
+        <MobileSheetHost />
+      </MemoryRouter>,
+    )
+    expect(screen.getByTestId('notifications-sheet')).toBeInTheDocument()
+  })
+
   it('renders MoreDrawer when mobileTab=more', () => {
     vi.mocked(useMobileTabBar).mockReturnValue({
       openSheet: 'more',

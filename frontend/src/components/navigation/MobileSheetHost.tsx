@@ -11,12 +11,10 @@ export function MobileSheetHost() {
   const { openSheet, close } = useMobileTabBar()
   const isRemoteRoute = !isLocalOpenCodeServer(useRouteOpenCodeServerId())
 
-  if (!isMobile) return null
-
   return (
     <>
-      <SessionPickerSheet isOpen={openSheet === 'sessions'} onClose={close} />
-      {openSheet === 'files' && !isRemoteRoute && (
+      {isMobile && <SessionPickerSheet isOpen={openSheet === 'sessions'} onClose={close} />}
+      {isMobile && openSheet === 'files' && !isRemoteRoute && (
         <FileBrowserSheet
           isOpen
           onClose={close}
@@ -26,7 +24,7 @@ export function MobileSheetHost() {
         />
       )}
       {openSheet === 'notifications' && <NotificationsSheet isOpen onClose={close} />}
-      <MoreDrawer isOpen={openSheet === 'more'} onClose={close} />
+      {isMobile && <MoreDrawer isOpen={openSheet === 'more'} onClose={close} />}
     </>
   )
 }

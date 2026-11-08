@@ -1,7 +1,9 @@
 import { BottomSheet, BottomSheetHeader, BottomSheetContent } from '@/components/ui/bottom-sheet'
 import { usePermissions, useForms } from '@/contexts/EventContext'
 import { getFormText, getPermissionDetail, getPermissionLabel } from '@opencode-manager/shared/notifications'
-import { Bell, HelpCircle } from 'lucide-react'
+import { ScheduleReportsList } from '@/components/notifications/ScheduleReportsList'
+import { useMarkAllScheduleRunsViewed, useUnreadScheduleRuns } from '@/hooks/useSchedules'
+import { Bell, HelpCircle, Inbox } from 'lucide-react'
 
 interface NotificationsSheetProps {
   isOpen: boolean
@@ -20,6 +22,10 @@ export function NotificationsSheet({ isOpen, onClose }: NotificationsSheetProps)
     pendingCount: formCount,
     navigateToCurrent: navigateToForm,
   } = useForms()
+  const { data: unreadReports } = useUnreadScheduleRuns()
+  const markAllViewed = useMarkAllScheduleRunsViewed()
+  const reportRuns = unreadReports?.runs ?? []
+  const reportTotal = unreadReports?.total ?? 0
 
   const handlePermissionClick = () => {
     navigateToPermission()
@@ -101,6 +107,27 @@ export function NotificationsSheet({ isOpen, onClose }: NotificationsSheetProps)
                 </div>
               )}
             </div>
+          )}
+        </div>
+
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <Inbox className="w-5 h-5 text-highlight" />
+            <h3 className="font-semibold text-foreground">Schedule reports</h3>
+          </div>
+          {reportTotal === 0 ? (
+            <div className="text-muted-foreground text-sm py-4">
+              You're all caught up
+            </div>
+          ) : (
+            <ScheduleReportsList
+              runs={reportRuns}
+              total={reportTotal}
+              showTitle={false}
+              onMarkAllRead={() => markAllViewed.mutate()}
+              markAllPending={markAllViewed.isPending}
+              onNavigate={onClose}
+            />
           )}
         </div>
       </BottomSheetContent>
