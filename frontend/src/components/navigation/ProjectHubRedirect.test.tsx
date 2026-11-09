@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { parseProjectTarget } from '@/lib/projectTarget'
 import { ProjectHubRedirect } from './ProjectHubRedirect'
 
 function LocationProbe() {
@@ -25,6 +26,7 @@ function renderAt(initialEntries: string[], initialIndex?: number) {
         <Route path="/assistant" element={<ProjectHubRedirect />} />
         <Route path="/repos/:id" element={<ProjectHubRedirect />} />
         <Route path="/repos/:id/assistant" element={<ProjectHubRedirect />} />
+        <Route path="/servers/:serverId/projects" element={<ProjectHubRedirect />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -68,6 +70,29 @@ describe('ProjectHubRedirect', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('location')).toHaveTextContent('menuProject=repo:0')
+    })
+  })
+
+  it('redirects a linked-server project route to the Home hub for that project', async () => {
+    renderAt(['/servers/srv_kitchen/projects?directory=%2Fhome%2Fme%2Fapp'])
+
+    await waitFor(() => {
+      const text = screen.getByTestId('location').textContent ?? ''
+      expect(text.startsWith('/?menu=sessions&menuProject=')).toBe(true)
+      const params = new URLSearchParams(text.slice(text.indexOf('?')))
+      expect(parseProjectTarget(params.get('menuProject'))).toEqual({
+        kind: 'server',
+        serverId: 'srv_kitchen',
+        directory: '/home/me/app',
+      })
+    })
+  })
+
+  it('redirects a linked-server project route without a directory to Home', async () => {
+    renderAt(['/servers/srv_kitchen/projects'])
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location')).toHaveTextContent(/^\/$/)
     })
   })
 })

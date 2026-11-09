@@ -26,11 +26,13 @@ vi.mock('@/components/session/SessionPickerPanel', () => ({
   ),
 }))
 vi.mock('./ProjectHub', () => ({
-  ProjectHub: ({ target }: { target: { kind: string; repoId?: number } }) => (
+  ProjectHub: ({ target }: { target: ProjectTarget }) => (
     <div
       data-testid="project-hub"
       data-kind={target.kind}
       data-repo-id={target.kind === 'repo' ? target.repoId : ''}
+      data-server-id={target.kind === 'server' ? target.serverId : ''}
+      data-directory={target.kind === 'server' ? target.directory : ''}
     />
   ),
 }))
@@ -47,6 +49,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import type { Repo } from '@/api/types'
+import type { ProjectTarget } from '@/lib/projectTarget'
 import { stubMatchMedia } from '@/test/test-utils'
 import { SideMenu } from './SideMenu'
 import { useAuth } from '@/hooks/useAuth'
@@ -260,13 +263,15 @@ describe('SideMenu', () => {
     await waitFor(() => expect(screen.getByTestId('project-hub')).toHaveAttribute('data-repo-id', '1'))
   })
 
-  it('does not render the project hub for a linked-server menu project', async () => {
+  it('renders the project hub for a linked-server menu project', async () => {
     renderSideMenu('/?menu=sessions&menuProject=server:srv_kitchen:%2Fhome%2Fme%2Fapp')
 
     await waitFor(() =>
       expect(screen.getByTestId('session-picker-panel')).toHaveAttribute('data-project-name', 'app'),
     )
-    expect(screen.queryByTestId('project-hub')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('project-hub')).toHaveAttribute('data-kind', 'server'))
+    expect(screen.getByTestId('project-hub')).toHaveAttribute('data-server-id', 'srv_kitchen')
+    expect(screen.getByTestId('project-hub')).toHaveAttribute('data-directory', '/home/me/app')
   })
 
   it('labels a linked-server menu project with its directory name', async () => {

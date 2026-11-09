@@ -6,7 +6,6 @@ import { DEVICE_PAIRING_PATH, LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager
 import { Toaster } from 'sonner'
 import { Repos } from './pages/Repos'
 import { LinkedServerRedirect } from './pages/LinkedServerRedirect'
-import { RemoteProject } from './pages/RemoteProject'
 import { SessionDetail } from './pages/SessionDetail'
 import { Schedules } from './pages/Schedules'
 import { GlobalSchedules } from './pages/GlobalSchedules'
@@ -343,11 +342,7 @@ const router = createBrowserRouter([
           },
           {
             path: '/servers/:serverId/projects',
-            element: (
-              <ServerScope>
-                <RemoteProject />
-              </ServerScope>
-            ),
+            element: <ProjectHubRedirect />,
             loader: protectedLoader,
           },
           {

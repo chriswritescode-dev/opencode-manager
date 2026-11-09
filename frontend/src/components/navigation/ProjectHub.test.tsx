@@ -6,9 +6,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { Repo } from '@/api/types'
 import type { RepoSibling } from '@/api/repos'
 import type { ProjectConfigResponse } from '@opencode-manager/shared/types'
+import type { OpenCodeServer } from '@opencode-manager/shared/schemas'
 import { FetchError } from '@/api/fetchWrapper'
 import { useSideMenu } from '@/hooks/useSideMenu'
-import type { ProjectTarget } from '@/lib/projectTarget'
+import { encodeProjectTarget, type ProjectTarget } from '@/lib/projectTarget'
 import { ProjectHub } from './ProjectHub'
 
 const mocks = vi.hoisted(() => ({
@@ -28,7 +29,18 @@ const mocks = vi.hoisted(() => ({
   removeMutate: vi.fn(),
   trustMutate: vi.fn(),
   createWorkspaceMutate: vi.fn(),
+  useOpenCodeServers: vi.fn(),
+  openSettingsTab: vi.fn(),
+  refetchServers: vi.fn(),
   lastDirectories: { current: [] as string[] },
+}))
+
+vi.mock('@/hooks/useOpenCodeServers', () => ({
+  useOpenCodeServers: mocks.useOpenCodeServers,
+}))
+
+vi.mock('@/hooks/useSettingsDialog', () => ({
+  useSettingsDialog: () => ({ openTab: mocks.openSettingsTab }),
 }))
 
 vi.mock('@/api/repos', () => ({
@@ -180,6 +192,19 @@ const assistantRepo: Repo = {
   fullPath: '/abs/assistant',
 }
 
+const enabledServer: OpenCodeServer = {
+  id: 'srv_kitchen',
+  name: 'Kitchen',
+  baseUrl: 'http://kitchen:5551',
+  username: 'opencode',
+  enabled: true,
+  hasPassword: false,
+  createdAt: 1,
+  updatedAt: 1,
+}
+
+const serverDirectory = '/abs/server/app'
+
 const opencodeWorktree: RepoSibling = {
   ...baseRepo,
   id: 2,
@@ -232,7 +257,7 @@ function currentParams(): URLSearchParams {
 function hubTree(queryClient: QueryClient, target: ProjectTarget, key: string) {
   return (
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={['/?menu=sessions&menuProject=repo:1']}>
+      <MemoryRouter initialEntries={[`/?menu=sessions&menuProject=${encodeProjectTarget(target)}`]}>
         <LocationProbe />
         <ProjectHub key={key} target={target} />
       </MemoryRouter>
@@ -242,7 +267,7 @@ function hubTree(queryClient: QueryClient, target: ProjectTarget, key: string) {
 
 function renderHub(target: ProjectTarget = { kind: 'repo', repoId: 1 }) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const rendered = render(hubTree(queryClient, target, 'repo:1'))
+  const rendered = render(hubTree(queryClient, target, encodeProjectTarget(target)))
   return {
     ...rendered,
     queryClient,
@@ -327,6 +352,12 @@ describe('ProjectHub', () => {
     mocks.useTerminals.mockReturnValue({ data: [] })
     mocks.getProjectConfig.mockResolvedValue(makeConfig())
     mocks.createWorkspaceMutate.mockImplementation(() => {})
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [enabledServer],
+      showsInitialLoading: false,
+      isPaused: false,
+      refetch: mocks.refetchServers,
+    })
   })
 
   it('shows a not-found state without retrying the missing repo', async () => {
@@ -547,11 +578,114 @@ describe('ProjectHub', () => {
     expect(screen.queryByRole('menuitem', { name: 'Create worktree' })).not.toBeInTheDocument()
   })
 
-  it('renders nothing for a linked-server project', async () => {
-    renderHub({ kind: 'server', serverId: 'srv_one', directory: '/abs/repos/one' })
+  it('renders the session search, New Session and Project actions for a server target', async () => {
+    renderHub({ kind: 'server', serverId: 'srv_kitchen', directory: serverDirectory })
 
-    await waitFor(() => expect(mocks.getRepo).not.toHaveBeenCalled())
-    expect(screen.queryByRole('button', { name: 'New Session' })).not.toBeInTheDocument()
-    expect(screen.queryByPlaceholderText('Search sessions...')).not.toBeInTheDocument()
+    expect(await screen.findByPlaceholderText('Search sessions...')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'New Session' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Project actions' })).toBeInTheDocument()
+    expect(screen.queryByTestId('worktree-tab')).not.toBeInTheDocument()
+  })
+
+  it('creates a session on the linked server and leaves the menu', async () => {
+    mocks.useCreateSession.mockReturnValue({
+      mutate: (_data: unknown, options: { onSuccess?: (session: { id: string }) => void }) => {
+        options.onSuccess?.({ id: 'ses_new' })
+      },
+      isPending: false,
+    })
+    const user = userEvent.setup()
+    renderHub({ kind: 'server', serverId: 'srv_kitchen', directory: serverDirectory })
+
+    await user.click(await screen.findByRole('button', { name: 'New Session' }))
+
+    expect(mocks.useCreateSession).toHaveBeenCalledWith(serverDirectory)
+    await waitFor(() => {
+      expect(screen.getByTestId('location').textContent).toContain('/servers/srv_kitchen/sessions/ses_new')
+    })
+    expect(currentParams().has('menu')).toBe(false)
+    expect(currentParams().has('menuProject')).toBe(false)
+  })
+
+  it('opens a server session row and leaves the menu', async () => {
+    const user = userEvent.setup()
+    renderHub({ kind: 'server', serverId: 'srv_kitchen', directory: serverDirectory })
+
+    await user.click(await screen.findByRole('button', { name: 'open-ses_1' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location').textContent).toContain('/servers/srv_kitchen/sessions/ses_1')
+    })
+    expect(currentParams().has('menu')).toBe(false)
+  })
+
+  it('offers server settings when the linked server is missing', async () => {
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [],
+      showsInitialLoading: false,
+      isPaused: false,
+      refetch: mocks.refetchServers,
+    })
+    const user = userEvent.setup()
+    renderHub({ kind: 'server', serverId: 'srv_missing', directory: serverDirectory })
+
+    expect(await screen.findByText('Server not found')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Open server settings' }))
+
+    expect(mocks.openSettingsTab).toHaveBeenCalledWith('servers')
+  })
+
+  it('offers server settings when the linked server is disabled', async () => {
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [{ ...enabledServer, enabled: false }],
+      showsInitialLoading: false,
+      isPaused: false,
+      refetch: mocks.refetchServers,
+    })
+    const user = userEvent.setup()
+    renderHub({ kind: 'server', serverId: 'srv_kitchen', directory: serverDirectory })
+
+    expect(await screen.findByText('This server is disabled')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Open server settings' }))
+
+    expect(mocks.openSettingsTab).toHaveBeenCalledWith('servers')
+  })
+
+  it('shows the loading state while the server list loads', async () => {
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [],
+      showsInitialLoading: true,
+      isPaused: false,
+      refetch: mocks.refetchServers,
+    })
+    renderHub({ kind: 'server', serverId: 'srv_kitchen', directory: serverDirectory })
+
+    expect(await screen.findByRole('status', { name: 'Loading project' })).toBeInTheDocument()
+  })
+
+  it('shows the unavailable state and retries when the server list is paused offline', async () => {
+    mocks.useOpenCodeServers.mockReturnValue({
+      servers: [],
+      showsInitialLoading: false,
+      isPaused: true,
+      refetch: mocks.refetchServers,
+    })
+    const user = userEvent.setup()
+    renderHub({ kind: 'server', serverId: 'srv_kitchen', directory: serverDirectory })
+
+    expect(await screen.findByText('Servers unavailable')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+
+    expect(mocks.refetchServers).toHaveBeenCalled()
+  })
+
+  it('shows the schedules and multi-run entries for a server target', async () => {
+    const user = userEvent.setup()
+    renderHub({ kind: 'server', serverId: 'srv_kitchen', directory: serverDirectory })
+
+    await user.click(await screen.findByRole('button', { name: 'Project actions' }))
+
+    expect(await screen.findByRole('menuitem', { name: 'Schedules' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Multi-run' })).toBeInTheDocument()
   })
 })

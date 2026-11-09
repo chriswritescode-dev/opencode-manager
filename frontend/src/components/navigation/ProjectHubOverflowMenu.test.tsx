@@ -30,6 +30,37 @@ vi.mock('@/lib/toast', () => ({
   showToast: { error: vi.fn(), success: vi.fn() },
 }))
 
+vi.mock('@/components/repo/MultiRunSheet', () => ({
+  MultiRunSheet: ({
+    target,
+    directory,
+    open,
+  }: {
+    target: { kind: string; serverId?: string; directory?: string }
+    directory?: string
+    open: boolean
+  }) => (
+    <div
+      data-testid="multi-run-sheet"
+      data-open={String(open)}
+      data-kind={target.kind}
+      data-server={target.serverId}
+      data-target-directory={target.directory}
+      data-directory={directory}
+    />
+  ),
+}))
+
+vi.mock('@/components/schedules/ServerSchedulesContent', () => ({
+  ServerSchedulesContent: ({ target }: { target: { serverId: string; directory: string } }) => (
+    <div
+      data-testid="server-schedules-content"
+      data-server={target.serverId}
+      data-directory={target.directory}
+    />
+  ),
+}))
+
 function makeConfig(actions: ProjectConfigResponse['actions']): ProjectConfigResponse {
   return {
     actions,
@@ -62,10 +93,29 @@ function renderMenu(onCreateWorktree = vi.fn()) {
   const rendered = render(
     <MemoryRouter initialEntries={['/?menu=sessions&menuProject=repo:1']}>
       <LocationProbe />
-      <ProjectHubOverflowMenu repoId={1} directory="/abs/repos/one" onCreateWorktree={onCreateWorktree} />
+      <ProjectHubOverflowMenu
+        target={{ kind: 'repo', repoId: 1 }}
+        directory="/abs/repos/one"
+        onCreateWorktree={onCreateWorktree}
+      />
     </MemoryRouter>,
   )
   return { ...rendered, onCreateWorktree }
+}
+
+const serverDirectory = '/abs/server/app'
+
+function renderServerMenu() {
+  const encodedTarget = `server:srv_kitchen:${encodeURIComponent(serverDirectory)}`
+  return render(
+    <MemoryRouter initialEntries={[`/?menu=sessions&menuProject=${encodedTarget}`]}>
+      <LocationProbe />
+      <ProjectHubOverflowMenu
+        target={{ kind: 'server', serverId: 'srv_kitchen', directory: serverDirectory }}
+        directory={serverDirectory}
+      />
+    </MemoryRouter>,
+  )
 }
 
 function currentParams(): URLSearchParams {
@@ -170,5 +220,69 @@ describe('ProjectHubOverflowMenu', () => {
       expect(params.get('dialog')).toBe('actions')
       expect(params.get('toolProject')).toBe('repo:1')
     })
+  })
+
+  it('lists only the linked-server project tools', async () => {
+    const user = userEvent.setup()
+    renderServerMenu()
+
+    await user.click(screen.getByRole('button', { name: 'Project actions' }))
+
+    const items = await screen.findAllByRole('menuitem')
+    expect(items.map((item) => item.textContent)).toEqual([
+      'Schedules',
+      'Multi-run',
+      'MCP',
+      'Skills',
+      'Git',
+      'Terminal',
+    ])
+    for (const name of ['Secrets', 'Preview', 'Reset Permissions', 'Create worktree']) {
+      expect(screen.queryByRole('menuitem', { name })).not.toBeInTheDocument()
+    }
+    expect(screen.queryByText('No actions configured')).not.toBeInTheDocument()
+  })
+
+  it('opens the MCP dialog scoped to the linked-server project', async () => {
+    const user = userEvent.setup()
+    renderServerMenu()
+
+    await user.click(screen.getByRole('button', { name: 'Project actions' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'MCP' }))
+
+    await waitFor(() => {
+      const params = currentParams()
+      expect(params.get('dialog')).toBe('mcp')
+      expect(params.get('toolProject')).toBe('server:srv_kitchen:%2Fabs%2Fserver%2Fapp')
+      expect(params.has('menu')).toBe(false)
+      expect(params.has('menuProject')).toBe(false)
+    })
+  })
+
+  it('opens the schedules dialog for the linked-server directory', async () => {
+    const user = userEvent.setup()
+    renderServerMenu()
+
+    await user.click(screen.getByRole('button', { name: 'Project actions' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Schedules' }))
+
+    const content = await screen.findByTestId('server-schedules-content')
+    expect(content).toHaveAttribute('data-server', 'srv_kitchen')
+    expect(content).toHaveAttribute('data-directory', serverDirectory)
+  })
+
+  it('opens the multi-run sheet scoped to the linked-server directory', async () => {
+    const user = userEvent.setup()
+    renderServerMenu()
+
+    await user.click(screen.getByRole('button', { name: 'Project actions' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Multi-run' }))
+
+    const sheet = await screen.findByTestId('multi-run-sheet')
+    expect(sheet).toHaveAttribute('data-open', 'true')
+    expect(sheet).toHaveAttribute('data-kind', 'server')
+    expect(sheet).toHaveAttribute('data-server', 'srv_kitchen')
+    expect(sheet).toHaveAttribute('data-target-directory', serverDirectory)
+    expect(sheet).toHaveAttribute('data-directory', serverDirectory)
   })
 })

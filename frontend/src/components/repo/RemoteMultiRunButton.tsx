@@ -1,4 +1,5 @@
-import { useState } from 'react'
+/* eslint-disable react-refresh/only-export-components */
+import { useCallback, useState } from 'react'
 import { Layers } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { MultiRunSheet } from '@/components/repo/MultiRunSheet'
@@ -24,21 +25,37 @@ export function RemoteMultiRun({ serverId, directory, open, onOpenChange }: Remo
   )
 }
 
-export function RemoteMultiRunButton({ serverId, directory }: { serverId: string; directory: string }) {
+export interface UseRemoteMultiRunReturn {
+  mounted: boolean
+  open: boolean
+  setOpen: (open: boolean) => void
+  openMultiRun: () => void
+}
+
+/**
+ * Defers mounting the multi-run sheet until its caller opens it, then keeps its state.
+ */
+export function useRemoteMultiRun(): UseRemoteMultiRunReturn {
   const [mounted, setMounted] = useState(false)
   const [open, setOpen] = useState(false)
 
-  const handleOpen = () => {
+  const openMultiRun = useCallback(() => {
     setMounted(true)
     setOpen(true)
-  }
+  }, [])
+
+  return { mounted, open, setOpen, openMultiRun }
+}
+
+export function RemoteMultiRunButton({ serverId, directory }: { serverId: string; directory: string }) {
+  const { mounted, open, setOpen, openMultiRun } = useRemoteMultiRun()
 
   return (
     <>
       <Button
         size="sm"
         variant="outline"
-        onClick={handleOpen}
+        onClick={openMultiRun}
         aria-label="Multi-run"
         className="h-9 w-9 shrink-0 p-0 @min-[36rem]:w-auto @min-[36rem]:px-3"
       >

@@ -1,36 +1,150 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Loader2, Layers, Plus } from 'lucide-react'
+import { FolderGit2, Loader2, Layers, Plus, Server } from 'lucide-react'
 import { ASSISTANT_REPO_ID, getRepoDirectoryNameError, isWorktreeSibling } from '@opencode-manager/shared/utils'
 import type { MultiRunTarget } from '@opencode-manager/shared/schemas'
 import { repoQueryOptions } from '@/lib/repoQuery'
-import { getSessionPath } from '@/lib/navigation'
+import { getServerSessionPath, getSessionPath } from '@/lib/navigation'
 import { notifyWorktreeSetup } from '@/lib/worktreeSetup'
 import { encodeProjectTarget, type ProjectTarget } from '@/lib/projectTarget'
 import { SessionList, type SessionListRenderArgs } from '@/components/session/SessionList'
 import { WorktreeTabs, type WorktreeTabValue } from '@/components/repo/WorktreeTabs'
 import { WorktreeSessionGroups } from '@/components/repo/WorktreeSessionGroups'
 import { ProjectHubOverflowMenu } from '@/components/navigation/ProjectHubOverflowMenu'
+import { LinkedServerStateCard } from '@/components/servers/LinkedServerStateCard'
+import { ServersUnavailableCard } from '@/components/servers/ServersUnavailableCard'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
 import { useCreateSession } from '@/hooks/useOpenCode'
+import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
 import { useRepoActivity } from '@/hooks/useRepoActivity'
 import { useCreateRepoWorkspace, useDeleteRepoWorkspaces, useRepoSiblings } from '@/hooks/useRepoSiblings'
 import { useMultiRuns } from '@/hooks/useMultiRuns'
+import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 import { useSSE } from '@/hooks/useSSE'
 import { useSideMenu } from '@/hooks/useSideMenu'
 import { openDialogParams } from '@/hooks/useDialogParam'
 import { useUrlParams } from '@/hooks/useUrlParams'
 
 /**
- * Renders the project hub for a repo project; linked-server projects are handled by a later phase.
+ * Renders the project hub for a Manager repo or a directory on a linked OpenCode server.
  */
 export function ProjectHub({ target }: { target: ProjectTarget }) {
-  if (target.kind !== 'repo') return null
-  return <RepoProjectHub repoId={target.repoId} />
+  if (target.kind === 'repo') return <RepoProjectHub repoId={target.repoId} />
+  return (
+    <OpenCodeServerProvider serverId={target.serverId}>
+      <ServerProjectHub serverId={target.serverId} directory={target.directory} />
+    </OpenCodeServerProvider>
+  )
+}
+
+function ServerProjectHub({ serverId, directory }: { serverId: string; directory?: string }) {
+  const { navigateFromMenu } = useSideMenu()
+  const {
+    servers,
+    showsInitialLoading: serversLoading,
+    isPaused: serversPaused,
+    refetch: refetchServers,
+  } = useOpenCodeServers()
+  const { openTab } = useSettingsDialog()
+
+  const server = servers.find((candidate) => candidate.id === serverId)
+  const serversUnavailable = serversPaused && servers.length === 0
+  const isDisabled = server !== undefined && !server.enabled
+  const isReady = server?.enabled === true && Boolean(directory)
+  const createSessionMutation = useCreateSession(directory)
+
+  useSSE(directory)
+
+  const serverTarget = useMemo<ProjectTarget | null>(
+    () => (directory ? { kind: 'server', serverId, directory } : null),
+    [serverId, directory],
+  )
+
+  const openSettings = () => openTab('servers')
+
+  const handleCreateSession = () => {
+    createSessionMutation.mutate({}, {
+      onSuccess: (session) => navigateFromMenu(getServerSessionPath(serverId, session.id)),
+    })
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center gap-2 px-4 pt-3">
+        <Button
+          onClick={handleCreateSession}
+          disabled={!isReady || createSessionMutation.isPending}
+          aria-label="New Session"
+          size="sm"
+          className="flex-1 bg-primary hover:bg-primary-hover text-primary-foreground transition-all duration-200"
+        >
+          <Plus className="h-4 w-4" />
+          New Session
+        </Button>
+        {serverTarget && (
+          <ProjectHubOverflowMenu target={serverTarget} directory={directory} />
+        )}
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col">
+        {serversLoading && directory ? (
+          <div
+            role="status"
+            aria-label="Loading project"
+            className="flex flex-1 items-center justify-center"
+          >
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        ) : serversUnavailable ? (
+          <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-3 sm:p-4">
+            <ServersUnavailableCard onRetry={refetchServers} />
+          </div>
+        ) : !serversLoading && !server ? (
+          <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-3 sm:p-4">
+            <LinkedServerStateCard
+              icon={Server}
+              title="Server not found"
+              description="This linked server is no longer configured."
+              actionLabel="Open server settings"
+              onAction={openSettings}
+            />
+          </div>
+        ) : isDisabled ? (
+          <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-3 sm:p-4">
+            <LinkedServerStateCard
+              icon={Server}
+              title="This server is disabled"
+              description="Enable it in Settings → Servers to browse its projects and sessions."
+              actionLabel="Open server settings"
+              onAction={openSettings}
+            />
+          </div>
+        ) : !directory ? (
+          <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-3 sm:p-4">
+            <LinkedServerStateCard
+              icon={FolderGit2}
+              title="No project selected"
+              description="This project link is missing its directory on the server."
+              actionLabel="Back to projects"
+              onAction={() => navigateFromMenu('/')}
+            />
+          </div>
+        ) : isReady ? (
+          <SessionList
+            key={directory}
+            directory={directory}
+            createDirectory={directory}
+            onSelectSession={(sessionId) => navigateFromMenu(getServerSessionPath(serverId, sessionId))}
+          />
+        ) : null}
+      </div>
+    </div>
+  )
 }
 
 function RepoProjectHub({ repoId }: { repoId: number }) {
@@ -213,7 +327,7 @@ function RepoProjectHub({ repoId }: { repoId: number }) {
           New Session
         </Button>
         <ProjectHubOverflowMenu
-          repoId={repoId}
+          target={{ kind: 'repo', repoId }}
           directory={baseDirectory}
           includeMultiRun={!isAssistant}
           onCreateWorktree={isAssistant ? undefined : () => setCreateWorkspaceOpen(true)}

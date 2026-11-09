@@ -114,7 +114,7 @@ export function SideMenuContent({ variant, fullWidth, onClose }: SideMenuContent
         ? 'Assistant'
         : repo ? getRepoDisplayName(repo) : null
   const projectBranch = repoId !== null ? repo?.currentBranch || repo?.branch : undefined
-  const renderProjectSessions = project?.kind === 'repo'
+  const renderProjectSessions = project
     ? () => <ProjectHub key={encodeProjectTarget(project)} target={project} />
     : undefined
 
