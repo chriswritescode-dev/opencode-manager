@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useDesktop } from '@/hooks/useDesktop'
 import { useSidebarCollapsed } from '@/hooks/useSidebarCollapsed'
@@ -6,12 +5,7 @@ import { useSidebarWidth } from '@/hooks/useSidebarWidth'
 import { useAuth } from '@/hooks/useAuth'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { useOpenNavItem } from '@/hooks/useOpenNavItem'
-import { useSessionPickerRouteScope } from '@/hooks/useSessionPickerRouteScope'
-import { useSessionPickerNavigation } from '@/hooks/useSessionPickerNavigation'
-import { useToolPanelToggle } from '@/hooks/useToolPanel'
-import { useUIState } from '@/stores/uiStateStore'
 import { buildNavModel, type NavItem, type NavPrimaryCta } from '@/components/navigation/navItems'
-import { SessionPickerDialog } from '@/components/session/SessionPickerDialog'
 import { DesktopSessionTree } from '@/components/navigation/DesktopSessionTree'
 import { LinkedServersNav } from '@/components/navigation/LinkedServersNav'
 import {
@@ -19,27 +13,8 @@ import {
   SidebarSection,
   SidebarItem,
 } from '@/components/ui/sidebar'
-import { List } from 'lucide-react'
 
 const FOOTER_ITEM_KEYS = new Set(['home', 'settings', 'logout'])
-
-function DesktopSessionsPicker({ onDismiss }: { onDismiss: () => void }) {
-  const { currentRepo, activeSessionID, remote } = useSessionPickerRouteScope(true)
-  const pickerNavigation = useSessionPickerNavigation({ mode: 'push', onClose: onDismiss })
-
-  return (
-    <SessionPickerDialog
-      open
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen) onDismiss()
-      }}
-      currentRepo={currentRepo}
-      activeSessionID={activeSessionID}
-      {...pickerNavigation}
-      remote={remote}
-    />
-  )
-}
 
 export function DesktopSidebar() {
   const location = useLocation()
@@ -48,10 +23,7 @@ export function DesktopSidebar() {
   const openNavItem = useOpenNavItem()
   const [collapsed, toggle] = useSidebarCollapsed()
   const [sidebarWidth, setSidebarWidth] = useSidebarWidth()
-  const [sessionsOpen, setSessionsOpen] = useState(false)
   const { isAuthenticated, isLoading, logout } = useAuth()
-  const isToolRailMounted = useUIState((state) => state.isToolRailMounted)
-  const togglePanelTool = useToolPanelToggle()
 
   const isDesktop = useDesktop()
 
@@ -75,90 +47,78 @@ export function DesktopSidebar() {
         p.set('settingsTab', 'account')
         p.delete('mobileTab')
       }, 'push')
-    } else if (item.key === 'sessions') {
-      if (isToolRailMounted) togglePanelTool('sessions')
-      else setSessionsOpen(true)
     }
   }
 
   const footerItems = items.filter((item) => FOOTER_ITEM_KEYS.has(item.key))
-  const collapsedItems: NavItem[] = [
-    footerItems[0],
-    { key: 'sessions', label: 'Sessions', icon: List },
-    ...footerItems.slice(1),
-  ]
 
   return (
-    <>
-      <Sidebar
-        collapsed={collapsed}
-        onToggle={toggle}
-        width={sidebarWidth}
-        onWidthChange={setSidebarWidth}
-        className='mt-2'
-      >
-        {primary.length > 0 && (
-          <SidebarSection collapsed={collapsed}>
-            {primary.map((item: NavPrimaryCta) => (
+    <Sidebar
+      collapsed={collapsed}
+      onToggle={toggle}
+      width={sidebarWidth}
+      onWidthChange={setSidebarWidth}
+      className='mt-2'
+    >
+      {primary.length > 0 && (
+        <SidebarSection collapsed={collapsed}>
+          {primary.map((item: NavPrimaryCta) => (
+            <SidebarItem
+              key={item.key}
+              icon={item.icon}
+              label={item.label}
+              collapsed={collapsed}
+              onClick={() => navigate(item.to)}
+              asPrimary
+              variant={item.variant}
+            />
+          ))}
+        </SidebarSection>
+      )}
+
+      {collapsed ? (
+        <>
+          <div className="flex flex-col gap-1 p-2 pt-0">
+            {footerItems.map((item: NavItem) => (
               <SidebarItem
                 key={item.key}
                 icon={item.icon}
                 label={item.label}
                 collapsed={collapsed}
-                onClick={() => navigate(item.to)}
-                asPrimary
-                variant={item.variant}
+                onClick={() => handleItemClick(item)}
+                danger={item.danger}
               />
             ))}
-          </SidebarSection>
-        )}
+          </div>
+          <LinkedServersNav variant="rail" />
+        </>
+      ) : (
+        <>
+          <div className="px-2 py-1">
+            <LinkedServersNav />
+          </div>
 
-        {collapsed ? (
-          <>
-            <div className="flex flex-col gap-1 p-2 pt-0">
-              {collapsedItems.map((item: NavItem) => (
-                <SidebarItem
-                  key={item.key}
-                  icon={item.icon}
-                  label={item.label}
-                  collapsed={collapsed}
-                  onClick={() => handleItemClick(item)}
-                  danger={item.danger}
-                />
-              ))}
-            </div>
-            <LinkedServersNav variant="rail" />
-          </>
-        ) : (
-          <>
-            <div className="px-2 py-1">
-              <LinkedServersNav />
-            </div>
+          <section aria-label="Sessions" className="flex min-h-0 flex-1 flex-col border-t border-border">
+            <h2 className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Sessions
+            </h2>
+            <DesktopSessionTree />
+          </section>
 
-            <section aria-label="Sessions" className="flex min-h-0 flex-1 flex-col border-t border-border">
-              <h2 className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Sessions
-              </h2>
-              <DesktopSessionTree />
-            </section>
-
-            <div className="flex gap-1 border-t border-border p-2">
-              {footerItems.map((item: NavItem) => (
-                <SidebarItem
-                  key={item.key}
-                  icon={item.icon}
-                  label={item.label}
-                  collapsed
-                  onClick={() => handleItemClick(item)}
-                  danger={item.danger}
-                />
-              ))}
-            </div>
-          </>
-        )}
-      </Sidebar>
-
-      {sessionsOpen && <DesktopSessionsPicker onDismiss={() => setSessionsOpen(false)} />}
-    </>
+          <div className="flex gap-1 border-t border-border p-2">
+            {footerItems.map((item: NavItem) => (
+              <SidebarItem
+                key={item.key}
+                icon={item.icon}
+                label={item.label}
+                collapsed
+                onClick={() => handleItemClick(item)}
+                danger={item.danger}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </Sidebar>
   )
 }

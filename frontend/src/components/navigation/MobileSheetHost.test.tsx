@@ -8,10 +8,6 @@ vi.mock('@/components/file-browser/FileBrowserSheet', () => ({
   FileBrowserSheet: ({ isOpen, basePath, repoName }: { isOpen: boolean; basePath: string; repoName: string }) =>
     isOpen ? <div data-testid="file-browser-sheet" data-base-path={basePath} data-repo-name={repoName}>FileBrowserSheet</div> : null,
 }))
-vi.mock('@/components/session/SessionPickerSheet', () => ({
-  SessionPickerSheet: ({ isOpen }: { isOpen: boolean }) =>
-    isOpen ? <div data-testid="session-picker-sheet">SessionPickerSheet</div> : null,
-}))
 vi.mock('@/components/navigation/NotificationsSheet', () => ({
   NotificationsSheet: ({ isOpen }: { isOpen: boolean }) =>
     isOpen ? <div data-testid="notifications-sheet">NotificationsSheet</div> : null,
@@ -52,20 +48,6 @@ describe('MobileSheetHost', () => {
       </MemoryRouter>,
     )
     expect(container.firstChild).toBeNull()
-  })
-
-  it('renders SessionPickerSheet when mobileTab=sessions', () => {
-    vi.mocked(useMobileTabBar).mockReturnValue({
-      openSheet: 'sessions',
-      open: vi.fn(),
-      close: vi.fn(),
-    })
-    render(
-      <MemoryRouter initialEntries={['/?mobileTab=sessions']}>
-        <MobileSheetHost />
-      </MemoryRouter>,
-    )
-    expect(screen.getByTestId('session-picker-sheet')).toBeInTheDocument()
   })
 
   it('renders FileBrowserSheet with correct props when mobileTab=files', () => {
@@ -126,20 +108,5 @@ describe('MobileSheetHost', () => {
       </MemoryRouter>,
     )
     expect(screen.getByTestId('notifications-sheet')).toBeInTheDocument()
-  })
-
-  it('closes sheet when onClose is called', () => {
-    const mockClose = vi.fn()
-    vi.mocked(useMobileTabBar).mockReturnValue({
-      openSheet: 'sessions',
-      open: vi.fn(),
-      close: mockClose,
-    })
-    render(
-      <MemoryRouter initialEntries={['/?mobileTab=sessions']}>
-        <MobileSheetHost />
-      </MemoryRouter>,
-    )
-    expect(screen.getByTestId('session-picker-sheet')).toBeInTheDocument()
   })
 })

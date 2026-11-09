@@ -4,7 +4,6 @@ import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { DesktopSidebar } from './DesktopSidebar'
-import { useUIState } from '@/stores/uiStateStore'
 import * as useDesktopModule from '@/hooks/useDesktop'
 import * as useSidebarCollapsedModule from '@/hooks/useSidebarCollapsed'
 import * as useAuthModule from '@/hooks/useAuth'
@@ -21,10 +20,6 @@ vi.mock('@/hooks/useOpenCodeServers', () => ({
 }))
 vi.mock('@/components/navigation/DesktopSessionTree', () => ({
   DesktopSessionTree: () => <div data-testid="session-tree" />,
-}))
-vi.mock('@/components/session/SessionPickerDialog', () => ({
-  SessionPickerDialog: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="sessions-picker-dialog" /> : null,
 }))
 
 function LocationDisplay() {
@@ -59,7 +54,6 @@ function createWrapper(initialEntries?: string[]) {
 describe('DesktopSidebar', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    useUIState.setState({ isToolRailMounted: false })
   })
 
   it('returns null when user is not authenticated', () => {
@@ -272,7 +266,7 @@ describe('DesktopSidebar', () => {
 
     expect(screen.queryByRole('button', { name: /Switch server/ })).toBeNull()
   })
-  it('renders home, sessions and account items and no session tree when collapsed', () => {
+  it('renders home and account items and no session tree when collapsed', () => {
     vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
     vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([true, vi.fn()])
     vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
@@ -285,50 +279,9 @@ describe('DesktopSidebar', () => {
 
     expect(screen.queryByTestId('session-tree')).toBeNull()
     expect(screen.getByText('Home')).toBeInTheDocument()
-    expect(screen.getByText('Sessions')).toBeInTheDocument()
+    expect(screen.queryByText('Sessions')).toBeNull()
     expect(screen.getByText('Settings')).toBeInTheDocument()
+    expect(screen.getByText('Logout')).toBeInTheDocument()
     expect(screen.queryByText('Files')).toBeNull()
-  })
-
-  it('opens the sessions picker dialog from the collapsed Sessions item when the tool rail is not mounted', () => {
-    vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
-    vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([true, vi.fn()])
-    vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
-      isAuthenticated: true,
-      isLoading: false,
-      logout: vi.fn(),
-    } as any)
-
-    render(<DesktopSidebar />, { wrapper: createWrapper(['/repos/5']) })
-
-    expect(screen.queryByTestId('sessions-picker-dialog')).toBeNull()
-
-    fireEvent.click(screen.getByText('Sessions'))
-
-    expect(screen.getByTestId('sessions-picker-dialog')).toBeInTheDocument()
-  })
-
-  it('opens the sessions panel from the collapsed Sessions item when the tool rail is mounted', () => {
-    vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
-    vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([true, vi.fn()])
-    vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
-      isAuthenticated: true,
-      isLoading: false,
-      logout: vi.fn(),
-    } as any)
-    useUIState.setState({ isToolRailMounted: true })
-
-    render(
-      <>
-        <DesktopSidebar />
-        <LocationDisplay />
-      </>,
-      { wrapper: createWrapper(['/repos/5']) },
-    )
-
-    fireEvent.click(screen.getByText('Sessions'))
-
-    expect(screen.getByTestId('location').textContent).toBe('/repos/5?panel=sessions')
-    expect(screen.queryByTestId('sessions-picker-dialog')).toBeNull()
   })
 })

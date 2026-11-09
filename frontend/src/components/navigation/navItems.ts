@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { BookOpen, Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, SquareTerminal, Settings, LogOut, Bot, Folder, Home, List, Play, Globe, KeyRound } from 'lucide-react'
+import { BookOpen, Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, SquareTerminal, Settings, LogOut, Bot, Folder, Home, Play, Globe, KeyRound } from 'lucide-react'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
 
@@ -70,8 +70,7 @@ export function isManagerOnlyNavItem(item: NavItem): boolean {
 
 /** Route-scoped tool items, shown in the desktop tool rail instead of the sidebar. */
 export function buildToolItems(pathname: string): NavItem[] {
-  const routeItems = buildNavModel(pathname).items.filter((item) => !NON_TOOL_ITEM_KEYS.has(item.key))
-  return [{ key: 'sessions', label: 'Sessions', icon: List, panelTool: 'sessions' }, ...routeItems]
+  return buildNavModel(pathname).items.filter((item) => !NON_TOOL_ITEM_KEYS.has(item.key))
 }
 
 /** The `?panel=`/`?dialog=` tool identifier an item targets, preferring its panel tool. */

@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import type { Repo, Session } from '@/api/types'
+import { useSideMenu } from '@/hooks/useSideMenu'
 import {
   getRepoPath,
   getServerSessionPath,
@@ -19,6 +20,8 @@ export interface SessionPickerNavigationOptions {
    * search param onto the destination path and leaves the picker open.
    */
   mode: 'push' | 'replace' | 'panel'
+  /** Whether selecting a project navigates to it or points the side menu at it in place. */
+  selectRepoDestination?: 'navigate' | 'menu'
   onClose: () => void
   /** Where to go after the open session is deleted, instead of the current repo's session list. */
   deleteActiveSessionPath?: string
@@ -44,10 +47,12 @@ export interface SessionPickerNavigation {
  */
 export function useSessionPickerNavigation({
   mode,
+  selectRepoDestination = 'navigate',
   onClose,
   deleteActiveSessionPath,
 }: SessionPickerNavigationOptions): SessionPickerNavigation {
   const navigate = useNavigate()
+  const { openMenu } = useSideMenu()
   const { pathname, search } = useLocation()
   const currentRepoId = parseRepoRoute(pathname).repoId
   const { sessionId: activeSessionID, serverId: activeServerId } = parseActivePickerSession(pathname)
@@ -116,9 +121,13 @@ export function useSessionPickerNavigation({
 
   const onSelectRepo = useCallback(
     (repo: Repo) => {
+      if (selectRepoDestination === 'menu') {
+        openMenu({ page: 'sessions', project: { kind: 'repo', repoId: repo.id } }, 'replace')
+        return
+      }
       open(getRepoPath(repo.id))
     },
-    [open],
+    [open, openMenu, selectRepoDestination],
   )
 
   return {

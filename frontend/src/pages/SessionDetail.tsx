@@ -28,7 +28,7 @@ import { useShortcutActions } from "@/contexts/KeyboardShortcutsContext";
 import { useSettingsDialog } from "@/hooks/useSettingsDialog";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useMobile } from "@/hooks/useMobile";
-import { useMobileTabBar } from "@/hooks/useMobileTabBar";
+import { useSideMenu } from "@/hooks/useSideMenu";
 import { useToolPanelLayout } from "@/hooks/useToolPanelLayout";
 import { useVisualViewport } from "@/hooks/useVisualViewport";
 import { useTTS } from "@/hooks/useTTS";
@@ -161,10 +161,9 @@ export function SessionDetail() {
   const [forkPickerLoading, setForkPickerLoading] = useState(false);
 
   const isMobile = useMobile();
-  const { open: openMobileSheet } = useMobileTabBar();
+  const { openMenu } = useSideMenu();
   const { docked, showRail } = useToolPanelLayout();
   const sidePanel = useToolPanel(showRail);
-  const { activeTool: activePanelTool, toggleTool: togglePanelTool } = sidePanel;
   const { keyboardHeight } = useVisualViewport();
   const inputBottomOffset = isMobile ? keyboardHeight : 0;
   const promptOverlayObserverRef = useRef<ResizeObserver | null>(null);
@@ -364,12 +363,8 @@ export function SessionDetail() {
   });
 
   const handleShowSessionsDialog = useCallback(() => {
-    if (isMobile) {
-      openMobileSheet('sessions');
-      return;
-    }
-    if (activePanelTool !== 'sessions') togglePanelTool('sessions');
-  }, [isMobile, openMobileSheet, activePanelTool, togglePanelTool]);
+    openMenu({ page: 'sessions' });
+  }, [openMenu]);
   const handleShowMcpDialog = useCallback(() => setMcpDialogOpen(true), [setMcpDialogOpen]);
   const handleShowSkillsDialog = useCallback(() => setSkillsDialogOpen(true), [setSkillsDialogOpen]);
   const handleShowWalkthrough = useCallback((source?: WalkthroughSource) => {
@@ -1021,7 +1016,6 @@ export function SessionDetail() {
           walkthroughSourceRequest={walkthroughSourceRequest}
           walkthroughModel={modelRef}
           walkthroughOnOpenSession={handleChildSessionClick}
-          deleteActiveSessionPath={isRemoteServer ? remoteProjectBackPath : undefined}
         />
       )}
       </div>

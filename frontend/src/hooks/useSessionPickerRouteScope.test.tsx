@@ -4,12 +4,16 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { renderHook, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
+import type { Repo } from '@/api/types'
+import { getProjectHubPath } from '@/lib/projectTarget'
+import { makeRepo } from '@/test/fixtures/session-picker'
 import { useSidebarServerStore } from '@/stores/sidebarServerStore'
 import { useSessionPickerRouteScope } from './useSessionPickerRouteScope'
 
 const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   listProjects: vi.fn(),
+  repos: [] as Repo[],
 }))
 
 vi.mock('@/api/opencode', async (importOriginal) => {
@@ -25,7 +29,7 @@ vi.mock('@/hooks/useOpenCodeServers', () => ({
 }))
 
 vi.mock('@/hooks/useSidebarRepoGroups', () => ({
-  useNavigableRepos: () => ({ repos: [], isLoading: false, refetch: vi.fn() }),
+  useNavigableRepos: () => ({ repos: mocks.repos, isLoading: false, refetch: vi.fn() }),
 }))
 
 function renderScope(entry: string, seed?: (queryClient: QueryClient) => void) {
@@ -51,6 +55,7 @@ describe('useSessionPickerRouteScope', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
+    mocks.repos = []
     mocks.listProjects.mockResolvedValue([])
   })
 
@@ -120,6 +125,27 @@ describe('useSessionPickerRouteScope', () => {
     const { result } = renderScope('/repos/5/sessions/ses_local')
 
     expect(result.current.remote).toBeUndefined()
+    expect(mocks.getSession).not.toHaveBeenCalled()
+    expect(mocks.listProjects).not.toHaveBeenCalled()
+  })
+
+  it('scopes to the side menu repo project', () => {
+    mocks.repos = [makeRepo(5, 'alpha', '/w/alpha'), makeRepo(6, 'beta', '/w/beta')]
+
+    const { result } = renderScope(getProjectHubPath({ kind: 'repo', repoId: 5 }))
+
+    expect(result.current.currentRepo?.id).toBe(5)
+    expect(result.current.remote).toBeUndefined()
+  })
+
+  it('scopes to the side menu server project without loading the route directory', () => {
+    const { result } = renderScope(
+      getProjectHubPath({ kind: 'server', serverId: 'srv_kitchen', directory: '/home/me/app' }),
+    )
+
+    expect(result.current.remote?.serverId).toBe('srv_kitchen')
+    expect(result.current.remote?.projectDirectory).toBe('/home/me/app')
+    expect(result.current.remote?.serverName).toBe('Kitchen')
     expect(mocks.getSession).not.toHaveBeenCalled()
     expect(mocks.listProjects).not.toHaveBeenCalled()
   })

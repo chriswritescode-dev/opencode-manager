@@ -6,42 +6,7 @@ import { MemoryRouter, useLocation } from 'react-router-dom'
 import { stubMatchMedia } from '@/test/test-utils'
 import { ToolSidePanel } from './ToolSidePanel'
 import { useToolPanel } from '@/hooks/useToolPanel'
-import type { SessionPickerNavigation, SessionPickerNavigationOptions } from '@/hooks/useSessionPickerNavigation'
 import { useUIState } from '@/stores/uiStateStore'
-
-const activeWorkMocks = vi.hoisted(() => ({
-  useActiveWorkCounts: vi.fn(),
-}))
-
-vi.mock('@/hooks/useActiveWork', () => ({
-  useActiveWorkCounts: activeWorkMocks.useActiveWorkCounts,
-}))
-
-const sessionPickerMocks = vi.hoisted(() => ({
-  useSessionPickerNavigation: vi.fn(),
-}))
-
-vi.mock('@/hooks/useSessionPickerNavigation', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/hooks/useSessionPickerNavigation')>()
-  return {
-    ...actual,
-    useSessionPickerNavigation: (options: SessionPickerNavigationOptions) => {
-      sessionPickerMocks.useSessionPickerNavigation(options)
-      return actual.useSessionPickerNavigation(options)
-    },
-  }
-})
-
-vi.mock('@/components/session/RouteSessionPicker', () => ({
-  RouteSessionPicker: ({ navigation }: { navigation: SessionPickerNavigation }) => (
-    <div>
-      route-session-picker
-      <button type="button" onClick={() => navigation.onNavigate('/repos/2/sessions/other')}>
-        open other session
-      </button>
-    </div>
-  ),
-}))
 
 vi.mock('@/components/file-browser/FileBrowser', () => ({
   FileBrowser: ({ initialSelectedFile }: { initialSelectedFile?: string }) => <div>files-tool {initialSelectedFile}</div>,
@@ -93,13 +58,7 @@ function LocationProbe() {
   )
 }
 
-function Harness({
-  docked,
-  deleteActiveSessionPath,
-}: {
-  docked: boolean
-  deleteActiveSessionPath?: string
-}) {
+function Harness({ docked }: { docked: boolean }) {
   const panel = useToolPanel(docked)
   return (
     <>
@@ -115,7 +74,6 @@ function Harness({
           selectedFilePath="src/a.ts"
           repoDirectory="/repo"
           onSkillLoaded={() => {}}
-          deleteActiveSessionPath={deleteActiveSessionPath}
         />
       ) : null}
       <LocationProbe />
@@ -123,10 +81,10 @@ function Harness({
   )
 }
 
-function renderAt(search: string, docked = true, deleteActiveSessionPath?: string) {
+function renderAt(search: string, docked = true) {
   return render(
     <MemoryRouter initialEntries={[`/repos/1/sessions/ses_1${search}`]}>
-      <Harness docked={docked} deleteActiveSessionPath={deleteActiveSessionPath} />
+      <Harness docked={docked} />
     </MemoryRouter>,
   )
 }
@@ -189,7 +147,6 @@ function RepoHarness() {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  activeWorkMocks.useActiveWorkCounts.mockReturnValue({ needsInput: 0, running: 0 })
   useUIState.setState({ isToolRailMounted: false })
 })
 
@@ -515,12 +472,12 @@ describe('ToolSidePanel', () => {
     expect(screen.getByLabelText('prompt')).toHaveFocus()
   })
 
-  it('lists the Sessions tool first in the rail', () => {
+  it('lists the Files tool first in the rail', () => {
     renderAt('')
 
     const rail = screen.getByRole('navigation', { name: 'Tools' })
     const buttons = within(rail).getAllByRole('button')
-    expect(buttons[0]).toHaveAccessibleName('Sessions')
+    expect(buttons[0]).toHaveAccessibleName('Files')
   })
 
   it('shows only the remote-capable tools on a linked-server route', async () => {
@@ -536,7 +493,7 @@ describe('ToolSidePanel', () => {
       within(rail)
         .getAllByRole('button')
         .map((button) => button.getAttribute('aria-label') ?? button.textContent?.trim()),
-    ).toEqual(['Sessions', 'MCP', 'Skills', 'Source Control', 'Terminal'])
+    ).toEqual(['MCP', 'Skills', 'Source Control', 'Terminal'])
 
     await user.click(screen.getByRole('button', { name: 'MCP' }))
     expect(await screen.findByText('mcp-tool')).toBeInTheDocument()
@@ -571,75 +528,6 @@ describe('ToolSidePanel', () => {
 
     expect(await screen.findByText('skills-tool')).toBeInTheDocument()
     expect(search().get('panel')).toBe('skills')
-  })
-
-  it('opens the Sessions panel with the session picker when clicked', async () => {
-    const user = userEvent.setup()
-    renderAt('')
-
-    await user.click(screen.getByRole('button', { name: 'Sessions' }))
-
-    const panel = await screen.findByRole('complementary', { name: 'Sessions' })
-    expect(within(panel).getByText('route-session-picker')).toBeInTheDocument()
-    expect(within(panel).getByRole('heading', { name: 'Sessions' })).toBeInTheDocument()
-    expect(search().get('panel')).toBe('sessions')
-  })
-
-  it('keeps the docked Sessions panel open when a session is chosen', async () => {
-    const user = userEvent.setup()
-    renderAt('?panel=sessions')
-
-    await user.click(await screen.findByRole('button', { name: 'open other session' }))
-
-    await waitFor(() => expect(screen.getByTestId('pathname').textContent).toBe('/repos/2/sessions/other'))
-    expect(search().get('panel')).toBe('sessions')
-  })
-
-  it('builds the docked picker navigation in panel mode', async () => {
-    renderAt('?panel=sessions')
-
-    await screen.findByText('route-session-picker')
-
-    expect(sessionPickerMocks.useSessionPickerNavigation).toHaveBeenLastCalledWith(
-      expect.objectContaining({ mode: 'panel', onClose: expect.any(Function) }),
-    )
-  })
-
-  it('builds the floating picker navigation in replace mode', async () => {
-    const removePage = stubNarrowPage()
-
-    try {
-      renderAt('?panel=sessions')
-
-      const panel = await screen.findByRole('dialog', { name: 'Sessions' })
-      expect(within(panel).getByText('route-session-picker')).toBeInTheDocument()
-      expect(sessionPickerMocks.useSessionPickerNavigation).toHaveBeenLastCalledWith(
-        expect.objectContaining({ mode: 'replace', onClose: expect.any(Function) }),
-      )
-    } finally {
-      removePage()
-    }
-  })
-
-  it('forwards the delete destination to the session picker', async () => {
-    renderAt('?panel=sessions', true, '/servers/srv_kitchen/projects?directory=%2Fapp')
-
-    await screen.findByText('route-session-picker')
-
-    expect(sessionPickerMocks.useSessionPickerNavigation).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        deleteActiveSessionPath: '/servers/srv_kitchen/projects?directory=%2Fapp',
-      }),
-    )
-  })
-
-  it('shows a Sessions count pill and extends the accessible name', () => {
-    activeWorkMocks.useActiveWorkCounts.mockReturnValue({ needsInput: 1, running: 2 })
-    renderAt('')
-
-    const button = screen.getByRole('button', { name: 'Sessions, 1 needs input, 2 running' })
-    const pill = within(button).getByText('3')
-    expect(pill.className).toContain('bg-warning')
   })
 
   it('marks the tool rail as mounted only while it renders', () => {

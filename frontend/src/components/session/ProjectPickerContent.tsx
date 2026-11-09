@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
 import type { Repo } from '@/api/types'
 import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
 import { LocalRepoNewSessionButton } from '@/components/navigation/RepoSessionNav'
@@ -18,7 +18,7 @@ interface ProjectPickerContentProps {
   onNavigate: (path: string) => void
   switchHint: string
   searchInputRef: React.RefObject<HTMLInputElement | null>
-  searchTrailing?: React.ReactNode
+  trailing?: ReactNode
 }
 
 interface ProjectPickerRow {
@@ -33,7 +33,7 @@ export function ProjectPickerContent({
   onNavigate,
   switchHint,
   searchInputRef,
-  searchTrailing,
+  trailing,
 }: ProjectPickerContentProps) {
   const { repos, isLoading } = useNavigableRepos()
   const listId = useId()
@@ -95,7 +95,7 @@ export function ProjectPickerContent({
         onKeyDown={handleSearchKeyDown}
         placeholder="Search projects..."
         name="project-picker-search"
-        trailing={searchTrailing}
+        trailing={trailing}
       />
 
       <div

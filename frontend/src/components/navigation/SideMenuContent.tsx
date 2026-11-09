@@ -1,20 +1,26 @@
+import { useState, type ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
-import { Bell, ChevronRight, GitBranch, List, X, type LucideIcon } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { Bell, ChevronLeft, ChevronRight, GitBranch, List, X, type LucideIcon } from 'lucide-react'
 import { repoQueryOptions } from '@/lib/repoQuery'
 import { cn, getDirectoryName, getRepoDisplayName } from '@/lib/utils'
 import type { ProjectTarget } from '@/lib/projectTarget'
 import { useAuth } from '@/hooks/useAuth'
 import { openDialogParams } from '@/hooks/useDialogParam'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useNotificationsAction } from '@/hooks/useNotificationsAction'
 import { useOpenNavItem } from '@/hooks/useOpenNavItem'
+import { useSessionPickerNavigation } from '@/hooks/useSessionPickerNavigation'
+import { useSessionPickerRouteScope } from '@/hooks/useSessionPickerRouteScope'
 import { useSideMenu } from '@/hooks/useSideMenu'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { NotificationsBadge } from '@/components/notifications/NotificationsBadge'
+import { SessionPickerPanel } from '@/components/session/SessionPickerPanel'
+import { LinkedServersNav } from './LinkedServersNav'
 import { buildNavModel, isManagerOnlyNavItem, type NavItem } from './navItems'
 import { TabStrip } from './MobileTabBar'
+import { SIDE_MENU_WIDE_MEDIA_QUERY } from './sideMenuLayout'
 import { getMobileTabRouteState, useTabDestinations } from './tabDestinations'
 
 export interface SideMenuContentProps {
@@ -78,12 +84,20 @@ function MenuRow({ icon: Icon, label, onClick, danger, trailing }: MenuRowProps)
 /** Side menu body shared by the phone overlay and the docked desktop panel. */
 export function SideMenuContent({ variant, fullWidth, onClose }: SideMenuContentProps) {
   const location = useLocation()
-  const { project, page, setPage } = useSideMenu()
+  const { project, page, setPage, closeMenu } = useSideMenu()
   const menuTabs = useTabDestinations(project, { inMenu: true })
   const { updateParams } = useUrlParams()
   const { logout } = useAuth()
   const { count, destructive, label, press } = useNotificationsAction()
   const openNavItem = useOpenNavItem()
+  const wideMenu = useMediaQuery(SIDE_MENU_WIDE_MEDIA_QUERY)
+  const pickerNavigation = useSessionPickerNavigation({
+    mode: 'push',
+    onClose: closeMenu,
+    selectRepoDestination: 'menu',
+  })
+  const { currentRepo, activeSessionID, remote } = useSessionPickerRouteScope(page === 'sessions')
+  const [projectLabelShown, setProjectLabelShown] = useState(false)
 
   const repoId = project?.kind === 'repo' && project.repoId !== ASSISTANT_REPO_ID ? project.repoId : null
   const { data: repo } = useQuery({
@@ -153,8 +167,10 @@ export function SideMenuContent({ variant, fullWidth, onClose }: SideMenuContent
     <div data-variant={variant} className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-background px-4 py-2">
         <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-          {projectName && (
-            <span className="truncate font-medium text-highlight">{projectName}</span>
+          {projectName !== null && !(page === 'sessions' && projectLabelShown) && (
+            <span data-testid="side-menu-project-name" className="truncate font-medium text-highlight">
+              {projectName}
+            </span>
           )}
           {projectBranch && (
             <>
@@ -163,17 +179,20 @@ export function SideMenuContent({ variant, fullWidth, onClose }: SideMenuContent
             </>
           )}
         </div>
-        {fullWidth && (
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close menu"
-            data-testid="side-menu-close"
-            className="shrink-0 rounded-sm p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        )}
+        <div className="flex shrink-0 items-center gap-1">
+          <LinkedServersNav variant={wideMenu ? 'header' : 'rail'} />
+          {fullWidth && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close menu"
+              data-testid="side-menu-close"
+              className="shrink-0 rounded-sm p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          )}
+        </div>
       </div>
       {count > 0 && (
         <div className="shrink-0 px-2 pt-2">
@@ -193,7 +212,25 @@ export function SideMenuContent({ variant, fullWidth, onClose }: SideMenuContent
       )}
       <div className="flex min-h-0 flex-1 flex-col overflow-auto px-2 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
         {page === 'sessions' ? (
-          <div data-testid="side-menu-sessions-page" className="min-h-0 flex-1" />
+          <div data-testid="side-menu-sessions-page" className="flex min-h-0 flex-1 flex-col">
+            <button
+              type="button"
+              onClick={() => setPage('home')}
+              className="flex shrink-0 items-center gap-1 px-2 py-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ChevronLeft aria-hidden="true" className="h-4 w-4" />
+              <span>Menu</span>
+            </button>
+            <SessionPickerPanel
+              open
+              currentRepo={currentRepo}
+              activeSessionID={activeSessionID}
+              {...pickerNavigation}
+              remote={remote}
+              projectName={projectName ?? undefined}
+              onProjectLabelShownChange={setProjectLabelShown}
+            />
+          </div>
         ) : (
           <div className="flex flex-col gap-4">
             <MenuSection>

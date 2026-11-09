@@ -268,4 +268,20 @@ describe('useSessionPickerNavigation', () => {
       expect(onClose).not.toHaveBeenCalled()
     })
   })
+
+  describe('menu repo destination', () => {
+    it('replaces the menu project without navigating or closing', () => {
+      const { result, onClose, location } = renderPickerNavigation(['/?menu=sessions'], {
+        mode: 'push',
+        selectRepoDestination: 'menu',
+      })
+
+      act(() => {
+        result.current.onSelectRepo(createRepo(3))
+      })
+
+      expect(location()).toBe('/?menu=sessions&menuProject=repo%3A3 REPLACE')
+      expect(onClose).not.toHaveBeenCalled()
+    })
+  })
 })

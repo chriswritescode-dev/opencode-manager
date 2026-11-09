@@ -499,7 +499,7 @@ describe('SessionDetail remote server mode', () => {
     expect(capturedPathname.current).toBe('/servers/srv_kitchen/sessions/ses_child')
   })
 
-  it('opens the sessions panel from the sessions shortcut on a remote route', async () => {
+  it('opens the sessions menu from the sessions shortcut on a remote route', async () => {
     const { capturedSearch } = renderRemoteSession()
 
     await waitFor(() => {
@@ -512,24 +512,8 @@ describe('SessionDetail remote server mode', () => {
     })
 
     await waitFor(() => {
-      expect(capturedSearch.current).toBe('?panel=sessions')
+      expect(capturedSearch.current).toBe('?menu=sessions')
     })
-  })
-
-  it('deletes the active remote session from the tool panel', async () => {
-    renderRemoteSession()
-
-    await waitFor(() => {
-      expect(screen.getByTestId('message-thread')).toBeInTheDocument()
-    })
-
-    const panelProps = mocks.ToolSidePanel.mock.calls.at(-1)?.[0] as
-      | { deleteActiveSessionPath?: string }
-      | undefined
-
-    expect(panelProps?.deleteActiveSessionPath).toBe(
-      getServerProjectPath('srv_kitchen', '/home/me/app'),
-    )
   })
 
   it('shows a loader until the session directory is available', async () => {

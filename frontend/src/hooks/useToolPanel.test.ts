@@ -1,31 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { isPanelTool, toggleToolDialogParams, toggleToolPanelParams, useToolPanel, useToolPanelToggle } from './useToolPanel'
 
-describe('sessions tool', () => {
-  it('is a panel tool', () => {
-    expect(isPanelTool('sessions')).toBe(true)
-  })
-
-  it('clears without opening a dialog when the panel is not docked', async () => {
-    function Probe() {
-      useToolPanel(false)
-      const location = useLocation()
-      return createElement('div', { 'data-testid': 'search' }, location.search)
-    }
-
-    render(
-      createElement(
-        MemoryRouter,
-        { initialEntries: ['/repos/1/sessions/abc?panel=sessions'] },
-        createElement(Probe),
-      ),
-    )
-
-    await waitFor(() => expect(screen.getByTestId('search').textContent).not.toContain('panel=sessions'))
-    expect(screen.getByTestId('search').textContent).not.toContain('dialog=sessions')
+describe('panel tools', () => {
+  it('no longer treats sessions as a panel tool', () => {
+    expect(isPanelTool('sessions')).toBe(false)
   })
 })
 

@@ -11,7 +11,7 @@ import { makeRepo, makeSession } from '@/test/fixtures/session-picker'
 import { DEFAULT_ACTIVITY_WINDOW_MINUTES } from '@/api/types/settings'
 import { KeyboardShortcutsProvider } from '@/contexts/KeyboardShortcutsContext'
 import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
-import { SessionPickerDialog } from './SessionPickerDialog'
+import { SessionPickerPanel } from './SessionPickerPanel'
 
 const mocks = vi.hoisted(() => ({
   sessionsData: [] as Session[],
@@ -176,15 +176,13 @@ function renderWithClient(ui: React.ReactElement, serverId?: string) {
   )
 }
 
-function renderPicker(overrides: Partial<React.ComponentProps<typeof SessionPickerDialog>> = {}) {
-  const onOpenChange = vi.fn()
+function renderPicker(overrides: Partial<React.ComponentProps<typeof SessionPickerPanel>> = {}) {
   const onSelectSession = vi.fn()
   const onDeleteActiveSession = vi.fn()
   const onSelectRepo = vi.fn()
   renderWithClient(
-    <SessionPickerDialog
+    <SessionPickerPanel
       open
-      onOpenChange={onOpenChange}
       currentRepo={mocks.repos[0]}
       onSelectSession={onSelectSession}
       onDeleteActiveSession={onDeleteActiveSession}
@@ -192,7 +190,7 @@ function renderPicker(overrides: Partial<React.ComponentProps<typeof SessionPick
       {...overrides}
     />,
   )
-  return { onOpenChange, onSelectSession, onDeleteActiveSession, onSelectRepo }
+  return { onSelectSession, onDeleteActiveSession, onSelectRepo }
 }
 
 const combobox = () => screen.getByRole('combobox')
@@ -205,7 +203,7 @@ const openActiveTab = () => {
   fireEvent.mouseDown(screen.getByRole('tab', { name: 'Activity' }))
 }
 
-describe('SessionPickerDialog', () => {
+describe('SessionPickerPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     stubMatchMedia(true)
@@ -526,9 +524,8 @@ describe('SessionPickerDialog', () => {
       return (
         <>
           <button type="button" onClick={() => setOpen(true)}>open-picker</button>
-          <SessionPickerDialog
+          <SessionPickerPanel
             open={open}
-            onOpenChange={setOpen}
             currentRepo={mocks.repos[0]}
             onSelectSession={vi.fn()}
             onDeleteActiveSession={vi.fn()}
@@ -644,9 +641,8 @@ describe('SessionPickerDialog', () => {
         <>
           <button type="button" onClick={() => setOpen(false)}>close-picker</button>
           <button type="button" onClick={() => setOpen(true)}>open-picker</button>
-          <SessionPickerDialog
+          <SessionPickerPanel
             open={open}
-            onOpenChange={setOpen}
             currentRepo={mocks.repos[0]}
             activeSessionID="ses_active"
             onSelectSession={vi.fn()}
@@ -676,6 +672,49 @@ describe('SessionPickerDialog', () => {
     expect(screen.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'false')
     expect(screen.getByRole('tab', { name: 'Projects' })).toHaveAttribute('aria-selected', 'false')
     expect(combobox()).toHaveAttribute('placeholder', 'Search sessions...')
+  })
+
+  it('labels the sessions tab with the project name and truncates it', () => {
+    renderPicker({ projectName: 'a-very-long-project-name' })
+
+    const sessionsTab = screen.getByRole('tab', {
+      name: 'a-very-long-project-name',
+      selected: true,
+    })
+    expect(sessionsTab.querySelector('span.truncate')).toHaveTextContent('a-very-long-project-name')
+  })
+
+  it('renders the project session list while scoped and the all-sessions list after toggling', async () => {
+    const user = userEvent.setup()
+    const renderProjectSessions = vi.fn(() => <div>project session list</div>)
+    renderPicker({ renderProjectSessions })
+
+    expect(screen.getByText('project session list')).toBeInTheDocument()
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'This project' }))
+
+    expect(await screen.findByRole('combobox')).toBeInTheDocument()
+    expect(screen.queryByText('project session list')).not.toBeInTheDocument()
+  })
+
+  it('reports whether the sessions tab labels the project by name', async () => {
+    const user = userEvent.setup()
+    const onProjectLabelShownChange = vi.fn()
+    renderPicker({ projectName: 'alpha', onProjectLabelShownChange })
+
+    await waitFor(() => expect(onProjectLabelShownChange).toHaveBeenLastCalledWith(true))
+
+    await user.click(screen.getByRole('tab', { name: 'alpha' }))
+
+    await waitFor(() => expect(onProjectLabelShownChange).toHaveBeenLastCalledWith(false))
+  })
+
+  it('reports the project label as hidden when the picker is unscoped', async () => {
+    const onProjectLabelShownChange = vi.fn()
+    renderPicker({ currentRepo: undefined, projectName: 'alpha', onProjectLabelShownChange })
+
+    await waitFor(() => expect(onProjectLabelShownChange).toHaveBeenLastCalledWith(false))
   })
 
   it('exposes a tabpanel labelled by the active tab and swaps panels on tab switch', async () => {
@@ -879,9 +918,8 @@ describe('SessionPickerDialog', () => {
         <>
           <button type="button" onClick={() => setOpen(false)}>close-picker</button>
           <button type="button" onClick={() => setOpen(true)}>open-picker</button>
-          <SessionPickerDialog
+          <SessionPickerPanel
             open={open}
-            onOpenChange={setOpen}
             currentRepo={mocks.repos[0]}
             onSelectSession={vi.fn()}
             onDeleteActiveSession={vi.fn()}
@@ -1112,9 +1150,8 @@ describe('SessionPickerDialog', () => {
         recent: [],
       }
       renderWithClient(
-        <SessionPickerDialog
+        <SessionPickerPanel
           open
-          onOpenChange={vi.fn()}
           currentRepo={mocks.repos[0]}
           onSelectSession={vi.fn()}
           onDeleteActiveSession={vi.fn()}

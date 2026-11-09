@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
-import type { ReactNode, RefObject } from 'react'
+import type { RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { useLocation } from 'react-router-dom'
@@ -26,11 +26,7 @@ import type { ModelRef } from '@opencode-manager/shared/opencode'
 import { buildToolItems, toolKeyOf, type NavItem } from '@/components/navigation/navItems'
 import { isPanelTool, type ToolPanelState, type PanelTool } from '@/hooks/useToolPanel'
 import { useOpenNavItem } from '@/hooks/useOpenNavItem'
-import { ActivityCountPill } from '@/components/activity/ActivityCountPill'
-import { RouteSessionPicker } from '@/components/session/RouteSessionPicker'
-import { useSessionPickerNavigation } from '@/hooks/useSessionPickerNavigation'
 import type { TerminalTarget } from '@/lib/terminal-target'
-import { useActiveWorkCounts } from '@/hooks/useActiveWork'
 import { useUIState } from '@/stores/uiStateStore'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, TOOLTIP_OPEN_DELAY_MS } from '@/components/ui/tooltip'
 import { restoreOverlayFocus } from '@/lib/overlayFocus'
@@ -128,7 +124,7 @@ function PanelResizeHandle({ width, minWidth, maxWidth, onWidthChange }: PanelRe
   )
 }
 
-const REMOTE_TOOL_KEYS: ReadonlySet<string> = new Set(['sessions', 'mcp', 'skills', 'source-control', 'terminal'])
+const REMOTE_TOOL_KEYS: ReadonlySet<string> = new Set(['mcp', 'skills', 'source-control', 'terminal'])
 
 /**
  * Escape closes the floating panel, except while a nested menu is open or the terminal owns
@@ -162,47 +158,6 @@ function useFloatingPanelDismiss(
   }, [floating, panelRef])
 }
 
-interface SessionsPanelBodyProps {
-  docked: boolean
-  onClose: () => void
-  deleteActiveSessionPath?: string
-}
-
-/**
- * Session picker shown in the tool panel. While docked, choosing a session keeps the panel open on
- * the destination; as an overlay sheet the choice replaces the entry behind it and closes the panel.
- */
-function SessionsPanelBody({ docked, onClose, deleteActiveSessionPath }: SessionsPanelBodyProps) {
-  const navigation = useSessionPickerNavigation({
-    mode: docked ? 'panel' : 'replace',
-    onClose,
-    deleteActiveSessionPath,
-  })
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col px-3 pb-3">
-      <RouteSessionPicker navigation={navigation} />
-    </div>
-  )
-}
-
-function SessionsRailIndicator() {
-  const { needsInput, running } = useActiveWorkCounts()
-  const total = needsInput + running
-  const label = total > 0 ? `Sessions, ${needsInput} needs input, ${running} running` : 'Sessions'
-
-  return (
-    <>
-      <span className="sr-only">{label}</span>
-      <ActivityCountPill
-        needsInput={needsInput}
-        running={running}
-        className="absolute -right-0.5 -top-0.5"
-      />
-    </>
-  )
-}
-
 interface ToolSidePanelProps {
   panel: ToolPanelState
   filesBasePath: string | undefined
@@ -219,25 +174,15 @@ interface ToolSidePanelProps {
   walkthroughSourceRequest?: WalkthroughSourceRequest
   walkthroughModel?: ModelRef | null
   walkthroughOnOpenSession?: (id: string) => void
-  /**
-   * Path the session picker opens after the open session is deleted; the session page passes the
-   * remote project path on linked-server routes.
-   */
-  deleteActiveSessionPath?: string
 }
 
 interface RailButtonProps {
   item: NavItem
   active: boolean
   onClick: () => void
-  /**
-   * Rendered inside the button. When present, the indicator owns the button's accessible name,
-   * so the item label is not applied as an `aria-label`.
-   */
-  indicator?: ReactNode
 }
 
-function RailButton({ item, active, onClick, indicator }: RailButtonProps) {
+function RailButton({ item, active, onClick }: RailButtonProps) {
   const Icon = item.icon
   return (
     <Tooltip delayDuration={TOOLTIP_OPEN_DELAY_MS}>
@@ -245,7 +190,7 @@ function RailButton({ item, active, onClick, indicator }: RailButtonProps) {
         <button
           type="button"
           onClick={onClick}
-          aria-label={indicator ? undefined : item.label}
+          aria-label={item.label}
           aria-pressed={active}
           className={cn(
             'relative rounded-md p-2 transition-colors',
@@ -257,7 +202,6 @@ function RailButton({ item, active, onClick, indicator }: RailButtonProps) {
           )}
         >
           <Icon className="h-4 w-4" />
-          {indicator}
         </button>
       </TooltipTrigger>
       <TooltipContent side="left" align="center">
@@ -289,7 +233,6 @@ export function ToolSidePanel({
   walkthroughSourceRequest,
   walkthroughModel,
   walkthroughOnOpenSession,
-  deleteActiveSessionPath,
 }: ToolSidePanelProps) {
   const { activeTool, toggleTool, closePanel } = panel
   const location = useLocation()
@@ -358,9 +301,6 @@ export function ToolSidePanel({
     if (tool === 'preview') return <PreviewWorkspace isOpen directory={directory} compact />
     if (tool === 'mcp') return repoDirectory ? <RepoMcpContent open directory={repoDirectory} /> : null
     if (tool === 'walkthrough') return sessionId ? <ChangesWalkthroughView /> : null
-    if (tool === 'sessions') {
-      return <SessionsPanelBody docked={docked} onClose={closePanel} deleteActiveSessionPath={deleteActiveSessionPath} />
-    }
     if (tool === 'terminal') {
       return terminalWorkspaceTarget
         ? <TerminalWorkspace target={terminalWorkspaceTarget} directory={terminalDirectory ?? directory} isOpen onLastTerminalExited={closePanel} />
@@ -489,7 +429,6 @@ export function ToolSidePanel({
               item={item}
               active={tool === activeTool}
               onClick={() => toggleTool(tool)}
-              indicator={tool === 'sessions' ? <SessionsRailIndicator /> : undefined}
             />
           ))}
           {actionItems.length > 0 ? <div className="my-1 h-px w-6 shrink-0 bg-border" role="separator" /> : null}

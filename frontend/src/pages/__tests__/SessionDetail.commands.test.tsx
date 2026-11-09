@@ -480,7 +480,7 @@ describe('SessionDetail command actions', () => {
     })
   })
 
-  it('opens the sessions panel from the sessions command on desktop', async () => {
+  it('opens the sessions menu from the sessions command on desktop', async () => {
     const captured = { search: { current: '' }, pathname: { current: '' } }
 
     renderSessionDetail(captured)
@@ -490,10 +490,10 @@ describe('SessionDetail command actions', () => {
       await showSessions()
     })
 
-    await waitFor(() => expect(captured.search.current).toBe('?panel=sessions'))
+    await waitFor(() => expect(captured.search.current).toBe('?menu=sessions'))
   })
 
-  it('opens the mobile sessions sheet instead of the panel from the sessions command', async () => {
+  it('opens the sessions menu from the sessions command on mobile', async () => {
     mocks.useMobile.mockReturnValue(true)
     const captured = { search: { current: '' }, pathname: { current: '' } }
 
@@ -504,7 +504,7 @@ describe('SessionDetail command actions', () => {
       await showSessions()
     })
 
-    await waitFor(() => expect(captured.search.current).toBe('?mobileTab=sessions'))
+    await waitFor(() => expect(captured.search.current).toBe('?menu=sessions'))
   })
 
   it('shows the error toast when the transcript fetch fails', async () => {

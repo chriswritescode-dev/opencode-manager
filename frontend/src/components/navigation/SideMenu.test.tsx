@@ -2,8 +2,31 @@ import { vi } from 'vitest'
 
 vi.mock('@/hooks/useNotificationsAction', () => ({ useNotificationsAction: vi.fn() }))
 vi.mock('@/hooks/useAuth', () => ({ useAuth: vi.fn() }))
-vi.mock('@/api/repos', () => ({ getRepo: vi.fn() }))
+vi.mock('@/api/repos', () => ({ getRepo: vi.fn(), listRepos: vi.fn() }))
 vi.mock('@/hooks/useSchedules', () => ({ useUnreadScheduleRuns: vi.fn(() => ({ data: undefined })) }))
+vi.mock('@/components/session/SessionPickerPanel', () => ({
+  SessionPickerPanel: ({
+    projectName,
+    onProjectLabelShownChange,
+  }: {
+    projectName?: string
+    onProjectLabelShownChange?: (shown: boolean) => void
+  }) => (
+    <div data-testid="session-picker-panel" data-project-name={projectName ?? ''}>
+      <button type="button" onClick={() => onProjectLabelShownChange?.(true)}>
+        show-project-label
+      </button>
+      <button type="button" onClick={() => onProjectLabelShownChange?.(false)}>
+        hide-project-label
+      </button>
+    </div>
+  ),
+}))
+vi.mock('@/components/navigation/LinkedServersNav', () => ({
+  LinkedServersNav: ({ variant }: { variant?: string }) => (
+    <div data-testid="linked-servers-nav" data-variant={variant} />
+  ),
+}))
 
 import { useEffect } from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -11,10 +34,12 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
+import type { Repo } from '@/api/types'
+import { stubMatchMedia } from '@/test/test-utils'
 import { SideMenu } from './SideMenu'
 import { useAuth } from '@/hooks/useAuth'
 import { useNotificationsAction } from '@/hooks/useNotificationsAction'
-import { getRepo } from '@/api/repos'
+import { getRepo, listRepos } from '@/api/repos'
 import { useSidebarServerStore } from '@/stores/sidebarServerStore'
 
 function LocationSpy({ search }: { search: { current: string } }) {
@@ -44,6 +69,19 @@ function notifications(count: number): ReturnType<typeof useNotificationsAction>
   }
 }
 
+function readyRepo(overrides: Partial<Repo> = {}): Repo {
+  return {
+    id: 1,
+    name: 'alpha',
+    localPath: '/repos/alpha',
+    fullPath: '/repos/alpha',
+    defaultBranch: 'main',
+    cloneStatus: 'ready',
+    clonedAt: 1,
+    ...overrides,
+  }
+}
+
 function renderSideMenu(entry: string) {
   const search = { current: '' }
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -69,6 +107,7 @@ describe('SideMenu', () => {
       logout: vi.fn(),
     } as unknown as ReturnType<typeof useAuth>)
     vi.mocked(getRepo).mockReturnValue(new Promise(() => {}))
+    vi.mocked(listRepos).mockResolvedValue([])
     useSidebarServerStore.setState({ serverId: LOCAL_OPENCODE_SERVER_ID })
   })
 
@@ -173,5 +212,74 @@ describe('SideMenu', () => {
     renderSideMenu('/?menu=home')
 
     expect(screen.getByRole('button', { name: /Notifications/ })).toBeInTheDocument()
+  })
+
+  it('hosts the session picker on the sessions page and goes back to the home page', async () => {
+    const search = renderSideMenu('/?menu=sessions')
+
+    expect(screen.getByTestId('side-menu-sessions-page')).toBeInTheDocument()
+    expect(screen.getByTestId('session-picker-panel')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Menu' }))
+
+    await waitFor(() => expect(search.current).toContain('menu=home'))
+  })
+
+  it('scopes the session picker to the menu project', async () => {
+    const repo = readyRepo()
+    vi.mocked(getRepo).mockResolvedValue(repo)
+    vi.mocked(listRepos).mockResolvedValue([repo])
+
+    renderSideMenu('/repos/1?menu=sessions&menuProject=repo:1')
+
+    await waitFor(() =>
+      expect(screen.getByTestId('session-picker-panel')).toHaveAttribute('data-project-name', 'alpha'),
+    )
+  })
+
+  it('labels a linked-server menu project with its directory name', async () => {
+    renderSideMenu('/?menu=sessions&menuProject=server:srv_kitchen:%2Fhome%2Fme%2Fapp')
+
+    await waitFor(() =>
+      expect(screen.getByTestId('session-picker-panel')).toHaveAttribute('data-project-name', 'app'),
+    )
+  })
+
+  it('hides the header project name only while the sessions tab labels the project', async () => {
+    const repo = readyRepo()
+    vi.mocked(getRepo).mockResolvedValue(repo)
+    vi.mocked(listRepos).mockResolvedValue([repo])
+
+    renderSideMenu('/repos/1?menu=sessions&menuProject=repo:1')
+
+    await waitFor(() =>
+      expect(screen.getByTestId('session-picker-panel')).toHaveAttribute('data-project-name', 'alpha'),
+    )
+    expect(screen.getByTestId('side-menu-project-name')).toHaveTextContent('alpha')
+
+    fireEvent.click(screen.getByRole('button', { name: 'show-project-label' }))
+
+    expect(screen.queryByTestId('side-menu-project-name')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'hide-project-label' }))
+
+    expect(screen.getByTestId('side-menu-project-name')).toHaveTextContent('alpha')
+  })
+
+  it('shows the server switcher as a rail on a narrow menu', () => {
+    renderSideMenu('/?menu=home')
+
+    expect(screen.getByTestId('linked-servers-nav')).toHaveAttribute('data-variant', 'rail')
+  })
+
+  it('shows the server switcher in the header on a wide menu', () => {
+    stubMatchMedia(true)
+    try {
+      renderSideMenu('/?menu=home')
+
+      expect(screen.getByTestId('linked-servers-nav')).toHaveAttribute('data-variant', 'header')
+    } finally {
+      Reflect.deleteProperty(window, 'matchMedia')
+    }
   })
 })
