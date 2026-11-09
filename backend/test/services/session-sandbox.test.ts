@@ -21,6 +21,12 @@ import { createFakeSessionPermissionClient } from '../helpers/fake-session-permi
 const DIRECTORY = '/abs/repo'
 
 const ENV_RESOURCES = { cpus: ENV.SANDBOX.CPUS, memoryMib: parseMemoryMib(ENV.SANDBOX.MEMORY) ?? 0 }
+const HOST_CPUS = os.availableParallelism()
+const HOST_MEMORY_MIB = Math.floor(os.totalmem() / 1048576)
+const RESOURCE_OVERRIDE = {
+  cpus: Math.min(4, HOST_CPUS),
+  memoryMib: Math.min(8192, HOST_MEMORY_MIB),
+}
 
 function createTestDb(): Database {
   const db = new Database(':memory:')
@@ -402,7 +408,7 @@ describe('SessionSandboxService', () => {
       },
     })
 
-    await service.update('ses_root', { resources: { cpus: 4, memoryMib: 8192 } })
+    await service.update('ses_root', { resources: RESOURCE_OVERRIDE })
 
     expect(removed).toEqual([])
   })
@@ -494,10 +500,10 @@ describe('SessionSandboxService', () => {
     await service.update('ses_root', { sandboxed: true })
     const toggledAt = getSessionSandboxMode(db, 'ses_root')?.toggledAt
 
-    await expect(service.update('ses_root', { resources: { cpus: 4, memoryMib: 8192 } })).resolves.toMatchObject({
+    await expect(service.update('ses_root', { resources: RESOURCE_OVERRIDE })).resolves.toMatchObject({
       source: 'user',
-      resources: { cpus: 4, memoryMib: 8192 },
-      effectiveResources: { cpus: 4, memoryMib: 8192 },
+      resources: RESOURCE_OVERRIDE,
+      effectiveResources: RESOURCE_OVERRIDE,
     })
 
     expect(getSessionSandboxMode(db, 'ses_root')).toMatchObject({ toggledAt })

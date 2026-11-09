@@ -66,10 +66,11 @@ test.describe('inline markdown images', () => {
     expect(webpResponse.ok()).toBe(true)
     expect(webpResponse.headers()['content-type']).toContain('image/webp')
 
-    await page.goto(`/repos/${repo.id}?panel=files`)
-    const filesPanel = page.locator('aside[aria-label="Files"]')
-    await filesPanel.getByText('docs', { exact: true }).click()
-    await filesPanel.getByText('README.md', { exact: true }).click()
+    await page.goto(`/repos/${repo.id}`)
+    const sidebar = page.getByRole('complementary', { name: 'Sidebar' })
+    await sidebar.getByRole('button', { name: 'Files', exact: true }).click()
+    await page.getByText('docs', { exact: true }).click()
+    await page.getByText('README.md', { exact: true }).click()
 
     const logo = page.getByAltText('logo')
     await expect(logo).toHaveAttribute('src', rawFileUrl(`${localPath}/docs/img/logo.png`))

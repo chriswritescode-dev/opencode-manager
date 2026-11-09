@@ -212,8 +212,9 @@ test.describe('repository secrets', () => {
 
   test('lists secrets by name without revealing their values', async ({ page }) => {
     await page.goto(`/repos/${secretsRepo.id}`)
-    await page.getByRole('navigation', { name: 'Tools' }).getByRole('button', { name: 'Secrets' }).click()
-    const panel = page.getByRole('complementary', { name: 'Secrets' })
+    await page.getByRole('button', { name: 'Project actions' }).click()
+    await page.getByRole('menuitem', { name: 'Secrets', exact: true }).click()
+    const panel = page.getByRole('dialog', { name: 'Secrets' })
     await expect(panel.getByText(SECRET_NAME, { exact: true })).toBeVisible()
     await expect(panel.getByRole('button', { name: `Update ${SECRET_NAME}` })).toBeVisible()
     await expect(page.locator('body')).not.toContainText(SECRET_VALUE)

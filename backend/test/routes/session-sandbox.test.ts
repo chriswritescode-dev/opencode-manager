@@ -13,6 +13,12 @@ import { createSessionSandboxRoutes } from '../../src/routes/session-sandbox'
 import { createFakeSessionPermissionClient } from '../helpers/fake-session-permission-client'
 
 const ENV_RESOURCES = { cpus: ENV.SANDBOX.CPUS, memoryMib: parseMemoryMib(ENV.SANDBOX.MEMORY) ?? 0 }
+const HOST_CPUS = os.availableParallelism()
+const HOST_MEMORY_MIB = Math.floor(os.totalmem() / 1048576)
+const RESOURCE_OVERRIDE = {
+  cpus: Math.min(4, HOST_CPUS),
+  memoryMib: Math.min(8192, HOST_MEMORY_MIB),
+}
 
 function createTestDb(): Database {
   const db = new Database(':memory:')
@@ -159,12 +165,12 @@ describe('session sandbox routes', () => {
     const putRes = await app.request('/session-sandbox/ses_root', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ resources: { cpus: 4, memoryMib: 8192 } }),
+      body: JSON.stringify({ resources: RESOURCE_OVERRIDE }),
     })
     expect(putRes.status).toBe(200)
     await expect(putRes.json()).resolves.toMatchObject({
-      resources: { cpus: 4, memoryMib: 8192 },
-      effectiveResources: { cpus: 4, memoryMib: 8192 },
+      resources: RESOURCE_OVERRIDE,
+      effectiveResources: RESOURCE_OVERRIDE,
     })
   })
 
