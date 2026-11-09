@@ -117,7 +117,7 @@ export function ScheduleRepoSwitcher({ repoId, name }: ScheduleRepoSwitcherProps
     return (
       <>
         {trigger(() => setOpen(true))}
-        <BottomSheet isOpen={open} onClose={close} heightClass="h-[70dvh]" ariaLabel="Switch repository">
+        <BottomSheet isOpen={open} onClose={close} size="fit" ariaLabel="Switch repository">
           <BottomSheetHeader title="Switch repository" className="border-b-0">
             <Input
               type="text"

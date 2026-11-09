@@ -39,7 +39,7 @@ export function NotificationsSheet({ isOpen, onClose }: NotificationsSheetProps)
   }
 
   return (
-    <BottomSheet isOpen={isOpen} onClose={onClose} ariaLabel="Notifications">
+    <BottomSheet isOpen={isOpen} onClose={onClose} size="fit" ariaLabel="Notifications">
       <BottomSheetHeader title="Notifications" />
       <BottomSheetContent className="flex flex-col gap-4">
         <div>

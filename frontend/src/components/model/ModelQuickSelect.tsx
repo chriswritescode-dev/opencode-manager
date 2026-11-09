@@ -630,8 +630,9 @@ export const ModelQuickSelect = memo(function ModelQuickSelect({
       <BottomSheet
         isOpen={isOpen}
         onClose={() => handleOpenChange(false)}
+        size="page"
         heightClass="h-[70dvh] max-h-[720px]"
-        className="z-[300] border-border bg-popover text-foreground shadow-2xl md:mx-auto md:max-w-lg"
+        className="z-[300] border-border bg-popover text-foreground shadow-2xl"
         ariaLabel="Select model"
       >
         {contextUsage && (

@@ -222,6 +222,49 @@ describe('BottomSheet', () => {
     expect(dialog).toHaveClass('h-[50dvh]')
   })
 
+  it('caps the default page sheet at max-w-3xl with its height class', () => {
+    render(
+      <BottomSheet isOpen onClose={() => {}} heightClass="h-[60dvh]" ariaLabel="Test sheet">
+        <div>Test content</div>
+      </BottomSheet>,
+    )
+    const dialog = screen.getByRole('dialog', { name: 'Test sheet' })
+    expect(dialog).toHaveClass('sm:max-w-3xl')
+    expect(dialog).toHaveClass('h-[60dvh]')
+    expect(dialog).toHaveClass('min-h-0')
+  })
+
+  it('lets a fit sheet size to its content instead of heightClass', () => {
+    render(
+      <BottomSheet isOpen onClose={() => {}} size="fit" heightClass="h-[50dvh]" ariaLabel="Test sheet">
+        <div>Test content</div>
+      </BottomSheet>,
+    )
+    const dialog = screen.getByRole('dialog', { name: 'Test sheet' })
+    expect(dialog).toHaveClass('h-auto')
+    expect(dialog).toHaveClass('max-h-[90dvh]')
+    expect(dialog).toHaveClass('sm:max-w-lg')
+    expect(dialog).not.toHaveClass('h-[50dvh]')
+  })
+
+  it('keeps a fit sheet scrollable when its content outgrows the viewport', () => {
+    render(
+      <BottomSheet isOpen onClose={() => {}} size="fit" ariaLabel="Test sheet">
+        <BottomSheetContent>
+          {Array.from({ length: 40 }, (_, index) => (
+            <div key={index}>row {index}</div>
+          ))}
+        </BottomSheetContent>
+      </BottomSheet>,
+    )
+    const content = screen.getByText('row 0').parentElement
+    expect(content).toHaveClass('overflow-auto')
+    expect(content).toHaveClass('min-h-0')
+    for (let index = 0; index < 40; index += 1) {
+      expect(screen.getByText(`row ${index}`)).toBeInTheDocument()
+    }
+  })
+
   it('passes correct options to useSwipeDismiss', () => {
     const mockBind = vi.fn()
     vi.mocked(useSwipeDismiss).mockReturnValue({

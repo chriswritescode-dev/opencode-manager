@@ -14,6 +14,11 @@ import { useOverlayReturnFocus } from '@/hooks/useOverlayReturnFocus'
 export interface BottomSheetProps {
   isOpen: boolean
   onClose: () => void
+  /**
+   * `page` fills a fixed viewport height (`heightClass`) and caps at `max-w-3xl`;
+   * `fit` grows with its content up to `90dvh` and caps at `max-w-lg`.
+   */
+  size?: 'page' | 'fit'
   heightClass?: string
   className?: string
   children: React.ReactNode
@@ -24,6 +29,7 @@ export interface BottomSheetProps {
 export function BottomSheet({
   isOpen,
   onClose,
+  size = 'page',
   heightClass = 'h-[70dvh]',
   className,
   children,
@@ -92,8 +98,8 @@ export function BottomSheet({
             onOpenAutoFocus={handleOpenAutoFocus}
             onCloseAutoFocus={handleCloseAutoFocus}
             className={cn(
-              'fixed inset-x-0 bottom-0 flex flex-col bg-background rounded-t-2xl border-t border-border focus:outline-none',
-              heightClass,
+              'fixed inset-x-0 bottom-0 mx-auto flex min-h-0 flex-col bg-background rounded-t-2xl border-t border-border focus:outline-none',
+              size === 'fit' ? 'h-auto max-h-[90dvh] sm:max-w-lg' : cn(heightClass, 'sm:max-w-3xl'),
               className,
             )}
             style={swipeStyles}

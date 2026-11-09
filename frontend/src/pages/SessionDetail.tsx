@@ -10,6 +10,7 @@ import { SquareFill } from "@/components/ui/square-fill";
 import { Header } from "@/components/ui/header";
 import { Badge } from "@/components/ui/badge";
 import { getServerProjectPath, getSessionListPath, getSessionPath } from '@/lib/navigation'
+import { READABLE_COLUMN_CLASS } from '@/lib/layout'
 import { FetchError } from '@/api/fetchWrapper'
 
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
@@ -856,20 +857,22 @@ export function SessionDetail() {
           {isTranscriptLoading ? (
             <MessageSkeleton />
           ) : sessionDirectory ? (
-            <MessageThread 
-              sessionID={sessionId} 
-              directory={sessionDirectory}
-              repoFullPath={repo?.fullPath}
-              repoLocalPath={repo?.localPath}
-              messages={messages}
-              pending={pendingPrompts}
-              isSessionBusy={isSessionActive}
-              onFileClick={isRemoteServer ? undefined : handleFileClick}
-              onChildSessionClick={handleChildSessionClick}
-              onOpenWalkthrough={isRemoteServer ? undefined : handleShowWalkthrough}
-              onUndoMessage={handleUndoMessage}
-              model={modelRef ? formatOpenCodeModelRef(modelRef) : undefined}
-            />
+            <div className={READABLE_COLUMN_CLASS}>
+              <MessageThread 
+                sessionID={sessionId} 
+                directory={sessionDirectory}
+                repoFullPath={repo?.fullPath}
+                repoLocalPath={repo?.localPath}
+                messages={messages}
+                pending={pendingPrompts}
+                isSessionBusy={isSessionActive}
+                onFileClick={isRemoteServer ? undefined : handleFileClick}
+                onChildSessionClick={handleChildSessionClick}
+                onOpenWalkthrough={isRemoteServer ? undefined : handleShowWalkthrough}
+                onUndoMessage={handleUndoMessage}
+                model={modelRef ? formatOpenCodeModelRef(modelRef) : undefined}
+              />
+            </div>
           ) : null}
         </div>
         {sessionDirectory && !isEditingMessage && (
@@ -888,7 +891,7 @@ export function SessionDetail() {
                 isFormOpen && "pointer-events-auto",
                 isFormSheetOpen
                   ? "flex w-full flex-1 min-h-0 flex-col"
-                  : cn("w-full md:w-[94%] md:max-w-4xl", isFormOpen && "flex max-h-full min-h-0 flex-col"),
+                  : cn('w-full', READABLE_COLUMN_CLASS, isFormOpen && "flex max-h-full min-h-0 flex-col"),
               )}
             >
               {!isFormSheetOpen && (

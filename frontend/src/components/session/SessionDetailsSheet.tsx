@@ -183,6 +183,7 @@ export function SessionDetailsSheet({
       <BottomSheet
         isOpen={open}
         onClose={handleClose}
+        size="page"
         ariaLabel="Session details"
         dismissible={!saving}
       >

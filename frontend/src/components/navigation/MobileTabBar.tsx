@@ -42,34 +42,36 @@ interface TabStripProps {
 export const TabStrip = memo(function TabStrip({ tabs, className }: TabStripProps) {
   return (
     <div className={cn('flex border-t border-border bg-card/90 backdrop-blur-sm', className)}>
-      {tabs.map((tab) => {
-        const Icon = tab.icon
-        return (
-          <button
-            key={tab.key}
-            type="button"
-            className={cn(
-              'relative flex-1 flex flex-col items-center justify-center gap-1 px-2 py-2 text-xs font-medium border-b-2 transition-colors',
-              tab.active
-                ? 'text-primary border-primary'
-                : 'text-muted-foreground border-transparent hover:text-foreground',
-            )}
-            onClick={tab.onClick}
-          >
-            <div className="relative">
-              <Icon className="w-5 h-5" />
-              {tab.badge && (
-                <span
-                  aria-hidden="true"
-                  data-unread-badge
-                  className="absolute -top-0.5 -right-1 w-2 h-2 rounded-full bg-highlight ring-2 ring-card animate-pulse"
-                />
+      <div className="mx-auto flex w-full max-w-xl">
+        {tabs.map((tab) => {
+          const Icon = tab.icon
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              className={cn(
+                'relative flex-1 flex flex-col items-center justify-center gap-1 px-2 py-2 text-xs font-medium border-b-2 transition-colors',
+                tab.active
+                  ? 'text-primary border-primary'
+                  : 'text-muted-foreground border-transparent hover:text-foreground',
               )}
-            </div>
-            <span className="leading-none">{tab.label}</span>
-          </button>
-        )
-      })}
+              onClick={tab.onClick}
+            >
+              <div className="relative">
+                <Icon className="w-5 h-5" />
+                {tab.badge && (
+                  <span
+                    aria-hidden="true"
+                    data-unread-badge
+                    className="absolute -top-0.5 -right-1 w-2 h-2 rounded-full bg-highlight ring-2 ring-card animate-pulse"
+                  />
+                )}
+              </div>
+              <span className="leading-none">{tab.label}</span>
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 })
