@@ -59,9 +59,12 @@ vi.mock('@/contexts/KeyboardShortcutsContext', () => ({ useShortcutActions: mock
 vi.mock('@/hooks/useAutoScroll', () => ({ useAutoScroll: mocks.useAutoScroll }))
 vi.mock('@/hooks/useDialogParam', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/hooks/useDialogParam')>()
-  return { ...actual, useDialogParam: mocks.useDialogParam }
+  return { ...actual, useDialogParam: mocks.useDialogParam, useRouteDialogParam: mocks.useDialogParam }
 })
-vi.mock('@/hooks/useOpenTerminal', () => ({ useTerminalDialogParam: mocks.useTerminalDialogParam }))
+vi.mock('@/hooks/useOpenTerminal', () => ({
+  useTerminalDialogParam: mocks.useTerminalDialogParam,
+  useRouteTerminalDialogParam: mocks.useTerminalDialogParam,
+}))
 vi.mock('@/hooks/useAutoPlayLastResponse', () => ({
   getAssistantText: vi.fn(() => ''),
   getLatestPlayableAssistantMessage: vi.fn(() => null),

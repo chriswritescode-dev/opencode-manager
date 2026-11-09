@@ -90,15 +90,18 @@ export interface ToolPanelState {
 /**
  * URL state of the desktop tool panel (`?panel=`). While the panel surface is available, a tool opened
  * through the shared `?dialog=` param is moved into the panel; when it is not, an open panel tool falls
- * back to its dialog, or closes when it has none.
+ * back to its dialog, or closes when it has none. A `toolProject` dialog belongs to another project and
+ * is left for `ProjectToolsHost`.
  */
 export function useToolPanel(panelAvailable: boolean): ToolPanelState {
   const { searchParams, updateParams, closePushedParams } = useUrlParams()
   const panelParam = searchParams.get(PANEL_PARAM)
   const dialogParam = searchParams.get('dialog')
+  const toolProjectParam = searchParams.get('toolProject')
   const activeTool = panelAvailable && isPanelTool(panelParam) ? panelParam : null
 
   useEffect(() => {
+    if (toolProjectParam !== null) return
     if (panelAvailable && isPanelTool(dialogParam)) {
       updateParams((params) => {
         params.delete('dialog')
@@ -117,7 +120,7 @@ export function useToolPanel(panelAvailable: boolean): ToolPanelState {
         if (!params.has('dialog')) params.set('dialog', panelParam)
       }, 'replace')
     }
-  }, [panelAvailable, dialogParam, panelParam, updateParams])
+  }, [panelAvailable, dialogParam, panelParam, toolProjectParam, updateParams])
 
   const closePanel = useCallback(() => {
     closePushedParams(clearToolPanelParams)

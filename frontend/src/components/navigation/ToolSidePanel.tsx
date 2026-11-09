@@ -25,7 +25,8 @@ import type { SkillFileInfo } from '@opencode-manager/shared'
 import type { ModelRef } from '@opencode-manager/shared/opencode'
 import { buildToolItems, toolKeyOf, type NavItem } from '@/components/navigation/navItems'
 import { isPanelTool, type ToolPanelState, type PanelTool } from '@/hooks/useToolPanel'
-import { useOpenNavItem } from '@/hooks/useOpenNavItem'
+import { useOpenProjectTool } from '@/hooks/useOpenProjectTool'
+import { projectTargetFromRoute } from '@/lib/projectTarget'
 import type { TerminalTarget } from '@/lib/terminal-target'
 import { useUIState } from '@/stores/uiStateStore'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, TOOLTIP_OPEN_DELAY_MS } from '@/components/ui/tooltip'
@@ -236,7 +237,8 @@ export function ToolSidePanel({
 }: ToolSidePanelProps) {
   const { activeTool, toggleTool, closePanel } = panel
   const location = useLocation()
-  const openNavItem = useOpenNavItem()
+  const openProjectTool = useOpenProjectTool()
+  const routeTarget = projectTargetFromRoute(location.pathname, location.search)
   const routeServerId = useRouteOpenCodeServerId()
   const isRemoteRoute = !isLocalOpenCodeServer(routeServerId)
   const railRef = useRef<HTMLElement>(null)
@@ -433,7 +435,7 @@ export function ToolSidePanel({
           ))}
           {actionItems.length > 0 ? <div className="my-1 h-px w-6 shrink-0 bg-border" role="separator" /> : null}
           {actionItems.map((item) => (
-            <RailButton key={item.key} item={item} active={false} onClick={() => openNavItem(item)} />
+            <RailButton key={item.key} item={item} active={false} onClick={() => openProjectTool(item, routeTarget)} />
           ))}
         </nav>
       </TooltipProvider>

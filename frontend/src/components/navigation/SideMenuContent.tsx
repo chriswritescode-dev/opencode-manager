@@ -7,10 +7,9 @@ import { repoQueryOptions } from '@/lib/repoQuery'
 import { cn, getDirectoryName, getRepoDisplayName } from '@/lib/utils'
 import type { ProjectTarget } from '@/lib/projectTarget'
 import { useAuth } from '@/hooks/useAuth'
-import { openDialogParams } from '@/hooks/useDialogParam'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useNotificationsAction } from '@/hooks/useNotificationsAction'
-import { useOpenNavItem } from '@/hooks/useOpenNavItem'
+import { useOpenProjectTool } from '@/hooks/useOpenProjectTool'
 import { useSessionPickerNavigation } from '@/hooks/useSessionPickerNavigation'
 import { useSessionPickerRouteScope } from '@/hooks/useSessionPickerRouteScope'
 import { useSideMenu } from '@/hooks/useSideMenu'
@@ -85,11 +84,11 @@ function MenuRow({ icon: Icon, label, onClick, danger, trailing }: MenuRowProps)
 export function SideMenuContent({ variant, fullWidth, onClose }: SideMenuContentProps) {
   const location = useLocation()
   const { project, page, setPage, closeMenu } = useSideMenu()
-  const menuTabs = useTabDestinations(project, { inMenu: true })
+  const menuTabs = useTabDestinations(project)
   const { updateParams } = useUrlParams()
   const { logout } = useAuth()
   const { count, destructive, label, press } = useNotificationsAction()
-  const openNavItem = useOpenNavItem()
+  const openProjectTool = useOpenProjectTool()
   const wideMenu = useMediaQuery(SIDE_MENU_WIDE_MEDIA_QUERY)
   const pickerNavigation = useSessionPickerNavigation({
     mode: 'push',
@@ -141,16 +140,7 @@ export function SideMenuContent({ variant, fullWidth, onClose }: SideMenuContent
       void handleLogoutClick()
       return
     }
-    if (item.dialog) {
-      const dialog = item.dialog
-      updateParams((params) => {
-        openDialogParams(params, dialog)
-        params.delete('menu')
-        params.delete('menuProject')
-      }, 'push')
-      return
-    }
-    openNavItem(item)
+    openProjectTool(item, project)
   }
 
   const items = buildNavModel(navPathForProject(project)).items

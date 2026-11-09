@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
 import { LinkedServersNav } from "@/components/navigation/LinkedServersNav";
 import { ToolSidePanel } from "@/components/navigation/ToolSidePanel";
-import { useDialogParam } from "@/hooks/useDialogParam";
+import { useRouteDialogParam } from "@/hooks/useDialogParam";
 import { useToolPanelLayout } from "@/hooks/useToolPanelLayout";
 import { useSidebarServerSelection } from "@/hooks/useSidebarServerSelection";
 import { useToolPanel } from "@/hooks/useToolPanel";
@@ -19,7 +19,7 @@ import { useToolPanel } from "@/hooks/useToolPanel";
 export function Repos() {
   const navigate = useNavigate();
   const [addRepoOpen, setAddRepoOpen] = useState(false);
-  const [fileBrowserOpen, setFileBrowserOpen] = useDialogParam('files');
+  const [fileBrowserOpen, setFileBrowserOpen] = useRouteDialogParam('files');
   const { docked, showRail } = useToolPanelLayout();
   const toolPanel = useToolPanel(showRail);
   const [selectedServerId] = useSidebarServerSelection();

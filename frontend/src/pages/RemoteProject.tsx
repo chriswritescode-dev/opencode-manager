@@ -9,8 +9,8 @@ import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 import { useSSE } from '@/hooks/useSSE'
 import { useToolPanelLayout } from '@/hooks/useToolPanelLayout'
 import { useToolPanel } from '@/hooks/useToolPanel'
-import { useDialogParam } from '@/hooks/useDialogParam'
-import { useTerminalDialogParam, useTerminalDirectoryParam } from '@/hooks/useOpenTerminal'
+import { useRouteDialogParam } from '@/hooks/useDialogParam'
+import { useRouteTerminalDialogParam, useTerminalDirectoryParam } from '@/hooks/useOpenTerminal'
 import { getServerSessionPath } from '@/lib/navigation'
 import { getDirectoryName } from '@/lib/utils'
 import { Header } from '@/components/ui/header'
@@ -36,10 +36,10 @@ function RemoteProjectContent({ serverId, directory }: { serverId: string; direc
     refetch: refetchServers,
   } = useOpenCodeServers()
   const { openTab } = useSettingsDialog()
-  const [mcpDialogOpen, setMcpDialogOpen] = useDialogParam('mcp')
-  const [skillsDialogOpen, setSkillsDialogOpen] = useDialogParam('skills')
-  const [sourceControlOpen, setSourceControlOpen] = useDialogParam('sourceControl')
-  const [terminalOpen, setTerminalOpen] = useTerminalDialogParam()
+  const [mcpDialogOpen, setMcpDialogOpen] = useRouteDialogParam('mcp')
+  const [skillsDialogOpen, setSkillsDialogOpen] = useRouteDialogParam('skills')
+  const [sourceControlOpen, setSourceControlOpen] = useRouteDialogParam('sourceControl')
+  const [terminalOpen, setTerminalOpen] = useRouteTerminalDialogParam()
   const terminalDirectory = useTerminalDirectoryParam()
   const { docked, showRail } = useToolPanelLayout()
   const toolPanel = useToolPanel(showRail)

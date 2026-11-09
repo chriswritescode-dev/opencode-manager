@@ -2,8 +2,8 @@ import { useNavigate } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { getRepo } from "@/api/repos"
 import { useCreateSession } from "@/hooks/useOpenCode"
-import { useDialogParam } from "@/hooks/useDialogParam"
-import { useTerminalDialogParam } from "@/hooks/useOpenTerminal"
+import { useRouteDialogParam } from "@/hooks/useDialogParam"
+import { useRouteTerminalDialogParam } from "@/hooks/useOpenTerminal"
 import { useSSE } from "@/hooks/useSSE"
 import { getSessionPath } from "@/lib/navigation"
 import { Button } from "@/components/ui/button"
@@ -25,13 +25,13 @@ import { Plus } from "lucide-react"
 export function AssistantRedirect() {
   const navigate = useNavigate()
   const repoId = 0
-  const [fileBrowserOpen, setFileBrowserOpen] = useDialogParam('files')
-  const [mcpDialogOpen, setMcpDialogOpen] = useDialogParam('mcp')
-  const [skillsDialogOpen, setSkillsDialogOpen] = useDialogParam('skills')
-  const [sourceControlOpen, setSourceControlOpen] = useDialogParam('sourceControl')
-  const [terminalOpen, setTerminalOpen] = useTerminalDialogParam()
-  const [previewOpen, setPreviewOpen] = useDialogParam('preview')
-  const [resetPermissionsOpen, setResetPermissionsOpen] = useDialogParam('resetPermissions')
+  const [fileBrowserOpen, setFileBrowserOpen] = useRouteDialogParam('files')
+  const [mcpDialogOpen, setMcpDialogOpen] = useRouteDialogParam('mcp')
+  const [skillsDialogOpen, setSkillsDialogOpen] = useRouteDialogParam('skills')
+  const [sourceControlOpen, setSourceControlOpen] = useRouteDialogParam('sourceControl')
+  const [terminalOpen, setTerminalOpen] = useRouteTerminalDialogParam()
+  const [previewOpen, setPreviewOpen] = useRouteDialogParam('preview')
+  const [resetPermissionsOpen, setResetPermissionsOpen] = useRouteDialogParam('resetPermissions')
   const { docked, showRail } = useToolPanelLayout()
   const toolPanel = useToolPanel(showRail)
 

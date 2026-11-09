@@ -4,7 +4,8 @@ import { useSidebarCollapsed } from '@/hooks/useSidebarCollapsed'
 import { useSidebarWidth } from '@/hooks/useSidebarWidth'
 import { useAuth } from '@/hooks/useAuth'
 import { useUrlParams } from '@/hooks/useUrlParams'
-import { useOpenNavItem } from '@/hooks/useOpenNavItem'
+import { useOpenProjectTool } from '@/hooks/useOpenProjectTool'
+import { projectTargetFromRoute } from '@/lib/projectTarget'
 import { buildNavModel, type NavItem, type NavPrimaryCta } from '@/components/navigation/navItems'
 import { DesktopSessionTree } from '@/components/navigation/DesktopSessionTree'
 import { LinkedServersNav } from '@/components/navigation/LinkedServersNav'
@@ -20,7 +21,7 @@ export function DesktopSidebar() {
   const location = useLocation()
   const navigate = useNavigate()
   const { updateParams } = useUrlParams()
-  const openNavItem = useOpenNavItem()
+  const openProjectTool = useOpenProjectTool()
   const [collapsed, toggle] = useSidebarCollapsed()
   const [sidebarWidth, setSidebarWidth] = useSidebarWidth()
   const { isAuthenticated, isLoading, logout } = useAuth()
@@ -36,9 +37,10 @@ export function DesktopSidebar() {
   }
 
   const { primary, items } = buildNavModel(location.pathname)
+  const routeTarget = projectTargetFromRoute(location.pathname, location.search)
 
   const handleItemClick = (item: NavItem) => {
-    if (openNavItem(item)) return
+    if (openProjectTool(item, routeTarget)) return
     if (item.key === 'logout') {
       logout()
     } else if (item.key === 'settings') {

@@ -19,7 +19,6 @@ import { getMobileTabRouteState, useTabDestinations } from './tabDestinations'
 function renderDestinations(
   initialEntry: string,
   target: ProjectTarget | null,
-  options: { inMenu: boolean } = { inMenu: false },
 ) {
   const capturedSearch = { current: '' }
   const capturedPathname = { current: '' }
@@ -38,7 +37,7 @@ function renderDestinations(
     )
   }
 
-  const rendered = renderHook(() => useTabDestinations(target, options), { wrapper: Wrapper })
+  const rendered = renderHook(() => useTabDestinations(target), { wrapper: Wrapper })
   return { ...rendered, capturedSearch, capturedPathname }
 }
 

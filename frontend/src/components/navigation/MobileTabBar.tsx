@@ -80,7 +80,7 @@ export const MobileTabBar = memo(function MobileTabBar() {
   const isMobile = useMobile()
   const routeMode = useMemo(() => getMobileTabRouteState(pathname, search), [pathname, search])
   const target = useMemo(() => projectTargetFromRoute(pathname, search), [pathname, search])
-  const destinations = useTabDestinations(target, { inMenu: false })
+  const destinations = useTabDestinations(target)
 
   const tabs = useMemo<TabDef[]>(
     () => (routeMode === 'schedule' ? buildScheduleTabs(scheduleTab, setScheduleTab) : destinations),

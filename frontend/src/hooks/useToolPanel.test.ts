@@ -166,6 +166,19 @@ describe('panel history entries', () => {
     expect(screen.getByTestId('pathname').textContent).toBe('/repos/2')
   })
 
+  it('leaves a dialog that belongs to another project out of the panel', () => {
+    render(
+      createElement(
+        MemoryRouter,
+        { initialEntries: ['/repos/1/sessions/s?dialog=files&toolProject=repo%3A2'], initialIndex: 0 },
+        createElement(PanelHarness),
+      ),
+    )
+
+    expect(screen.getByTestId('activeTool').textContent).toBe('')
+    expect(screen.getByTestId('search').textContent).toBe('?dialog=files&toolProject=repo%3A2')
+  })
+
   it('closing a deep-linked panel replaces the entry instead of leaving the route', () => {
     render(
       createElement(

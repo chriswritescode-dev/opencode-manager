@@ -21,6 +21,7 @@ import { VersionNotifier } from './components/VersionNotifier'
 import { PwaUpdatePrompt } from '@/components/PwaUpdatePrompt'
 import { MobileTabBar } from '@/components/navigation/MobileTabBar'
 import { MobileSheetHost } from '@/components/navigation/MobileSheetHost'
+import { ProjectToolsHost } from '@/components/navigation/ProjectToolsHost'
 import { SideMenu, useSideMenuOffset } from '@/components/navigation/SideMenu'
 import { RouteErrorBoundary } from '@/components/ui/route-error-boundary'
 import { NotFoundState } from '@/components/ui/not-found-state'
@@ -260,6 +261,7 @@ export function AppShell() {
           </div>
           <MobileTabBar />
           <MobileSheetHost />
+          <ProjectToolsHost />
           <SideMenu />
           <PermissionDialogWrapper />
           <SSHHostKeyDialogWrapper />

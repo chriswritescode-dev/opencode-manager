@@ -79,6 +79,7 @@ vi.mock('@/hooks/useAutoScroll', () => ({
 
 vi.mock('@/hooks/useDialogParam', () => ({
   useDialogParam: vi.fn(() => [false, vi.fn()]),
+  useRouteDialogParam: vi.fn(() => [false, vi.fn()]),
 }))
 
 vi.mock('@/hooks/useAutoPlayLastResponse', () => ({

@@ -69,3 +69,37 @@ export function useDialogParam(
 
   return [isOpen, setOpen]
 }
+
+/**
+ * Dialog state for a route page: open only when `dialog` matches `name` and no `toolProject` is set,
+ * so a route page never opens a tool that belongs to another project.
+ */
+export function useRouteDialogParam(
+  name: string,
+  ownedParams: readonly string[] = NO_OWNED_PARAMS,
+): [boolean, (open: boolean) => void] {
+  const { searchParams, updateParams, closePushedParams } = useUrlParams()
+
+  const isOpen = searchParams.get('toolProject') === null && searchParams.get('dialog') === name
+
+  const setOpen = useCallback(
+    (open: boolean) => {
+      if (open) {
+        updateParams((p) => {
+          openDialogParams(p, name)
+          p.delete('toolProject')
+        }, 'push')
+        return
+      }
+      closePushedParams((p) => {
+        if (p.get('dialog') !== name) return
+        p.delete('dialog')
+        p.delete('toolProject')
+        for (const param of ownedParams) p.delete(param)
+      })
+    },
+    [updateParams, closePushedParams, name, ownedParams],
+  )
+
+  return [isOpen, setOpen]
+}

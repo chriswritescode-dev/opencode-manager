@@ -6,11 +6,10 @@ import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { isAssistantPath, parseRepoRoute, parseServerProjectRoute } from '@/lib/navigation'
 import type { ProjectTarget } from '@/lib/projectTarget'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
+import { useOpenProjectTool } from '@/hooks/useOpenProjectTool'
 import { useSideMenu } from '@/hooks/useSideMenu'
-import { useUrlParams } from '@/hooks/useUrlParams'
 import { useUnreadScheduleRuns } from '@/hooks/useSchedules'
 import { useSidebarServerSelection } from '@/hooks/useSidebarServerSelection'
-import { openDialogParam, openDialogParams } from '@/hooks/useDialogParam'
 
 /** A single tab rendered by the phone tab bar and the side menu tab strip. */
 export interface TabDef {
@@ -44,44 +43,27 @@ export function getMobileTabRouteState(pathname: string, search: string): TabBar
   return 'hidden'
 }
 
-interface TabDestinationOptions {
-  inMenu: boolean
-}
-
 /**
  * Builds the project-scoped tab destinations shared by the phone tab bar and the side menu tab strip.
  *
  * @param target Project shown by the destination tabs, or null when no project is in view.
- * @param options When `inMenu` is set, a project dialog closes the menu in the same URL update but keeps `menuProject`.
  * @returns The destinations to render, in display order.
  */
-export function useTabDestinations(target: ProjectTarget | null, options: TabDestinationOptions): TabDef[] {
+export function useTabDestinations(target: ProjectTarget | null): TabDef[] {
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const { isOpen, page, openMenu } = useSideMenu()
   const { openSheet, open } = useMobileTabBar()
-  const { updateParams } = useUrlParams()
+  const openProjectTool = useOpenProjectTool()
   const { data: unreadRuns } = useUnreadScheduleRuns()
   const [selectedServerId] = useSidebarServerSelection()
   const localServerSelected = selectedServerId === LOCAL_OPENCODE_SERVER_ID
   const unreadScheduleCount = unreadRuns?.total ?? 0
-  const inMenu = options.inMenu
 
   return useMemo<TabDef[]>(() => {
     const showsFiles = target === null ? localServerSelected : target.kind === 'repo'
     const showsGit = target === null ? false : target.kind === 'server' || target.repoId !== ASSISTANT_REPO_ID
     const showsSchedules = target === null || (target.kind === 'repo' && target.repoId === ASSISTANT_REPO_ID)
-
-    const openProjectDialog = (dialog: string) => {
-      if (inMenu) {
-        updateParams((params) => {
-          openDialogParams(params, dialog)
-          params.delete('menu')
-        }, 'push')
-        return
-      }
-      openDialogParam(updateParams, dialog)
-    }
 
     const tabs: TabDef[] = [
       {
@@ -103,7 +85,7 @@ export function useTabDestinations(target: ProjectTarget | null, options: TabDes
             open('files')
             return
           }
-          openProjectDialog('files')
+          openProjectTool({ key: 'files', label: 'Files', icon: FolderOpen, dialog: 'files' }, target)
         },
         active: openSheet === 'files',
       })
@@ -114,7 +96,10 @@ export function useTabDestinations(target: ProjectTarget | null, options: TabDes
         key: 'source-control',
         label: 'Git',
         icon: GitCommitHorizontal,
-        onClick: () => openProjectDialog('sourceControl'),
+        onClick: () => openProjectTool(
+          { key: 'source-control', label: 'Git', icon: GitCommitHorizontal, dialog: 'sourceControl' },
+          target,
+        ),
         active: false,
       })
     }
@@ -144,10 +129,9 @@ export function useTabDestinations(target: ProjectTarget | null, options: TabDes
     return tabs
   }, [
     target,
-    inMenu,
     openMenu,
     open,
-    updateParams,
+    openProjectTool,
     navigate,
     isOpen,
     page,

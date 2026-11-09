@@ -90,11 +90,12 @@ vi.mock('@/hooks/useAutoScroll', () => ({ useAutoScroll: mocks.useAutoScroll }))
 
 vi.mock('@/hooks/useDialogParam', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/hooks/useDialogParam')>()
-  return { ...actual, useDialogParam: mocks.useDialogParam }
+  return { ...actual, useDialogParam: mocks.useDialogParam, useRouteDialogParam: mocks.useDialogParam }
 })
 
 vi.mock('@/hooks/useOpenTerminal', () => ({
   useTerminalDialogParam: mocks.useTerminalDialogParam,
+  useRouteTerminalDialogParam: mocks.useTerminalDialogParam,
 }))
 
 vi.mock('@/hooks/useAutoPlayLastResponse', () => ({

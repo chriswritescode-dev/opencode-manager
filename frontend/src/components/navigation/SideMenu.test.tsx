@@ -191,13 +191,14 @@ describe('SideMenu', () => {
     expect(screen.queryByRole('button', { name: 'Git' })).not.toBeInTheDocument()
   })
 
-  it('opens the menu project Files dialog from the pinned tab and keeps the menu project', async () => {
+  it('opens the menu project Files dialog from the pinned tab scoped to that project', async () => {
     const search = renderSideMenu('/repos/1/sessions/abc?menu=home&menuProject=repo:2')
 
     fireEvent.click(screen.getByRole('button', { name: 'Files' }))
 
     await waitFor(() => expect(search.current).toContain('dialog=files'))
-    expect(search.current).toContain('menuProject=repo%3A2')
+    expect(search.current).toContain('toolProject=repo%3A2')
+    expect(search.current).not.toContain('menuProject')
     expect(search.current).not.toContain('menu=')
   })
 

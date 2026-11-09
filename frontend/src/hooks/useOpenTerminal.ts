@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { openDialogParam, useDialogParam } from './useDialogParam'
+import { openDialogParam, useDialogParam, useRouteDialogParam } from './useDialogParam'
 import { useUrlParams } from './useUrlParams'
 
 const TERMINAL_DIALOG = 'terminal'
@@ -7,6 +7,10 @@ const TERMINAL_DIALOG_PARAMS = ['terminal', 'terminalDirectory'] as const
 
 export function useTerminalDialogParam(): [boolean, (open: boolean) => void] {
   return useDialogParam(TERMINAL_DIALOG, TERMINAL_DIALOG_PARAMS)
+}
+
+export function useRouteTerminalDialogParam(): [boolean, (open: boolean) => void] {
+  return useRouteDialogParam(TERMINAL_DIALOG, TERMINAL_DIALOG_PARAMS)
 }
 
 /**
