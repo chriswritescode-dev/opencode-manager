@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   useSSE: vi.fn(),
   useCreateSession: vi.fn(),
   useDeleteSession: vi.fn(),
+  useUpdateSession: vi.fn(),
   useMultiRuns: vi.fn(),
   useProjectConfig: vi.fn(),
   useTerminals: vi.fn(),
@@ -80,6 +81,7 @@ vi.mock('@/hooks/useMultiRuns', () => ({ useMultiRuns: mocks.useMultiRuns }))
 vi.mock('@/hooks/useOpenCode', () => ({
   useCreateSession: mocks.useCreateSession,
   useDeleteSession: mocks.useDeleteSession,
+  useUpdateSession: mocks.useUpdateSession,
 }))
 vi.mock('@/hooks/useSessionPins', () => ({
   useSessionPins: () => ({ data: [] }),
@@ -347,6 +349,7 @@ describe('ProjectHub', () => {
     mocks.useDeleteRepoWorkspaces.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useCreateSession.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useDeleteSession.mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
+    mocks.useUpdateSession.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useMultiRuns.mockReturnValue({ data: [] })
     mocks.useProjectConfig.mockReturnValue({ data: makeConfig() })
     mocks.useTerminals.mockReturnValue({ data: [] })

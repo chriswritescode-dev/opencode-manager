@@ -5,9 +5,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { SessionList } from './SessionList'
 
-const { createSessionMock, deleteSessionMock, sessionsData, createSessionState, fetchNextPageMock, hasNextPageRef, isFetchingNextPageRef, isFetchNextPageErrorRef, isLoadingRef, isPendingRef, isPlaceholderDataRef, useRealSessionsHookRef, lastSessionsHookArgs, sessionPinsData, togglePinMock } = vi.hoisted(() => ({
+const { createSessionMock, deleteSessionMock, updateSessionMock, sessionsData, createSessionState, fetchNextPageMock, hasNextPageRef, isFetchingNextPageRef, isFetchNextPageErrorRef, isLoadingRef, isPendingRef, isPlaceholderDataRef, useRealSessionsHookRef, lastSessionsHookArgs, sessionPinsData, togglePinMock } = vi.hoisted(() => ({
   createSessionMock: vi.fn(),
   deleteSessionMock: vi.fn(),
+  updateSessionMock: vi.fn(),
   sessionsData: [] as Array<{ id: string; title: string; location: { directory: string }; parentID?: string; time: { updated: number } }>,
   createSessionState: { directory: undefined as string | undefined },
   fetchNextPageMock: vi.fn(),
@@ -52,6 +53,7 @@ vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
       return { mutate: createSessionMock }
     },
     useDeleteSession: () => ({ mutateAsync: deleteSessionMock, isPending: false }),
+    useUpdateSession: () => ({ mutate: updateSessionMock, isPending: false }),
   }
 })
 
@@ -76,6 +78,7 @@ describe('SessionList', () => {
     createSessionState.directory = undefined
     deleteSessionMock.mockReset()
     deleteSessionMock.mockResolvedValue(undefined)
+    updateSessionMock.mockReset()
     fetchNextPageMock.mockReset()
     hasNextPageRef.current = false
     isFetchingNextPageRef.current = false
@@ -398,6 +401,62 @@ describe('SessionList', () => {
     await user.click(pinItem)
 
     expect(togglePinMock).toHaveBeenCalledWith({ sessionId: 'ses_x', directory: '/w/a', pinned: true })
+  })
+
+  it('renames a session from the row actions menu', async () => {
+    const user = userEvent.setup()
+    sessionsData.splice(0, sessionsData.length,
+      { id: 'ses_x', title: 'test session', location: { directory: '/w/a' }, time: { updated: Date.now() } },
+    )
+
+    render(
+      <SessionList
+        directories={['/w/a']}
+        onSelectSession={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Session actions' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Rename' }))
+
+    const dialog = screen.getByRole('dialog', { name: 'Rename Session' })
+    const input = within(dialog).getByLabelText('Session title')
+    expect((input as HTMLInputElement).value).toBe('test session')
+
+    await user.clear(input)
+    await user.type(input, 'renamed session')
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    expect(updateSessionMock).toHaveBeenCalledWith({ sessionID: 'ses_x', title: 'renamed session' })
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Rename Session' })).toBeNull()
+    })
+  })
+
+  it('disables saving a rename while the title is empty', async () => {
+    const user = userEvent.setup()
+    sessionsData.splice(0, sessionsData.length,
+      { id: 'ses_x', title: 'test session', location: { directory: '/w/a' }, time: { updated: Date.now() } },
+    )
+
+    render(
+      <SessionList
+        directories={['/w/a']}
+        onSelectSession={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Session actions' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Rename' }))
+
+    const dialog = screen.getByRole('dialog', { name: 'Rename Session' })
+    const saveButton = within(dialog).getByRole('button', { name: 'Save' })
+    expect(saveButton).toBeEnabled()
+
+    await user.clear(within(dialog).getByLabelText('Session title'))
+
+    expect(saveButton).toBeDisabled()
+    expect(updateSessionMock).not.toHaveBeenCalled()
   })
 
   it('shows a retry action and stops automatic pagination while a next-page error is active', async () => {

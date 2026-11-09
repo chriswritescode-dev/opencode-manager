@@ -1,11 +1,12 @@
 import { useCallback, useState, useMemo, useEffect, useRef, type ReactNode } from "react";
-import { useDeleteSession, useCreateSession } from "@/hooks/useOpenCode";
+import { useDeleteSession, useCreateSession, useUpdateSession } from "@/hooks/useOpenCode";
 import type { DeleteSessionTarget } from "@/hooks/useOpenCode";
 import type { Session } from "@/api/types";
 import { useSessionPins, useToggleSessionPin } from '@/hooks/useSessionPins';
 import { getSessionKey, buildPinnedSessionKeys } from '@/lib/sessionKey';
 import { partitionSessions } from './session-partition';
 import { DeleteSessionDialog } from "./DeleteSessionDialog";
+import { RenameSessionDialog } from "./RenameSessionDialog";
 import { SessionCard } from "./SessionCard";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -72,9 +73,12 @@ export const SessionList = ({
   );
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<DeleteSessionTarget | DeleteSessionTarget[] | null>(null);
+  const [renameTarget, setRenameTarget] = useState<Session | null>(null);
+  const [renameDirectory, setRenameDirectory] = useState<string>();
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set());
   const [manageMode, setManageMode] = useState(false);
   const sessionListRef = useRef<HTMLDivElement>(null);
+  const updateSession = useUpdateSession(renameDirectory);
 
   const { pinned: pinnedSessions, today: todaySessions, older: olderSessions } = useMemo(
     () => partitionSessions(filteredSessions, pinnedKeys, getSessionKey),
@@ -113,10 +117,16 @@ export const SessionList = ({
     directory: session.location.directory,
   });
 
-  const handleDelete = (session: Session, e: React.MouseEvent<HTMLButtonElement>) => {
+  const handleDelete = (session: Session, e: React.MouseEvent<HTMLElement>) => {
     e.stopPropagation();
     setSessionToDelete(getDeleteTarget(session));
     setDeleteDialogOpen(true);
+  };
+
+  const handleRenameSubmit = (title: string) => {
+    if (!renameTarget) return;
+    updateSession.mutate({ sessionID: renameTarget.id, title });
+    setRenameTarget(null);
   };
 
   const confirmDelete = async () => {
@@ -182,6 +192,10 @@ export const SessionList = ({
         onSelect={onSelectSession}
         onToggleSelection={(selected) => toggleSessionSelection(session, selected)}
         onTogglePin={() => handleTogglePin(session)}
+        onRename={() => {
+          setRenameDirectory(session.location.directory);
+          setRenameTarget(session);
+        }}
         onDelete={(e) => handleDelete(session, e)}
       />
     );
@@ -351,6 +365,15 @@ export const SessionList = ({
         onCancel={cancelDelete}
         isDeleting={deleteSession.isPending}
         sessionCount={Array.isArray(sessionToDelete) ? sessionToDelete.length : 1}
+      />
+      <RenameSessionDialog
+        open={!!renameTarget}
+        initialTitle={renameTarget?.title ?? ''}
+        onSubmit={handleRenameSubmit}
+        onOpenChange={(open) => {
+          if (!open) setRenameTarget(null);
+        }}
+        isPending={updateSession.isPending}
       />
     </div>
   );

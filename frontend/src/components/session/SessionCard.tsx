@@ -2,12 +2,14 @@ import { useRef, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SessionStatusIndicator } from "@/components/ui/session-status-indicator";
-import { Trash2, Clock, MoreVertical, Pin, PinOff } from "lucide-react";
+import { Trash2, Clock, MoreVertical, Pin, PinOff, Pencil } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import type { Session } from "@/api/types";
 import { useSwipe } from "@/hooks/useSwipe";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+
+const SWIPE_ACTION_WIDTH = 44;
 
 interface SessionCardProps {
   session: Session;
@@ -15,9 +17,10 @@ interface SessionCardProps {
   manageMode: boolean;
   isPinned?: boolean;
   onTogglePin?: () => void;
+  onRename?: () => void;
   onSelect: (sessionID: string) => void;
   onToggleSelection: (selected: boolean) => void;
-  onDelete: (e: React.MouseEvent<HTMLButtonElement>) => void;
+  onDelete: (e: React.MouseEvent<HTMLElement>) => void;
 }
 
 export const SessionCard = ({
@@ -26,12 +29,17 @@ export const SessionCard = ({
   manageMode,
   isPinned,
   onTogglePin,
+  onRename,
   onSelect,
   onToggleSelection,
   onDelete,
 }: SessionCardProps) => {
   const cardRef = useRef<HTMLDivElement>(null);
-  const { bind, swipeOffset, isOpen, isSwipingBack, close, swipeStyles } = useSwipe();
+  const actionCount = (onTogglePin ? 1 : 0) + (onRename ? 1 : 0) + 1;
+  const actionsWidth = actionCount * SWIPE_ACTION_WIDTH;
+  const { bind, swipeOffset, isOpen, isSwipingBack, close, swipeStyles } = useSwipe({
+    threshold: actionsWidth,
+  });
 
   useEffect(() => {
     if (cardRef.current) {
@@ -39,22 +47,49 @@ export const SessionCard = ({
     }
   }, [bind]);
 
-  const handleDeleteClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+  const handleDeleteClick = (e: React.MouseEvent<HTMLElement>) => {
     e.stopPropagation();
     onDelete(e);
     close();
   };
 
   return (
-    <div className="relative" onClick={close}>
+    <div className="relative" data-row-swipe="" onClick={close}>
       <div
-        className={`absolute top-0.5 right-0 bottom-0.5 w-20 bg-destructive flex items-center justify-center rounded-r-lg transition-opacity ${
+        className={`absolute top-0.5 right-0 bottom-0.5 flex overflow-hidden rounded-r-lg transition-opacity ${
           !isSwipingBack && (isOpen || swipeOffset > 40) ? "opacity-100" : "opacity-0 pointer-events-none"
         }`}
+        style={{ width: actionsWidth }}
       >
+        {onTogglePin && (
+          <button
+            aria-label={isPinned ? "Unpin session" : "Pin session"}
+            className="h-full w-11 flex items-center justify-center bg-muted text-muted-foreground hover:bg-muted/80"
+            onClick={(e) => {
+              e.stopPropagation();
+              onTogglePin();
+              close();
+            }}
+          >
+            {isPinned ? <PinOff className="w-5 h-5" /> : <Pin className="w-5 h-5" />}
+          </button>
+        )}
+        {onRename && (
+          <button
+            aria-label="Rename session"
+            className="h-full w-11 flex items-center justify-center bg-muted text-muted-foreground hover:bg-muted/80"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRename();
+              close();
+            }}
+          >
+            <Pencil className="w-5 h-5" />
+          </button>
+        )}
         <button
           aria-label="Delete session"
-          className="h-full w-full flex items-center justify-center text-destructive-foreground hover:bg-destructive/90"
+          className="h-full w-11 flex items-center justify-center bg-destructive text-destructive-foreground hover:bg-destructive/90"
           onClick={handleDeleteClick}
         >
           <Trash2 className="w-5 h-5" />
@@ -62,7 +97,7 @@ export const SessionCard = ({
       </div>
       <div ref={cardRef} style={swipeStyles}>
         <Card
-          className={`p-2 cursor-pointer transition-all overflow-hidden ${
+          className={`group p-2 cursor-pointer transition-all overflow-hidden ${
             isOpen
               ? "rounded-none"
               : "rounded-r-lg"
@@ -133,32 +168,42 @@ export const SessionCard = ({
                     <SessionStatusIndicator sessionID={session.id} />
                   </div>
                 </div>
-                {onTogglePin && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        aria-label="Session actions"
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 w-7 p-0 shrink-0"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <MoreVertical className="w-4 h-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent
-                      align="end"
-                      className="z-[200]"
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      aria-label="Session actions"
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 w-7 p-0 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 pointer-coarse:h-11 pointer-coarse:w-11 pointer-coarse:opacity-100"
                       onClick={(e) => e.stopPropagation()}
-                      onPointerDown={(e) => e.stopPropagation()}
                     >
+                      <MoreVertical className="w-4 h-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    className="z-[200]"
+                    onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    {onTogglePin && (
                       <DropdownMenuItem onClick={() => onTogglePin()}>
                         {isPinned ? <PinOff className="w-4 h-4 mr-2" /> : <Pin className="w-4 h-4 mr-2" />}
                         {isPinned ? "Unpin" : "Pin to top"}
                       </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
+                    )}
+                    {onRename && (
+                      <DropdownMenuItem onClick={() => onRename()}>
+                        <Pencil className="w-4 h-4 mr-2" />
+                        Rename
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem className="text-destructive" onClick={(e) => onDelete(e)}>
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </>
             )}
             {manageMode && (
