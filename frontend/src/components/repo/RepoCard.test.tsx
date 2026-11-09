@@ -4,17 +4,16 @@ import { BrowserRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RepoCard } from './RepoCard'
 
-const mockNavigate = vi.fn()
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom')
-  return {
-    ...actual,
-    useNavigate: () => mockNavigate,
-  }
-})
-
 const activityMocks = vi.hoisted(() => ({
   useRepoActivityState: vi.fn(),
+}))
+
+const menuMocks = vi.hoisted(() => ({
+  openMenu: vi.fn(),
+}))
+
+vi.mock('@/hooks/useSideMenu', () => ({
+  useSideMenu: () => ({ openMenu: menuMocks.openMenu }),
 }))
 
 vi.mock('@/hooks/useActiveWork', () => ({
@@ -58,7 +57,7 @@ describe('RepoCard', () => {
     activityMocks.useRepoActivityState.mockReturnValue(null)
   })
 
-  it('should not navigate when cloneStatus is not ready', () => {
+  it('should not open the menu when cloneStatus is not ready', () => {
     const props = {
       ...defaultProps,
       repo: { ...defaultProps.repo, cloneStatus: 'cloning' as const },
@@ -66,7 +65,18 @@ describe('RepoCard', () => {
     renderWithRouter(<RepoCard {...props} />)
 
     fireEvent.click(screen.getByText('test-repo'))
-    expect(mockNavigate).not.toHaveBeenCalled()
+    expect(menuMocks.openMenu).not.toHaveBeenCalled()
+  })
+
+  it('should open the side menu on the repo hub when a ready card is clicked', () => {
+    renderWithRouter(<RepoCard {...defaultProps} />)
+
+    fireEvent.click(screen.getByText('test-repo'))
+    expect(menuMocks.openMenu).toHaveBeenCalledTimes(1)
+    expect(menuMocks.openMenu).toHaveBeenCalledWith({
+      page: 'sessions',
+      project: { kind: 'repo', repoId: 1 },
+    })
   })
 
   it('should not show checkbox when onSelect is not provided', () => {
@@ -98,7 +108,7 @@ describe('RepoCard', () => {
     expect(onSelect).toHaveBeenCalledWith(1, true)
   })
 
-  it('should not navigate when card is clicked in selection mode', () => {
+  it('should not open the menu when card is clicked in selection mode', () => {
     const onSelect = vi.fn()
     const props = {
       ...defaultProps,
@@ -108,7 +118,7 @@ describe('RepoCard', () => {
     renderWithRouter(<RepoCard {...props} />)
 
     fireEvent.click(screen.getByText('test-repo'))
-    expect(mockNavigate).not.toHaveBeenCalled()
+    expect(menuMocks.openMenu).not.toHaveBeenCalled()
     expect(onSelect).toHaveBeenCalledWith(1, true)
   })
 

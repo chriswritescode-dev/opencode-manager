@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-rou
 import { IsRestoringProvider, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { OpenCodeProject } from '@/api/opencode'
 import { getServerProjectPath } from '@/lib/navigation'
+import { parseProjectTarget } from '@/lib/projectTarget'
 import { RemoteProjectNavList } from './RemoteProjectNav'
 
 type SessionFixture = {
@@ -164,7 +165,6 @@ function RemoteListHarness({ serverId }: { serverId: string }) {
     <RemoteProjectNavList
       serverId={serverId}
       isVisible
-      onOpenProject={navigate}
       onSelectSession={navigate}
     />
   )
@@ -195,7 +195,6 @@ describe('RemoteProjectNavList', () => {
       <RemoteProjectNavList
         serverId="srv_kitchen"
         isVisible
-        onOpenProject={vi.fn()}
         onSelectSession={vi.fn()}
       />,
       { wrapper: createWrapper('/') },
@@ -248,9 +247,16 @@ describe('RemoteProjectNavList', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /^Alpha/ }))
 
-    expect(screen.getByTestId('location')).toHaveTextContent(
-      getServerProjectPath('srv_kitchen', '/projects/alpha'),
-    )
+    const location = screen.getByTestId('location').textContent ?? ''
+    const [pathname, search = ''] = location.split('?')
+    const params = new URLSearchParams(search)
+    expect(pathname).toBe('/')
+    expect(params.get('menu')).toBe('sessions')
+    expect(parseProjectTarget(params.get('menuProject'))).toEqual({
+      kind: 'server',
+      serverId: 'srv_kitchen',
+      directory: '/projects/alpha',
+    })
   })
 
   it('expands another project and shows its sessions', async () => {
@@ -304,7 +310,6 @@ describe('RemoteProjectNavList', () => {
       <RemoteProjectNavList
         serverId="srv_kitchen"
         isVisible
-        onOpenProject={vi.fn()}
         onSelectSession={vi.fn()}
       />,
       { wrapper: createWrapper('/') },
@@ -321,7 +326,6 @@ describe('RemoteProjectNavList', () => {
       <RemoteProjectNavList
         serverId="srv_kitchen"
         isVisible
-        onOpenProject={vi.fn()}
         onSelectSession={vi.fn()}
       />,
       { wrapper: createWrapper('/') },
@@ -375,7 +379,6 @@ describe('RemoteProjectNavList', () => {
       <RemoteProjectNavList
         serverId="srv_kitchen"
         isVisible
-        onOpenProject={vi.fn()}
         onSelectSession={vi.fn()}
       />,
       { wrapper: createWrapper('/') },
@@ -397,7 +400,6 @@ describe('RemoteProjectNavList', () => {
       <RemoteProjectNavList
         serverId="srv_kitchen"
         isVisible
-        onOpenProject={vi.fn()}
         onSelectSession={vi.fn()}
       />,
       { wrapper: createWrapper('/') },
@@ -420,7 +422,6 @@ describe('RemoteProjectNavList', () => {
       <RemoteProjectNavList
         serverId="srv_kitchen"
         isVisible
-        onOpenProject={vi.fn()}
         onSelectSession={vi.fn()}
       />,
       { wrapper: createWrapper('/') },

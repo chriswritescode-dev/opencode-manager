@@ -9,6 +9,7 @@ import { useRemoteProjectsByActivity } from '@/hooks/useRemoteProjects'
 import { useOpenCodeServers, useOpenCodeServerStatuses } from '@/hooks/useOpenCodeServers'
 import { useProjectActivityState } from '@/hooks/useActiveWork'
 import { useSessionSearch } from '@/hooks/useSessionSearch'
+import { useSideMenu } from '@/hooks/useSideMenu'
 import {
   getServerProjectPath,
   getServerSessionPath,
@@ -131,7 +132,6 @@ interface RemoteProjectGroupProps {
   isOpen: boolean
   isCurrent: boolean
   onToggle?: () => void
-  onOpenProject: (path: string) => void
   onSelectSession: (path: string) => void
   children: React.ReactNode
 }
@@ -142,11 +142,11 @@ function RemoteProjectGroup({
   isOpen,
   isCurrent,
   onToggle,
-  onOpenProject,
   onSelectSession,
   children,
 }: RemoteProjectGroupProps) {
   const name = remoteProjectName(project)
+  const { openMenu } = useSideMenu()
 
   return (
     <RepoNavGroup
@@ -154,7 +154,7 @@ function RemoteProjectGroup({
       branch={project.canonical}
       isOpen={isOpen}
       isCurrent={isCurrent}
-      onOpenRepo={() => onOpenProject(getServerProjectPath(serverId, project.canonical))}
+      onOpenRepo={() => openMenu({ page: 'sessions', project: { kind: 'server', serverId, directory: project.canonical } })}
       onToggle={onToggle}
       indicator={<RemoteProjectActivityIndicator serverId={serverId} directory={project.canonical} />}
       actions={
@@ -177,7 +177,6 @@ interface RemoteProjectGroupsProps {
   projects: OpenCodeProject[]
   activeDirectory: string | null
   isVisible: boolean
-  onOpenProject: (path: string) => void
   onSelectSession: (path: string) => void
 }
 
@@ -186,7 +185,6 @@ function RemoteProjectGroups({
   projects,
   activeDirectory,
   isVisible,
-  onOpenProject,
   onSelectSession,
 }: RemoteProjectGroupsProps) {
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null)
@@ -214,7 +212,6 @@ function RemoteProjectGroups({
             onToggle={() =>
               setExpandedProjectId((current) => (current === project.id ? null : project.id))
             }
-            onOpenProject={onOpenProject}
             onSelectSession={onSelectSession}
           >
             <RemoteProjectSessions
@@ -234,7 +231,6 @@ interface RemoteProjectSearchResultsProps {
   projects: OpenCodeProject[]
   activeDirectory: string | null
   search: string
-  onOpenProject: (path: string) => void
   onSelectSession: (path: string) => void
 }
 
@@ -243,7 +239,6 @@ function RemoteProjectSearchResults({
   projects,
   activeDirectory,
   search,
-  onOpenProject,
   onSelectSession,
 }: RemoteProjectSearchResultsProps) {
   const directories = useMemo(() => projects.map((project) => project.canonical), [projects])
@@ -315,7 +310,6 @@ function RemoteProjectSearchResults({
             project={project}
             isOpen
             isCurrent={normalizeDirectory(project.canonical) === normalizedActiveDirectory}
-            onOpenProject={onOpenProject}
             onSelectSession={onSelectSession}
           >
             {matchedSessions ? (
@@ -345,7 +339,6 @@ interface RemoteProjectNavListProps {
   serverId: string
   isVisible: boolean
   search?: string
-  onOpenProject: (path: string) => void
   onSelectSession: (path: string) => void
 }
 
@@ -357,7 +350,6 @@ export function RemoteProjectNavList({
   serverId,
   isVisible,
   search = '',
-  onOpenProject,
   onSelectSession,
 }: RemoteProjectNavListProps) {
   const {
@@ -393,7 +385,6 @@ export function RemoteProjectNavList({
         projects={projects}
         activeDirectory={activeDirectory}
         search={trimmedSearch}
-        onOpenProject={onOpenProject}
         onSelectSession={onSelectSession}
       />
     )
@@ -405,7 +396,6 @@ export function RemoteProjectNavList({
       projects={projects}
       activeDirectory={activeDirectory}
       isVisible={isVisible}
-      onOpenProject={onOpenProject}
       onSelectSession={onSelectSession}
     />
   )

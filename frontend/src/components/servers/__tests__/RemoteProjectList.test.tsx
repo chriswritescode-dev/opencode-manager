@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { getServerProjectPath } from '@/lib/navigation'
+import { parseProjectTarget } from '@/lib/projectTarget'
 import { LocationCatcher } from '@/test/test-utils'
 import { RemoteProjectList } from '../RemoteProjectList'
 
@@ -241,17 +241,22 @@ describe('RemoteProjectList', () => {
     expect(container.querySelector('.bg-success')).toBeNull()
   })
 
-  it('opens the remote project page when a project card is clicked', async () => {
+  it('opens the side menu on the remote project when a project card is clicked', async () => {
     const user = userEvent.setup()
     const { capturedPathname, capturedSearch } = renderProjectList()
 
     await user.click(await screen.findByText('App'))
 
-    const destination = new URL(getServerProjectPath('srv_kitchen', '/home/me/app'), 'https://example.com')
     await waitFor(() => {
-      expect(capturedPathname.current).toBe(destination.pathname)
+      expect(capturedPathname.current).toBe('/')
     })
-    expect(capturedSearch.current).toBe(destination.search)
+    const params = new URLSearchParams(capturedSearch.current)
+    expect(params.get('menu')).toBe('sessions')
+    expect(parseProjectTarget(params.get('menuProject'))).toEqual({
+      kind: 'server',
+      serverId: 'srv_kitchen',
+      directory: '/home/me/app',
+    })
   })
 
   it('creates a session in a project directory from the actions menu and navigates to it', async () => {

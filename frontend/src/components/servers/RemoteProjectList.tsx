@@ -1,12 +1,11 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { Folder, FolderGit2, FolderPlus, GitBranch, Search, Server } from 'lucide-react'
 import { remoteProjectName, type OpenCodeProject } from '@/api/opencode'
 import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
 import { useRemoteProjectsByActivity } from '@/hooks/useRemoteProjects'
 import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 import { useProjectActivityState } from '@/hooks/useActiveWork'
-import { getServerProjectPath } from '@/lib/navigation'
+import { useSideMenu } from '@/hooks/useSideMenu'
 import { formatShortRelativeTime } from '@/lib/utils'
 import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
 import { ActivityStateIndicator } from '@/components/activity/ActivityStateIndicator'
@@ -27,7 +26,7 @@ interface RemoteProjectCardProps {
 }
 
 function RemoteProjectCard({ project, serverId, activityAt }: RemoteProjectCardProps) {
-  const navigate = useNavigate()
+  const { openMenu } = useSideMenu()
   const activityState = useProjectActivityState(serverId, project.canonical)
 
   return (
@@ -47,7 +46,7 @@ function RemoteProjectCard({ project, serverId, activityAt }: RemoteProjectCardP
       }
       activityLabel={activityAt > 0 ? formatShortRelativeTime(new Date(activityAt)) : undefined}
       isInteractive
-      onClick={() => navigate(getServerProjectPath(serverId, project.canonical))}
+      onClick={() => openMenu({ page: 'sessions', project: { kind: 'server', serverId, directory: project.canonical } })}
     />
   )
 }

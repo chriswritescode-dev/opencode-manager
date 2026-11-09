@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Loader2, GitBranch, FolderOpen, AlertCircle } from "lucide-react";
 import { getRepoDisplayName } from "@/lib/utils";
+import { useSideMenu } from "@/hooks/useSideMenu";
 import type { Repo } from "@/api/types";
 import type { GitStatusResponse } from "@/types/git"
 import { RepoActivityIndicator } from "@/components/activity/RepoActivityIndicator"
@@ -35,7 +35,7 @@ export function RepoCard({
   hasSelectedRepos = false,
   selectionMode = false,
 }: RepoCardProps) {
-  const navigate = useNavigate();
+  const { openMenu } = useSideMenu();
   const [actionsOpen, setActionsOpen] = useState(false);
 
   const repoName = getRepoDisplayName(repo);
@@ -55,7 +55,7 @@ export function RepoCard({
       return;
     }
     if (isReady && !actionsOpen) {
-      navigate(`/repos/${repo.id}`);
+      openMenu({ page: 'sessions', project: { kind: 'repo', repoId: repo.id } });
     }
   };
 

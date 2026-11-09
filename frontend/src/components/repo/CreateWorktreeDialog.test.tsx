@@ -2,13 +2,14 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import type { Repo } from '@/api/types'
+import { parseProjectTarget } from '@/lib/projectTarget'
 import { CreateWorktreeDialog } from './CreateWorktreeDialog'
 
 const mocks = vi.hoisted(() => ({
   createRepo: vi.fn(),
   listBranches: vi.fn(),
-  navigate: vi.fn(),
   showToastSuccess: vi.fn(),
   showToastInfo: vi.fn(),
   showToastWarning: vi.fn(),
@@ -33,15 +34,12 @@ vi.mock('@/lib/queryInvalidation', () => ({
   invalidateRepoGitCaches: mocks.invalidateRepoGitCaches,
 }))
 
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom')
-  return {
-    ...actual,
-    useNavigate: () => mocks.navigate,
-  }
-})
-
 const repoUrl = 'git@example.com:org/repo.git'
+
+function LocationProbe() {
+  const location = useLocation()
+  return <div data-testid="location">{`${location.pathname}${location.search}`}</div>
+}
 
 function createWorktreeRepo(overrides: Partial<Repo> = {}): Repo {
   return {
@@ -60,15 +58,18 @@ function renderDialog() {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
-    <QueryClientProvider client={queryClient}>
-      <CreateWorktreeDialog
-        open
-        onOpenChange={vi.fn()}
-        repoId={1}
-        repoUrl={repoUrl}
-        defaultBaseBranch="main"
-      />
-    </QueryClientProvider>,
+    <MemoryRouter initialEntries={['/']}>
+      <QueryClientProvider client={queryClient}>
+        <CreateWorktreeDialog
+          open
+          onOpenChange={vi.fn()}
+          repoId={1}
+          repoUrl={repoUrl}
+          defaultBaseBranch="main"
+        />
+        <LocationProbe />
+      </QueryClientProvider>
+    </MemoryRouter>,
   )
 }
 
@@ -209,7 +210,7 @@ describe('CreateWorktreeDialog', () => {
     expect(screen.getByRole('button', { name: 'Create Worktree' })).toBeDisabled()
   })
 
-  it('navigates to the setup terminal when the worktree setup starts', async () => {
+  it('opens the setup terminal in the hub when the worktree setup starts', async () => {
     mocks.createRepo.mockResolvedValue(
       createWorktreeRepo({
         worktreeSetup: {
@@ -229,9 +230,17 @@ describe('CreateWorktreeDialog', () => {
     renderDialog()
     await submitCreate()
 
-    await waitFor(() =>
-      expect(mocks.navigate).toHaveBeenCalledWith('/repos/42?dialog=terminal&terminal=pty-1'),
-    )
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toContain('dialog=terminal'))
+
+    const locationText = screen.getByTestId('location').textContent ?? ''
+    const [pathname, search = ''] = locationText.split('?')
+    const params = new URLSearchParams(search)
+    expect(pathname).toBe('/')
+    expect(params.get('menu')).toBe('sessions')
+    expect(parseProjectTarget(params.get('menuProject'))).toEqual({ kind: 'repo', repoId: 42 })
+    expect(parseProjectTarget(params.get('toolProject'))).toEqual({ kind: 'repo', repoId: 42 })
+    expect(params.get('dialog')).toBe('terminal')
+    expect(params.get('terminal')).toBe('pty-1')
   })
 
   it('warns without navigating when the worktree setup fails', async () => {
@@ -243,7 +252,7 @@ describe('CreateWorktreeDialog', () => {
     await submitCreate()
 
     await waitFor(() => expect(mocks.showToastWarning).toHaveBeenCalled())
-    expect(mocks.navigate).not.toHaveBeenCalled()
+    expect(screen.getByTestId('location').textContent).toBe('/')
   })
 
   it('informs about skipped repository commands when the setup is skipped', async () => {
@@ -259,6 +268,6 @@ describe('CreateWorktreeDialog', () => {
         'Repository setup commands were skipped until trusted in Actions',
       ),
     )
-    expect(mocks.navigate).not.toHaveBeenCalled()
+    expect(screen.getByTestId('location').textContent).toBe('/')
   })
 })

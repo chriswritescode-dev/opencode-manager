@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { AlertCircle, GitBranch, Loader2 } from 'lucide-react'
 import { createRepo, type CreateRepoOptions, type GitBranch as RepoBranch } from '@/api/repos'
-import { dialogSearch } from '@/hooks/useDialogParam'
+import { openDialogParams } from '@/hooks/useDialogParam'
+import { useUrlParams } from '@/hooks/useUrlParams'
+import { encodeProjectTarget } from '@/lib/projectTarget'
 import { showToast } from '@/lib/toast'
 import { notifyWorktreeSetup } from '@/lib/worktreeSetup'
 import { invalidateRepoGitCaches } from '@/lib/queryInvalidation'
@@ -43,7 +44,7 @@ export function CreateWorktreeDialog({
   onCreated,
 }: CreateWorktreeDialogProps) {
   const queryClient = useQueryClient()
-  const navigate = useNavigate()
+  const { updateParams } = useUrlParams()
   const [mode, setMode] = useState<WorktreeMode>('new')
   const [branchName, setBranchName] = useState('')
   const [baseBranch, setBaseBranch] = useState<string>('')
@@ -100,7 +101,14 @@ export function CreateWorktreeDialog({
       onOpenChange(false)
       notifyWorktreeSetup(repo.worktreeSetup)
       if (repo.worktreeSetup?.status === 'started') {
-        navigate(`/repos/${repo.id}${dialogSearch('terminal', { terminal: repo.worktreeSetup.terminal.id })}`)
+        const terminalId = repo.worktreeSetup.terminal.id
+        const target = { kind: 'repo' as const, repoId: repo.id }
+        updateParams((params) => {
+          params.set('menu', 'sessions')
+          params.set('menuProject', encodeProjectTarget(target))
+          params.set('toolProject', encodeProjectTarget(target))
+          openDialogParams(params, 'terminal', { terminal: terminalId })
+        })
       }
     },
     onError: (err) => {

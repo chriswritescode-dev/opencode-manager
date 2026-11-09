@@ -1158,7 +1158,6 @@ interface RemoteProjectPickerContentProps {
   open: boolean
   searchInputRef: React.RefObject<HTMLInputElement | null>
   trailing?: ReactNode
-  onOpenProject: (path: string) => void
   onSelectSession: (path: string) => void
 }
 
@@ -1167,7 +1166,6 @@ function RemoteProjectPickerContent({
   open,
   searchInputRef,
   trailing,
-  onOpenProject,
   onSelectSession,
 }: RemoteProjectPickerContentProps) {
   const listId = useId()
@@ -1193,7 +1191,6 @@ function RemoteProjectPickerContent({
           serverId={serverId}
           isVisible={open}
           search={query}
-          onOpenProject={onOpenProject}
           onSelectSession={onSelectSession}
         />
       </div>
@@ -1445,7 +1442,6 @@ function SessionPickerPanelBody({
                 open={open}
                 searchInputRef={projectSearchInputRef}
                 trailing={projectsTrailing}
-                onOpenProject={onNavigate}
                 onSelectSession={onNavigate}
               />
             ) : (

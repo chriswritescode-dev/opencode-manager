@@ -212,7 +212,6 @@ function RemoteSessionTree({ serverId }: { serverId: string }) {
         serverId={serverId}
         isVisible
         search={draft}
-        onOpenProject={navigate}
         onSelectSession={navigate}
       />
     </SessionTreeLayout>
