@@ -4,8 +4,9 @@ export const OFFLINE_TRANSCRIPT_LIMIT = 10
 export const OFFLINE_TRANSCRIPT_MAX_AGE_MS = 24 * 60 * 60 * 1000
 
 const DATABASE_NAME = 'ocm-offline-transcripts'
-const DATABASE_VERSION = 1
-const STORE_NAME = 'snapshots'
+const DATABASE_VERSION = 2
+const SNAPSHOT_STORE_NAME = 'snapshots'
+const META_STORE_NAME = 'meta'
 const KEY_PREFIX = 'ocm.transcript.v1:'
 
 interface OfflineTranscriptRecord {
@@ -16,6 +17,17 @@ interface OfflineTranscriptRecord {
   savedAt: number
   openedAt: number
   cache: TranscriptCache
+}
+
+interface OfflineTranscriptMeta {
+  key: string
+  owner: string
+  openedAt: number
+}
+
+interface OfflineTranscriptStores {
+  snapshots: IDBObjectStore
+  meta: IDBObjectStore
 }
 
 interface OfflineTranscriptTarget {
@@ -43,6 +55,10 @@ function transcriptKey(target: OfflineTranscriptTarget): string {
 
 function ownerKeyPrefix(owner: string): string {
   return `${KEY_PREFIX}${owner}:`
+}
+
+function prefixedKeyRange(prefix: string): IDBKeyRange {
+  return IDBKeyRange.bound(prefix, `${prefix}\uffff`)
 }
 
 function compareKeys(a: string, b: string): number {
@@ -77,8 +93,11 @@ function openDatabase(): Promise<IDBDatabase | null> {
       const request = factory.open(DATABASE_NAME, DATABASE_VERSION)
       request.onupgradeneeded = () => {
         const database = request.result
-        if (!database.objectStoreNames.contains(STORE_NAME)) {
-          database.createObjectStore(STORE_NAME, { keyPath: 'key' })
+        if (!database.objectStoreNames.contains(SNAPSHOT_STORE_NAME)) {
+          database.createObjectStore(SNAPSHOT_STORE_NAME, { keyPath: 'key' })
+        }
+        if (!database.objectStoreNames.contains(META_STORE_NAME)) {
+          database.createObjectStore(META_STORE_NAME, { keyPath: 'key' })
         }
       }
       request.onsuccess = () => finish(request.result)
@@ -91,8 +110,7 @@ function openDatabase(): Promise<IDBDatabase | null> {
 }
 
 async function runTransaction<T>(
-  mode: IDBTransactionMode,
-  execute: (store: IDBObjectStore, setResult: (value: T) => void) => void,
+  execute: (stores: OfflineTranscriptStores, setResult: (value: T) => void) => void,
 ): Promise<T | null> {
   const database = await openDatabase()
   if (!database) return null
@@ -108,37 +126,59 @@ async function runTransaction<T>(
     }
 
     try {
-      const transaction = database.transaction(STORE_NAME, mode)
+      const transaction = database.transaction([SNAPSHOT_STORE_NAME, META_STORE_NAME], 'readwrite')
       transaction.oncomplete = () => finish(result)
       transaction.onerror = () => finish(null)
       transaction.onabort = () => finish(null)
-      execute(transaction.objectStore(STORE_NAME), (value) => {
-        result = value
-      })
+      execute(
+        {
+          snapshots: transaction.objectStore(SNAPSHOT_STORE_NAME),
+          meta: transaction.objectStore(META_STORE_NAME),
+        },
+        (value) => {
+          result = value
+        },
+      )
     } catch {
       finish(null)
     }
   })
 }
 
-function enforceOwnerLimit(store: IDBObjectStore, owner: string): void {
-  const prefix = ownerKeyPrefix(owner)
-  const request = store.openCursor(IDBKeyRange.bound(prefix, `${prefix}\uffff`))
-  const records: OfflineTranscriptRecord[] = []
+/**
+ * Evicts the least recently opened metadata entries for the owner, dropping each
+ * evicted transcript from the snapshot store in the same transaction.
+ */
+function enforceOwnerLimit({ snapshots, meta }: OfflineTranscriptStores, owner: string): void {
+  const request = meta.openCursor(prefixedKeyRange(ownerKeyPrefix(owner)))
+  const entries: OfflineTranscriptMeta[] = []
 
   request.onsuccess = () => {
     const cursor = request.result
     if (cursor) {
-      const record = cursor.value as OfflineTranscriptRecord
-      if (record.owner === owner) records.push(record)
+      const entry = cursor.value as OfflineTranscriptMeta
+      if (entry.owner === owner) entries.push(entry)
       cursor.continue()
       return
     }
 
-    records
+    entries
       .sort((a, b) => b.openedAt - a.openedAt || compareKeys(a.key, b.key))
       .slice(OFFLINE_TRANSCRIPT_LIMIT)
-      .forEach((record) => store.delete(record.key))
+      .forEach((entry) => {
+        snapshots.delete(entry.key)
+        meta.delete(entry.key)
+      })
+  }
+}
+
+function deletePrefixedKeys(store: IDBObjectStore): void {
+  const request = store.openCursor(prefixedKeyRange(KEY_PREFIX))
+  request.onsuccess = () => {
+    const cursor = request.result
+    if (!cursor) return
+    cursor.delete()
+    cursor.continue()
   }
 }
 
@@ -165,11 +205,11 @@ export async function saveOfflineTranscript({
     },
   }
 
-  await runTransaction<void>('readwrite', (store) => {
-    const existingRequest = store.get(key)
+  await runTransaction<void>((stores) => {
+    const existingRequest = stores.meta.get(key)
     existingRequest.onsuccess = () => {
-      const existing = existingRequest.result as OfflineTranscriptRecord | undefined
-      store.put({
+      const existing = existingRequest.result as OfflineTranscriptMeta | undefined
+      stores.snapshots.put({
         key,
         owner,
         serverId,
@@ -178,7 +218,12 @@ export async function saveOfflineTranscript({
         openedAt: existing?.openedAt ?? now,
         cache: storedCache,
       } satisfies OfflineTranscriptRecord)
-      enforceOwnerLimit(store, owner)
+      stores.meta.put({
+        key,
+        owner,
+        openedAt: existing?.openedAt ?? now,
+      } satisfies OfflineTranscriptMeta)
+      enforceOwnerLimit(stores, owner)
     }
   })
 }
@@ -196,16 +241,17 @@ export async function loadOfflineTranscript({
   const target = { owner, serverId, sessionId }
   const key = transcriptKey(target)
 
-  return runTransaction<TranscriptCache>('readwrite', (store, setResult) => {
-    const request = store.get(key)
+  return runTransaction<TranscriptCache>((stores, setResult) => {
+    const request = stores.snapshots.get(key)
     request.onsuccess = () => {
       const record = request.result as OfflineTranscriptRecord | undefined
       if (!record || record.owner !== owner) return
       if (now - record.savedAt > OFFLINE_TRANSCRIPT_MAX_AGE_MS) {
-        store.delete(key)
+        stores.snapshots.delete(key)
+        stores.meta.delete(key)
         return
       }
-      store.put({ ...record, openedAt: now } satisfies OfflineTranscriptRecord)
+      stores.meta.put({ key, owner, openedAt: now } satisfies OfflineTranscriptMeta)
       setResult(record.cache)
     }
   })
@@ -223,13 +269,13 @@ export async function markOfflineTranscriptOpened({
   const target = { owner, serverId, sessionId }
   const key = transcriptKey(target)
 
-  await runTransaction<void>('readwrite', (store) => {
-    const existingRequest = store.get(key)
+  await runTransaction<void>((stores) => {
+    const existingRequest = stores.meta.get(key)
     existingRequest.onsuccess = () => {
-      const existing = existingRequest.result as OfflineTranscriptRecord | undefined
+      const existing = existingRequest.result as OfflineTranscriptMeta | undefined
       if (!existing || existing.owner !== owner) return
-      store.put({ ...existing, openedAt: now } satisfies OfflineTranscriptRecord)
-      enforceOwnerLimit(store, owner)
+      stores.meta.put({ key, owner, openedAt: now } satisfies OfflineTranscriptMeta)
+      enforceOwnerLimit(stores, owner)
     }
   })
 }
@@ -239,13 +285,8 @@ export async function markOfflineTranscriptOpened({
  * in the same database untouched.
  */
 export async function clearOfflineTranscripts(): Promise<void> {
-  await runTransaction<void>('readwrite', (store) => {
-    const request = store.openCursor(IDBKeyRange.bound(KEY_PREFIX, `${KEY_PREFIX}\uffff`))
-    request.onsuccess = () => {
-      const cursor = request.result
-      if (!cursor) return
-      cursor.delete()
-      cursor.continue()
-    }
+  await runTransaction<void>((stores) => {
+    deletePrefixedKeys(stores.snapshots)
+    deletePrefixedKeys(stores.meta)
   })
 }

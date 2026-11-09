@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { FolderGit2, Loader2, Layers, Plus, Server } from 'lucide-react'
 import { ASSISTANT_REPO_ID, getRepoDirectoryNameError, isWorktreeSibling } from '@opencode-manager/shared/utils'
-import type { MultiRunTarget } from '@opencode-manager/shared/schemas'
+import { LOCAL_OPENCODE_SERVER_ID, type MultiRunTarget } from '@opencode-manager/shared/schemas'
 import { repoQueryOptions } from '@/lib/repoQuery'
-import { getServerSessionPath, getSessionPath } from '@/lib/navigation'
+import { getServerSessionPath, getSessionPath, parseActivePickerSession } from '@/lib/navigation'
+import { getProjectHubPath, type ProjectTarget } from '@/lib/projectTarget'
 import { notifyWorktreeSetup } from '@/lib/worktreeSetup'
-import { encodeProjectTarget, type ProjectTarget } from '@/lib/projectTarget'
 import { SessionList, type SessionListRenderArgs } from '@/components/session/SessionList'
 import { WorktreeTabs, type WorktreeTabValue } from '@/components/repo/WorktreeTabs'
 import { WorktreeSessionGroups } from '@/components/repo/WorktreeSessionGroups'
@@ -27,8 +27,7 @@ import { useMultiRuns } from '@/hooks/useMultiRuns'
 import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 import { useSSE } from '@/hooks/useSSE'
 import { useSideMenu } from '@/hooks/useSideMenu'
-import { openDialogParams } from '@/hooks/useDialogParam'
-import { useUrlParams } from '@/hooks/useUrlParams'
+import { useOpenProjectDialog } from '@/hooks/useOpenProjectTool'
 
 /**
  * Renders the project hub for a Manager repo or a directory on a linked OpenCode server.
@@ -44,6 +43,9 @@ export function ProjectHub({ target }: { target: ProjectTarget }) {
 
 function ServerProjectHub({ serverId, directory }: { serverId: string; directory?: string }) {
   const { navigateFromMenu } = useSideMenu()
+  const navigate = useNavigate()
+  const { pathname } = useLocation()
+  const { sessionId: activeSessionId, serverId: activeSessionServerId } = parseActivePickerSession(pathname)
   const {
     servers,
     showsInitialLoading: serversLoading,
@@ -59,6 +61,21 @@ function ServerProjectHub({ serverId, directory }: { serverId: string; directory
   const createSessionMutation = useCreateSession(directory)
 
   useSSE(directory)
+
+  const handleSessionsDeleted = useCallback(
+    (sessionIds: string[]) => {
+      if (
+        directory === undefined ||
+        activeSessionId === undefined ||
+        activeSessionServerId !== serverId ||
+        !sessionIds.includes(activeSessionId)
+      ) {
+        return
+      }
+      navigate(getProjectHubPath({ kind: 'server', serverId, directory }), { replace: true })
+    },
+    [activeSessionId, activeSessionServerId, directory, navigate, serverId],
+  )
 
   const serverTarget = useMemo<ProjectTarget | null>(
     () => (directory ? { kind: 'server', serverId, directory } : null),
@@ -140,6 +157,7 @@ function ServerProjectHub({ serverId, directory }: { serverId: string; directory
             directory={directory}
             createDirectory={directory}
             onSelectSession={(sessionId) => navigateFromMenu(getServerSessionPath(serverId, sessionId))}
+            onSessionsDeleted={handleSessionsDeleted}
           />
         ) : null}
       </div>
@@ -149,8 +167,10 @@ function ServerProjectHub({ serverId, directory }: { serverId: string; directory
 
 function RepoProjectHub({ repoId }: { repoId: number }) {
   const location = useLocation()
+  const navigate = useNavigate()
   const { navigateFromMenu } = useSideMenu()
-  const { updateParams } = useUrlParams()
+  const { sessionId: activeSessionId, serverId: activeSessionServerId } = parseActivePickerSession(location.pathname)
+  const openProjectDialog = useOpenProjectDialog()
   const isAssistant = repoId === ASSISTANT_REPO_ID
   const [activeTab, setActiveTab] = useState<WorktreeTabValue>(() => {
     if (repoId === ASSISTANT_REPO_ID) return 'repo'
@@ -227,6 +247,20 @@ function RepoProjectHub({ repoId }: { repoId: number }) {
 
   const createSessionMutation = useCreateSession(baseDirectory)
 
+  const handleSessionsDeleted = useCallback(
+    (sessionIds: string[]) => {
+      if (
+        activeSessionId === undefined ||
+        activeSessionServerId !== LOCAL_OPENCODE_SERVER_ID ||
+        !sessionIds.includes(activeSessionId)
+      ) {
+        return
+      }
+      navigate(getProjectHubPath({ kind: 'repo', repoId }), { replace: true })
+    },
+    [activeSessionId, activeSessionServerId, navigate, repoId],
+  )
+
   const openSession = useCallback((sessionId: string, inWorktree: boolean) => {
     navigateFromMenu(getSessionPath(repoId, sessionId, inWorktree ? { repoTab: 'workspaces' } : undefined))
   }, [navigateFromMenu, repoId])
@@ -239,16 +273,11 @@ function RepoProjectHub({ repoId }: { repoId: number }) {
   }
 
   const openProjectTerminal = useCallback((terminalId: string | null, extraParams?: Record<string, string>) => {
-    updateParams((params) => {
-      openDialogParams(params, 'terminal', {
-        ...(terminalId ? { terminal: terminalId } : {}),
-        ...extraParams,
-      })
-      params.set('toolProject', encodeProjectTarget({ kind: 'repo', repoId }))
-      params.delete('menu')
-      params.delete('menuProject')
+    openProjectDialog('terminal', { kind: 'repo', repoId }, {
+      ...(terminalId ? { terminal: terminalId } : {}),
+      ...extraParams,
     })
-  }, [repoId, updateParams])
+  }, [openProjectDialog, repoId])
 
   const handleCreateWorkspace = (name: string) => {
     createWorkspace.mutate(name ? { name } : {}, {
@@ -351,6 +380,7 @@ function RepoProjectHub({ repoId }: { repoId: number }) {
             directories={sessionListDirectories}
             createDirectory={baseDirectory}
             onSelectSession={(sessionId) => openSession(sessionId, showWorktrees)}
+            onSessionsDeleted={handleSessionsDeleted}
             renderSessions={showWorktrees ? renderWorktreeGroups : undefined}
           />
         )}

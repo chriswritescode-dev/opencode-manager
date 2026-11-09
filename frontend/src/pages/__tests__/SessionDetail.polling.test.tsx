@@ -19,7 +19,6 @@ const mocks = vi.hoisted(() => ({
   useVisualViewport: vi.fn(),
   useShortcutActions: vi.fn(),
   useAutoScroll: vi.fn(),
-  useDialogParam: vi.fn(),
   useSessionStatusForSession: vi.fn(),
   syncPermissionsForSession: vi.fn(),
   syncFormsForSession: vi.fn(),
@@ -78,7 +77,6 @@ vi.mock('@/hooks/useAutoScroll', () => ({
 }))
 
 vi.mock('@/hooks/useDialogParam', () => ({
-  useDialogParam: vi.fn(() => [false, vi.fn()]),
   useRouteDialogParam: vi.fn(() => [false, vi.fn()]),
 }))
 
@@ -196,7 +194,6 @@ describe('SessionDetail pending-actions polling gating', () => {
     mocks.useMobile.mockReturnValue(false)
     mocks.useVisualViewport.mockReturnValue({ keyboardHeight: 0 })
     mocks.useAutoScroll.mockReturnValue({ scrollToBottom: vi.fn() })
-    mocks.useDialogParam.mockReturnValue([false, vi.fn()])
     mocks.useSessionStatusForSession.mockReturnValue({ type: 'idle' })
   })
 

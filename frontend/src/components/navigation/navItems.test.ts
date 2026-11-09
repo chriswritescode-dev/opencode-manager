@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { buildNavModel, buildToolItems } from './navItems'
+import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
+import {
+  buildNavModel,
+  buildProjectNavModel,
+  buildToolItems,
+  navItemByKey,
+  navPathForProject,
+} from './navItems'
 
 describe('buildNavModel items', () => {
   it('returns Home + All Schedules + Files + Settings + Logout for root path', () => {
@@ -245,5 +252,62 @@ describe('buildNavModel', () => {
     expect(model.primary[0].key).toBe('assistant')
     expect(model.primary[0].to).toBe('/assistant')
     expect(model.primary[0].variant).toBe('secondary')
+  })
+})
+
+describe('navPathForProject', () => {
+  it.each([
+    [null, '/'],
+    [{ kind: 'repo' as const, repoId: 7 }, '/repos/7'],
+    [{ kind: 'repo' as const, repoId: ASSISTANT_REPO_ID }, `/repos/${ASSISTANT_REPO_ID}/assistant`],
+    [
+      { kind: 'server' as const, serverId: 'srv kitchen', directory: '/tmp/app' },
+      '/servers/srv%20kitchen/projects',
+    ],
+  ])('maps %o to %s', (project, path) => {
+    expect(navPathForProject(project)).toBe(path)
+  })
+})
+
+describe('buildProjectNavModel', () => {
+  it('offers every repo tool the hub and tab destinations show', () => {
+    const keys = buildProjectNavModel({ kind: 'repo', repoId: 7 }).items.map((item) => item.key)
+    for (const key of [
+      'files',
+      'mcp',
+      'skills',
+      'secrets',
+      'terminal',
+      'preview',
+      'schedules',
+      'source-control',
+      'reset-permissions',
+      'actions',
+    ]) {
+      expect(keys).toContain(key)
+    }
+  })
+
+  it('offers only the linked-server tools for a server project', () => {
+    const keys = buildProjectNavModel({ kind: 'server', serverId: 'srv', directory: '/tmp' })
+      .items.map((item) => item.key)
+    for (const key of ['mcp', 'skills', 'source-control', 'terminal']) {
+      expect(keys).toContain(key)
+    }
+    for (const key of ['secrets', 'preview', 'actions', 'reset-permissions', 'schedules']) {
+      expect(keys).not.toContain(key)
+    }
+  })
+})
+
+describe('navItemByKey', () => {
+  it('returns the item that carries the label, icon, and dialog', () => {
+    const item = navItemByKey(buildNavModel('/repos/7').items, 'source-control')
+    expect(item.label).toBe('Source Control')
+    expect(item.dialog).toBe('sourceControl')
+  })
+
+  it('throws for a key the model does not offer', () => {
+    expect(() => navItemByKey(buildNavModel('/').items, 'secrets')).toThrow(/secrets/)
   })
 })

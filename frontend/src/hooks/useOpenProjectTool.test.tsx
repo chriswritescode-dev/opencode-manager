@@ -1,17 +1,18 @@
 import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { createElement, type ReactNode } from 'react'
-import { MemoryRouter, useNavigate } from 'react-router-dom'
+import { MemoryRouter, useNavigate, type InitialEntry } from 'react-router-dom'
 import { CalendarClock, Plug, Settings } from 'lucide-react'
 import type { NavItem } from '@/components/navigation/navItems'
 import type { ProjectTarget } from '@/lib/projectTarget'
 import { LocationCatcher } from '@/test/test-utils'
-import { useOpenProjectTool } from './useOpenProjectTool'
+import { useRouteDialogParam } from './useDialogParam'
+import { useOpenProjectDialog, useOpenProjectTool } from './useOpenProjectTool'
 
 const repo1: ProjectTarget = { kind: 'repo', repoId: 1 }
 const repo2: ProjectTarget = { kind: 'repo', repoId: 2 }
 
-function renderTool(initialEntries: string[], initialIndex?: number) {
+function renderTool(initialEntries: InitialEntry[], initialIndex?: number) {
   const capturedSearch = { current: '' }
   const capturedPathname = { current: '' }
 
@@ -24,10 +25,16 @@ function renderTool(initialEntries: string[], initialIndex?: number) {
     )
   }
 
-  const rendered = renderHook(() => ({
-    open: useOpenProjectTool(),
-    navigate: useNavigate(),
-  }), { wrapper: Wrapper })
+  const rendered = renderHook(() => {
+    const [dialogOpen, setDialogOpen] = useRouteDialogParam('files')
+    return {
+      open: useOpenProjectTool(),
+      openDialog: useOpenProjectDialog(),
+      navigate: useNavigate(),
+      dialogOpen,
+      setDialogOpen,
+    }
+  }, { wrapper: Wrapper })
 
   return { ...rendered, capturedSearch, capturedPathname }
 }
@@ -77,6 +84,60 @@ describe('useOpenProjectTool', () => {
     const params = new URLSearchParams(capturedSearch.current)
     expect(params.get('dialog')).toBe('files')
     expect(params.has('toolProject')).toBe(false)
+  })
+
+  it('replaces the menu entry with a route-hosted dialog, so closing leaves the route without the menu', () => {
+    const menuEntry: InitialEntry = {
+      pathname: '/repos/1',
+      search: '?menu=home&menuProject=repo:1',
+      state: { urlParamHistory: { previousSearch: '' } },
+    }
+    const { result, capturedSearch } = renderTool(['/repos/1', menuEntry], 1)
+
+    act(() => {
+      result.current.open({ ...dialogItem('files'), key: 'files' }, repo1)
+    })
+    expect(new URLSearchParams(capturedSearch.current).get('dialog')).toBe('files')
+
+    act(() => {
+      result.current.setDialogOpen(false)
+    })
+
+    expect(result.current.dialogOpen).toBe(false)
+    expect(capturedSearch.current).toBe('')
+  })
+
+  it('leaves the route without the menu when Back closes a route-hosted dialog', () => {
+    const menuEntry: InitialEntry = {
+      pathname: '/repos/1',
+      search: '?menu=home&menuProject=repo:1',
+      state: { urlParamHistory: { previousSearch: '' } },
+    }
+    const { result, capturedSearch } = renderTool(['/repos/1', menuEntry], 1)
+
+    act(() => {
+      result.current.open({ ...dialogItem('files'), key: 'files' }, repo1)
+    })
+    act(() => {
+      result.current.navigate(-1)
+    })
+
+    expect(capturedSearch.current).toBe('')
+  })
+
+  it('opens a dialog with extra params tagged for a project the route does not host', () => {
+    const { result, capturedSearch } = renderTool(['/'])
+
+    act(() => {
+      result.current.openDialog('terminal', repo1, { terminal: 'term-1' })
+    })
+
+    const params = new URLSearchParams(capturedSearch.current)
+    expect(params.get('dialog')).toBe('terminal')
+    expect(params.get('terminal')).toBe('term-1')
+    expect(params.get('toolProject')).toBe('repo:1')
+    expect(params.has('menu')).toBe(false)
+    expect(params.has('menuProject')).toBe(false)
   })
 
   it('replaces the menu entry with a dialog tagged for a different project, so Back leaves the menu', () => {

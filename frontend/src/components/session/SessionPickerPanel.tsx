@@ -559,7 +559,6 @@ function SessionPickerList({
 }
 
 interface SessionPickerContentProps {
-  open: boolean
   currentRepo: Repo | undefined
   activeSessionID?: string
   onSelectSession: (session: Session, repo: Repo) => void
@@ -574,7 +573,6 @@ interface SessionPickerContentProps {
 }
 
 function SessionPickerContent({
-  open,
   currentRepo,
   activeSessionID,
   onSelectSession,
@@ -722,7 +720,6 @@ function SessionPickerContent({
   )
 
   useEffect(() => {
-    if (!open) return
     const node = listRef.current
     const isNearBottom = node
       ? node.scrollHeight - node.scrollTop - node.clientHeight <= NEAR_BOTTOM_PX
@@ -730,7 +727,7 @@ function SessionPickerContent({
     if (!isLoading && isNearBottom && canFetchNextPage) {
       void fetchNextPage()
     }
-  }, [open, isLoading, rows, canFetchNextPage, fetchNextPage])
+  }, [isLoading, rows, canFetchNextPage, fetchNextPage])
 
   const labelFor = useCallback(
     (row: SessionPickerRow) =>
@@ -744,7 +741,7 @@ function SessionPickerContent({
         <PickerSearchBar
           inputRef={searchInputRef}
           listId={listId}
-          open={open}
+          open
           activeDescendantId={cursorIndex >= 0 ? optionId(optionBaseId, cursorIndex) : undefined}
           value={query}
           onChange={setQuery}
@@ -817,7 +814,6 @@ function SessionPickerContent({
 }
 
 interface ActivePickerContentProps {
-  open: boolean
   activeSessionID?: string
   onSelectSession: (session: Session, repo: Repo) => void
   onSelectRemoteSession?: (session: Session, serverId: string) => void
@@ -828,7 +824,6 @@ interface ActivePickerContentProps {
 }
 
 function ActivePickerContent({
-  open,
   activeSessionID,
   onSelectSession,
   onSelectRemoteSession,
@@ -942,7 +937,7 @@ function ActivePickerContent({
         <PickerSearchBar
           inputRef={searchInputRef}
           listId={listId}
-          open={open}
+          open
           activeDescendantId={cursorIndex >= 0 ? optionId(optionBaseId, cursorIndex) : undefined}
           value={query}
           onChange={setQuery}
@@ -986,7 +981,6 @@ function ActivePickerContent({
 const EMPTY_PINNED_KEYS: ReadonlySet<string> = new Set()
 
 interface RemoteSessionPickerContentProps {
-  open: boolean
   serverName?: string
   projectDirectory?: string
   isPending?: boolean
@@ -998,7 +992,6 @@ interface RemoteSessionPickerContentProps {
 }
 
 function RemoteSessionPickerContent({
-  open,
   serverName,
   projectDirectory,
   isPending = false,
@@ -1084,7 +1077,7 @@ function RemoteSessionPickerContent({
       <PickerSearchBar
         inputRef={searchInputRef}
         listId={listId}
-        open={open}
+        open
         activeDescendantId={cursorIndex >= 0 ? optionId(optionBaseId, cursorIndex) : undefined}
         value={query}
         onChange={setQuery}
@@ -1155,7 +1148,6 @@ function RemoteSessionPickerContent({
 
 interface RemoteProjectPickerContentProps {
   serverId: string
-  open: boolean
   searchInputRef: React.RefObject<HTMLInputElement | null>
   trailing?: ReactNode
   onSelectSession: (path: string) => void
@@ -1163,7 +1155,6 @@ interface RemoteProjectPickerContentProps {
 
 function RemoteProjectPickerContent({
   serverId,
-  open,
   searchInputRef,
   trailing,
   onSelectSession,
@@ -1176,7 +1167,7 @@ function RemoteProjectPickerContent({
       <PickerSearchBar
         inputRef={searchInputRef}
         listId={listId}
-        open={open}
+        open
         activeDescendantId={undefined}
         value={query}
         onChange={setQuery}
@@ -1189,7 +1180,7 @@ function RemoteProjectPickerContent({
       <div className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-md">
         <RemoteProjectNavList
           serverId={serverId}
-          isVisible={open}
+          isVisible
           search={query}
           onSelectSession={onSelectSession}
         />
@@ -1199,7 +1190,6 @@ function RemoteProjectPickerContent({
 }
 
 export interface SessionPickerPanelProps {
-  open: boolean
   currentRepo: Repo | undefined
   activeSessionID?: string
   onSelectSession: (session: Session, repo: Repo) => void
@@ -1231,7 +1221,6 @@ export function SessionPickerPanel(props: SessionPickerPanelProps) {
 }
 
 function SessionPickerPanelBody({
-  open,
   currentRepo,
   activeSessionID,
   onSelectSession,
@@ -1266,12 +1255,6 @@ function SessionPickerPanelBody({
   )
   const isRemote = remote !== undefined
   const [activeTab, setActiveTab] = useState<SessionPickerTab>('sessions')
-  const [prevOpen, setPrevOpen] = useState(open)
-
-  if (prevOpen !== open) {
-    setPrevOpen(open)
-    if (open) setActiveTab('sessions')
-  }
 
   const scopeEnabled = isRemote ? Boolean(remote?.projectDirectory) : Boolean(currentRepo)
   const allProjects = scopeEnabled ? allProjectsPreference : true
@@ -1288,13 +1271,9 @@ function SessionPickerPanelBody({
     setActiveTab((current) => nextSessionPickerTab(current, SESSION_PICKER_TABS))
   }, [])
 
-  useShortcutActions({ switchPickerTab: open ? toggleTab : undefined })
+  useShortcutActions({ switchPickerTab: toggleTab })
 
   useEffect(() => {
-    if (!open) {
-      focusSearchAfterSwitchRef.current = false
-      return
-    }
     if (!hasFinePointer && !focusSearchAfterSwitchRef.current) return
     const frame = requestAnimationFrame(() => {
       focusSearchAfterSwitchRef.current = false
@@ -1303,7 +1282,7 @@ function SessionPickerPanelBody({
       else searchInputRef.current?.focus()
     })
     return () => cancelAnimationFrame(frame)
-  }, [open, activeTab, hasFinePointer])
+  }, [activeTab, hasFinePointer])
 
   const addRepoButton = isRemote ? null : (
     <Button
@@ -1354,110 +1333,104 @@ function SessionPickerPanelBody({
 
   return (
     <>
-      {open && (
-        <Tabs
-          value={activeTab}
-          onValueChange={(value) => setActiveTab(value as SessionPickerTab)}
-          className="flex min-h-0 w-full min-w-0 flex-1 flex-col gap-0"
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => setActiveTab(value as SessionPickerTab)}
+        className="flex min-h-0 w-full min-w-0 flex-1 flex-col gap-0"
+      >
+        <div className="shrink-0 px-4 pt-4 sm:px-0 sm:pt-6">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="active">{SESSION_PICKER_TAB_LABELS.active}</TabsTrigger>
+            <TabsTrigger
+              value="sessions"
+              className="min-w-0"
+              onPointerDown={handleSessionsPointerDown}
+              onClick={handleSessionsClick}
+              onKeyDown={handleSessionsKeyDown}
+            >
+              <span className="truncate">
+                {sessionsTabLabel(projectName, scopeEnabled, allProjects)}
+              </span>
+              {scopeEnabled && (
+                <ChevronsUpDown aria-hidden="true" className="ml-1 h-3 w-3 shrink-0 opacity-60" />
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="projects">{SESSION_PICKER_TAB_LABELS.projects}</TabsTrigger>
+          </TabsList>
+        </div>
+        <TabsContent
+          value="active"
+          className="mt-0 flex min-h-0 w-full min-w-0 flex-1 flex-col px-0"
         >
-          <div className="shrink-0 px-4 pt-4 sm:px-0 sm:pt-6">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="active">{SESSION_PICKER_TAB_LABELS.active}</TabsTrigger>
-              <TabsTrigger
-                value="sessions"
-                className="min-w-0"
-                onPointerDown={handleSessionsPointerDown}
-                onClick={handleSessionsClick}
-                onKeyDown={handleSessionsKeyDown}
-              >
-                <span className="truncate">
-                  {sessionsTabLabel(projectName, scopeEnabled, allProjects)}
-                </span>
-                {scopeEnabled && (
-                  <ChevronsUpDown aria-hidden="true" className="ml-1 h-3 w-3 shrink-0 opacity-60" />
-                )}
-              </TabsTrigger>
-              <TabsTrigger value="projects">{SESSION_PICKER_TAB_LABELS.projects}</TabsTrigger>
-            </TabsList>
-          </div>
-          <TabsContent
-            value="active"
-            className="mt-0 flex min-h-0 w-full min-w-0 flex-1 flex-col px-0"
-          >
-            <OpenCodeServerProvider serverId={LOCAL_OPENCODE_SERVER_ID}>
-              <ActivePickerContent
-                open={open}
-                activeSessionID={activeSessionID}
-                onSelectSession={onSelectSession}
-                onSelectRemoteSession={onSelectRemoteSession}
-                onDeleteActiveSession={onDeleteActiveSession}
-                switchHint={switchHint}
-                searchInputRef={activeSearchInputRef}
-                trailing={sessionsTrailing}
-              />
-            </OpenCodeServerProvider>
-          </TabsContent>
-          <TabsContent
-            value="sessions"
-            className="mt-0 flex min-h-0 w-full min-w-0 flex-1 flex-col px-0"
-          >
-            {projectScoped && renderProjectSessions ? (
-              renderProjectSessions()
-            ) : remote ? (
-              <RemoteSessionPickerContent
-                open={open}
-                serverName={remote.serverName}
-                projectDirectory={projectScoped ? remote.projectDirectory : undefined}
-                isPending={projectScoped ? remote.isPending : false}
-                activeSessionID={activeSessionID}
-                onSelectSession={(session) => onSelectRemoteSession?.(session, remote.serverId)}
-                switchHint={switchHint}
-                searchInputRef={searchInputRef}
-                trailing={sessionsTrailing}
-              />
-            ) : (
-              <SessionPickerContent
-                open={open}
-                currentRepo={currentRepo}
-                activeSessionID={activeSessionID}
-                onSelectSession={onSelectSession}
-                onSelectRemoteSession={onSelectRemoteSession}
-                onDeleteActiveSession={onDeleteActiveSession}
-                allProjects={allProjects}
-                scopeEnabled={scopeEnabled}
-                onToggleAllProjects={scopeEnabled ? toggleAllProjects : undefined}
-                switchHint={switchHint}
-                searchInputRef={searchInputRef}
-                trailing={sessionsTrailing}
-              />
-            )}
-          </TabsContent>
-          <TabsContent
-            value="projects"
-            className="mt-0 flex min-h-0 w-full min-w-0 flex-1 flex-col px-0"
-          >
-            {remote ? (
-              <RemoteProjectPickerContent
-                serverId={remote.serverId}
-                open={open}
-                searchInputRef={projectSearchInputRef}
-                trailing={projectsTrailing}
-                onSelectSession={onNavigate}
-              />
-            ) : (
-              <ProjectPickerContent
-                open={open}
-                currentRepo={currentRepo}
-                onSelectRepo={onSelectRepo}
-                onNavigate={onNavigate}
-                switchHint={switchHint}
-                searchInputRef={projectSearchInputRef}
-                trailing={projectsTrailing}
-              />
-            )}
-          </TabsContent>
-        </Tabs>
-      )}
+          <OpenCodeServerProvider serverId={LOCAL_OPENCODE_SERVER_ID}>
+            <ActivePickerContent
+              activeSessionID={activeSessionID}
+              onSelectSession={onSelectSession}
+              onSelectRemoteSession={onSelectRemoteSession}
+              onDeleteActiveSession={onDeleteActiveSession}
+              switchHint={switchHint}
+              searchInputRef={activeSearchInputRef}
+              trailing={sessionsTrailing}
+            />
+          </OpenCodeServerProvider>
+        </TabsContent>
+        <TabsContent
+          value="sessions"
+          className="mt-0 flex min-h-0 w-full min-w-0 flex-1 flex-col px-0"
+        >
+          {projectScoped && renderProjectSessions ? (
+            renderProjectSessions()
+          ) : remote ? (
+            <RemoteSessionPickerContent
+              serverName={remote.serverName}
+              projectDirectory={projectScoped ? remote.projectDirectory : undefined}
+              isPending={projectScoped ? remote.isPending : false}
+              activeSessionID={activeSessionID}
+              onSelectSession={(session) => onSelectRemoteSession?.(session, remote.serverId)}
+              switchHint={switchHint}
+              searchInputRef={searchInputRef}
+              trailing={sessionsTrailing}
+            />
+          ) : (
+            <SessionPickerContent
+              currentRepo={currentRepo}
+              activeSessionID={activeSessionID}
+              onSelectSession={onSelectSession}
+              onSelectRemoteSession={onSelectRemoteSession}
+              onDeleteActiveSession={onDeleteActiveSession}
+              allProjects={allProjects}
+              scopeEnabled={scopeEnabled}
+              onToggleAllProjects={scopeEnabled ? toggleAllProjects : undefined}
+              switchHint={switchHint}
+              searchInputRef={searchInputRef}
+              trailing={sessionsTrailing}
+            />
+          )}
+        </TabsContent>
+        <TabsContent
+          value="projects"
+          className="mt-0 flex min-h-0 w-full min-w-0 flex-1 flex-col px-0"
+        >
+          {remote ? (
+            <RemoteProjectPickerContent
+              serverId={remote.serverId}
+              searchInputRef={projectSearchInputRef}
+              trailing={projectsTrailing}
+              onSelectSession={onNavigate}
+            />
+          ) : (
+            <ProjectPickerContent
+              open
+              currentRepo={currentRepo}
+              onSelectRepo={onSelectRepo}
+              onNavigate={onNavigate}
+              switchHint={switchHint}
+              searchInputRef={projectSearchInputRef}
+              trailing={projectsTrailing}
+            />
+          )}
+        </TabsContent>
+      </Tabs>
       {addRepoOpen && <AddRepoDialog open onOpenChange={setAddRepoOpen} />}
     </>
   )

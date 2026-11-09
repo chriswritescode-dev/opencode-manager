@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getOpenCodeApi, openCodeApiBaseUrl } from './opencodeApi'
+import { ClientError } from '@opencode-manager/shared/opencode'
+import { callOpenCode, getOpenCodeApi, openCodeApiBaseUrl } from './opencodeApi'
 import { API_BASE_URL, OPENCODE_API_ENDPOINT } from '@/config'
 
 describe('openCodeApi', () => {
@@ -24,5 +25,14 @@ describe('openCodeApi', () => {
     expect(getOpenCodeApi('local')).toBe(local)
     expect(getOpenCodeApi('srv_abc')).toBe(remote)
     expect(getOpenCodeApi('srv_other')).not.toBe(remote)
+  })
+
+  it('maps a Transport client error to a status-0 FetchError carrying the cause name', async () => {
+    const transport = new ClientError('Transport', { cause: new TypeError('Failed to fetch') })
+
+    await expect(callOpenCode(() => Promise.reject(transport))).rejects.toMatchObject({
+      statusCode: 0,
+      code: 'TypeError',
+    })
   })
 })

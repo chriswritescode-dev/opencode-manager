@@ -1,18 +1,5 @@
-import { useMemo, useState, type ReactNode } from 'react'
-import {
-  CalendarClock,
-  Columns3,
-  GitCommitHorizontal,
-  Globe,
-  KeyRound,
-  Layers,
-  MoreHorizontal,
-  Play,
-  Plug,
-  ShieldOff,
-  Sparkles,
-  SquareTerminal,
-} from 'lucide-react'
+import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { CalendarClock, Columns3, Layers, MoreHorizontal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -24,10 +11,32 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { RemoteMultiRun, useRemoteMultiRun } from '@/components/repo/RemoteMultiRunButton'
 import { RemoteSchedulesDialog } from '@/components/schedules/RemoteSchedulesButton'
-import { useOpenProjectTool } from '@/hooks/useOpenProjectTool'
+import { useOpenProjectDialog, useOpenProjectTool } from '@/hooks/useOpenProjectTool'
 import { ProjectActionsMenuItems, useProjectActionsMenu } from '@/components/repo/ProjectActionsMenu'
-import type { NavItem } from '@/components/navigation/navItems'
+import { buildNavModel, buildProjectNavModel, navItemByKey, type NavItem } from '@/components/navigation/navItems'
 import type { ProjectTarget } from '@/lib/projectTarget'
+
+const REPO_TOOL_ITEM_KEYS: readonly string[] = [
+  'mcp',
+  'skills',
+  'secrets',
+  'terminal',
+  'preview',
+  'schedules',
+  'reset-permissions',
+]
+
+const SERVER_TOOL_ITEM_KEYS: readonly string[] = ['mcp', 'skills', 'source-control', 'terminal']
+
+const SERVER_TOOL_LABELS: Readonly<Partial<Record<string, string>>> = { 'source-control': 'Git' }
+
+/**
+ * Repo tool items for the hub menu, read from the repo detail route's model so the hub offers every
+ * repo tool, including for the assistant repo whose side-menu model describes the assistant workspace.
+ */
+function repoToolItems(repoId: number): NavItem[] {
+  return buildNavModel(`/repos/${repoId}`).items
+}
 
 interface ProjectHubOverflowMenuProps {
   target: ProjectTarget
@@ -78,7 +87,25 @@ function RepoProjectOverflowMenu({
 }: RepoProjectOverflowMenuProps) {
   const [open, setOpen] = useState(false)
   const openProjectTool = useOpenProjectTool()
+  const openProjectDialog = useOpenProjectDialog()
   const target = useMemo(() => ({ kind: 'repo' as const, repoId }), [repoId])
+  const navItems = useMemo(() => repoToolItems(repoId), [repoId])
+  const repoTools = REPO_TOOL_ITEM_KEYS.map((key) => navItemByKey(navItems, key))
+
+  const openTerminal = useCallback((terminalId: string | null, extraParams?: Record<string, string>) => {
+    openProjectDialog('terminal', target, {
+      ...(terminalId ? { terminal: terminalId } : {}),
+      ...extraParams,
+    })
+  }, [openProjectDialog, target])
+
+  const openPreview = useCallback((port: number, path = '/') => {
+    openProjectDialog('preview', target, {
+      previewPort: String(port),
+      previewPath: path,
+    })
+  }, [openProjectDialog, target])
+
   const {
     actions,
     runningByAction,
@@ -91,18 +118,10 @@ function RepoProjectOverflowMenu({
     repoId,
     directory,
     active: open,
-    onManageActions: () => openProjectTool({ key: 'actions', label: 'Actions', icon: Play, dialog: 'actions' }, target),
+    openTerminal,
+    openPreview,
+    onManageActions: () => openProjectTool(navItemByKey(navItems, 'actions'), target),
   })
-
-  const repoTools: NavItem[] = [
-    { key: 'mcp', label: 'MCP', icon: Plug, dialog: 'mcp' },
-    { key: 'skills', label: 'Skills', icon: Sparkles, dialog: 'skills' },
-    { key: 'secrets', label: 'Secrets', icon: KeyRound, dialog: 'secrets' },
-    { key: 'terminal', label: 'Terminal', icon: SquareTerminal, dialog: 'terminal' },
-    { key: 'preview', label: 'Preview', icon: Globe, dialog: 'preview' },
-    { key: 'schedules', label: 'Schedules', icon: CalendarClock, to: `/repos/${repoId}/schedules` },
-    { key: 'reset-permissions', label: 'Reset Permissions', icon: ShieldOff, dialog: 'resetPermissions', danger: true },
-  ]
 
   return (
     <>
@@ -155,13 +174,12 @@ function ServerProjectOverflowMenu({ serverId, directory }: { serverId: string; 
     () => ({ kind: 'server', serverId, directory }),
     [serverId, directory],
   )
-
-  const serverTools: NavItem[] = [
-    { key: 'mcp', label: 'MCP', icon: Plug, dialog: 'mcp' },
-    { key: 'skills', label: 'Skills', icon: Sparkles, dialog: 'skills' },
-    { key: 'source-control', label: 'Git', icon: GitCommitHorizontal, dialog: 'sourceControl' },
-    { key: 'terminal', label: 'Terminal', icon: SquareTerminal, dialog: 'terminal' },
-  ]
+  const navItems = useMemo(() => buildProjectNavModel(target).items, [target])
+  const serverTools = SERVER_TOOL_ITEM_KEYS.map((key) => {
+    const item = navItemByKey(navItems, key)
+    const label = SERVER_TOOL_LABELS[key]
+    return label ? { ...item, label } : item
+  })
 
   return (
     <>

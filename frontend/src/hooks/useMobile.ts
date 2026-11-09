@@ -28,6 +28,30 @@ export function useMobile() {
 const VELOCITY_THRESHOLD = 0.3
 const ANIMATION_DURATION = 300
 
+interface TouchHandlers {
+  onStart: (event: TouchEvent) => void
+  onMove: (event: TouchEvent) => void
+  onEnd: (event: TouchEvent) => void
+}
+
+/**
+ * Binds a touch gesture's start, move, and end handlers to `element`, using a non-passive move
+ * listener so the gesture can prevent scrolling. Returns the cleanup that unbinds them.
+ */
+function bindTouchHandlers(element: HTMLElement, handlers: TouchHandlers): () => void {
+  element.addEventListener('touchstart', handlers.onStart, { passive: true })
+  element.addEventListener('touchmove', handlers.onMove, { passive: false })
+  element.addEventListener('touchend', handlers.onEnd, { passive: true })
+  element.addEventListener('touchcancel', handlers.onEnd, { passive: true })
+
+  return () => {
+    element.removeEventListener('touchstart', handlers.onStart)
+    element.removeEventListener('touchmove', handlers.onMove)
+    element.removeEventListener('touchend', handlers.onEnd)
+    element.removeEventListener('touchcancel', handlers.onEnd)
+  }
+}
+
 export interface UseSwipeBackOptions {
   threshold?: number
   edgeWidth?: number
@@ -253,16 +277,11 @@ function useSwipeHandlers(
 
   const bind = useCallback((element: HTMLElement | null) => {
     if (!element || !enabled || !isMobile) return undefined
-    element.addEventListener('touchstart', handleTouchStart, { passive: true })
-    element.addEventListener('touchmove', handleTouchMove, { passive: false })
-    element.addEventListener('touchend', handleTouchEnd, { passive: true })
-    element.addEventListener('touchcancel', handleTouchEnd, { passive: true })
-    return () => {
-      element.removeEventListener('touchstart', handleTouchStart)
-      element.removeEventListener('touchmove', handleTouchMove)
-      element.removeEventListener('touchend', handleTouchEnd)
-      element.removeEventListener('touchcancel', handleTouchEnd)
-    }
+    return bindTouchHandlers(element, {
+      onStart: handleTouchStart,
+      onMove: handleTouchMove,
+      onEnd: handleTouchEnd,
+    })
   }, [enabled, isMobile, handleTouchStart, handleTouchMove, handleTouchEnd])
 
   const swipeStyles: CSSProperties = direction === 'vertical'
@@ -478,17 +497,11 @@ export function useLeftEdgeSwipe(
   const bind = useCallback((element: HTMLElement | null) => {
     if (!element || !enabled || !isMobile) return undefined
 
-    element.addEventListener('touchstart', handleTouchStart, { passive: true })
-    element.addEventListener('touchmove', handleTouchMove, { passive: false })
-    element.addEventListener('touchend', handleTouchEnd, { passive: true })
-    element.addEventListener('touchcancel', handleTouchEnd, { passive: true })
-
-    return () => {
-      element.removeEventListener('touchstart', handleTouchStart)
-      element.removeEventListener('touchmove', handleTouchMove)
-      element.removeEventListener('touchend', handleTouchEnd)
-      element.removeEventListener('touchcancel', handleTouchEnd)
-    }
+    return bindTouchHandlers(element, {
+      onStart: handleTouchStart,
+      onMove: handleTouchMove,
+      onEnd: handleTouchEnd,
+    })
   }, [enabled, handleTouchEnd, handleTouchMove, handleTouchStart, isMobile])
 
   return { bind }
@@ -586,17 +599,11 @@ export function usePanelSwipeClose(
   const bind = useCallback((element: HTMLElement | null) => {
     if (!element || !enabled || !isMobile) return undefined
 
-    element.addEventListener('touchstart', handleTouchStart, { passive: true })
-    element.addEventListener('touchmove', handleTouchMove, { passive: false })
-    element.addEventListener('touchend', handleTouchEnd, { passive: true })
-    element.addEventListener('touchcancel', handleTouchEnd, { passive: true })
-
-    return () => {
-      element.removeEventListener('touchstart', handleTouchStart)
-      element.removeEventListener('touchmove', handleTouchMove)
-      element.removeEventListener('touchend', handleTouchEnd)
-      element.removeEventListener('touchcancel', handleTouchEnd)
-    }
+    return bindTouchHandlers(element, {
+      onStart: handleTouchStart,
+      onMove: handleTouchMove,
+      onEnd: handleTouchEnd,
+    })
   }, [enabled, handleTouchEnd, handleTouchMove, handleTouchStart, isMobile])
 
   return { bind }

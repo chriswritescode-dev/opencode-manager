@@ -43,28 +43,6 @@ export function useActivityWindowMinutes(): number {
 }
 
 /**
- * Distinct active roots for a badge: needs-input roots and running roots that are not also
- * pending input. Reads only the session-status store and the pending queues, with no network.
- */
-export function useActiveWorkCounts(): { needsInput: number; running: number } {
-  const statuses = useSessionStatus((state) => state.statuses)
-  const parents = useSessionStatus((state) => state.parents)
-  const runningShells = useSessionStatus((state) => state.runningShells)
-  const pendingInputSessionIDs = usePendingInputSessionIDs()
-
-  return useMemo(() => {
-    const roots = collectActiveRoots({ statuses, parents, runningShells, pendingInputSessionIDs })
-
-    let running = 0
-    for (const rootID of roots.running) {
-      if (!roots.needsInput.has(rootID)) running += 1
-    }
-
-    return { needsInput: roots.needsInput.size, running }
-  }, [statuses, parents, runningShells, pendingInputSessionIDs])
-}
-
-/**
  * Whether a repo has any active session, returned as a primitive so rows only re-render when it
  * changes. Reads only the session-status store and the pending queues, with no network.
  */

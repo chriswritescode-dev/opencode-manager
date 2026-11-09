@@ -7,14 +7,22 @@ import { isFullWidthSideMenu, sideMenuWidthCss } from './sideMenuLayout'
 
 const openSideMenuStack: symbol[] = []
 
-function useTrackedWindowWidth(): number {
+/**
+ * Tracks the window width only while it is needed.
+ *
+ * @param active Whether a consumer is showing a width-dependent layout.
+ * @returns The current window width, re-read when tracking becomes active.
+ */
+function useTrackedWindowWidth(active: boolean): number {
   const [width, setWidth] = useState(() => (typeof window === 'undefined' ? 0 : window.innerWidth))
 
   useEffect(() => {
+    if (!active) return undefined
+    setWidth(window.innerWidth)
     const handleResize = () => setWidth(window.innerWidth)
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
-  }, [])
+  }, [active])
 
   return width
 }
@@ -27,7 +35,7 @@ function useTrackedWindowWidth(): number {
  */
 export function useSideMenuOffset(enabled = true): string {
   const { isOpen } = useSideMenu()
-  const width = useTrackedWindowWidth()
+  const width = useTrackedWindowWidth(enabled && isOpen)
   return enabled && isOpen ? sideMenuWidthCss(width) : '0px'
 }
 
@@ -35,7 +43,7 @@ export function useSideMenuOffset(enabled = true): string {
 export function SideMenu() {
   const isMobile = useMobile()
   const { isOpen, closeMenu } = useSideMenu()
-  const windowWidth = useTrackedWindowWidth()
+  const windowWidth = useTrackedWindowWidth(isMobile && isOpen)
   const panelRef = useRef<HTMLDivElement>(null)
   const closeMenuRef = useRef(closeMenu)
 

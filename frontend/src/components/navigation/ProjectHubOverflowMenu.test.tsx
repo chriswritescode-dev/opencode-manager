@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import type { ProjectConfigResponse } from '@opencode-manager/shared/types'
+import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { ProjectHubOverflowMenu } from './ProjectHubOverflowMenu'
 
 const mocks = vi.hoisted(() => ({
@@ -89,12 +90,12 @@ function LocationProbe() {
   return <div data-testid="location">{`${location.pathname}${location.search}`}</div>
 }
 
-function renderMenu(onCreateWorktree = vi.fn()) {
+function renderMenu(onCreateWorktree = vi.fn(), repoId = 1) {
   const rendered = render(
-    <MemoryRouter initialEntries={['/?menu=sessions&menuProject=repo:1']}>
+    <MemoryRouter initialEntries={[`/?menu=sessions&menuProject=repo:${repoId}`]}>
       <LocationProbe />
       <ProjectHubOverflowMenu
-        target={{ kind: 'repo', repoId: 1 }}
+        target={{ kind: 'repo', repoId }}
         directory="/abs/repos/one"
         onCreateWorktree={onCreateWorktree}
       />
@@ -148,6 +149,27 @@ describe('ProjectHubOverflowMenu', () => {
     for (const name of ['Multi-run', 'Create worktree', 'MCP', 'Skills', 'Secrets', 'Terminal', 'Preview', 'Schedules', 'Reset Permissions']) {
       expect(screen.getByRole('menuitem', { name })).toBeInTheDocument()
     }
+  })
+
+  it('keeps the repo tool set for the assistant repo', async () => {
+    const user = userEvent.setup()
+    renderMenu(vi.fn(), ASSISTANT_REPO_ID)
+
+    await user.click(screen.getByRole('button', { name: 'Project actions' }))
+
+    const items = await screen.findAllByRole('menuitem')
+    expect(items.map((item) => item.textContent)).toEqual([
+      'Manage actions…',
+      'Multi-run',
+      'Create worktree',
+      'MCP',
+      'Skills',
+      'Secrets',
+      'Terminal',
+      'Preview',
+      'Schedules',
+      'Reset Permissions',
+    ])
   })
 
   it('opens the multi-run dialog scoped to the repo project', async () => {

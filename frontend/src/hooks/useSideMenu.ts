@@ -19,6 +19,16 @@ export interface OpenSideMenuOptions {
   project?: ProjectTarget;
 }
 
+/**
+ * Removes the side menu's `menu` and `menuProject` params from a param set.
+ *
+ * @param params Params to clear.
+ */
+export function clearSideMenuParams(params: URLSearchParams): void {
+  params.delete('menu');
+  params.delete('menuProject');
+}
+
 /** Side menu URL state and the actions that write it. */
 export interface UseSideMenuReturn {
   isOpen: boolean;
@@ -73,25 +83,23 @@ export function useSideMenu(): UseSideMenuReturn {
   );
 
   const closeMenu = useCallback(() => {
-    closePushedParams((params) => {
-      params.delete('menu');
-      params.delete('menuProject');
-    });
+    closePushedParams(clearSideMenuParams);
   }, [closePushedParams]);
 
   /**
    * Leaves the menu for a path in one history operation, so a pending route loader is never aborted
-   * by the traversal `closeMenu` would start.
+   * by the traversal `closeMenu` would start. Replaces the entry only when the menu itself was
+   * pushed from a search without the menu params, so the pre-menu entry is the one Back should reach.
    */
   const navigateFromMenu = useCallback(
     (path: string) => {
-      if (readPreviousSearch(location.state) !== null) {
-        navigate(path, { replace: true });
-        return;
-      }
-      navigate(path);
+      const previousSearch = readPreviousSearch(location.state);
+      const replaceMenuEntry = isOpen
+        && previousSearch !== null
+        && !new URLSearchParams(previousSearch).has('menu');
+      navigate(path, replaceMenuEntry ? { replace: true } : undefined);
     },
-    [location.state, navigate],
+    [isOpen, location.state, navigate],
   );
 
   return { isOpen, page, project, openMenu, setPage, closeMenu, navigateFromMenu };

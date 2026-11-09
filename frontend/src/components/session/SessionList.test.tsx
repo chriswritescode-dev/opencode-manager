@@ -798,4 +798,56 @@ describe('SessionList', () => {
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(fetchNextPageMock).not.toHaveBeenCalled()
   })
+
+  it('reports the deleted session id after a single delete', async () => {
+    const user = userEvent.setup()
+    sessionsData.splice(0, sessionsData.length,
+      { id: 'ses_a', title: 'alpha task', location: { directory: '/w/a' }, time: { updated: 1 } },
+    )
+    const onSessionsDeleted = vi.fn()
+
+    render(
+      <SessionList
+        directories={['/w/a']}
+        onSelectSession={vi.fn()}
+        onSessionsDeleted={onSessionsDeleted}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Session actions' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete' }))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Delete Session' })
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+
+    await waitFor(() => expect(onSessionsDeleted).toHaveBeenCalledWith(['ses_a']))
+  })
+
+  it('reports every deleted session id after a bulk delete', async () => {
+    const user = userEvent.setup()
+    sessionsData.splice(0, sessionsData.length,
+      { id: 'ses_a', title: 'alpha task', location: { directory: '/w/a' }, time: { updated: 2 } },
+      { id: 'ses_b', title: 'beta task', location: { directory: '/w/b' }, time: { updated: 1 } },
+    )
+    const onSessionsDeleted = vi.fn()
+
+    render(
+      <SessionList
+        directories={['/w/a', '/w/b']}
+        onSelectSession={vi.fn()}
+        onSessionsDeleted={onSessionsDeleted}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Manage sessions' }))
+    await user.click(screen.getByRole('button', { name: 'Select All' }))
+    await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Delete Sessions' })
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+
+    await waitFor(() =>
+      expect(onSessionsDeleted).toHaveBeenCalledWith(['ses_a', 'ses_b']),
+    )
+  })
 })

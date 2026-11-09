@@ -19,7 +19,6 @@ const mocks = vi.hoisted(() => ({
   useVisualViewport: vi.fn(),
   useShortcutActions: vi.fn(),
   useAutoScroll: vi.fn(),
-  useDialogParam: vi.fn(),
   RepoSkillsDialog: vi.fn(() => null),
 }))
 
@@ -76,7 +75,6 @@ vi.mock('@/hooks/useAutoScroll', () => ({
 }))
 
 vi.mock('@/hooks/useDialogParam', () => ({
-  useDialogParam: vi.fn(() => [false, vi.fn()]),
   useRouteDialogParam: vi.fn(() => [false, vi.fn()]),
 }))
 
@@ -125,7 +123,6 @@ vi.mock('@/contexts/EventContext', async (importOriginal) => {
 })
 
 vi.mock('@/hooks/useActiveWork', () => ({
-  useActiveWorkCounts: () => ({ needsInput: 0, running: 0 }),
   useRepoActivityState: () => null,
 }))
 
@@ -221,7 +218,6 @@ describe('SessionDetail assistant loading at repoId=0', () => {
     mocks.useMobile.mockReturnValue(false)
     mocks.useVisualViewport.mockReturnValue({ keyboardHeight: 0 })
     mocks.useAutoScroll.mockReturnValue({ scrollToBottom: vi.fn() })
-    mocks.useDialogParam.mockReturnValue([false, vi.fn()])
   })
 
   const createQueryClient = () =>

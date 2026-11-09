@@ -1,10 +1,9 @@
 import { useCallback } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import type { Repo, Session } from '@/api/types'
 import { useSideMenu } from '@/hooks/useSideMenu'
 import {
-  getRepoPath,
   getServerSessionPath,
   getSessionListPath,
   getSessionPath,
@@ -12,21 +11,12 @@ import {
   parseRepoRoute,
   withQueryParam,
 } from '@/lib/navigation'
+import { getProjectHubPath } from '@/lib/projectTarget'
 
 export interface SessionPickerNavigationOptions {
-  /**
-   * `replace` rewrites the entry the picker was opened from so Back returns to the page behind it;
-   * `push` adds an entry and closes the picker; `panel` adds an entry, carries the current `panel`
-   * search param onto the destination path and leaves the picker open.
-   */
-  mode: 'push' | 'replace' | 'panel'
-  /** Whether selecting a project navigates to it or points the side menu at it in place. */
-  selectRepoDestination?: 'navigate' | 'menu'
   onClose: () => void
-  /** Leaves a pushed side-menu entry for a path in one history operation. */
-  navigateFromMenu?: (path: string) => void
-  /** Where to go after the open session is deleted, instead of the current repo's session list. */
-  deleteActiveSessionPath?: string
+  /** Leaves the side menu for a path in one history operation. */
+  navigateFromMenu: (path: string) => void
 }
 
 export interface SessionPickerNavigation {
@@ -38,102 +28,69 @@ export interface SessionPickerNavigation {
 }
 
 /**
- * Builds the session picker handlers shared by the mobile sheet, the desktop dialog, the desktop
- * tool panel and the session page picker. The route in view comes from the location: choosing the
- * session already open on the same server only closes the picker, and does nothing in `panel` mode
- * where the picker stays open. An assistant session keeps `?assistant=1` when the chosen session
- * belongs to the current repo.
+ * Builds the session picker handlers used by the side menu. The route in view comes from the
+ * location: choosing the session already open on the same server only closes the menu. An assistant
+ * session keeps `?assistant=1` when the chosen session belongs to the current repo.
  *
- * @param options Navigation mode, the picker's close callback, and an optional delete destination.
+ * @param options The picker's close callback and the action that leaves the menu for a path.
  * @returns Handlers for selecting sessions and repos and for following a prepared path.
  */
 export function useSessionPickerNavigation({
-  mode,
-  selectRepoDestination = 'navigate',
   onClose,
   navigateFromMenu,
-  deleteActiveSessionPath,
 }: SessionPickerNavigationOptions): SessionPickerNavigation {
-  const navigate = useNavigate()
-  const { openMenu } = useSideMenu()
+  const { openMenu, project } = useSideMenu()
   const { pathname, search } = useLocation()
   const currentRepoId = parseRepoRoute(pathname).repoId
   const { sessionId: activeSessionID, serverId: activeServerId } = parseActivePickerSession(pathname)
   const searchParams = new URLSearchParams(search)
   const isAssistantSession = searchParams.get('assistant') === '1'
   const repoTab = searchParams.get('repoTab') ?? undefined
-  const panelId = searchParams.get('panel')
-  const isPanelMode = mode === 'panel'
-
-  const open = useCallback(
-    (path: string) => {
-      const destination = isPanelMode && panelId ? withQueryParam(path, 'panel', panelId) : path
-      if (mode === 'push' && navigateFromMenu) {
-        navigateFromMenu(destination)
-        return
-      }
-      navigate(destination, { replace: mode === 'replace' })
-      if (mode === 'push') onClose()
-    },
-    [isPanelMode, mode, navigate, navigateFromMenu, onClose, panelId],
-  )
 
   const onSelectSession = useCallback(
     (session: Session, repo: Repo) => {
       if (session.id === activeSessionID && activeServerId === LOCAL_OPENCODE_SERVER_ID) {
-        if (!isPanelMode) onClose()
+        onClose()
         return
       }
       const sessionPath = getSessionPath(repo.id, session.id)
-      open(
+      navigateFromMenu(
         isAssistantSession && repo.id === currentRepoId
           ? withQueryParam(sessionPath, 'assistant', '1')
           : sessionPath,
       )
     },
-    [activeServerId, activeSessionID, currentRepoId, isAssistantSession, isPanelMode, onClose, open],
+    [activeServerId, activeSessionID, currentRepoId, isAssistantSession, navigateFromMenu, onClose],
   )
 
   const onSelectRemoteSession = useCallback(
     (session: Session, serverId: string) => {
       if (session.id === activeSessionID && serverId === activeServerId) {
-        if (!isPanelMode) onClose()
+        onClose()
         return
       }
-      open(getServerSessionPath(serverId, session.id))
+      navigateFromMenu(getServerSessionPath(serverId, session.id))
     },
-    [activeServerId, activeSessionID, isPanelMode, onClose, open],
+    [activeServerId, activeSessionID, navigateFromMenu, onClose],
   )
 
   const onDeleteActiveSession = useCallback(() => {
-    if (deleteActiveSessionPath) {
-      open(deleteActiveSessionPath)
+    if (currentRepoId !== null) {
+      navigateFromMenu(getSessionListPath(currentRepoId, isAssistantSession, repoTab))
       return
     }
-    if (currentRepoId === null) {
-      if (!isPanelMode) onClose()
+    if (project?.kind === 'server' && project.serverId === activeServerId) {
+      navigateFromMenu(getProjectHubPath(project))
       return
     }
-    open(getSessionListPath(currentRepoId, isAssistantSession, repoTab))
-  }, [
-    currentRepoId,
-    deleteActiveSessionPath,
-    isAssistantSession,
-    isPanelMode,
-    onClose,
-    open,
-    repoTab,
-  ])
+    navigateFromMenu('/')
+  }, [activeServerId, currentRepoId, isAssistantSession, navigateFromMenu, project, repoTab])
 
   const onSelectRepo = useCallback(
     (repo: Repo) => {
-      if (selectRepoDestination === 'menu') {
-        openMenu({ page: 'sessions', project: { kind: 'repo', repoId: repo.id } }, 'replace')
-        return
-      }
-      open(getRepoPath(repo.id))
+      openMenu({ page: 'sessions', project: { kind: 'repo', repoId: repo.id } }, 'replace')
     },
-    [open, openMenu, selectRepoDestination],
+    [openMenu],
   )
 
   return {
@@ -141,6 +98,6 @@ export function useSessionPickerNavigation({
     onSelectRemoteSession,
     onDeleteActiveSession,
     onSelectRepo,
-    onNavigate: open,
+    onNavigate: navigateFromMenu,
   }
 }

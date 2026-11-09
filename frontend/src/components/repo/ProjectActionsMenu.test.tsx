@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -14,6 +14,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { LocationCatcher } from '@/test/test-utils'
+import { useOpenPreview } from '@/hooks/useOpenPreview'
+import { openDialogParam } from '@/hooks/useDialogParam'
+import { useUrlParams } from '@/hooks/useUrlParams'
 import { ProjectActionsMenuItems, useProjectActionsMenu } from './ProjectActionsMenu'
 
 const mocks = vi.hoisted(() => ({
@@ -104,8 +107,19 @@ function untrustedError(hash: string): FetchError {
 
 function TestProjectActionsMenu({ repoId, directory }: { repoId: number; directory: string | undefined }) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const { updateParams } = useUrlParams()
+  const openTerminal = useCallback(
+    (terminalId: string | null, extraParams?: Record<string, string>) => {
+      openDialogParam(updateParams, 'terminal', {
+        ...(terminalId ? { terminal: terminalId } : {}),
+        ...extraParams,
+      })
+    },
+    [updateParams],
+  )
+  const openPreview = useOpenPreview()
   const { actions, runningByAction, isRunning, startRun, stopRun, manageActions, trustDialog } =
-    useProjectActionsMenu({ repoId, directory, active: menuOpen })
+    useProjectActionsMenu({ repoId, directory, active: menuOpen, openTerminal, openPreview })
 
   if (!directory) return null
 

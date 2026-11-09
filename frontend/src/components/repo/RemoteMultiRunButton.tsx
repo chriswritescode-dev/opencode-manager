@@ -1,7 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useCallback, useState } from 'react'
-import { Layers } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import { MultiRunSheet } from '@/components/repo/MultiRunSheet'
 
 interface RemoteMultiRunProps {
@@ -45,31 +43,4 @@ export function useRemoteMultiRun(): UseRemoteMultiRunReturn {
   }, [])
 
   return { mounted, open, setOpen, openMultiRun }
-}
-
-export function RemoteMultiRunButton({ serverId, directory }: { serverId: string; directory: string }) {
-  const { mounted, open, setOpen, openMultiRun } = useRemoteMultiRun()
-
-  return (
-    <>
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={openMultiRun}
-        aria-label="Multi-run"
-        className="h-9 w-9 shrink-0 p-0 @min-[36rem]:w-auto @min-[36rem]:px-3"
-      >
-        <Layers className="h-4 w-4 @min-[36rem]:mr-2" />
-        <span className="hidden @min-[36rem]:inline">Multi-run</span>
-      </Button>
-      {mounted ? (
-        <RemoteMultiRun
-          serverId={serverId}
-          directory={directory}
-          open={open}
-          onOpenChange={setOpen}
-        />
-      ) : null}
-    </>
-  )
 }

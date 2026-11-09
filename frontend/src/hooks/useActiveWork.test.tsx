@@ -6,7 +6,7 @@ import type { SessionInfo } from '@opencode-manager/shared/opencode'
 import type { Repo } from '@/api/types'
 import { MS_PER_MINUTE } from '@/lib/activeWork'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
-import { useActiveWork, useActiveWorkCounts } from './useActiveWork'
+import { useActiveWork } from './useActiveWork'
 
 const REPO_PATH = '/repo'
 const WINDOW_MS = 60 * MS_PER_MINUTE
@@ -289,7 +289,7 @@ describe('useActiveWork', () => {
     expect(mocks.getRepoSiblings).not.toHaveBeenCalled()
   })
 
-  it('counts a remote pending permission and shows one labelled remote row', async () => {
+  it('shows a remote pending permission as one labelled remote row', async () => {
     const now = Date.now()
     mocks.pendingSessionIDs = ['ses_remote']
     mocks.listSessionPage.mockResolvedValue({ items: [] })
@@ -299,15 +299,13 @@ describe('useActiveWork', () => {
       directories: new Map([['ses_remote', 'srv_kitchen|/home/me/app']]),
     })
 
-    const { result } = renderHook(
-      () => ({ work: useActiveWork(WINDOW_MS), counts: useActiveWorkCounts() }),
-      { wrapper: createWrapper(createQueryClient()) },
-    )
+    const { result } = renderHook(() => useActiveWork(WINDOW_MS), {
+      wrapper: createWrapper(createQueryClient()),
+    })
 
-    await waitFor(() => expect(result.current.work.groups.needsInput).toHaveLength(1))
+    await waitFor(() => expect(result.current.groups.needsInput).toHaveLength(1))
 
-    const row = result.current.work.groups.needsInput[0]
-    expect(result.current.counts).toEqual({ needsInput: 1, running: 0 })
+    const row = result.current.groups.needsInput[0]
     expect(row.serverId).toBe('srv_kitchen')
     expect(row.serverName).toBe('Kitchen')
     expect(row.repo).toBeNull()
@@ -392,16 +390,14 @@ describe('useActiveWork', () => {
       directories: new Map([['ses_child', 'srv_kitchen|/home/me/app']]),
     })
 
-    const { result } = renderHook(
-      () => ({ work: useActiveWork(WINDOW_MS), counts: useActiveWorkCounts() }),
-      { wrapper: createWrapper(createQueryClient()) },
-    )
+    const { result } = renderHook(() => useActiveWork(WINDOW_MS), {
+      wrapper: createWrapper(createQueryClient()),
+    })
 
-    await waitFor(() => expect(result.current.work.groups.running).toHaveLength(1))
+    await waitFor(() => expect(result.current.groups.running).toHaveLength(1))
 
-    expect(result.current.counts).toEqual({ needsInput: 0, running: 1 })
-    expect(result.current.work.groups.running[0].session.id).toBe('ses_remote')
-    expect(result.current.work.groups.running[0].serverName).toBe('Kitchen')
+    expect(result.current.groups.running[0].session.id).toBe('ses_remote')
+    expect(result.current.groups.running[0].serverName).toBe('Kitchen')
     expect(mocks.getSession).toHaveBeenCalledWith('ses_child', 'srv_kitchen')
     expect(mocks.getSession).not.toHaveBeenCalledWith('ses_child', 'local')
   })

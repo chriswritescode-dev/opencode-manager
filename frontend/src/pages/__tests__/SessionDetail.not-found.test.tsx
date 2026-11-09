@@ -20,8 +20,8 @@ const mocks = vi.hoisted(() => ({
   useVisualViewport: vi.fn(),
   useShortcutActions: vi.fn(),
   useAutoScroll: vi.fn(),
-  useDialogParam: vi.fn(),
-  useTerminalDialogParam: vi.fn(),
+  useRouteDialogParam: vi.fn(),
+  useRouteTerminalDialogParam: vi.fn(),
   useOpenCodeServers: vi.fn(),
   useOpenCodeServerStatuses: vi.fn(),
   getRepo: vi.fn(),
@@ -70,11 +70,10 @@ vi.mock('@/contexts/KeyboardShortcutsContext', () => ({ useShortcutActions: mock
 vi.mock('@/hooks/useAutoScroll', () => ({ useAutoScroll: mocks.useAutoScroll }))
 vi.mock('@/hooks/useDialogParam', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/hooks/useDialogParam')>()
-  return { ...actual, useDialogParam: mocks.useDialogParam, useRouteDialogParam: mocks.useDialogParam }
+  return { ...actual, useRouteDialogParam: mocks.useRouteDialogParam }
 })
 vi.mock('@/hooks/useOpenTerminal', () => ({
-  useTerminalDialogParam: mocks.useTerminalDialogParam,
-  useRouteTerminalDialogParam: mocks.useTerminalDialogParam,
+  useRouteTerminalDialogParam: mocks.useRouteTerminalDialogParam,
 }))
 vi.mock('@/hooks/useAutoPlayLastResponse', () => ({
   getAssistantText: vi.fn(() => ''),
@@ -186,8 +185,8 @@ describe('SessionDetail not-found handling', () => {
     mocks.useMobile.mockReturnValue(false)
     mocks.useVisualViewport.mockReturnValue({ keyboardHeight: 0 })
     mocks.useAutoScroll.mockReturnValue({ scrollToBottom: vi.fn(), scrollByUser: vi.fn() })
-    mocks.useDialogParam.mockReturnValue([false, vi.fn()])
-    mocks.useTerminalDialogParam.mockReturnValue([false, vi.fn()])
+    mocks.useRouteDialogParam.mockReturnValue([false, vi.fn()])
+    mocks.useRouteTerminalDialogParam.mockReturnValue([false, vi.fn()])
     mocks.useSessionStatus.mockReturnValue({ setStatus: vi.fn() })
     mocks.useOpenCodeServers.mockReturnValue({ servers: [], isLoading: false })
     mocks.useOpenCodeServerStatuses.mockReturnValue({ statusById: {} })

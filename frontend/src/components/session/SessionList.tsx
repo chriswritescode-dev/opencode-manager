@@ -19,6 +19,7 @@ interface SessionListProps {
   directories?: string[];
   createDirectory?: string;
   onSelectSession: (sessionID: string) => void;
+  onSessionsDeleted?: (sessionIds: string[]) => void;
   renderSessions?: (args: SessionListRenderArgs) => ReactNode;
 }
 
@@ -37,6 +38,7 @@ export const SessionList = ({
   directories,
   createDirectory,
   onSelectSession,
+  onSessionsDeleted,
   renderSessions,
 }: SessionListProps) => {
   const directoriesList = useMemo(() => {
@@ -131,7 +133,10 @@ export const SessionList = ({
 
   const confirmDelete = async () => {
     if (sessionToDelete) {
+      const targets = Array.isArray(sessionToDelete) ? sessionToDelete : [sessionToDelete];
+      const deletedIds = targets.map((target) => (typeof target === 'string' ? target : target.id));
       await deleteSession.mutateAsync(sessionToDelete);
+      onSessionsDeleted?.(deletedIds);
       setDeleteDialogOpen(false);
       setSessionToDelete(null);
       setSelectedSessions(new Set());

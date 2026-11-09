@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, RouterProvider, createMemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   useSSE: vi.fn(),
   useCreateSession: vi.fn(),
   useDeleteSession: vi.fn(),
+  deleteSessionMutate: vi.fn(),
   useUpdateSession: vi.fn(),
   useMultiRuns: vi.fn(),
   useProjectConfig: vi.fn(),
@@ -34,6 +35,12 @@ const mocks = vi.hoisted(() => ({
   openSettingsTab: vi.fn(),
   refetchServers: vi.fn(),
   lastDirectories: { current: [] as string[] },
+  sessionsForSearch: [] as Array<{
+    id: string
+    title: string
+    time: { created: number; updated: number }
+    location: { directory: string }
+  }>,
 }))
 
 vi.mock('@/hooks/useOpenCodeServers', () => ({
@@ -99,12 +106,7 @@ vi.mock('@/hooks/useSessionSearch', async () => {
     useSessionSearch: (directories: string[]) => {
       mocks.lastDirectories.current = directories
       const [query, setQuery] = React.useState('')
-      const sessions = [{
-        id: 'ses_1',
-        title: 'One',
-        time: { created: 1, updated: 2 },
-        location: { directory: '/abs/repos/one' },
-      }]
+      const sessions = mocks.sessionsForSearch
       const trimmedQuery = query.trim()
       const filteredSessions = trimmedQuery
         ? sessions.filter((session) => session.title.toLowerCase().includes(trimmedQuery.toLowerCase()))
@@ -292,6 +294,21 @@ function renderPushedHub(target: ProjectTarget = { kind: 'repo', repoId: 1 }) {
   )
 }
 
+function renderSessionHub(
+  entry: string,
+  target: ProjectTarget = { kind: 'repo', repoId: 1 },
+) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[entry]}>
+        <LocationProbe />
+        <ProjectHub target={target} />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+}
+
 class SignalFreeRequest extends Request {
   constructor(input: RequestInfo | URL, init?: RequestInit) {
     super(input, init ? { ...init, signal: undefined } : init)
@@ -343,12 +360,19 @@ describe('ProjectHub', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.lastDirectories.current = []
+    mocks.sessionsForSearch = [{
+      id: 'ses_1',
+      title: 'One',
+      time: { created: 1, updated: 2 },
+      location: { directory: '/abs/repos/one' },
+    }]
     mocks.getRepo.mockResolvedValue(baseRepo)
     mocks.useRepoSiblings.mockReturnValue({ data: [] })
     mocks.useCreateRepoWorkspace.mockReturnValue({ mutate: mocks.createWorkspaceMutate, isPending: false })
     mocks.useDeleteRepoWorkspaces.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useCreateSession.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useDeleteSession.mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
+    mocks.deleteSessionMutate.mockResolvedValue(undefined)
+    mocks.useDeleteSession.mockReturnValue({ mutateAsync: mocks.deleteSessionMutate, isPending: false })
     mocks.useUpdateSession.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useMultiRuns.mockReturnValue({ data: [] })
     mocks.useProjectConfig.mockReturnValue({ data: makeConfig() })
@@ -423,6 +447,46 @@ describe('ProjectHub', () => {
       expect(params.get('toolProject')).toBe('repo:1')
       expect(params.get('repoTab')).toBe('workspaces')
       expect(params.get('terminalDirectory')).toBe(newWorkspaceDirectory)
+    })
+  })
+
+  it('opens an action terminal from the hub tagged for the repo project and leaves the menu', async () => {
+    mocks.useProjectConfig.mockReturnValue({
+      data: makeConfig([{
+        id: 'dev',
+        name: 'Dev server',
+        command: 'pnpm dev',
+        autoOpenUrl: false,
+        source: 'personal',
+      }]),
+    })
+    mocks.runMutate.mockImplementation((_actionId, options) => {
+      options.onSuccess({
+        terminal: {
+          id: 'term-1',
+          title: 'Dev server',
+          kind: 'action',
+          actionId: 'dev',
+          cwd: '/abs/repos/my-repo',
+          status: 'running',
+        },
+        alreadyRunning: false,
+        autoOpenUrl: false,
+      })
+    })
+    const user = userEvent.setup()
+    renderHub()
+
+    await user.click(await screen.findByRole('button', { name: 'Project actions' }))
+    await user.click(await screen.findByRole('menuitem', { name: /dev server/i }))
+
+    await waitFor(() => {
+      const params = currentParams()
+      expect(params.get('dialog')).toBe('terminal')
+      expect(params.get('terminal')).toBe('term-1')
+      expect(params.get('toolProject')).toBe('repo:1')
+      expect(params.has('menu')).toBe(false)
+      expect(params.has('menuProject')).toBe(false)
     })
   })
 
@@ -533,6 +597,40 @@ describe('ProjectHub', () => {
 
     await user.click(screen.getByRole('button', { name: 'back' }))
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/'))
+  })
+
+  it('returns to the hub when the open session is deleted from the session list', async () => {
+    const user = userEvent.setup()
+    renderSessionHub('/repos/1/sessions/ses_1?menu=sessions&menuProject=repo:1')
+
+    await user.click(await screen.findByRole('button', { name: 'Manage sessions' }))
+    await user.click(screen.getByRole('button', { name: 'Select All' }))
+    await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Delete Session' })
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location').textContent).toBe('/?menu=sessions&menuProject=repo:1')
+    })
+  })
+
+  it('stays on the open session when another session is deleted', async () => {
+    const user = userEvent.setup()
+    const entry = '/repos/1/sessions/ses_other?menu=sessions&menuProject=repo:1'
+    renderSessionHub(entry)
+
+    await user.click(await screen.findByRole('button', { name: 'Manage sessions' }))
+    await user.click(screen.getByRole('button', { name: 'Select All' }))
+    await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Delete Session' })
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+
+    await waitFor(() => expect(mocks.deleteSessionMutate).toHaveBeenCalledWith([
+      { id: 'ses_1', directory: '/abs/repos/one' },
+    ]))
+    expect(screen.getByTestId('location').textContent).toBe(entry)
   })
 
   it('opens the session when the destination route has an async loader', async () => {

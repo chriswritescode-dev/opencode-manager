@@ -6,10 +6,6 @@ export function getAssistantPath(): string {
   return '/assistant';
 }
 
-export function getAssistantSessionListPath(): string {
-  return getProjectHubPath({ kind: 'repo', repoId: ASSISTANT_REPO_ID });
-}
-
 export function isAssistantPath(pathname: string): boolean {
   return pathname === '/assistant' || /^\/repos\/[^/]+\/assistant$/.test(pathname);
 }

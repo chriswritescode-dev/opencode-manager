@@ -23,8 +23,6 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import { openDialogParam } from '@/hooks/useDialogParam'
-import { useOpenPreview } from '@/hooks/useOpenPreview'
-import { useOpenTerminal } from '@/hooks/useOpenTerminal'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { getOpenCodeApiErrorMessage } from '@/lib/opencode-errors'
 import { openUrlFromManager } from '@/lib/open-url'
@@ -111,21 +109,26 @@ export function ProjectActionsMenuItems({
 
 /**
  * Owns the project action config, run, stop, and trust-confirmation logic for action menus.
+ *
+ * The host supplies `openTerminal` and `openPreview`, so actions opened from a menu outside the
+ * route's own hosts (such as the project hub) can target the menu's project.
  */
 export function useProjectActionsMenu({
   repoId,
   directory,
   active,
+  openTerminal,
+  openPreview,
   onManageActions,
 }: {
   repoId: number
   directory: string | undefined
   active: boolean
+  openTerminal: (terminalId: string | null, extraParams?: Record<string, string>) => void
+  openPreview: (port: number, path?: string) => void
   onManageActions?: () => void
 }) {
   const { updateParams } = useUrlParams()
-  const openPreview = useOpenPreview()
-  const openTerminal = useOpenTerminal()
   const configQuery = useProjectConfig(repoId, directory, active && !!directory)
   const terminalsQuery = useTerminals({ kind: 'repo', repoId }, directory, {
     enabled: active && !!directory,

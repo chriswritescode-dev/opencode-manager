@@ -18,7 +18,6 @@ const mocks = vi.hoisted(() => ({
   useConfig: vi.fn(),
   useMobile: vi.fn(),
   useAutoScroll: vi.fn(),
-  useDialogParam: vi.fn(),
   useSessionStatusForSession: vi.fn(),
   setToolRailMounted: vi.fn(),
   showToast: { error: vi.fn(), success: vi.fn(), info: vi.fn(), loading: vi.fn() },
@@ -103,7 +102,6 @@ vi.mock('@/hooks/useAutoScroll', () => ({
 }))
 
 vi.mock('@/hooks/useDialogParam', () => ({
-  useDialogParam: vi.fn(() => [false, vi.fn()]),
   useRouteDialogParam: vi.fn(() => [false, vi.fn()]),
 }))
 
@@ -160,7 +158,6 @@ vi.mock('@/contexts/EventContext', async (importOriginal) => {
 })
 
 vi.mock('@/hooks/useActiveWork', () => ({
-  useActiveWorkCounts: () => ({ needsInput: 0, running: 0 }),
   useRepoActivityState: () => null,
 }))
 
@@ -275,7 +272,6 @@ describe('SessionDetail form prompt session scoping', () => {
     mocks.useConfig.mockReturnValue({ data: undefined, isLoading: false })
     mocks.useMobile.mockReturnValue(false)
     mocks.useAutoScroll.mockReturnValue({ scrollToBottom: vi.fn() })
-    mocks.useDialogParam.mockReturnValue([false, vi.fn()])
     mocks.useSessionStatusForSession.mockReturnValue({ type: 'idle' })
   })
 

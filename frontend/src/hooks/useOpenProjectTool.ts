@@ -9,25 +9,58 @@ import {
   type ProjectTarget,
 } from '@/lib/projectTarget'
 import { openDialogParams } from './useDialogParam'
+import { clearSideMenuParams } from './useSideMenu'
 import { useUrlParams } from './useUrlParams'
+
+/**
+ * Opens a tool dialog scoped to a project.
+ *
+ * The menu params are dropped in the same replace update, so closing the dialog returns to the route
+ * without the menu. When the project is the route's project and the route's own nav model hosts the
+ * dialog, the route host opens it and no `toolProject` is set. Otherwise the dialog is tagged with
+ * `toolProject` and `ProjectToolsHost` renders it.
+ *
+ * @returns A handler that takes the dialog name, its project, and any extra dialog params.
+ */
+export function useOpenProjectDialog(): (
+  dialog: string,
+  target: ProjectTarget | null,
+  extraParams?: Record<string, string>,
+) => void {
+  const location = useLocation()
+  const { updateParams } = useUrlParams()
+
+  return useCallback((dialog, target, extraParams) => {
+    const sameProject = isSameProjectTarget(target, projectTargetFromRoute(location.pathname, location.search))
+    const routeHostsDialog = buildNavModel(location.pathname).items.some((item) => item.dialog === dialog)
+
+    updateParams((params) => {
+      openDialogParams(params, dialog, extraParams)
+      clearSideMenuParams(params)
+      if (sameProject && routeHostsDialog) {
+        params.delete('toolProject')
+      } else if (target !== null) {
+        params.set('toolProject', encodeProjectTarget(target))
+      }
+    }, 'replace')
+  }, [location.pathname, location.search, updateParams])
+}
 
 /**
  * Opens a navigation item's route, or its dialog scoped to the project the item belongs to.
  *
  * Route items navigate and drop the menu params. Dialog items close the menu and open the dialog in
- * one URL update: when the item's project is the route's project and the route's own nav model hosts
- * the dialog, the route host opens it and a push lets Back close it again. Otherwise the dialog is
- * tagged with `toolProject` and the current entry is replaced so Back returns to the entry before the
- * menu, while `ProjectToolsHost` renders the tool.
+ * one replace update through {@link useOpenProjectDialog}, so closing the dialog never reopens the
+ * menu.
  *
  * @returns A handler that returns false for items with neither a route nor a dialog.
  */
 export function useOpenProjectTool(): (item: NavItem, target: ProjectTarget | null) => boolean {
   const location = useLocation()
   const navigate = useNavigate()
-  const { updateParams } = useUrlParams()
+  const openProjectDialog = useOpenProjectDialog()
 
-  return useCallback((item: NavItem, target: ProjectTarget | null) => {
+  return useCallback((item, target) => {
     if (item.to) {
       navigate(item.key === 'schedules'
         ? getPathWithReturnTo(item.to, `${location.pathname}${location.search}`)
@@ -38,21 +71,7 @@ export function useOpenProjectTool(): (item: NavItem, target: ProjectTarget | nu
     const dialog = item.dialog
     if (!dialog) return false
 
-    const sameProject = isSameProjectTarget(target, projectTargetFromRoute(location.pathname, location.search))
-    const routeHostsDialog = buildNavModel(location.pathname).items.some((navItem) => navItem.dialog === dialog)
-    const useRouteHost = sameProject && routeHostsDialog
-
-    updateParams((params) => {
-      openDialogParams(params, dialog)
-      params.delete('menu')
-      params.delete('menuProject')
-      if (useRouteHost) {
-        params.delete('toolProject')
-      } else if (target !== null) {
-        params.set('toolProject', encodeProjectTarget(target))
-      }
-    }, useRouteHost ? 'push' : 'replace')
-
+    openProjectDialog(dialog, target)
     return true
-  }, [location.pathname, location.search, navigate, updateParams])
+  }, [location.pathname, location.search, navigate, openProjectDialog])
 }

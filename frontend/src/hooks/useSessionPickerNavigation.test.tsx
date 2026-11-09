@@ -3,12 +3,10 @@ import { act, renderHook } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import type { Repo, Session } from '@/api/types'
-import { getSessionListPath, withQueryParam } from '@/lib/navigation'
+import { getServerSessionPath, getSessionListPath } from '@/lib/navigation'
+import { getProjectHubPath } from '@/lib/projectTarget'
 import { LocationCatcher } from '@/test/test-utils'
-import {
-  useSessionPickerNavigation,
-  type SessionPickerNavigationOptions,
-} from './useSessionPickerNavigation'
+import { useSessionPickerNavigation } from './useSessionPickerNavigation'
 
 function createSession(id: string): Session {
   return {
@@ -35,11 +33,9 @@ function createRepo(id: number): Repo {
   }
 }
 
-function renderPickerNavigation(
-  initialEntries: string[],
-  options: Omit<SessionPickerNavigationOptions, 'onClose'>,
-) {
+function renderPickerNavigation(initialEntries: string[]) {
   const onClose = vi.fn()
+  const navigateFromMenu = vi.fn()
   const capturedPathname: { current: string } = { current: '' }
   const capturedSearch: { current: string } = { current: '' }
   const capturedNavigationType: { current: string } = { current: '' }
@@ -55,194 +51,24 @@ function renderPickerNavigation(
       </MemoryRouter>
     )
   }
-  const rendered = renderHook(() => useSessionPickerNavigation({ ...options, onClose }), { wrapper })
+  const rendered = renderHook(
+    () => useSessionPickerNavigation({ onClose, navigateFromMenu }),
+    { wrapper },
+  )
   return {
     ...rendered,
     onClose,
+    navigateFromMenu,
     location: () =>
       `${capturedPathname.current}${capturedSearch.current} ${capturedNavigationType.current}`,
   }
 }
 
 describe('useSessionPickerNavigation', () => {
-  describe('panel mode', () => {
-    it('pushes the chosen session and keeps the panel open', () => {
-      const { result, onClose, location } = renderPickerNavigation(
-        ['/repos/1/sessions/a?panel=sessions'],
-        { mode: 'panel' },
-      )
-
-      act(() => {
-        result.current.onSelectSession(createSession('b'), createRepo(1))
-      })
-
-      expect(location()).toBe('/repos/1/sessions/b?panel=sessions PUSH')
-      expect(onClose).not.toHaveBeenCalled()
-    })
-
-    it('keeps the panel param when opening a session on another server', () => {
-      const { result, onClose, location } = renderPickerNavigation(
-        ['/servers/srv_kitchen/sessions/a?panel=sessions'],
-        { mode: 'panel' },
-      )
-
-      act(() => {
-        result.current.onSelectRemoteSession(createSession('b'), 'srv_hall')
-      })
-
-      expect(location()).toBe('/servers/srv_hall/sessions/b?panel=sessions PUSH')
-      expect(onClose).not.toHaveBeenCalled()
-    })
-
-    it('does nothing when the chosen local session is already open', () => {
-      const { result, onClose, location } = renderPickerNavigation(
-        ['/repos/1/sessions/a?panel=sessions'],
-        { mode: 'panel' },
-      )
-
-      act(() => {
-        result.current.onSelectSession(createSession('a'), createRepo(1))
-      })
-
-      expect(location()).toBe('/repos/1/sessions/a?panel=sessions POP')
-      expect(onClose).not.toHaveBeenCalled()
-    })
-
-    it('does nothing when the chosen remote session is already open', () => {
-      const { result, onClose, location } = renderPickerNavigation(
-        ['/servers/srv_kitchen/sessions/a?panel=sessions'],
-        { mode: 'panel' },
-      )
-
-      act(() => {
-        result.current.onSelectRemoteSession(createSession('a'), 'srv_kitchen')
-      })
-
-      expect(location()).toBe('/servers/srv_kitchen/sessions/a?panel=sessions POP')
-      expect(onClose).not.toHaveBeenCalled()
-    })
-
-    it('leaves the path unchanged without a panel param', () => {
-      const { result, onClose, location } = renderPickerNavigation(
-        ['/repos/1/sessions/a'],
-        { mode: 'panel' },
-      )
-
-      act(() => {
-        result.current.onSelectSession(createSession('b'), createRepo(1))
-      })
-
-      expect(location()).toBe('/repos/1/sessions/b PUSH')
-      expect(onClose).not.toHaveBeenCalled()
-    })
-
-    it('does not carry an empty panel param', () => {
-      const { result, location } = renderPickerNavigation(['/repos/1/sessions/a?panel='], {
-        mode: 'panel',
-      })
-
-      act(() => {
-        result.current.onSelectRepo(createRepo(2))
-      })
-
-      expect(location()).toBe('/?menu=sessions&menuProject=repo:2 PUSH')
-    })
-
-    it('pushes a prepared path with the panel param and keeps the picker open', () => {
-      const { result, onClose, location } = renderPickerNavigation(
-        ['/repos/1/sessions/a?panel=sessions'],
-        { mode: 'panel' },
-      )
-
-      act(() => {
-        result.current.onNavigate('/repos/1/schedules')
-      })
-
-      expect(location()).toBe('/repos/1/schedules?panel=sessions PUSH')
-      expect(onClose).not.toHaveBeenCalled()
-    })
-
-    it('opens the delete destination with the panel param and keeps the picker open', () => {
-      const { result, onClose, location } = renderPickerNavigation(
-        ['/servers/srv_kitchen/sessions/a?panel=sessions'],
-        { mode: 'panel', deleteActiveSessionPath: '/servers/srv_kitchen/projects?directory=%2Fapp' },
-      )
-
-      act(() => {
-        result.current.onDeleteActiveSession()
-      })
-
-      expect(location()).toBe(
-        '/servers/srv_kitchen/projects?directory=%2Fapp&panel=sessions PUSH',
-      )
-      expect(onClose).not.toHaveBeenCalled()
-    })
-
-    it('does nothing when deleting without a destination outside a repo route', () => {
-      const { result, onClose, location } = renderPickerNavigation(
-        ['/servers/srv_kitchen/sessions/a?panel=sessions'],
-        { mode: 'panel' },
-      )
-
-      act(() => {
-        result.current.onDeleteActiveSession()
-      })
-
-      expect(location()).toBe('/servers/srv_kitchen/sessions/a?panel=sessions POP')
-      expect(onClose).not.toHaveBeenCalled()
-    })
-
-    it('opens the session list with the panel param when a repo is in view', () => {
-      const { result, onClose, location } = renderPickerNavigation(
-        ['/repos/1/sessions/a?panel=sessions&repoTab=changes'],
-        { mode: 'panel' },
-      )
-
-      act(() => {
-        result.current.onDeleteActiveSession()
-      })
-
-      expect(location()).toBe(
-        `${withQueryParam(getSessionListPath(1, false, 'changes'), 'panel', 'sessions')} PUSH`,
-      )
-      expect(onClose).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('push mode', () => {
-    it('pushes the chosen session and closes the picker', () => {
-      const { result, onClose, location } = renderPickerNavigation(
+  describe('selecting a session', () => {
+    it('navigates to the chosen session without closing the menu', () => {
+      const { result, onClose, navigateFromMenu } = renderPickerNavigation(
         ['/repos/1?mobileTab=sessions'],
-        { mode: 'push' },
-      )
-
-      act(() => {
-        result.current.onSelectSession(createSession('b'), createRepo(1))
-      })
-
-      expect(location()).toBe('/repos/1/sessions/b PUSH')
-      expect(onClose).toHaveBeenCalledTimes(1)
-    })
-
-    it('closes the picker without navigating when the session is already open', () => {
-      const { result, onClose, location } = renderPickerNavigation(
-        ['/repos/1/sessions/a?mobileTab=sessions'],
-        { mode: 'push' },
-      )
-
-      act(() => {
-        result.current.onSelectSession(createSession('a'), createRepo(1))
-      })
-
-      expect(location()).toBe('/repos/1/sessions/a?mobileTab=sessions POP')
-      expect(onClose).toHaveBeenCalledTimes(1)
-    })
-
-    it('leaves a menu-hosted picker in one history operation', () => {
-      const navigateFromMenu = vi.fn()
-      const { result, onClose, location } = renderPickerNavigation(
-        ['/?menu=sessions'],
-        { mode: 'push', navigateFromMenu },
       )
 
       act(() => {
@@ -251,46 +77,138 @@ describe('useSessionPickerNavigation', () => {
 
       expect(navigateFromMenu).toHaveBeenCalledWith('/repos/1/sessions/b')
       expect(onClose).not.toHaveBeenCalled()
-      expect(location()).toBe('/?menu=sessions POP')
     })
-  })
 
-  describe('replace mode', () => {
-    it('replaces the entry without closing the picker', () => {
-      const { result, onClose, location } = renderPickerNavigation(
-        ['/repos/1/sessions/a?mobileTab=sessions'],
-        { mode: 'replace' },
+    it('keeps assistant mode when the chosen session belongs to the current repo', () => {
+      const { result, navigateFromMenu } = renderPickerNavigation(
+        ['/repos/1/sessions/a?assistant=1'],
       )
 
       act(() => {
         result.current.onSelectSession(createSession('b'), createRepo(1))
       })
 
-      expect(location()).toBe('/repos/1/sessions/b REPLACE')
-      expect(onClose).not.toHaveBeenCalled()
+      expect(navigateFromMenu).toHaveBeenCalledWith('/repos/1/sessions/b?assistant=1')
     })
 
-    it('replaces the entry with the delete destination without closing or going back', () => {
-      const { result, onClose, location } = renderPickerNavigation(
-        ['/servers/srv_kitchen/sessions/a?panel=sessions'],
-        { mode: 'replace', deleteActiveSessionPath: '/servers/srv_kitchen/projects?directory=%2Fapp' },
+    it('drops assistant mode when the chosen session belongs to another repo', () => {
+      const { result, navigateFromMenu } = renderPickerNavigation(
+        ['/repos/1/sessions/a?assistant=1'],
+      )
+
+      act(() => {
+        result.current.onSelectSession(createSession('b'), createRepo(2))
+      })
+
+      expect(navigateFromMenu).toHaveBeenCalledWith('/repos/2/sessions/b')
+    })
+
+    it('closes the menu without navigating when the local session is already open', () => {
+      const { result, onClose, navigateFromMenu } = renderPickerNavigation(
+        ['/repos/1/sessions/a?mobileTab=sessions'],
+      )
+
+      act(() => {
+        result.current.onSelectSession(createSession('a'), createRepo(1))
+      })
+
+      expect(navigateFromMenu).not.toHaveBeenCalled()
+      expect(onClose).toHaveBeenCalledTimes(1)
+    })
+
+    it('navigates to a session on another server', () => {
+      const { result, navigateFromMenu } = renderPickerNavigation(
+        ['/servers/srv_kitchen/sessions/a?mobileTab=sessions'],
+      )
+
+      act(() => {
+        result.current.onSelectRemoteSession(createSession('b'), 'srv_hall')
+      })
+
+      expect(navigateFromMenu).toHaveBeenCalledWith(getServerSessionPath('srv_hall', 'b'))
+    })
+
+    it('closes the menu without navigating when the remote session is already open', () => {
+      const { result, onClose, navigateFromMenu } = renderPickerNavigation(
+        ['/servers/srv_kitchen/sessions/a?mobileTab=sessions'],
+      )
+
+      act(() => {
+        result.current.onSelectRemoteSession(createSession('a'), 'srv_kitchen')
+      })
+
+      expect(navigateFromMenu).not.toHaveBeenCalled()
+      expect(onClose).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('deleting the open session', () => {
+    it('opens the session list of the repo in view', () => {
+      const { result, navigateFromMenu } = renderPickerNavigation(
+        ['/repos/1/sessions/a?repoTab=changes'],
       )
 
       act(() => {
         result.current.onDeleteActiveSession()
       })
 
-      expect(location()).toBe('/servers/srv_kitchen/projects?directory=%2Fapp REPLACE')
-      expect(onClose).not.toHaveBeenCalled()
+      expect(navigateFromMenu).toHaveBeenCalledWith(getSessionListPath(1, false, 'changes'))
+    })
+
+    it('opens the assistant session list for an assistant session', () => {
+      const { result, navigateFromMenu } = renderPickerNavigation(
+        ['/repos/1/sessions/a?assistant=1'],
+      )
+
+      act(() => {
+        result.current.onDeleteActiveSession()
+      })
+
+      expect(navigateFromMenu).toHaveBeenCalledWith(getSessionListPath(1, true))
+    })
+
+    it('opens the hub of the side menu project on the session server', () => {
+      const { result, navigateFromMenu } = renderPickerNavigation([
+        '/servers/srv_kitchen/sessions/a?menu=sessions&menuProject=server:srv_kitchen:%2Fapp',
+      ])
+
+      act(() => {
+        result.current.onDeleteActiveSession()
+      })
+
+      expect(navigateFromMenu).toHaveBeenCalledWith(
+        getProjectHubPath({ kind: 'server', serverId: 'srv_kitchen', directory: '/app' }),
+      )
+    })
+
+    it('goes home when the side menu project is on another server', () => {
+      const { result, navigateFromMenu } = renderPickerNavigation([
+        '/servers/srv_kitchen/sessions/a?menu=sessions&menuProject=server:srv_hall:%2Fapp',
+      ])
+
+      act(() => {
+        result.current.onDeleteActiveSession()
+      })
+
+      expect(navigateFromMenu).toHaveBeenCalledWith('/')
+    })
+
+    it('goes home when no side menu project is set', () => {
+      const { result, navigateFromMenu } = renderPickerNavigation([
+        '/servers/srv_kitchen/sessions/a?menu=sessions',
+      ])
+
+      act(() => {
+        result.current.onDeleteActiveSession()
+      })
+
+      expect(navigateFromMenu).toHaveBeenCalledWith('/')
     })
   })
 
-  describe('menu repo destination', () => {
-    it('replaces the menu project without navigating or closing', () => {
-      const { result, onClose, location } = renderPickerNavigation(['/?menu=sessions'], {
-        mode: 'push',
-        selectRepoDestination: 'menu',
-      })
+  describe('selecting a project', () => {
+    it('points the side menu at the repo in place', () => {
+      const { result, onClose, location } = renderPickerNavigation(['/?menu=sessions'])
 
       act(() => {
         result.current.onSelectRepo(createRepo(3))
@@ -298,6 +216,18 @@ describe('useSessionPickerNavigation', () => {
 
       expect(location()).toBe('/?menu=sessions&menuProject=repo%3A3 REPLACE')
       expect(onClose).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('following a prepared path', () => {
+    it('leaves the menu for the path in one operation', () => {
+      const { result, navigateFromMenu } = renderPickerNavigation(['/?menu=sessions'])
+
+      act(() => {
+        result.current.onNavigate('/repos/1/schedules')
+      })
+
+      expect(navigateFromMenu).toHaveBeenCalledWith('/repos/1/schedules')
     })
   })
 })

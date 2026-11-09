@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Bot, CalendarClock, FolderOpen, GitCommitHorizontal, List } from 'lucide-react'
+import { Bot, CalendarClock, List } from 'lucide-react'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { isAssistantPath, parseRepoRoute, parseServerProjectRoute } from '@/lib/navigation'
@@ -10,6 +10,7 @@ import { useOpenProjectTool } from '@/hooks/useOpenProjectTool'
 import { useSideMenu } from '@/hooks/useSideMenu'
 import { useUnreadScheduleRuns } from '@/hooks/useSchedules'
 import { useSidebarServerSelection } from '@/hooks/useSidebarServerSelection'
+import { buildProjectNavModel, navItemByKey } from './navItems'
 
 /** A single tab rendered by the phone tab bar and the side menu tab strip. */
 export interface TabDef {
@@ -61,6 +62,7 @@ export function useTabDestinations(target: ProjectTarget | null): TabDef[] {
   const unreadScheduleCount = unreadRuns?.total ?? 0
 
   return useMemo<TabDef[]>(() => {
+    const navItems = buildProjectNavModel(target).items
     const showsFiles = target === null ? localServerSelected : target.kind === 'repo'
     const showsGit = target === null ? false : target.kind === 'server' || target.repoId !== ASSISTANT_REPO_ID
     const showsSchedules = target === null || (target.kind === 'repo' && target.repoId === ASSISTANT_REPO_ID)
@@ -76,30 +78,29 @@ export function useTabDestinations(target: ProjectTarget | null): TabDef[] {
     ]
 
     if (showsFiles) {
+      const filesItem = navItemByKey(navItems, 'files')
       tabs.push({
-        key: 'files',
-        label: 'Files',
-        icon: FolderOpen,
+        key: filesItem.key,
+        label: filesItem.label,
+        icon: filesItem.icon,
         onClick: () => {
           if (target === null) {
             open('files')
             return
           }
-          openProjectTool({ key: 'files', label: 'Files', icon: FolderOpen, dialog: 'files' }, target)
+          openProjectTool(filesItem, target)
         },
         active: openSheet === 'files',
       })
     }
 
     if (showsGit) {
+      const sourceControlItem = navItemByKey(navItems, 'source-control')
       tabs.push({
-        key: 'source-control',
+        key: sourceControlItem.key,
         label: 'Git',
-        icon: GitCommitHorizontal,
-        onClick: () => openProjectTool(
-          { key: 'source-control', label: 'Git', icon: GitCommitHorizontal, dialog: 'sourceControl' },
-          target,
-        ),
+        icon: sourceControlItem.icon,
+        onClick: () => openProjectTool(sourceControlItem, target),
         active: false,
       })
     }

@@ -103,6 +103,25 @@ describe('useGlobalShortcutActions', () => {
     await waitFor(() => expect(location()).toBe('/?dialog=terminal&toolProject=repo%3A5'))
   })
 
+  it('opens the terminal for the project hub repo instead of the assistant', async () => {
+    const { location } = renderHarness('/?menu=sessions&menuProject=repo:5')
+
+    pressLeaderFollowUp('t')
+
+    await waitFor(() => expect(location()).toBe('/?dialog=terminal&toolProject=repo%3A5'))
+  })
+
+  it('creates a session in the project hub repo directory', async () => {
+    queryClient.setQueryData(['repo', 5], { id: 5, fullPath: '/repo/five' })
+    const { location } = renderHarness('/?menu=sessions&menuProject=repo:5')
+
+    pressKey({ key: 'o', ctrlKey: true })
+    pressKey({ key: 'n' })
+
+    await waitFor(() => expect(mocks.createSession).toHaveBeenCalledWith({ directory: '/repo/five' }, 'local'))
+    await waitFor(() => expect(location()).toBe('/repos/5/sessions/session-new'))
+  })
+
   it('toggles the docked panel on and off when the route hosts the tool', async () => {
     const { location } = renderHarness('/repos/5')
 

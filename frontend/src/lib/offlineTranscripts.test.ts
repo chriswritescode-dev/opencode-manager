@@ -22,6 +22,7 @@ import {
 
 const DATABASE_NAME = 'ocm-offline-transcripts'
 const STORE_NAME = 'snapshots'
+const META_STORE_NAME = 'meta'
 const KEY_PREFIX = 'ocm.transcript.v1:'
 
 interface RawTranscriptRecord {
@@ -32,6 +33,12 @@ interface RawTranscriptRecord {
   savedAt: number
   openedAt: number
   cache: TranscriptCache
+}
+
+interface RawMetaRecord {
+  key: string
+  owner: string
+  openedAt: number
 }
 
 function userMessage(id: string, text: string): SessionMessageInfo {
@@ -68,10 +75,14 @@ const retryStatus: SessionStatus = {
 
 function openRawDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = globalThis.indexedDB.open(DATABASE_NAME, 1)
+    const request = globalThis.indexedDB.open(DATABASE_NAME, 2)
     request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains(STORE_NAME)) {
-        request.result.createObjectStore(STORE_NAME, { keyPath: 'key' })
+      const database = request.result
+      if (!database.objectStoreNames.contains(STORE_NAME)) {
+        database.createObjectStore(STORE_NAME, { keyPath: 'key' })
+      }
+      if (!database.objectStoreNames.contains(META_STORE_NAME)) {
+        database.createObjectStore(META_STORE_NAME, { keyPath: 'key' })
       }
     }
     request.onsuccess = () => resolve(request.result)
@@ -79,13 +90,13 @@ function openRawDatabase(): Promise<IDBDatabase> {
   })
 }
 
-async function readRawRecords(): Promise<RawTranscriptRecord[]> {
+async function readStoreRecords<Record>(storeName: string): Promise<Record[]> {
   const database = await openRawDatabase()
   try {
-    return await new Promise<RawTranscriptRecord[]>((resolve, reject) => {
-      const transaction = database.transaction(STORE_NAME, 'readonly')
-      const request = transaction.objectStore(STORE_NAME).getAll()
-      request.onsuccess = () => resolve(request.result as RawTranscriptRecord[])
+    return await new Promise<Record[]>((resolve, reject) => {
+      const transaction = database.transaction(storeName, 'readonly')
+      const request = transaction.objectStore(storeName).getAll()
+      request.onsuccess = () => resolve(request.result as Record[])
       request.onerror = () => reject(request.error)
     })
   } finally {
@@ -93,23 +104,49 @@ async function readRawRecords(): Promise<RawTranscriptRecord[]> {
   }
 }
 
+function readRawRecords(): Promise<RawTranscriptRecord[]> {
+  return readStoreRecords<RawTranscriptRecord>(STORE_NAME)
+}
+
+function readRawMeta(): Promise<RawMetaRecord[]> {
+  return readStoreRecords<RawMetaRecord>(META_STORE_NAME)
+}
+
 async function countOwnerEntries(owner: string): Promise<number> {
   const records = await readRawRecords()
   return records.filter((record) => record.owner === owner).length
 }
 
-async function writeRawRecord(record: RawTranscriptRecord): Promise<void> {
+async function writeStoreRecord(storeName: string, record: unknown): Promise<void> {
   const database = await openRawDatabase()
   try {
     await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction(STORE_NAME, 'readwrite')
-      transaction.objectStore(STORE_NAME).put(record)
+      const transaction = database.transaction(storeName, 'readwrite')
+      transaction.objectStore(storeName).put(record)
       transaction.oncomplete = () => resolve()
       transaction.onerror = () => reject(transaction.error)
     })
   } finally {
     database.close()
   }
+}
+
+function writeRawRecord(record: RawTranscriptRecord): Promise<void> {
+  return writeStoreRecord(STORE_NAME, record)
+}
+
+function writeRawMeta(record: RawMetaRecord): Promise<void> {
+  return writeStoreRecord(META_STORE_NAME, record)
+}
+
+async function ownerStoreKeys(owner: string): Promise<{ snapshots: string[]; meta: string[] }> {
+  const snapshots = (await readRawRecords())
+    .filter((record) => record.owner === owner)
+    .map((record) => record.key)
+  const meta = (await readRawMeta())
+    .filter((record) => record.owner === owner)
+    .map((record) => record.key)
+  return { snapshots: snapshots.sort(), meta: meta.sort() }
 }
 
 beforeEach(() => {
@@ -223,6 +260,14 @@ describe('offlineTranscripts', () => {
     expect(await countOwnerEntries(owner)).toBe(OFFLINE_TRANSCRIPT_LIMIT)
     expect(await countOwnerEntries(otherOwner)).toBe(1)
 
+    const ownerStores = await ownerStoreKeys(owner)
+    expect(ownerStores.snapshots).toEqual(ownerStores.meta)
+    expect(ownerStores.snapshots).not.toContain(`${KEY_PREFIX}${owner}:server:session-0`)
+
+    const otherOwnerStores = await ownerStoreKeys(otherOwner)
+    expect(otherOwnerStores.snapshots).toEqual(otherOwnerStores.meta)
+    expect(otherOwnerStores.snapshots).toHaveLength(1)
+
     const markOwner = 'owner-mark'
     for (let index = 0; index < OFFLINE_TRANSCRIPT_LIMIT; index += 1) {
       await saveOfflineTranscript({
@@ -234,8 +279,9 @@ describe('offlineTranscripts', () => {
       })
     }
 
+    const openedKey = `${KEY_PREFIX}${markOwner}:server:opened`
     await writeRawRecord({
-      key: `${KEY_PREFIX}${markOwner}:server:opened`,
+      key: openedKey,
       owner: markOwner,
       serverId: 'server',
       sessionId: 'opened',
@@ -243,6 +289,7 @@ describe('offlineTranscripts', () => {
       openedAt: 500,
       cache: idleCache('opened'),
     })
+    await writeRawMeta({ key: openedKey, owner: markOwner, openedAt: 500 })
 
     await markOfflineTranscriptOpened({
       owner: markOwner,
@@ -252,6 +299,11 @@ describe('offlineTranscripts', () => {
     })
 
     expect(await countOwnerEntries(markOwner)).toBe(OFFLINE_TRANSCRIPT_LIMIT)
+    const evictedKey = `${KEY_PREFIX}${markOwner}:server:saved-0`
+    const markOwnerStores = await ownerStoreKeys(markOwner)
+    expect(markOwnerStores.snapshots).toEqual(markOwnerStores.meta)
+    expect(markOwnerStores.snapshots).not.toContain(evictedKey)
+    expect(markOwnerStores.snapshots).toContain(openedKey)
     expect(
       await loadOfflineTranscript({
         owner: markOwner,
@@ -268,6 +320,32 @@ describe('offlineTranscripts', () => {
         now: 2_000,
       }),
     ).not.toBeNull()
+  })
+
+  it('refreshes recency in the meta store without rewriting the snapshot', async () => {
+    const owner = 'owner-recency'
+    const key = `${KEY_PREFIX}${owner}:server:session`
+
+    await saveOfflineTranscript({
+      owner,
+      serverId: 'server',
+      sessionId: 'session',
+      cache: idleCache('recency'),
+      now: 1_000,
+    })
+
+    await loadOfflineTranscript({
+      owner,
+      serverId: 'server',
+      sessionId: 'session',
+      now: 2_000,
+    })
+
+    const stored = (await readRawRecords()).find((record) => record.key === key)
+    const meta = (await readRawMeta()).find((record) => record.key === key)
+    expect(stored?.savedAt).toBe(1_000)
+    expect(stored?.openedAt).toBe(1_000)
+    expect(meta?.openedAt).toBe(2_000)
   })
 
   it('expires transcripts older than the maximum age', async () => {
@@ -299,6 +377,10 @@ describe('offlineTranscripts', () => {
         now: savedAt + 1,
       }),
     ).toBeNull()
+
+    const expiredStores = await ownerStoreKeys(owner)
+    expect(expiredStores.snapshots).toEqual([])
+    expect(expiredStores.meta).toEqual([])
   })
 
   it('stores busy transcripts as idle without retry state', async () => {
@@ -362,7 +444,7 @@ describe('offlineTranscripts', () => {
     expect(loaded?.nextCursor).toBe(cache.nextCursor)
   })
 
-  it('clears only prefixed transcripts', async () => {
+  it('clears only prefixed transcripts from both stores', async () => {
     const prefixedKey = `${KEY_PREFIX}raw-owner:server:session`
     const unrelatedKey = 'ocm.other:keep'
 
@@ -375,6 +457,7 @@ describe('offlineTranscripts', () => {
       openedAt: 0,
       cache: idleCache('raw'),
     })
+    await writeRawMeta({ key: prefixedKey, owner: 'raw-owner', openedAt: 0 })
     await writeRawRecord({
       key: unrelatedKey,
       owner: '',
@@ -384,11 +467,15 @@ describe('offlineTranscripts', () => {
       openedAt: 0,
       cache: idleCache('unrelated'),
     })
+    await writeRawMeta({ key: unrelatedKey, owner: '', openedAt: 0 })
 
     await clearOfflineTranscripts()
 
-    const keys = (await readRawRecords()).map((record) => record.key)
-    expect(keys).not.toContain(prefixedKey)
-    expect(keys).toContain(unrelatedKey)
+    const snapshotKeys = (await readRawRecords()).map((record) => record.key)
+    const metaKeys = (await readRawMeta()).map((record) => record.key)
+    expect(snapshotKeys).not.toContain(prefixedKey)
+    expect(metaKeys).not.toContain(prefixedKey)
+    expect(snapshotKeys).toContain(unrelatedKey)
+    expect(metaKeys).toContain(unrelatedKey)
   })
 })

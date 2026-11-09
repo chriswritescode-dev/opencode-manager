@@ -7,8 +7,8 @@ import { useSidebarCollapsed } from '@/hooks/useSidebarCollapsed'
 import { useSidebarWidth } from '@/hooks/useSidebarWidth'
 import { useAuth } from '@/hooks/useAuth'
 import { useNotificationsAction } from '@/hooks/useNotificationsAction'
+import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 import { useSideMenu } from '@/hooks/useSideMenu'
-import { useUrlParams } from '@/hooks/useUrlParams'
 import { NotificationsBadge } from '@/components/notifications/NotificationsBadge'
 import { LinkedServersNav } from '@/components/navigation/LinkedServersNav'
 import { Sidebar, SidebarItem } from '@/components/ui/sidebar'
@@ -17,7 +17,7 @@ import { SideMenuContent } from './SideMenuContent'
 export function DesktopSidebar() {
   const location = useLocation()
   const navigate = useNavigate()
-  const { updateParams } = useUrlParams()
+  const { openTab: openSettingsTab } = useSettingsDialog()
   const [collapsed, toggle] = useSidebarCollapsed()
   const [sidebarWidth, setSidebarWidth] = useSidebarWidth()
   const { isAuthenticated, isLoading, logout } = useAuth()
@@ -40,13 +40,7 @@ export function DesktopSidebar() {
     return null
   }
 
-  const handleSettingsClick = () => {
-    updateParams((params) => {
-      params.set('settings', 'open')
-      params.set('settingsTab', 'account')
-      params.delete('mobileTab')
-    }, 'push')
-  }
+  const handleSettingsClick = () => openSettingsTab('account')
 
   return (
     <Sidebar

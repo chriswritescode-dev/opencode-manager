@@ -1221,35 +1221,53 @@ describe('useSessionTranscript', () => {
       serverId: 'local',
       sessionId: SESSION_ID,
     })
-    expect(offlineMocks.markOfflineTranscriptOpened).toHaveBeenCalledWith({
-      owner: 'owner-user-1',
-      serverId: 'local',
-      sessionId: SESSION_ID,
-    })
-    expect(offlineMocks.markOfflineTranscriptOpened.mock.invocationCallOrder[0]).toBeLessThan(
-      offlineMocks.loadOfflineTranscript.mock.invocationCallOrder[0] ?? 0,
-    )
+    expect(offlineMocks.markOfflineTranscriptOpened).not.toHaveBeenCalled()
   })
 
-  it('does not overwrite a fresher cached transcript with the stored snapshot', async () => {
+  it('marks recency without loading when a transcript is already cached', async () => {
     const fresher: SessionMessageInfo = {
       id: messageID(500),
       type: 'synthetic',
       text: 'Cached',
       time: { created: 50000 },
     }
-    const stored = deferred<TranscriptCache>()
-    offlineMocks.loadOfflineTranscript.mockReturnValue(stored.promise)
     const queryClient = createQueryClient()
     queryClient.setQueryData<TranscriptCache>(sessionTranscriptQueryKey(SESSION_ID), {
       transcript: { messages: [fresher], pending: [], status: 'idle' },
     })
-    const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
+    renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
       wrapper: createWrapper(queryClient),
     })
 
-    await waitFor(() => expect(result.current.messages).toEqual(seededMessages))
-    expect(offlineMocks.loadOfflineTranscript).toHaveBeenCalledTimes(1)
+    await waitFor(() =>
+      expect(offlineMocks.markOfflineTranscriptOpened).toHaveBeenCalledWith({
+        owner: 'owner-user-1',
+        serverId: 'local',
+        sessionId: SESSION_ID,
+      }),
+    )
+    expect(offlineMocks.loadOfflineTranscript).not.toHaveBeenCalled()
+  })
+
+  it('does not overwrite a transcript cached while the stored snapshot loads', async () => {
+    const cached: TranscriptCache = {
+      transcript: {
+        messages: [
+          { id: messageID(500), type: 'synthetic', text: 'Cached', time: { created: 50000 } },
+        ],
+        pending: [],
+        status: 'idle',
+      },
+    }
+    const stored = deferred<TranscriptCache>()
+    offlineMocks.loadOfflineTranscript.mockReturnValue(stored.promise)
+    const queryClient = createQueryClient()
+    renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => expect(offlineMocks.loadOfflineTranscript).toHaveBeenCalledTimes(1))
+    queryClient.setQueryData<TranscriptCache>(sessionTranscriptQueryKey(SESSION_ID), cached)
 
     await act(async () => {
       stored.resolve({
@@ -1264,7 +1282,10 @@ describe('useSessionTranscript', () => {
       })
     })
 
-    expect(result.current.messages).toEqual(seededMessages)
+    expect(
+      queryClient.getQueryData<TranscriptCache>(sessionTranscriptQueryKey(SESSION_ID))?.transcript
+        .messages,
+    ).toEqual(cached.transcript.messages)
   })
 
   it('writes one snapshot when a run finishes and none while streaming', async () => {
@@ -1357,6 +1378,7 @@ describe('useSessionTranscript', () => {
 
     await waitFor(() => expect(first.result.current.messages).toHaveLength(2))
     first.unmount()
+    queryClient.clear()
 
     authMocks.useAuth.mockReturnValue({ user: { id: 'user-2' } })
     const second = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {

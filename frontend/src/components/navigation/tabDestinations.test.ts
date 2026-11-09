@@ -106,6 +106,20 @@ describe('useTabDestinations', () => {
     expect(labels(result.current)).toEqual(['Sessions', 'Assistant', 'Schedules'])
   })
 
+  it('opens the shared Files and Git tools for a repo project', () => {
+    const files = renderDestinations('/repos/2', { kind: 'repo', repoId: 2 })
+    act(() => {
+      files.result.current.find((tab) => tab.key === 'files')?.onClick()
+    })
+    expect(files.capturedSearch.current).toContain('dialog=files')
+
+    const git = renderDestinations('/repos/2', { kind: 'repo', repoId: 2 })
+    act(() => {
+      git.result.current.find((tab) => tab.key === 'source-control')?.onClick()
+    })
+    expect(git.capturedSearch.current).toContain('dialog=sourceControl')
+  })
+
   it('opens the sessions side menu with the project in view on Sessions click', () => {
     const { result, capturedSearch } = renderDestinations('/repos/2', { kind: 'repo', repoId: 2 })
 

@@ -12,15 +12,17 @@ export function isGatewayTimeout(error: unknown): boolean {
 }
 
 /**
- * Returns true when a request failed without reaching the Manager, either as a
- * fetch network error or as a {@link FetchError} with no HTTP status.
+ * Returns true when a request failed without reaching the Manager: a raw fetch
+ * network {@link TypeError}, or a {@link FetchError} reporting status 0 with
+ * code `TypeError`. Aborts and other status-0 failures such as parse errors are
+ * not connectivity errors.
  */
 export function isConnectivityError(error: unknown): boolean {
   if ((error instanceof DOMException || error instanceof Error) && error.name === 'AbortError') {
     return false
   }
   if (error instanceof TypeError) return true
-  return error instanceof FetchError && error.statusCode === 0
+  return error instanceof FetchError && error.statusCode === 0 && error.code === 'TypeError'
 }
 
 export function parseNetworkError(error: unknown): ParsedError {

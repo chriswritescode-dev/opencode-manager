@@ -20,7 +20,6 @@ const mocks = vi.hoisted(() => ({
   useVisualViewport: vi.fn(),
   useShortcutActions: vi.fn(),
   useAutoScroll: vi.fn(),
-  useDialogParam: vi.fn(),
   useSessionStatusForSession: vi.fn(),
   interruptMutate: vi.fn(),
   PromptInput: vi.fn(),
@@ -96,7 +95,6 @@ vi.mock('@/hooks/useAutoScroll', () => ({
 }))
 
 vi.mock('@/hooks/useDialogParam', () => ({
-  useDialogParam: vi.fn(() => [false, vi.fn()]),
   useRouteDialogParam: vi.fn(() => [false, vi.fn()]),
 }))
 
@@ -153,7 +151,6 @@ vi.mock('@/contexts/EventContext', async (importOriginal) => {
 })
 
 vi.mock('@/hooks/useActiveWork', () => ({
-  useActiveWorkCounts: () => ({ needsInput: 0, running: 0 }),
   useRepoActivityState: () => null,
 }))
 
@@ -289,7 +286,6 @@ describe('SessionDetail scroll floating button', () => {
     mocks.useSSEHealth.mockReturnValue({ isHealthy: true })
     mocks.useConfig.mockReturnValue({ data: undefined, isLoading: false })
     mocks.useVisualViewport.mockReturnValue({ keyboardHeight: 0 })
-    mocks.useDialogParam.mockReturnValue([false, vi.fn()])
     mocks.useSessionStatusForSession.mockReturnValue({ type: 'idle' })
     mocks.PromptInput.mockImplementation(() => <div>MockedPromptInput</div>)
   })

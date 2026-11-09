@@ -131,15 +131,21 @@ export function useSessionTranscript(sessionID: string, directory: string) {
 
   /**
    * Seeds the cache from the stored snapshot for the signed-in user, without
-   * overwriting a fresher transcript that is already cached.
+   * overwriting a fresher transcript that is already cached. An already cached
+   * transcript only has its stored recency refreshed, because the load that would
+   * read and re-bump the snapshot is not needed.
    */
   useEffect(() => {
     if (!offlineOwner || !sessionID) return
 
+    const target = { owner: offlineOwner, serverId, sessionId: sessionID }
     let cancelled = false
     void (async () => {
-      await markOfflineTranscriptOpened({ owner: offlineOwner, serverId, sessionId: sessionID })
-      const snapshot = await loadOfflineTranscript({ owner: offlineOwner, serverId, sessionId: sessionID })
+      if (queryClient.getQueryData<TranscriptCache>(queryKey) !== undefined) {
+        await markOfflineTranscriptOpened(target)
+        return
+      }
+      const snapshot = await loadOfflineTranscript(target)
       if (cancelled || !snapshot) return
       if (queryClient.getQueryData<TranscriptCache>(queryKey) !== undefined) return
       queryClient.setQueryData<TranscriptCache>(queryKey, snapshot, { updatedAt: 0 })

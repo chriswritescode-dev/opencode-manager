@@ -1,16 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { getSessionListPath, getAssistantPath, getAssistantSessionListPath, isAssistantPath, getPathWithReturnTo, getReturnToPath, getRepoPath, getServerProjectPath, getServerSessionPath, getSessionPath, isSessionDetailRoute, parseActivePickerSession, parseRepoRoute, parseServerProjectRoute, parseServerSessionRoute } from './navigation';
+import { getSessionListPath, getAssistantPath, isAssistantPath, getPathWithReturnTo, getReturnToPath, getRepoPath, getServerProjectPath, getServerSessionPath, getSessionPath, isSessionDetailRoute, parseActivePickerSession, parseRepoRoute, parseServerProjectRoute, parseServerSessionRoute } from './navigation';
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas';
 
 describe('getAssistantPath', () => {
   it('returns /assistant', () => {
     expect(getAssistantPath()).toBe('/assistant');
-  });
-});
-
-describe('getAssistantSessionListPath', () => {
-  it('returns the Assistant hub path', () => {
-    expect(getAssistantSessionListPath()).toBe('/?menu=sessions&menuProject=repo:0');
   });
 });
 

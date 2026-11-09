@@ -99,8 +99,14 @@ describe('isConnectivityError', () => {
     expect(isConnectivityError(new TypeError('Failed to fetch'))).toBe(true)
   })
 
-  it('returns true for a FetchError with statusCode 0', () => {
-    expect(isConnectivityError(new FetchError('Network unreachable', 0))).toBe(true)
+  it('returns true for a FetchError with statusCode 0 and code TypeError', () => {
+    expect(isConnectivityError(new FetchError('Network unreachable', 0, 'TypeError'))).toBe(true)
+  })
+
+  it('returns false for other status-0 FetchErrors', () => {
+    expect(isConnectivityError(new FetchError('The operation was aborted.', 0, 'AbortError'))).toBe(false)
+    expect(isConnectivityError(new FetchError('Unexpected token', 0, 'SyntaxError'))).toBe(false)
+    expect(isConnectivityError(new FetchError('Network unreachable', 0))).toBe(false)
   })
 
   it('returns false for a FetchError carrying an HTTP status', () => {

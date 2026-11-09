@@ -182,7 +182,6 @@ function renderPicker(overrides: Partial<React.ComponentProps<typeof SessionPick
   const onSelectRepo = vi.fn()
   renderWithClient(
     <SessionPickerPanel
-      open
       currentRepo={mocks.repos[0]}
       onSelectSession={onSelectSession}
       onDeleteActiveSession={onDeleteActiveSession}
@@ -516,21 +515,22 @@ describe('SessionPickerPanel', () => {
     expect(await screen.findByText('Alpha session')).toBeInTheDocument()
   })
 
-  it('does not query sessions while closed and queries after opening', async () => {
+  it('queries sessions once the picker is mounted', async () => {
     mocks.sessionsData = [makeSession('ses_1', 'First', '/w/a', 3000)]
 
     function Host() {
-      const [open, setOpen] = useState(false)
+      const [shown, setShown] = useState(false)
       return (
         <>
-          <button type="button" onClick={() => setOpen(true)}>open-picker</button>
-          <SessionPickerPanel
-            open={open}
-            currentRepo={mocks.repos[0]}
-            onSelectSession={vi.fn()}
-            onDeleteActiveSession={vi.fn()}
-            onSelectRepo={vi.fn()}
-          />
+          <button type="button" onClick={() => setShown(true)}>open-picker</button>
+          {shown && (
+            <SessionPickerPanel
+              currentRepo={mocks.repos[0]}
+              onSelectSession={vi.fn()}
+              onDeleteActiveSession={vi.fn()}
+              onSelectRepo={vi.fn()}
+            />
+          )}
         </>
       )
     }
@@ -636,19 +636,20 @@ describe('SessionPickerPanel', () => {
     ]
 
     function Host() {
-      const [open, setOpen] = useState(true)
+      const [shown, setShown] = useState(true)
       return (
         <>
-          <button type="button" onClick={() => setOpen(false)}>close-picker</button>
-          <button type="button" onClick={() => setOpen(true)}>open-picker</button>
-          <SessionPickerPanel
-            open={open}
-            currentRepo={mocks.repos[0]}
-            activeSessionID="ses_active"
-            onSelectSession={vi.fn()}
-            onDeleteActiveSession={vi.fn()}
-            onSelectRepo={vi.fn()}
-          />
+          <button type="button" onClick={() => setShown(false)}>close-picker</button>
+          <button type="button" onClick={() => setShown(true)}>open-picker</button>
+          {shown && (
+            <SessionPickerPanel
+              currentRepo={mocks.repos[0]}
+              activeSessionID="ses_active"
+              onSelectSession={vi.fn()}
+              onDeleteActiveSession={vi.fn()}
+              onSelectRepo={vi.fn()}
+            />
+          )}
         </>
       )
     }
@@ -913,18 +914,19 @@ describe('SessionPickerPanel', () => {
 
   it('resets to the sessions tab when the dialog reopens', async () => {
     function Host() {
-      const [open, setOpen] = useState(true)
+      const [shown, setShown] = useState(true)
       return (
         <>
-          <button type="button" onClick={() => setOpen(false)}>close-picker</button>
-          <button type="button" onClick={() => setOpen(true)}>open-picker</button>
-          <SessionPickerPanel
-            open={open}
-            currentRepo={mocks.repos[0]}
-            onSelectSession={vi.fn()}
-            onDeleteActiveSession={vi.fn()}
-            onSelectRepo={vi.fn()}
-          />
+          <button type="button" onClick={() => setShown(false)}>close-picker</button>
+          <button type="button" onClick={() => setShown(true)}>open-picker</button>
+          {shown && (
+            <SessionPickerPanel
+              currentRepo={mocks.repos[0]}
+              onSelectSession={vi.fn()}
+              onDeleteActiveSession={vi.fn()}
+              onSelectRepo={vi.fn()}
+            />
+          )}
         </>
       )
     }
@@ -1151,7 +1153,6 @@ describe('SessionPickerPanel', () => {
       }
       renderWithClient(
         <SessionPickerPanel
-          open
           currentRepo={mocks.repos[0]}
           onSelectSession={vi.fn()}
           onDeleteActiveSession={vi.fn()}

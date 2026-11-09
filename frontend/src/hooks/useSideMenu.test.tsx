@@ -186,4 +186,48 @@ describe('useSideMenu', () => {
     await user.click(screen.getByRole('button', { name: 'back' }));
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/?menu=sessions'));
   });
+
+  it('pushes when no menu is open even though the entry remembers a previous search', async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter
+        initialEntries={[{
+          pathname: '/repos/1',
+          search: '?panel=terminal',
+          state: { urlParamHistory: { previousSearch: '?panel=files' } },
+        }]}
+      >
+        <MenuNavigationHarness />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'open-session' }));
+    expect(screen.getByTestId('location')).toHaveTextContent('/repos/1/sessions/b');
+    expect(screen.getByTestId('navigation-type')).toHaveTextContent('PUSH');
+
+    await user.click(screen.getByRole('button', { name: 'back' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/repos/1?panel=terminal'));
+  });
+
+  it('pushes from a menu opened over an entry that was itself a menu', async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter
+        initialEntries={[{
+          pathname: '/repos/1',
+          search: '?menu=home',
+          state: { urlParamHistory: { previousSearch: '?menu=sessions' } },
+        }]}
+      >
+        <MenuNavigationHarness />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'open-session' }));
+    expect(screen.getByTestId('location')).toHaveTextContent('/repos/1/sessions/b');
+    expect(screen.getByTestId('navigation-type')).toHaveTextContent('PUSH');
+
+    await user.click(screen.getByRole('button', { name: 'back' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('?menu=home'));
+  });
 });

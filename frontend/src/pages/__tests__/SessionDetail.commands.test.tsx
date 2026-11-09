@@ -142,7 +142,6 @@ vi.mock('@/hooks/useAutoScroll', () => ({
 }))
 
 vi.mock('@/hooks/useDialogParam', () => ({
-  useDialogParam: vi.fn((name: string) => [false, mocks.dialogSetters[name]]),
   useRouteDialogParam: vi.fn((name: string) => [false, mocks.dialogSetters[name]]),
 }))
 

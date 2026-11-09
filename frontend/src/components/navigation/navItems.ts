@@ -2,6 +2,7 @@ import type { LucideIcon } from 'lucide-react'
 import { BookOpen, Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, SquareTerminal, Settings, LogOut, Bot, Folder, Home, Play, Globe, KeyRound } from 'lucide-react'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
+import type { ProjectTarget } from '@/lib/projectTarget'
 
 export interface NavItem {
   key: string
@@ -182,4 +183,42 @@ function buildRouteNavModel(pathname: string): NavModel {
 export function buildNavModel(pathname: string): NavModel {
   const { primary, items } = buildRouteNavModel(pathname)
   return { primary, items: [getHomeItem(), ...items] }
+}
+
+/**
+ * The pathname whose nav model describes a project's own tools and pages.
+ *
+ * @param project Project to describe, or null when no project is in view.
+ * @returns The route the project's nav model is built for.
+ */
+export function navPathForProject(project: ProjectTarget | null): string {
+  if (project === null) return '/'
+  if (project.kind === 'server') return `/servers/${encodeURIComponent(project.serverId)}/projects`
+  if (project.repoId === ASSISTANT_REPO_ID) return `/repos/${ASSISTANT_REPO_ID}/assistant`
+  return `/repos/${project.repoId}`
+}
+
+/**
+ * Builds the nav model for a project, so every surface that lists a project's tools reads the same
+ * labels, icons, and dialogs.
+ *
+ * @param project Project to describe, or null when no project is in view.
+ * @returns The nav model for the project's route.
+ */
+export function buildProjectNavModel(project: ProjectTarget | null): NavModel {
+  return buildNavModel(navPathForProject(project))
+}
+
+/**
+ * Finds one item of a nav model by key.
+ *
+ * @param items Items of a nav model.
+ * @param key Key of the item to find.
+ * @returns The matching item.
+ * @throws When the model does not offer an item with that key.
+ */
+export function navItemByKey(items: readonly NavItem[], key: string): NavItem {
+  const item = items.find((candidate) => candidate.key === key)
+  if (!item) throw new Error(`Nav model has no "${key}" item`)
+  return item
 }

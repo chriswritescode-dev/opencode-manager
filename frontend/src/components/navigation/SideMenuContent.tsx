@@ -5,20 +5,20 @@ import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { Bell, ChevronLeft, ChevronRight, GitBranch, List, X, type LucideIcon } from 'lucide-react'
 import { repoQueryOptions } from '@/lib/repoQuery'
 import { cn, getDirectoryName, getRepoDisplayName } from '@/lib/utils'
-import { encodeProjectTarget, type ProjectTarget } from '@/lib/projectTarget'
+import { encodeProjectTarget } from '@/lib/projectTarget'
 import { useAuth } from '@/hooks/useAuth'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useNotificationsAction } from '@/hooks/useNotificationsAction'
 import { useOpenProjectTool } from '@/hooks/useOpenProjectTool'
 import { useSessionPickerNavigation } from '@/hooks/useSessionPickerNavigation'
 import { useSessionPickerRouteScope } from '@/hooks/useSessionPickerRouteScope'
-import { useSideMenu, type SideMenuPage } from '@/hooks/useSideMenu'
+import { clearSideMenuParams, useSideMenu, type SideMenuPage } from '@/hooks/useSideMenu'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { NotificationsBadge } from '@/components/notifications/NotificationsBadge'
 import { SessionPickerPanel } from '@/components/session/SessionPickerPanel'
 import { LinkedServersNav } from './LinkedServersNav'
 import { ProjectHub } from './ProjectHub'
-import { buildNavModel, isManagerOnlyNavItem, type NavItem } from './navItems'
+import { buildProjectNavModel, isManagerOnlyNavItem, type NavItem } from './navItems'
 import { TabStrip } from './MobileTabBar'
 import { SIDE_MENU_WIDE_MEDIA_QUERY } from './sideMenuLayout'
 import { getMobileTabRouteState, useTabDestinations } from './tabDestinations'
@@ -38,13 +38,6 @@ const ITEM_GROUPS: ReadonlyArray<{ label: string; keys: ReadonlySet<string> }> =
   { label: 'Workspace', keys: new Set(['files', 'source-control', 'terminal', 'preview', 'walkthrough']) },
   { label: 'Project', keys: new Set(['mcp', 'skills', 'actions', 'schedules', 'all-schedules', 'reset-permissions']) },
 ]
-
-function navPathForProject(project: ProjectTarget | null): string {
-  if (project === null) return '/'
-  if (project.kind === 'server') return `/servers/${encodeURIComponent(project.serverId)}/projects`
-  if (project.repoId === ASSISTANT_REPO_ID) return `/repos/${ASSISTANT_REPO_ID}/assistant`
-  return `/repos/${project.repoId}`
-}
 
 function MenuSection({ label, children }: { label?: string; children: ReactNode }) {
   return (
@@ -94,10 +87,8 @@ export function SideMenuContent({ variant, fullWidth, onClose, defaultPage = 'ho
   const openProjectTool = useOpenProjectTool()
   const wideMenu = useMediaQuery(SIDE_MENU_WIDE_MEDIA_QUERY)
   const pickerNavigation = useSessionPickerNavigation({
-    mode: 'push',
     onClose: closeMenu,
     navigateFromMenu,
-    selectRepoDestination: 'menu',
   })
   const { currentRepo, activeSessionID, remote } = useSessionPickerRouteScope(page === 'sessions')
   const [projectLabelShown, setProjectLabelShown] = useState(false)
@@ -125,8 +116,7 @@ export function SideMenuContent({ variant, fullWidth, onClose, defaultPage = 'ho
       params.set('settings', 'open')
       params.delete('settingsTab')
       params.delete('mobileTab')
-      params.delete('menu')
-      params.delete('menuProject')
+      clearSideMenuParams(params)
     }, 'replace')
   }
 
@@ -150,7 +140,7 @@ export function SideMenuContent({ variant, fullWidth, onClose, defaultPage = 'ho
     openProjectTool(item, project)
   }
 
-  const items = buildNavModel(navPathForProject(project)).items
+  const items = buildProjectNavModel(project).items
   const visibleItems = (project?.kind === 'server' ? items.filter((item) => !isManagerOnlyNavItem(item)) : items)
     .filter((item) => !TAB_ROW_KEYS.has(item.key))
     .filter((item) => item.key !== 'logout' || location.pathname === '/')
@@ -219,7 +209,6 @@ export function SideMenuContent({ variant, fullWidth, onClose, defaultPage = 'ho
               <span>Menu</span>
             </button>
             <SessionPickerPanel
-              open
               currentRepo={currentRepo}
               activeSessionID={activeSessionID}
               {...pickerNavigation}

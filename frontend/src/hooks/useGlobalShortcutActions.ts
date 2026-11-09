@@ -8,6 +8,7 @@ import { useShortcutActions } from '@/contexts/KeyboardShortcutsContext'
 import { sessionQueryOptions, useCreateSession } from '@/hooks/useOpenCode'
 import { useMobile } from '@/hooks/useMobile'
 import { useSettingsDialog } from '@/hooks/useSettingsDialog'
+import { useSideMenu } from '@/hooks/useSideMenu'
 import { useSidebarCollapsed } from '@/hooks/useSidebarCollapsed'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import {
@@ -34,11 +35,18 @@ export function useGlobalShortcutActions(): void {
   const navigate = useNavigate()
   const { updateParams } = useUrlParams()
   const { open: openSettings } = useSettingsDialog()
+  const { project: menuProject } = useSideMenu()
   const isMobile = useMobile()
-  const serverId = useRouteOpenCodeServerId()
-  const isRemoteRoute = !isLocalOpenCodeServer(serverId)
+  const routeServerId = useRouteOpenCodeServerId()
+  const routeIsRemote = !isLocalOpenCodeServer(routeServerId)
 
-  const repoId = isAssistantPath(pathname) ? ASSISTANT_REPO_ID : parseRepoRoute(pathname).repoId
+  const routeRepoId = isAssistantPath(pathname) ? ASSISTANT_REPO_ID : parseRepoRoute(pathname).repoId
+  const menuRepoId = menuProject?.kind === 'repo' ? menuProject.repoId : null
+  const repoId = routeRepoId ?? menuRepoId
+
+  const menuServerProject = !routeIsRemote && routeRepoId === null && menuProject?.kind === 'server' ? menuProject : null
+  const serverId = menuServerProject?.serverId ?? routeServerId
+  const isRemoteRoute = !isLocalOpenCodeServer(serverId)
 
   const { data: repo } = useQuery({
     ...repoQueryOptions(repoId as number),
@@ -49,7 +57,9 @@ export function useGlobalShortcutActions(): void {
   const { data: remoteSession } = useQuery(
     sessionQueryOptions(remoteSessionRoute?.sessionId, undefined, serverId),
   )
-  const sessionDirectory = isRemoteRoute ? remoteSession?.location?.directory : repo?.fullPath
+  const sessionDirectory = isRemoteRoute
+    ? remoteSession?.location?.directory ?? menuServerProject?.directory
+    : repo?.fullPath
 
   const createSession = useCreateSession(sessionDirectory, (session) => {
     if (isRemoteRoute) {

@@ -31,6 +31,10 @@ function toFetchError(error: unknown): FetchError {
   }
 
   if (error instanceof ClientError) {
+    if (error.reason === 'Transport' && (error.cause instanceof Error || error.cause instanceof DOMException)) {
+      return new FetchError(error.message, 0, error.cause.name)
+    }
+
     const status = (error.cause as { status?: number } | undefined)?.status
     return new FetchError(error.message, status, error.reason)
   }
