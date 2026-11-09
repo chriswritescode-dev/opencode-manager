@@ -44,7 +44,6 @@ import { getWorkspaceFilePath } from "@/lib/markdownLinks";
 import { getRepoDisplayName, getDirectoryName, cn } from "@/lib/utils";
 import { resolveSessionBranch } from "@/lib/activeWork";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
-import { ProjectActionsMenu } from "@/components/repo/ProjectActionsMenu";
 import { RepoActionsDialog } from "@/components/repo/RepoActionsDialog";
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
 import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
@@ -64,7 +63,6 @@ import { formatOpenCodeModelRef } from "@opencode-manager/shared/opencode";
 import { FormPrompt } from "@/components/session/FormPrompt";
 import { clearFormDraft } from "@/lib/formDrafts";
 import { MinimizedFormIndicator } from "@/components/session/MinimizedFormIndicator";
-import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
 import { SourceControlPanel, RemoteSourceControlPanel } from "@/components/source-control";
 import { TerminalPanel } from "@/components/terminal/TerminalPanel";
 import { PreviewPanel } from "@/components/preview/PreviewPanel";
@@ -75,7 +73,7 @@ import { BackgroundWorkBar } from "@/components/session/BackgroundWorkBar";
 import { SessionGoalBar } from "@/components/session/SessionGoalBar";
 import { useRouteDialogParam } from "@/hooks/useDialogParam";
 import { useRouteTerminalDialogParam } from "@/hooks/useOpenTerminal";
-import { SessionMoreButton } from "@/components/navigation/SessionMoreButton";
+import { SessionBackButton } from "@/components/navigation/SessionBackButton";
 import { SideQuestionDialog } from "@/components/session/SideQuestionDialog";
 import { SessionMessagePickerDialog } from "@/components/session/SessionMessagePickerDialog";
 import { ChangesWalkthroughSheet, type WalkthroughSourceRequest } from "@/components/session/ChangesWalkthroughSheet";
@@ -797,7 +795,7 @@ export function SessionDetail() {
       >
         <Header className="bg-background [&_button]:bg-background [&_button]:text-foreground [&_button]:border-border [&_button:hover]:bg-accent">
           <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
-            <Header.BackButton to={sessionBackPath} className="text-xs sm:text-sm" />
+            <SessionBackButton to={sessionBackPath} />
             <div className="min-w-0 flex-1">
               <h1 className="min-w-0 max-w-full text-xs sm:text-base font-semibold">
                 <button
@@ -848,15 +846,6 @@ export function SessionDetail() {
               </Badge>
             )}
           </div>
-          <Header.Actions className="gap-2 sm:gap-4">
-            <div className="flex items-center gap-1">
-              {!isAssistantSession && !isRemoteServer && (
-                <ProjectActionsMenu repoId={repoId} directory={sessionDirectory} />
-              )}
-              <PendingActionsGroup showScheduleReports={!isRemoteServer} />
-            </div>
-            <SessionMoreButton />
-          </Header.Actions>
         </Header>
       </div>
 

@@ -16,7 +16,7 @@ import type { CreateScheduleJobRequest } from '@opencode-manager/shared/types'
 import { DELETE_SCHEDULE_DESCRIPTION, matchesScheduleJobSearch, toUpdateScheduleRequest } from '@/components/schedules/schedule-utils'
 import { Header } from '@/components/ui/header'
 import { Button } from '@/components/ui/button'
-import { ScheduleReportsBell } from '@/components/notifications/ScheduleReportsBell'
+import { MenuButton } from '@/components/navigation/MenuButton'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { Card, CardContent } from '@/components/ui/card'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
@@ -26,6 +26,7 @@ import { CalendarClock, Loader2, Plus, ArrowLeft, SlidersHorizontal } from 'luci
 import { useScheduleUrlState } from '@/hooks/useScheduleUrlState'
 import type { ScheduleTab } from '@/hooks/useScheduleUrlState'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
+import { useSideMenu } from '@/hooks/useSideMenu'
 
 import type { ScheduleJobWithRepo, ScheduleRunWithContext } from '@/api/schedules'
 import { Combobox } from '@/components/ui/combobox'
@@ -55,6 +56,7 @@ function getLinkedServerJobPath(job: ScheduleJobWithRepo): string {
 
 export function GlobalSchedules() {
   const navigate = useNavigate()
+  const { openMenu } = useSideMenu()
   const [selectedRepoId, setSelectedRepoId] = useState<number | undefined>(undefined)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [scheduleModeFilter, setScheduleModeFilter] = useState<ScheduleModeFilter>('all')
@@ -433,13 +435,13 @@ export function GlobalSchedules() {
     <div className="h-full max-h-full overflow-hidden bg-background flex flex-col">
       <Header>
         <Header.BackButton to="/" />
+        <MenuButton className="md:hidden" onPress={() => openMenu({ page: 'home' })} />
         <div className="min-w-0 flex-1 px-3">
           <ScheduleRepoSwitcher name="All repos" />
           <p className="text-xs text-muted-foreground truncate">Schedules</p>
         </div>
         <div className="flex items-center gap-2">
           <Header.Actions>
-            <ScheduleReportsBell />
             <Button
               onClick={() => { openNewJob(); setSelectedRepoId(undefined) }}
               size="sm"

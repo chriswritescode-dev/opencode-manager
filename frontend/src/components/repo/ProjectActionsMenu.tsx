@@ -8,7 +8,7 @@ import type {
   ProjectConfigResponse,
   RunProjectActionResponse,
 } from '@opencode-manager/shared/types'
-import { Play, Square } from 'lucide-react'
+import { Square } from 'lucide-react'
 import {
   getProjectConfig,
   useProjectConfig,
@@ -16,15 +16,11 @@ import {
   useTrustRepoConfig,
 } from '@/api/projectConfig'
 import { useRemoveTerminal, useTerminals } from '@/api/terminals'
-import { Button } from '@/components/ui/button'
 import { ConfirmDestructiveDialog } from '@/components/ui/confirm-destructive-dialog'
 import {
-  DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { openDialogParam } from '@/hooks/useDialogParam'
 import { useOpenPreview } from '@/hooks/useOpenPreview'
@@ -35,11 +31,6 @@ import { openUrlFromManager } from '@/lib/open-url'
 import { showToast } from '@/lib/toast'
 import { TrustExecutableList } from './TrustExecutableList'
 import { actionIcon } from './projectActionIcons'
-
-interface ProjectActionsMenuProps {
-  repoId: number
-  directory: string | undefined
-}
 
 /**
  * Props for the project action list items, so any menu can host them.
@@ -263,44 +254,4 @@ export function useProjectActionsMenu({
     manageActions,
     trustDialog,
   }
-}
-
-/**
- * Project actions button that opens a dropdown of runnable project actions.
- */
-export function ProjectActionsMenu({ repoId, directory }: ProjectActionsMenuProps) {
-  const [menuOpen, setMenuOpen] = useState(false)
-  const { actions, runningByAction, isRunning, startRun, stopRun, manageActions, trustDialog } =
-    useProjectActionsMenu({ repoId, directory, active: menuOpen })
-
-  if (!directory) return null
-
-  return (
-    <>
-      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Project actions"
-            className="h-10 w-10 text-muted-foreground hover:text-foreground sm:h-8 sm:w-8"
-          >
-            <Play className="h-5 w-5 sm:h-4 sm:w-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
-          <ProjectActionsMenuItems
-            actions={actions}
-            runningByAction={runningByAction}
-            isRunning={isRunning}
-            onRun={startRun}
-            onStop={stopRun}
-            onManage={manageActions}
-          />
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      {trustDialog}
-    </>
-  )
 }

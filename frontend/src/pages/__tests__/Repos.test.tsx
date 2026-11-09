@@ -56,8 +56,8 @@ vi.mock('@/components/navigation/ToolSidePanel', () => ({
   ToolSidePanel: () => null,
 }))
 
-vi.mock('@/components/notifications/PendingActionsGroup', () => ({
-  PendingActionsGroup: () => null,
+vi.mock('@/hooks/useNotificationsAction', () => ({
+  useNotificationsAction: () => ({ permissionCount: 0, formCount: 0, reportCount: 0, count: 0, destructive: false, label: 'Notifications', press: vi.fn() }),
 }))
 
 vi.mock('@/components/servers/RemoteProjectList', () => ({
@@ -81,10 +81,15 @@ function LocationDisplay() {
   return <div data-testid="location">{useLocation().pathname}</div>
 }
 
+function LocationSearchDisplay() {
+  return <div data-testid="location-search">{useLocation().search}</div>
+}
+
 function renderRepos() {
   return render(
     <MemoryRouter initialEntries={['/']}>
       <LocationDisplay />
+      <LocationSearchDisplay />
       <Routes>
         <Route path="/" element={<Repos />} />
       </Routes>
@@ -134,7 +139,19 @@ describe('Repos', () => {
     expect(screen.queryByRole('button', { name: 'Repo' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Open files' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'All Schedules' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Menu' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument()
+  })
+
+  it('opens the side menu from the header menu button', async () => {
+    const user = userEvent.setup()
+
+    renderRepos()
+
+    await user.click(screen.getByRole('button', { name: 'Menu' }))
+
+    expect(screen.getByTestId('location')).toHaveTextContent('/')
+    expect(screen.getByTestId('location-search')).toHaveTextContent('menu=home')
   })
 
   it('swaps the center section without navigating when the selection changes', () => {

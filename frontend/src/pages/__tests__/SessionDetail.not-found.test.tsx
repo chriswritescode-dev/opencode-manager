@@ -43,6 +43,17 @@ vi.mock('@/hooks/useSessionTranscript', () => ({ useSessionTranscript: mocks.use
 vi.mock('@/hooks/useRepoSiblings', () => ({ useRepoSiblings: mocks.useRepoSiblings }))
 vi.mock('@/hooks/useRepoActivity', () => ({ useRepoActivity: mocks.useRepoActivity }))
 vi.mock('@/hooks/useSSE', () => ({ useSSE: mocks.useSSE }))
+vi.mock('@/hooks/useNotificationsAction', () => ({
+  useNotificationsAction: () => ({
+    permissionCount: 0,
+    formCount: 0,
+    reportCount: 0,
+    count: 0,
+    destructive: false,
+    label: 'Notifications',
+    press: vi.fn(),
+  }),
+}))
 vi.mock('@/hooks/useOpenCodeServers', () => ({
   useOpenCodeServers: mocks.useOpenCodeServers,
   useOpenCodeServerStatuses: mocks.useOpenCodeServerStatuses,
@@ -96,8 +107,6 @@ vi.mock('@/components/session/SessionGoalBar', () => ({ SessionGoalBar: () => nu
 vi.mock('@/components/session/FormPrompt', () => ({ FormPrompt: () => null }))
 vi.mock('@/components/session/MinimizedFormIndicator', () => ({ MinimizedFormIndicator: () => null }))
 vi.mock('@/components/session/ChangesWalkthroughSheet', () => ({ ChangesWalkthroughSheet: () => null }))
-vi.mock('@/components/notifications/PendingActionsGroup', () => ({ PendingActionsGroup: () => null }))
-vi.mock('@/components/navigation/SessionMoreButton', () => ({ SessionMoreButton: () => null }))
 vi.mock('@/components/navigation/ToolSidePanel', () => ({ ToolSidePanel: () => null }))
 vi.mock('@/components/file-browser/FileBrowserSheet', () => ({ FileBrowserSheet: () => null }))
 vi.mock('@/components/source-control', () => ({
@@ -106,7 +115,6 @@ vi.mock('@/components/source-control', () => ({
 }))
 vi.mock('@/components/terminal/TerminalPanel', () => ({ TerminalPanel: () => null }))
 vi.mock('@/components/preview/PreviewPanel', () => ({ PreviewPanel: () => null }))
-vi.mock('@/components/repo/ProjectActionsMenu', () => ({ ProjectActionsMenu: () => null }))
 vi.mock('@/components/repo/RepoActionsDialog', () => ({ RepoActionsDialog: () => null }))
 vi.mock('@/components/repo/ResetPermissionsDialog', () => ({ ResetPermissionsDialog: () => null }))
 vi.mock('@/components/repo/RepoSkillsDialog', () => ({ RepoSkillsDialog: () => null }))

@@ -100,6 +100,17 @@ vi.mock('@/stores/sessionStatusStore', () => ({
 vi.mock('@/hooks/useSSE', () => ({
   useSSE: mocks.useSSE,
 }))
+vi.mock('@/hooks/useNotificationsAction', () => ({
+  useNotificationsAction: () => ({
+    permissionCount: 0,
+    formCount: 0,
+    reportCount: 0,
+    count: 0,
+    destructive: false,
+    label: 'Notifications',
+    press: vi.fn(),
+  }),
+}))
 
 vi.mock('@/hooks/useRepoActivity', () => ({
   useRepoActivity: mocks.useRepoActivity,
@@ -148,8 +159,6 @@ vi.mock('@/components/repo/RepoSkillsDialog', () => ({ RepoSkillsDialog: vi.fn((
 vi.mock('@/components/source-control', () => ({ SourceControlPanel: vi.fn(() => null) }))
 vi.mock('@/components/session/FormPrompt', () => ({ FormPrompt: vi.fn(() => null) }))
 vi.mock('@/components/session/MinimizedFormIndicator', () => ({ MinimizedFormIndicator: vi.fn(() => null) }))
-vi.mock('@/components/notifications/PendingActionsGroup', () => ({ PendingActionsGroup: vi.fn(() => null) }))
-
 const findPendingActionsQuery = (queryClient: QueryClient): Query | undefined =>
   queryClient
     .getQueryCache()

@@ -1,12 +1,20 @@
+import { useState } from 'react'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
+import { Play } from 'lucide-react'
 import type { TerminalInfo } from '@opencode-manager/shared/types'
 import type { ProjectConfigResponse } from '@opencode-manager/shared/types'
 import { FetchError } from '@opencode-manager/shared'
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { LocationCatcher } from '@/test/test-utils'
-import { ProjectActionsMenu } from './ProjectActionsMenu'
+import { ProjectActionsMenuItems, useProjectActionsMenu } from './ProjectActionsMenu'
 
 const mocks = vi.hoisted(() => ({
   useProjectConfig: vi.fn(),
@@ -94,11 +102,48 @@ function untrustedError(hash: string): FetchError {
   })
 }
 
+function TestProjectActionsMenu({ repoId, directory }: { repoId: number; directory: string | undefined }) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const { actions, runningByAction, isRunning, startRun, stopRun, manageActions, trustDialog } =
+    useProjectActionsMenu({ repoId, directory, active: menuOpen })
+
+  if (!directory) return null
+
+  return (
+    <>
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Project actions"
+            className="h-10 w-10 text-muted-foreground hover:text-foreground sm:h-8 sm:w-8"
+          >
+            <Play className="h-5 w-5 sm:h-4 sm:w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56">
+          <ProjectActionsMenuItems
+            actions={actions}
+            runningByAction={runningByAction}
+            isRunning={isRunning}
+            onRun={startRun}
+            onStop={stopRun}
+            onManage={manageActions}
+          />
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {trustDialog}
+    </>
+  )
+}
+
 function menuTree(directory: string, capturedSearch: { current: string }) {
   return (
     <MemoryRouter initialEntries={['/repos/1']}>
       <LocationCatcher capturedSearch={capturedSearch} />
-      <ProjectActionsMenu repoId={1} directory={directory} />
+      <TestProjectActionsMenu repoId={1} directory={directory} />
     </MemoryRouter>
   )
 }

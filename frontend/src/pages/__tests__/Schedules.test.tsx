@@ -53,6 +53,10 @@ vi.mock('@/hooks/useScheduleUrlState', () => ({
   useScheduleUrlState: mocks.useScheduleUrlState,
 }))
 
+vi.mock('@/hooks/useNotificationsAction', () => ({
+  useNotificationsAction: () => ({ permissionCount: 0, formCount: 0, reportCount: 0, count: 0, destructive: false, label: 'Notifications', press: vi.fn() }),
+}))
+
 vi.mock('@/components/schedules', () => ({
   ScheduleListToolbar: () => null,
   ScheduleJobDialog: vi.fn(({ onOpenChange }) => (
@@ -286,6 +290,28 @@ describe('Schedules', () => {
 
       expect(screen.getByText('my-repo')).toBeInTheDocument()
       expect(screen.getByText('repos/my-repo')).toBeInTheDocument()
+    })
+
+    it('renders the header menu button', () => {
+      mocks.useScheduleTarget.mockReturnValue({
+        scheduleTarget: {
+          repoId: 5,
+          kind: 'repo',
+          name: 'my-repo',
+          subtitle: 'repos/my-repo',
+          fullPath: '/abs/repos/my-repo',
+          backHref: '/repos/5',
+        },
+        isLoading: false,
+        isError: false,
+      })
+      mocks.useAllSchedules.mockReturnValue({ data: [], isLoading: false })
+      mocks.useRepoSchedule.mockReturnValue({ data: undefined, isFetching: false })
+      mocks.useRepoScheduleRuns.mockReturnValue({ data: [], isLoading: false })
+
+      renderSchedules('5')
+
+      expect(screen.getByRole('button', { name: 'Menu' })).toBeInTheDocument()
     })
 
     it('renders back button with correct href', () => {

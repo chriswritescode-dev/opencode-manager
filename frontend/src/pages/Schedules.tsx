@@ -6,6 +6,8 @@ import { ScheduleRepoSwitcher } from '@/components/schedules'
 import { RepoSchedulesContent } from '@/components/schedules/RepoSchedulesContent'
 import { Header } from '@/components/ui/header'
 import { Button } from '@/components/ui/button'
+import { MenuButton } from '@/components/navigation/MenuButton'
+import { useSideMenu } from '@/hooks/useSideMenu'
 import { getReturnToPath } from '@/lib/navigation'
 import { Loader2, Plus } from 'lucide-react'
 
@@ -14,6 +16,7 @@ export function Schedules() {
   const location = useLocation()
   const repoId = id ? Number(id) : undefined
   const { openNewJob } = useScheduleUrlState()
+  const { openMenu } = useSideMenu()
 
   const { scheduleTarget, isLoading: scheduleTargetLoading } = useScheduleTarget(repoId)
 
@@ -43,6 +46,7 @@ export function Schedules() {
     <div className="h-full max-h-full overflow-hidden bg-background flex flex-col">
       <Header>
         <Header.BackButton to={backHref} />
+        <MenuButton className="md:hidden" onPress={() => openMenu({ page: 'home' })} />
         <div className="min-w-0 flex-1 px-3">
           <ScheduleRepoSwitcher repoId={repoId} name={scheduleTarget.name} />
           <p className="text-xs text-muted-foreground truncate">{scheduleTarget.subtitle}</p>

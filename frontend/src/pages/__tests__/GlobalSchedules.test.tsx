@@ -36,8 +36,8 @@ vi.mock('@/hooks/useScheduleUrlState', () => ({
   useScheduleUrlState: mocks.useScheduleUrlState,
 }))
 
-vi.mock('@/components/notifications/ScheduleReportsBell', () => ({
-  ScheduleReportsBell: vi.fn(() => null),
+vi.mock('@/hooks/useNotificationsAction', () => ({
+  useNotificationsAction: () => ({ permissionCount: 0, formCount: 0, reportCount: 0, count: 0, destructive: false, label: 'Notifications', press: vi.fn() }),
 }))
 
 vi.mock('@/components/schedules', () => ({
@@ -374,5 +374,13 @@ describe('GlobalSchedules run history', () => {
     renderGlobalSchedules()
 
     expect(screen.getByText('No schedules yet')).toBeInTheDocument()
+  })
+
+  it('renders the header menu button', () => {
+    mocks.useScheduleUrlState.mockReturnValue(createMockScheduleUrlState({ scheduleTab: 'jobs', runId: null }))
+
+    renderGlobalSchedules()
+
+    expect(screen.getByRole('button', { name: 'Menu' })).toBeInTheDocument()
   })
 })

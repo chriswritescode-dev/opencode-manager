@@ -1,8 +1,5 @@
-import { Settings } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { BackButton } from "@/components/ui/back-button";
 import { PageHeader } from "@/components/ui/page-header";
-import { useSettingsDialog } from "@/hooks/useSettingsDialog";
 import { useTheme } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
 import type { ReactNode } from "react";
@@ -56,30 +53,12 @@ function HeaderActions({ children, className }: { children: ReactNode; className
   return <div className={cn("flex items-center gap-2", className)}>{children}</div>;
 }
 
-function HeaderSettingsButton() {
-  const { open } = useSettingsDialog();
-
-  return (
-    <Button
-      variant="ghost"
-      size="icon"
-      onClick={open}
-      aria-label="Settings"
-      className="text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
-    >
-      <Settings className="w-4 h-4" />
-    </Button>
-  );
-}
-
 export const Header = Object.assign(HeaderBase, {
   BackButton: HeaderBackButton,
   Title: HeaderTitle,
   Actions: HeaderActions,
-  Settings: HeaderSettingsButton,
 }) as typeof HeaderBase & {
   BackButton: typeof HeaderBackButton;
   Title: typeof HeaderTitle;
   Actions: typeof HeaderActions;
-  Settings: typeof HeaderSettingsButton;
 };

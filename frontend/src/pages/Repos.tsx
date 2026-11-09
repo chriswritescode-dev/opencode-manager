@@ -8,10 +8,11 @@ import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { RemoteProjectList } from "@/components/servers/RemoteProjectList";
 import { Header } from "@/components/ui/header";
 import { Button } from "@/components/ui/button";
-import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
 import { LinkedServersNav } from "@/components/navigation/LinkedServersNav";
+import { MenuButton } from "@/components/navigation/MenuButton";
 import { ToolSidePanel } from "@/components/navigation/ToolSidePanel";
 import { useRouteDialogParam } from "@/hooks/useDialogParam";
+import { useSideMenu } from "@/hooks/useSideMenu";
 import { useToolPanelLayout } from "@/hooks/useToolPanelLayout";
 import { useSidebarServerSelection } from "@/hooks/useSidebarServerSelection";
 import { useToolPanel } from "@/hooks/useToolPanel";
@@ -23,6 +24,7 @@ export function Repos() {
   const { docked, showRail } = useToolPanelLayout();
   const toolPanel = useToolPanel(showRail);
   const [selectedServerId] = useSidebarServerSelection();
+  const { openMenu } = useSideMenu();
   const isLocalServer = selectedServerId === LOCAL_OPENCODE_SERVER_ID;
 
   const handleCloseFileBrowser = () => {
@@ -34,12 +36,10 @@ export function Repos() {
     <div className="flex-1 min-w-0 h-full max-h-full overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col">
       <Header>
         <div className="flex items-center gap-3">
+          <MenuButton className="md:hidden" onPress={() => openMenu({ page: 'home' })} />
           <Header.Title logo>OpenCode</Header.Title>
         </div>
         <Header.Actions>
-          <div className="flex items-center gap-1">
-            <PendingActionsGroup />
-          </div>
           {isLocalServer && (
             <Button
               variant="ghost"
@@ -71,9 +71,6 @@ export function Repos() {
               Repo
             </Button>
           ) : null}
-          <span>
-            <Header.Settings />
-          </span>
         </Header.Actions>
       </Header>
       <div className="container mx-auto flex-1 pt-2 px-2 min-h-0 overflow-auto pb-[calc(env(safe-area-inset-bottom)+60px)] sm:pb-0">

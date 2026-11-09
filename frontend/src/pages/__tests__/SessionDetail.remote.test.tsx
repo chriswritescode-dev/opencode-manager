@@ -9,7 +9,6 @@ import { getServerProjectPath } from '@/lib/navigation'
 import { LocationCatcher } from '@/test/test-utils'
 import { MessageThread } from '@/components/message/MessageThread'
 import { SessionSendErrorBanner } from '@/components/session/SessionSendErrorBanner'
-import { PendingActionsGroup } from '@/components/notifications/PendingActionsGroup'
 import { SessionDetail } from '../SessionDetail'
 
 const mocks = vi.hoisted(() => ({
@@ -37,7 +36,6 @@ const mocks = vi.hoisted(() => ({
   TerminalPanel: vi.fn(() => null),
   PreviewPanel: vi.fn(() => null),
   FileBrowserSheet: vi.fn(() => null),
-  ProjectActionsMenu: vi.fn(() => null),
   RepoActionsDialog: vi.fn(() => null),
   ResetPermissionsDialog: vi.fn(() => null),
   RepoSkillsDialog: vi.fn(() => null),
@@ -45,7 +43,6 @@ const mocks = vi.hoisted(() => ({
   ChangesWalkthroughSheet: vi.fn(() => null),
   ToolSidePanel: vi.fn(() => null),
   SessionGoalBar: vi.fn(() => null),
-  SessionMoreButton: vi.fn(() => null),
 }))
 
 vi.mock('@/api/repos', () => ({ getRepo: mocks.getRepo }))
@@ -64,6 +61,17 @@ vi.mock('@/hooks/useSessionTranscript', () => ({
 vi.mock('@/hooks/useRepoSiblings', () => ({ useRepoSiblings: mocks.useRepoSiblings }))
 vi.mock('@/hooks/useRepoActivity', () => ({ useRepoActivity: mocks.useRepoActivity }))
 vi.mock('@/hooks/useSSE', () => ({ useSSE: mocks.useSSE }))
+vi.mock('@/hooks/useNotificationsAction', () => ({
+  useNotificationsAction: () => ({
+    permissionCount: 0,
+    formCount: 0,
+    reportCount: 0,
+    count: 0,
+    destructive: false,
+    label: 'Notifications',
+    press: vi.fn(),
+  }),
+}))
 
 vi.mock('@/hooks/useOpenCodeServers', () => ({
   useOpenCodeServers: mocks.useOpenCodeServers,
@@ -140,10 +148,6 @@ vi.mock('@/components/session/MinimizedFormIndicator', () => ({ MinimizedFormInd
 vi.mock('@/components/session/ChangesWalkthroughSheet', () => ({
   ChangesWalkthroughSheet: mocks.ChangesWalkthroughSheet,
 }))
-vi.mock('@/components/notifications/PendingActionsGroup', () => ({
-  PendingActionsGroup: vi.fn(() => null),
-}))
-vi.mock('@/components/navigation/SessionMoreButton', () => ({ SessionMoreButton: mocks.SessionMoreButton }))
 vi.mock('@/components/navigation/ToolSidePanel', () => ({ ToolSidePanel: mocks.ToolSidePanel }))
 vi.mock('@/components/file-browser/FileBrowserSheet', () => ({ FileBrowserSheet: mocks.FileBrowserSheet }))
 vi.mock('@/components/source-control', () => ({
@@ -152,7 +156,6 @@ vi.mock('@/components/source-control', () => ({
 }))
 vi.mock('@/components/terminal/TerminalPanel', () => ({ TerminalPanel: mocks.TerminalPanel }))
 vi.mock('@/components/preview/PreviewPanel', () => ({ PreviewPanel: mocks.PreviewPanel }))
-vi.mock('@/components/repo/ProjectActionsMenu', () => ({ ProjectActionsMenu: mocks.ProjectActionsMenu }))
 vi.mock('@/components/repo/RepoActionsDialog', () => ({ RepoActionsDialog: mocks.RepoActionsDialog }))
 vi.mock('@/components/repo/ResetPermissionsDialog', () => ({
   ResetPermissionsDialog: mocks.ResetPermissionsDialog,
@@ -284,7 +287,7 @@ describe('SessionDetail remote server mode', () => {
       expect(screen.getByLabelText('Remote server')).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Go back' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
 
     const backUrl = new URL(getServerProjectPath('srv_kitchen', '/home/me/app'), 'https://example.com')
     expect(capturedPathname.current).toBe(backUrl.pathname)
@@ -324,24 +327,22 @@ describe('SessionDetail remote server mode', () => {
     expect(mocks.SourceControlPanel).not.toHaveBeenCalled()
     expect(mocks.PreviewPanel).not.toHaveBeenCalled()
     expect(mocks.FileBrowserSheet).not.toHaveBeenCalled()
-    expect(mocks.ProjectActionsMenu).not.toHaveBeenCalled()
     expect(mocks.RepoActionsDialog).not.toHaveBeenCalled()
     expect(mocks.ResetPermissionsDialog).not.toHaveBeenCalled()
     expect(mocks.ChangesWalkthroughSheet).not.toHaveBeenCalled()
-    expect(mocks.SessionMoreButton).toHaveBeenCalled()
-    expect(vi.mocked(PendingActionsGroup).mock.calls.at(-1)?.[0]).toEqual(
-      expect.objectContaining({ showScheduleReports: false }),
-    )
   })
 
-  it('renders the More button so the drawer stays reachable on a remote session', async () => {
+  it('renders the back button and title without session actions in the header', async () => {
     renderRemoteSession()
 
     await waitFor(() => {
       expect(screen.getByTestId('message-thread')).toBeInTheDocument()
     })
 
-    expect(mocks.SessionMoreButton).toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Back' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Session details: Remote chat' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /more/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Project actions' })).not.toBeInTheDocument()
   })
 
   it('shows the session goal bar for a remote session', async () => {
