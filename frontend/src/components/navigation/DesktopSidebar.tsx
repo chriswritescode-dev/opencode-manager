@@ -1,58 +1,52 @@
+import { useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
+import { Bell, Bot, Home, List, LogOut, Settings } from 'lucide-react'
 import { useDesktop } from '@/hooks/useDesktop'
 import { useSidebarCollapsed } from '@/hooks/useSidebarCollapsed'
 import { useSidebarWidth } from '@/hooks/useSidebarWidth'
 import { useAuth } from '@/hooks/useAuth'
+import { useNotificationsAction } from '@/hooks/useNotificationsAction'
+import { useSideMenu } from '@/hooks/useSideMenu'
 import { useUrlParams } from '@/hooks/useUrlParams'
-import { useOpenProjectTool } from '@/hooks/useOpenProjectTool'
-import { projectTargetFromRoute } from '@/lib/projectTarget'
-import { buildNavModel, type NavItem, type NavPrimaryCta } from '@/components/navigation/navItems'
-import { DesktopSessionTree } from '@/components/navigation/DesktopSessionTree'
+import { NotificationsBadge } from '@/components/notifications/NotificationsBadge'
 import { LinkedServersNav } from '@/components/navigation/LinkedServersNav'
-import {
-  Sidebar,
-  SidebarSection,
-  SidebarItem,
-} from '@/components/ui/sidebar'
-
-const FOOTER_ITEM_KEYS = new Set(['home', 'settings', 'logout'])
+import { Sidebar, SidebarItem } from '@/components/ui/sidebar'
+import { SideMenuContent } from './SideMenuContent'
 
 export function DesktopSidebar() {
   const location = useLocation()
   const navigate = useNavigate()
   const { updateParams } = useUrlParams()
-  const openProjectTool = useOpenProjectTool()
   const [collapsed, toggle] = useSidebarCollapsed()
   const [sidebarWidth, setSidebarWidth] = useSidebarWidth()
   const { isAuthenticated, isLoading, logout } = useAuth()
-
   const isDesktop = useDesktop()
+  const { isOpen, openMenu, closeMenu } = useSideMenu()
+  const { count, destructive, label, press } = useNotificationsAction()
+  const handledOpenRef = useRef(false)
 
-  if (isLoading || !isAuthenticated) {
-    return null
-  }
-
-  if (!isDesktop) {
-    return null
-  }
-
-  const { primary, items } = buildNavModel(location.pathname)
-  const routeTarget = projectTargetFromRoute(location.pathname, location.search)
-
-  const handleItemClick = (item: NavItem) => {
-    if (openProjectTool(item, routeTarget)) return
-    if (item.key === 'logout') {
-      logout()
-    } else if (item.key === 'settings') {
-      updateParams((p) => {
-        p.set('settings', 'open')
-        p.set('settingsTab', 'account')
-        p.delete('mobileTab')
-      }, 'push')
+  useEffect(() => {
+    if (!isDesktop || !isOpen) {
+      handledOpenRef.current = false
+      return
     }
+    if (handledOpenRef.current) return
+    handledOpenRef.current = true
+    if (collapsed) toggle()
+  }, [collapsed, isDesktop, isOpen, toggle])
+
+  if (isLoading || !isAuthenticated || !isDesktop) {
+    return null
   }
 
-  const footerItems = items.filter((item) => FOOTER_ITEM_KEYS.has(item.key))
+  const handleSettingsClick = () => {
+    updateParams((params) => {
+      params.set('settings', 'open')
+      params.set('settingsTab', 'account')
+      params.delete('mobileTab')
+    }, 'push')
+  }
 
   return (
     <Sidebar
@@ -60,66 +54,46 @@ export function DesktopSidebar() {
       onToggle={toggle}
       width={sidebarWidth}
       onWidthChange={setSidebarWidth}
-      className='mt-2'
+      className="mt-2"
     >
-      {primary.length > 0 && (
-        <SidebarSection collapsed={collapsed}>
-          {primary.map((item: NavPrimaryCta) => (
-            <SidebarItem
-              key={item.key}
-              icon={item.icon}
-              label={item.label}
-              collapsed={collapsed}
-              onClick={() => navigate(item.to)}
-              asPrimary
-              variant={item.variant}
-            />
-          ))}
-        </SidebarSection>
-      )}
-
       {collapsed ? (
         <>
           <div className="flex flex-col gap-1 p-2 pt-0">
-            {footerItems.map((item: NavItem) => (
+            {count > 0 && (
               <SidebarItem
-                key={item.key}
-                icon={item.icon}
-                label={item.label}
-                collapsed={collapsed}
-                onClick={() => handleItemClick(item)}
-                danger={item.danger}
+                icon={Bell}
+                label={label}
+                collapsed
+                onClick={press}
+                badge={<NotificationsBadge count={count} destructive={destructive} />}
               />
-            ))}
+            )}
+            <SidebarItem
+              icon={List}
+              label="Sessions"
+              collapsed
+              onClick={() => {
+                handledOpenRef.current = true
+                toggle()
+                openMenu({ page: 'sessions' })
+              }}
+            />
+            <SidebarItem
+              icon={Bot}
+              label="Assistant"
+              collapsed
+              onClick={() => openMenu({ page: 'sessions', project: { kind: 'repo', repoId: ASSISTANT_REPO_ID } })}
+            />
+            <SidebarItem icon={Home} label="Home" collapsed onClick={() => navigate('/')} />
+            <SidebarItem icon={Settings} label="Settings" collapsed onClick={handleSettingsClick} />
+            {location.pathname === '/' && (
+              <SidebarItem icon={LogOut} label="Logout" collapsed onClick={() => { void logout() }} />
+            )}
           </div>
           <LinkedServersNav variant="rail" />
         </>
       ) : (
-        <>
-          <div className="px-2 py-1">
-            <LinkedServersNav />
-          </div>
-
-          <section aria-label="Sessions" className="flex min-h-0 flex-1 flex-col border-t border-border">
-            <h2 className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Sessions
-            </h2>
-            <DesktopSessionTree />
-          </section>
-
-          <div className="flex gap-1 border-t border-border p-2">
-            {footerItems.map((item: NavItem) => (
-              <SidebarItem
-                key={item.key}
-                icon={item.icon}
-                label={item.label}
-                collapsed
-                onClick={() => handleItemClick(item)}
-                danger={item.danger}
-              />
-            ))}
-          </div>
-        </>
+        <SideMenuContent variant="docked" fullWidth={false} onClose={closeMenu} defaultPage="sessions" />
       )}
     </Sidebar>
   )

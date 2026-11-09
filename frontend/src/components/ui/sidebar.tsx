@@ -154,25 +154,6 @@ export function Sidebar({
   )
 }
 
-export interface SidebarSectionProps {
-  label?: string
-  collapsed: boolean
-  children: React.ReactNode
-}
-
-export function SidebarSection({ label, collapsed, children }: SidebarSectionProps) {
-  return (
-    <div className={cn('flex flex-col gap-1 p-2', !label && 'pt-0')}>
-      {label && !collapsed && (
-        <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-          {label}
-        </div>
-      )}
-      {children}
-    </div>
-  )
-}
-
 export interface SidebarItemProps {
   icon: LucideIcon
   label: string
@@ -183,6 +164,7 @@ export interface SidebarItemProps {
   asPrimary?: boolean
   dense?: boolean
   variant?: 'default' | 'primary' | 'secondary' | 'danger'
+  badge?: React.ReactNode
 }
 
 export function SidebarItem({
@@ -194,6 +176,7 @@ export function SidebarItem({
   asPrimary = false,
   dense = false,
   variant = 'default',
+  badge,
 }: SidebarItemProps) {
 
   const baseClasses = cn(
@@ -214,7 +197,10 @@ export function SidebarItem({
       className={baseClasses}
       onClick={onClick}
     >
-      <Icon className={cn(dense ? 'h-4 w-4' : 'h-5 w-5', 'flex-shrink-0')} />
+      <span className="relative flex shrink-0" aria-hidden={badge ? true : undefined}>
+        <Icon className={cn(dense ? 'h-4 w-4' : 'h-5 w-5', 'flex-shrink-0')} />
+        {badge}
+      </span>
       {!collapsed && <span className="truncate">{label}</span>}
       {collapsed && <span className="sr-only">{label}</span>}
     </button>

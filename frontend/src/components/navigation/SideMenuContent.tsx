@@ -12,7 +12,7 @@ import { useNotificationsAction } from '@/hooks/useNotificationsAction'
 import { useOpenProjectTool } from '@/hooks/useOpenProjectTool'
 import { useSessionPickerNavigation } from '@/hooks/useSessionPickerNavigation'
 import { useSessionPickerRouteScope } from '@/hooks/useSessionPickerRouteScope'
-import { useSideMenu } from '@/hooks/useSideMenu'
+import { useSideMenu, type SideMenuPage } from '@/hooks/useSideMenu'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { NotificationsBadge } from '@/components/notifications/NotificationsBadge'
 import { SessionPickerPanel } from '@/components/session/SessionPickerPanel'
@@ -27,6 +27,7 @@ export interface SideMenuContentProps {
   variant: 'overlay' | 'docked'
   fullWidth: boolean
   onClose: () => void
+  defaultPage?: SideMenuPage
 }
 
 const ACCOUNT_ITEM_KEYS: ReadonlySet<string> = new Set(['settings', 'logout'])
@@ -82,9 +83,10 @@ function MenuRow({ icon: Icon, label, onClick, danger, trailing }: MenuRowProps)
 }
 
 /** Side menu body shared by the phone overlay and the docked desktop panel. */
-export function SideMenuContent({ variant, fullWidth, onClose }: SideMenuContentProps) {
+export function SideMenuContent({ variant, fullWidth, onClose, defaultPage = 'home' }: SideMenuContentProps) {
   const location = useLocation()
-  const { project, page, setPage, closeMenu, navigateFromMenu } = useSideMenu()
+  const { isOpen, project, page: menuPage, setPage, closeMenu, navigateFromMenu } = useSideMenu()
+  const page = isOpen ? menuPage : defaultPage
   const menuTabs = useTabDestinations(project)
   const { updateParams } = useUrlParams()
   const { logout } = useAuth()

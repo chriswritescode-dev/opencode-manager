@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { Sidebar, SidebarSection, SidebarItem, SidebarCollapseToggle } from './sidebar'
+import { Sidebar, SidebarItem, SidebarCollapseToggle } from './sidebar'
 import { TooltipProvider } from './tooltip'
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from '@/hooks/useSidebarWidth'
 import { Folder } from 'lucide-react'
@@ -203,28 +203,6 @@ describe('Sidebar resize handle', () => {
   })
 })
 
-describe('SidebarSection', () => {
-  it('renders label when not collapsed', () => {
-    render(
-      <SidebarSection label="Test Section" collapsed={false}>
-        <div>Content</div>
-      </SidebarSection>
-    )
-
-    expect(screen.getByText('Test Section')).toBeInTheDocument()
-  })
-
-  it('hides label when collapsed', () => {
-    render(
-      <SidebarSection label="Test Section" collapsed={true}>
-        <div>Content</div>
-      </SidebarSection>
-    )
-
-    expect(screen.queryByText('Test Section')).not.toBeInTheDocument()
-  })
-})
-
 describe('SidebarItem', () => {
   it('fires onClick when clicked', () => {
     const handleClick = vi.fn()
@@ -268,6 +246,23 @@ describe('SidebarItem', () => {
 
     const button = screen.getByRole('button')
     expect(button).not.toHaveAttribute('title')
+    expect(button).toHaveAccessibleName('Test Item')
+  })
+
+  it('renders a badge over the icon without changing the accessible name', () => {
+    render(
+      <TooltipProvider>
+        <SidebarItem
+          icon={Folder}
+          label="Test Item"
+          collapsed={true}
+          badge={<span data-testid="badge">3</span>}
+        />
+      </TooltipProvider>
+    )
+
+    const button = screen.getByRole('button')
+    expect(button).toContainElement(screen.getByTestId('badge'))
     expect(button).toHaveAccessibleName('Test Item')
   })
 })
