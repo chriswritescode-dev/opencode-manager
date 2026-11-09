@@ -17,14 +17,13 @@ import {
 } from '@/hooks/useToolPanel'
 import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
 import {
-  getAssistantPath,
   getServerSessionPath,
   getSessionPath,
   isAssistantPath,
   parseRepoRoute,
   parseServerSessionRoute,
-  withQueryParam,
 } from '@/lib/navigation'
+import { encodeProjectTarget } from '@/lib/projectTarget'
 
 /**
  * Registers the app-wide shortcut actions: the settings dialog, the route tool panels, and session creation on the
@@ -75,8 +74,11 @@ export function useGlobalShortcutActions(): void {
       return
     }
     if (isRemoteRoute || tool === 'files') return
-    const host = repoId !== null && repoId !== ASSISTANT_REPO_ID ? `/repos/${repoId}` : getAssistantPath()
-    navigate(withQueryParam(host, 'dialog', tool))
+    const projectTarget = repoId !== null && repoId !== ASSISTANT_REPO_ID
+      ? { kind: 'repo' as const, repoId }
+      : { kind: 'repo' as const, repoId: ASSISTANT_REPO_ID }
+    const params = new URLSearchParams({ dialog: tool, toolProject: encodeProjectTarget(projectTarget) })
+    navigate(`/?${params.toString()}`)
   }, [toolItems, isMobile, togglePanelTool, updateParams, navigate, repoId, isRemoteRoute])
 
   const newSession = sessionDirectory && !createSession.isPending

@@ -8,9 +8,11 @@ vi.mock('@/components/session/SessionPickerPanel', () => ({
   SessionPickerPanel: ({
     projectName,
     onProjectLabelShownChange,
+    renderProjectSessions,
   }: {
     projectName?: string
     onProjectLabelShownChange?: (shown: boolean) => void
+    renderProjectSessions?: () => ReactNode
   }) => (
     <div data-testid="session-picker-panel" data-project-name={projectName ?? ''}>
       <button type="button" onClick={() => onProjectLabelShownChange?.(true)}>
@@ -19,7 +21,17 @@ vi.mock('@/components/session/SessionPickerPanel', () => ({
       <button type="button" onClick={() => onProjectLabelShownChange?.(false)}>
         hide-project-label
       </button>
+      {renderProjectSessions?.()}
     </div>
+  ),
+}))
+vi.mock('./ProjectHub', () => ({
+  ProjectHub: ({ target }: { target: { kind: string; repoId?: number } }) => (
+    <div
+      data-testid="project-hub"
+      data-kind={target.kind}
+      data-repo-id={target.kind === 'repo' ? target.repoId : ''}
+    />
   ),
 }))
 vi.mock('@/components/navigation/LinkedServersNav', () => ({
@@ -28,7 +40,7 @@ vi.mock('@/components/navigation/LinkedServersNav', () => ({
   ),
 }))
 
-import { useEffect } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -236,6 +248,25 @@ describe('SideMenu', () => {
     await waitFor(() =>
       expect(screen.getByTestId('session-picker-panel')).toHaveAttribute('data-project-name', 'alpha'),
     )
+  })
+
+  it('renders the project hub for a repo menu project', async () => {
+    const repo = readyRepo()
+    vi.mocked(getRepo).mockResolvedValue(repo)
+    vi.mocked(listRepos).mockResolvedValue([repo])
+
+    renderSideMenu('/?menu=sessions&menuProject=repo:1')
+
+    await waitFor(() => expect(screen.getByTestId('project-hub')).toHaveAttribute('data-repo-id', '1'))
+  })
+
+  it('does not render the project hub for a linked-server menu project', async () => {
+    renderSideMenu('/?menu=sessions&menuProject=server:srv_kitchen:%2Fhome%2Fme%2Fapp')
+
+    await waitFor(() =>
+      expect(screen.getByTestId('session-picker-panel')).toHaveAttribute('data-project-name', 'app'),
+    )
+    expect(screen.queryByTestId('project-hub')).not.toBeInTheDocument()
   })
 
   it('labels a linked-server menu project with its directory name', async () => {

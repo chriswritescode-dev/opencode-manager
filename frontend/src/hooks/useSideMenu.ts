@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react';
-import { useLocation } from 'react-router-dom';
-import { useUrlParams } from './useUrlParams';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { readPreviousSearch, useUrlParams } from './useUrlParams';
 import {
   encodeProjectTarget,
   parseProjectTarget,
@@ -27,6 +27,7 @@ export interface UseSideMenuReturn {
   openMenu: (options: OpenSideMenuOptions, mode?: UrlHistoryMode) => void;
   setPage: (page: SideMenuPage) => void;
   closeMenu: () => void;
+  navigateFromMenu: (path: string) => void;
 }
 
 /**
@@ -36,6 +37,7 @@ export interface UseSideMenuReturn {
  */
 export function useSideMenu(): UseSideMenuReturn {
   const location = useLocation();
+  const navigate = useNavigate();
   const { searchParams, updateParams, closePushedParams } = useUrlParams();
 
   const menuParam = searchParams.get('menu');
@@ -77,5 +79,20 @@ export function useSideMenu(): UseSideMenuReturn {
     });
   }, [closePushedParams]);
 
-  return { isOpen, page, project, openMenu, setPage, closeMenu };
+  /**
+   * Leaves the menu for a path in one history operation, so a pending route loader is never aborted
+   * by the traversal `closeMenu` would start.
+   */
+  const navigateFromMenu = useCallback(
+    (path: string) => {
+      if (readPreviousSearch(location.state) !== null) {
+        navigate(path, { replace: true });
+        return;
+      }
+      navigate(path);
+    },
+    [location.state, navigate],
+  );
+
+  return { isOpen, page, project, openMenu, setPage, closeMenu, navigateFromMenu };
 }

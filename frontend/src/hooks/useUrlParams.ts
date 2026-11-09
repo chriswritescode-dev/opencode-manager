@@ -35,7 +35,13 @@ function replaceOptions(state: unknown): { replace: true; state?: unknown } {
   return state == null ? { replace: true } : { replace: true, state }
 }
 
-function readPreviousSearch(state: unknown): string | null {
+/**
+ * Reads the search an entry was pushed from, so a param host can tell a pushed entry from a deep link.
+ *
+ * @param state Location state of the entry in view.
+ * @returns The previous search, or null when the entry was not pushed by `updateParams`.
+ */
+export function readPreviousSearch(state: unknown): string | null {
   if (state === null || typeof state !== 'object') return null
   const entry = (state as Record<string, unknown>)[URL_PARAM_HISTORY_KEY]
   if (entry === null || typeof entry !== 'object') return null

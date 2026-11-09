@@ -23,6 +23,8 @@ export interface SessionPickerNavigationOptions {
   /** Whether selecting a project navigates to it or points the side menu at it in place. */
   selectRepoDestination?: 'navigate' | 'menu'
   onClose: () => void
+  /** Leaves a pushed side-menu entry for a path in one history operation. */
+  navigateFromMenu?: (path: string) => void
   /** Where to go after the open session is deleted, instead of the current repo's session list. */
   deleteActiveSessionPath?: string
 }
@@ -49,6 +51,7 @@ export function useSessionPickerNavigation({
   mode,
   selectRepoDestination = 'navigate',
   onClose,
+  navigateFromMenu,
   deleteActiveSessionPath,
 }: SessionPickerNavigationOptions): SessionPickerNavigation {
   const navigate = useNavigate()
@@ -64,12 +67,15 @@ export function useSessionPickerNavigation({
 
   const open = useCallback(
     (path: string) => {
-      navigate(isPanelMode && panelId ? withQueryParam(path, 'panel', panelId) : path, {
-        replace: mode === 'replace',
-      })
+      const destination = isPanelMode && panelId ? withQueryParam(path, 'panel', panelId) : path
+      if (mode === 'push' && navigateFromMenu) {
+        navigateFromMenu(destination)
+        return
+      }
+      navigate(destination, { replace: mode === 'replace' })
       if (mode === 'push') onClose()
     },
-    [isPanelMode, mode, navigate, onClose, panelId],
+    [isPanelMode, mode, navigate, navigateFromMenu, onClose, panelId],
   )
 
   const onSelectSession = useCallback(

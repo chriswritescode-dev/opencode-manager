@@ -237,6 +237,22 @@ describe('useSessionPickerNavigation', () => {
       expect(location()).toBe('/repos/1/sessions/a?mobileTab=sessions POP')
       expect(onClose).toHaveBeenCalledTimes(1)
     })
+
+    it('leaves a menu-hosted picker in one history operation', () => {
+      const navigateFromMenu = vi.fn()
+      const { result, onClose, location } = renderPickerNavigation(
+        ['/?menu=sessions'],
+        { mode: 'push', navigateFromMenu },
+      )
+
+      act(() => {
+        result.current.onSelectSession(createSession('b'), createRepo(1))
+      })
+
+      expect(navigateFromMenu).toHaveBeenCalledWith('/repos/1/sessions/b')
+      expect(onClose).not.toHaveBeenCalled()
+      expect(location()).toBe('/?menu=sessions POP')
+    })
   })
 
   describe('replace mode', () => {

@@ -1,4 +1,6 @@
+/* eslint-disable react-refresh/only-export-components */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import type { TerminalInfo } from '@opencode-manager/shared/types'
 import { FetchError } from '@opencode-manager/shared'
 import { isRunningActionTerminal } from '@opencode-manager/shared/utils'
@@ -39,6 +41,18 @@ interface ProjectActionsMenuProps {
   directory: string | undefined
 }
 
+/**
+ * Props for the project action list items, so any menu can host them.
+ */
+export interface ProjectActionsMenuItemsProps {
+  actions: ProjectConfigResponse['actions']
+  runningByAction: ReadonlyMap<string, TerminalInfo>
+  isRunning: boolean
+  onRun: (actionId: string) => void
+  onStop: (terminal: TerminalInfo) => void
+  onManage: () => void
+}
+
 interface PendingTrust {
   actionId: string
   hash: string
@@ -55,15 +69,76 @@ function untrustedHash(error: unknown): string | null {
   return null
 }
 
-export function ProjectActionsMenu({ repoId, directory }: ProjectActionsMenuProps) {
-  const [menuOpen, setMenuOpen] = useState(false)
+/**
+ * Renders the project action entries for a dropdown menu content area.
+ */
+export function ProjectActionsMenuItems({
+  actions,
+  runningByAction,
+  isRunning,
+  onRun,
+  onStop,
+  onManage,
+}: ProjectActionsMenuItemsProps) {
+  return (
+    <>
+      {actions.length === 0 ? (
+        <DropdownMenuLabel className="font-normal text-muted-foreground">
+          No actions configured
+        </DropdownMenuLabel>
+      ) : (
+        actions.map((action) => {
+          const Icon = actionIcon(action.icon)
+          const running = runningByAction.get(action.id)
+          return (
+            <Fragment key={action.id}>
+              <DropdownMenuItem disabled={isRunning} onSelect={() => onRun(action.id)}>
+                <Icon className="mr-2 h-4 w-4" />
+                <span className="truncate">{action.name}</span>
+                {running && (
+                  <span
+                    data-testid="action-running-dot"
+                    className="ml-auto h-2 w-2 rounded-full bg-primary"
+                  />
+                )}
+              </DropdownMenuItem>
+              {running && (
+                <DropdownMenuItem onSelect={() => onStop(running)}>
+                  <Square className="mr-2 h-4 w-4" />
+                  Stop
+                </DropdownMenuItem>
+              )}
+            </Fragment>
+          )
+        })
+      )}
+      <DropdownMenuSeparator />
+      <DropdownMenuItem onSelect={onManage}>Manage actions…</DropdownMenuItem>
+    </>
+  )
+}
+
+/**
+ * Owns the project action config, run, stop, and trust-confirmation logic for action menus.
+ */
+export function useProjectActionsMenu({
+  repoId,
+  directory,
+  active,
+  onManageActions,
+}: {
+  repoId: number
+  directory: string | undefined
+  active: boolean
+  onManageActions?: () => void
+}) {
   const { updateParams } = useUrlParams()
   const openPreview = useOpenPreview()
   const openTerminal = useOpenTerminal()
-  const configQuery = useProjectConfig(repoId, directory, menuOpen && !!directory)
+  const configQuery = useProjectConfig(repoId, directory, active && !!directory)
   const terminalsQuery = useTerminals({ kind: 'repo', repoId }, directory, {
-    enabled: menuOpen && !!directory,
-    refetchInterval: menuOpen ? 5000 : false,
+    enabled: active && !!directory,
+    refetchInterval: active ? 5000 : false,
   })
   const runAction = useRunProjectAction(repoId, directory)
   const removeTerminal = useRemoveTerminal({ kind: 'repo', repoId })
@@ -150,15 +225,53 @@ export function ProjectActionsMenu({ repoId, directory }: ProjectActionsMenuProp
     })
   }, [pendingTrust, trustConfig, startRun, repoId])
 
-  const handleStop = useCallback((terminal: TerminalInfo) => {
+  const stopRun = useCallback((terminal: TerminalInfo) => {
     removeTerminal.mutate({ ptyID: terminal.id, directory }, {
       onError: (error) => showToast.error(getOpenCodeApiErrorMessage(error, 'Failed to stop action')),
     })
   }, [removeTerminal, directory])
 
-  const handleManage = useCallback(() => {
+  const manageActions = useCallback(() => {
+    if (onManageActions) {
+      onManageActions()
+      return
+    }
     openDialogParam(updateParams, 'actions')
-  }, [updateParams])
+  }, [onManageActions, updateParams])
+
+  const trustDialog: ReactNode = (
+    <ConfirmDestructiveDialog
+      open={pendingTrust !== null}
+      onOpenChange={(open) => { if (!open) setPendingTrust(null) }}
+      onConfirm={handleConfirmTrust}
+      onCancel={() => setPendingTrust(null)}
+      title="Trust repository actions"
+      description="This repository defines commands that run on your machine."
+      warning={pendingTrust ? <TrustExecutableList executable={pendingTrust.executable} /> : undefined}
+      confirmLabel="Trust and run"
+      pendingLabel="Trusting…"
+      isPending={trustConfig.isPending}
+    />
+  )
+
+  return {
+    actions,
+    runningByAction,
+    isRunning: runAction.isPending,
+    startRun,
+    stopRun,
+    manageActions,
+    trustDialog,
+  }
+}
+
+/**
+ * Project actions button that opens a dropdown of runnable project actions.
+ */
+export function ProjectActionsMenu({ repoId, directory }: ProjectActionsMenuProps) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const { actions, runningByAction, isRunning, startRun, stopRun, manageActions, trustDialog } =
+    useProjectActionsMenu({ repoId, directory, active: menuOpen })
 
   if (!directory) return null
 
@@ -176,53 +289,18 @@ export function ProjectActionsMenu({ repoId, directory }: ProjectActionsMenuProp
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
-          {actions.length === 0 ? (
-            <DropdownMenuLabel className="font-normal text-muted-foreground">
-              No actions configured
-            </DropdownMenuLabel>
-          ) : (
-            actions.map((action) => {
-              const Icon = actionIcon(action.icon)
-              const running = runningByAction.get(action.id)
-              return (
-                <Fragment key={action.id}>
-                  <DropdownMenuItem disabled={runAction.isPending} onSelect={() => startRun(action.id)}>
-                    <Icon className="mr-2 h-4 w-4" />
-                    <span className="truncate">{action.name}</span>
-                    {running && (
-                      <span
-                        data-testid="action-running-dot"
-                        className="ml-auto h-2 w-2 rounded-full bg-primary"
-                      />
-                    )}
-                  </DropdownMenuItem>
-                  {running && (
-                    <DropdownMenuItem onSelect={() => handleStop(running)}>
-                      <Square className="mr-2 h-4 w-4" />
-                      Stop
-                    </DropdownMenuItem>
-                  )}
-                </Fragment>
-              )
-            })
-          )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={handleManage}>Manage actions…</DropdownMenuItem>
+          <ProjectActionsMenuItems
+            actions={actions}
+            runningByAction={runningByAction}
+            isRunning={isRunning}
+            onRun={startRun}
+            onStop={stopRun}
+            onManage={manageActions}
+          />
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <ConfirmDestructiveDialog
-        open={pendingTrust !== null}
-        onOpenChange={(open) => { if (!open) setPendingTrust(null) }}
-        onConfirm={handleConfirmTrust}
-        onCancel={() => setPendingTrust(null)}
-        title="Trust repository actions"
-        description="This repository defines commands that run on your machine."
-        warning={pendingTrust ? <TrustExecutableList executable={pendingTrust.executable} /> : undefined}
-        confirmLabel="Trust and run"
-        pendingLabel="Trusting…"
-        isPending={trustConfig.isPending}
-      />
+      {trustDialog}
     </>
   )
 }

@@ -1,7 +1,25 @@
-import { renderHook, act } from '@testing-library/react';
+import { renderHook, act, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { describe, it, expect } from 'vitest';
 import { useSideMenu } from './useSideMenu';
 import { createRouterWrapper, renderHookWithRouter, renderHookWithRouterAndLocation } from '@/test/test-utils';
+
+function MenuNavigationHarness() {
+  const { openMenu, navigateFromMenu } = useSideMenu();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const navigationType = useNavigationType();
+  return (
+    <div>
+      <div data-testid="location">{`${location.pathname}${location.search}`}</div>
+      <div data-testid="navigation-type">{navigationType}</div>
+      <button type="button" onClick={() => openMenu({ page: 'sessions' })}>open-menu</button>
+      <button type="button" onClick={() => navigateFromMenu('/repos/1/sessions/b')}>open-session</button>
+      <button type="button" onClick={() => navigate(-1)}>back</button>
+    </div>
+  );
+}
 
 describe('useSideMenu', () => {
   it('is closed and on the home page without menu params', () => {
@@ -130,5 +148,42 @@ describe('useSideMenu', () => {
 
     expect(result.current.isOpen).toBe(false);
     expect(capturedSearch.current).toBe('');
+  });
+
+  it('replaces a pushed menu entry when leaving the menu', async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <MenuNavigationHarness />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'open-menu' }));
+    expect(screen.getByTestId('location')).toHaveTextContent('/?menu=sessions');
+    expect(screen.getByTestId('navigation-type')).toHaveTextContent('PUSH');
+
+    await user.click(screen.getByRole('button', { name: 'open-session' }));
+    expect(screen.getByTestId('location')).toHaveTextContent('/repos/1/sessions/b');
+    expect(screen.getByTestId('location')).not.toHaveTextContent('menu=');
+    expect(screen.getByTestId('navigation-type')).toHaveTextContent('REPLACE');
+
+    await user.click(screen.getByRole('button', { name: 'back' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/$/));
+  });
+
+  it('pushes from a deep-linked menu entry', async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={['/?menu=sessions']}>
+        <MenuNavigationHarness />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'open-session' }));
+    expect(screen.getByTestId('location')).toHaveTextContent('/repos/1/sessions/b');
+    expect(screen.getByTestId('navigation-type')).toHaveTextContent('PUSH');
+
+    await user.click(screen.getByRole('button', { name: 'back' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/?menu=sessions'));
   });
 });

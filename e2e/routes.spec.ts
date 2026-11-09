@@ -7,23 +7,6 @@ test.describe('application routes', () => {
     await expect(page.getByRole('heading', { name: repo.name })).toBeVisible()
   })
 
-  test('repo detail renders', async ({ page, repo }) => {
-    await page.goto(`/repos/${repo.id}`)
-    await expect(page.getByRole('heading', { name: repo.name })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'New Session', exact: true })).toBeVisible()
-  })
-
-  test('repo assistant renders', async ({ page, repo }) => {
-    await page.goto(`/repos/${repo.id}/assistant`)
-    await expect(page.getByRole('heading', { name: 'Assistant' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'New Session', exact: true })).toBeVisible()
-  })
-
-  test('global assistant renders', async ({ page }) => {
-    await page.goto('/assistant')
-    await expect(page.getByRole('heading', { name: 'Assistant' })).toBeVisible()
-  })
-
   test('session detail renders', async ({ page, repo }) => {
     await page.goto(`/repos/${repo.id}/sessions/${repo.sessionId}`)
     await expect(page.getByTestId('session-header-region')).toBeVisible()
@@ -40,6 +23,37 @@ test.describe('application routes', () => {
     await page.goto('/schedules')
     await expect(page.getByRole('button', { name: 'Switch repository (All repos)' })).toBeVisible()
     await expect(page.getByRole('tab', { name: 'Jobs' })).toBeVisible()
+  })
+})
+
+test.describe('project hub redirects', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true })
+
+  test('repo route opens the Home hub menu for the repo', async ({ page, repo }) => {
+    await page.goto(`/repos/${repo.id}`)
+    await expect(page).toHaveURL(new RegExp(`\\?menu=sessions&menuProject=repo:${repo.id}`))
+
+    const menu = page.getByRole('dialog', { name: 'Menu' })
+    await expect(menu).toBeVisible()
+    await expect(menu.getByRole('button', { name: 'New Session' })).toBeVisible()
+  })
+
+  test('repo assistant route opens the Home hub menu for the assistant project', async ({ page, repo }) => {
+    await page.goto(`/repos/${repo.id}/assistant`)
+    await expect(page).toHaveURL(/menuProject=repo:0/)
+
+    const menu = page.getByRole('dialog', { name: 'Menu' })
+    await expect(menu).toBeVisible()
+    await expect(menu.getByRole('button', { name: 'New Session' })).toBeVisible()
+  })
+
+  test('global assistant route opens the Home hub menu for the assistant project', async ({ page }) => {
+    await page.goto('/assistant')
+    await expect(page).toHaveURL(/menuProject=repo:0/)
+
+    const menu = page.getByRole('dialog', { name: 'Menu' })
+    await expect(menu).toBeVisible()
+    await expect(menu.getByRole('button', { name: 'New Session' })).toBeVisible()
   })
 })
 

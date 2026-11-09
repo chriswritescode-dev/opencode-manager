@@ -1,7 +1,8 @@
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { GitBranch, Layers, Plus } from 'lucide-react'
 import type { RepoSibling } from '@/api/repos'
-import type { WorktreeTabValue } from '@/hooks/useWorktreeTab'
+
+export type WorktreeTabValue = 'repo' | 'workspaces'
 
 interface WorktreeTabsProps {
   workspaces: RepoSibling[]

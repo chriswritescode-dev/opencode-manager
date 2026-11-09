@@ -5,7 +5,7 @@ import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { Bell, ChevronLeft, ChevronRight, GitBranch, List, X, type LucideIcon } from 'lucide-react'
 import { repoQueryOptions } from '@/lib/repoQuery'
 import { cn, getDirectoryName, getRepoDisplayName } from '@/lib/utils'
-import type { ProjectTarget } from '@/lib/projectTarget'
+import { encodeProjectTarget, type ProjectTarget } from '@/lib/projectTarget'
 import { useAuth } from '@/hooks/useAuth'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useNotificationsAction } from '@/hooks/useNotificationsAction'
@@ -17,6 +17,7 @@ import { useUrlParams } from '@/hooks/useUrlParams'
 import { NotificationsBadge } from '@/components/notifications/NotificationsBadge'
 import { SessionPickerPanel } from '@/components/session/SessionPickerPanel'
 import { LinkedServersNav } from './LinkedServersNav'
+import { ProjectHub } from './ProjectHub'
 import { buildNavModel, isManagerOnlyNavItem, type NavItem } from './navItems'
 import { TabStrip } from './MobileTabBar'
 import { SIDE_MENU_WIDE_MEDIA_QUERY } from './sideMenuLayout'
@@ -83,7 +84,7 @@ function MenuRow({ icon: Icon, label, onClick, danger, trailing }: MenuRowProps)
 /** Side menu body shared by the phone overlay and the docked desktop panel. */
 export function SideMenuContent({ variant, fullWidth, onClose }: SideMenuContentProps) {
   const location = useLocation()
-  const { project, page, setPage, closeMenu } = useSideMenu()
+  const { project, page, setPage, closeMenu, navigateFromMenu } = useSideMenu()
   const menuTabs = useTabDestinations(project)
   const { updateParams } = useUrlParams()
   const { logout } = useAuth()
@@ -93,6 +94,7 @@ export function SideMenuContent({ variant, fullWidth, onClose }: SideMenuContent
   const pickerNavigation = useSessionPickerNavigation({
     mode: 'push',
     onClose: closeMenu,
+    navigateFromMenu,
     selectRepoDestination: 'menu',
   })
   const { currentRepo, activeSessionID, remote } = useSessionPickerRouteScope(page === 'sessions')
@@ -112,6 +114,9 @@ export function SideMenuContent({ variant, fullWidth, onClose }: SideMenuContent
         ? 'Assistant'
         : repo ? getRepoDisplayName(repo) : null
   const projectBranch = repoId !== null ? repo?.currentBranch || repo?.branch : undefined
+  const renderProjectSessions = project?.kind === 'repo'
+    ? () => <ProjectHub key={encodeProjectTarget(project)} target={project} />
+    : undefined
 
   const handleSettingsClick = () => {
     updateParams((params) => {
@@ -219,6 +224,7 @@ export function SideMenuContent({ variant, fullWidth, onClose }: SideMenuContent
               remote={remote}
               projectName={projectName ?? undefined}
               onProjectLabelShownChange={setProjectLabelShown}
+              renderProjectSessions={renderProjectSessions}
             />
           </div>
         ) : (

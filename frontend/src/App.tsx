@@ -5,7 +5,6 @@ import { useEffect, useRef, type ReactNode } from 'react'
 import { DEVICE_PAIRING_PATH, LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { Toaster } from 'sonner'
 import { Repos } from './pages/Repos'
-import { RepoDetail } from './pages/RepoDetail'
 import { LinkedServerRedirect } from './pages/LinkedServerRedirect'
 import { RemoteProject } from './pages/RemoteProject'
 import { SessionDetail } from './pages/SessionDetail'
@@ -15,13 +14,13 @@ import { Login } from './pages/Login'
 import { Pair } from './pages/Pair'
 import { Register } from './pages/Register'
 import { Setup } from './pages/Setup'
-import { AssistantRedirect } from './pages/AssistantRedirect'
 import { SettingsDialog } from './components/settings/SettingsDialog'
 import { VersionNotifier } from './components/VersionNotifier'
 import { PwaUpdatePrompt } from '@/components/PwaUpdatePrompt'
 import { MobileTabBar } from '@/components/navigation/MobileTabBar'
 import { MobileSheetHost } from '@/components/navigation/MobileSheetHost'
 import { ProjectToolsHost } from '@/components/navigation/ProjectToolsHost'
+import { ProjectHubRedirect } from '@/components/navigation/ProjectHubRedirect'
 import { SideMenu, useSideMenuOffset } from '@/components/navigation/SideMenu'
 import { RouteErrorBoundary } from '@/components/ui/route-error-boundary'
 import { NotFoundState } from '@/components/ui/not-found-state'
@@ -309,17 +308,17 @@ const router = createBrowserRouter([
           },
           {
             path: '/assistant',
-            element: <AssistantRedirect />,
+            element: <ProjectHubRedirect />,
             loader: protectedLoader,
           },
           {
             path: '/repos/:id',
-            element: <RepoDetail />,
+            element: <ProjectHubRedirect />,
             loader: protectedLoader,
           },
           {
             path: '/repos/:id/assistant',
-            element: <AssistantRedirect />,
+            element: <ProjectHubRedirect />,
             loader: protectedLoader,
           },
           {

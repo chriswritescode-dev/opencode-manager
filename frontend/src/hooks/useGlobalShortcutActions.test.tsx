@@ -87,20 +87,20 @@ describe('useGlobalShortcutActions', () => {
     }
   }
 
-  it('opens the terminal dialog on the assistant host from the root route', async () => {
+  it('opens the terminal for the assistant project from the root route', async () => {
     const { location } = renderHarness('/')
 
     pressLeaderFollowUp('t')
 
-    await waitFor(() => expect(location()).toBe('/assistant?dialog=terminal'))
+    await waitFor(() => expect(location()).toBe('/?dialog=terminal&toolProject=repo%3A0'))
   })
 
-  it('navigates to the nearest repo host from a repo sub-route without the tool', async () => {
+  it('opens the tool for the nearest repo project from a repo sub-route', async () => {
     const { location } = renderHarness('/repos/5/schedules')
 
     pressLeaderFollowUp('t')
 
-    await waitFor(() => expect(location()).toBe('/repos/5?dialog=terminal'))
+    await waitFor(() => expect(location()).toBe('/?dialog=terminal&toolProject=repo%3A5'))
   })
 
   it('toggles the docked panel on and off when the route hosts the tool', async () => {
