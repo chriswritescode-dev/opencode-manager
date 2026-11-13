@@ -49,7 +49,7 @@ export type {
   V2Event,
 } from '@opencode/client'
 
-export { ClientError, isIntegrationNotFoundError, isMcpServerNotFoundError, isSessionNotFoundError, isWorktreeError } from '@opencode/client'
+export { ClientError, isMcpServerNotFoundError, isSessionNotFoundError, isWorktreeError } from '@opencode/client'
 
 export { assistantText, sessionIDFromEvent, toolContentText } from './content'
 
@@ -234,6 +234,10 @@ export interface OpenCodeLocation {
 
 export function openCodeLocation(directory: string | undefined): OpenCodeLocation | undefined {
   return directory ? { location: { directory } } : undefined
+}
+
+export async function awaitOpenCodePlugins(api: Pick<OpenCodeApi, 'provider'>): Promise<void> {
+  await api.provider.list()
 }
 
 interface OpenCodeErrorStatusByTag {

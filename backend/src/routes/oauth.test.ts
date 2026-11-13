@@ -142,6 +142,19 @@ describe('oauth routes /auth-methods', () => {
     expect(res.status).toBe(502)
     expect(await res.json()).toEqual({ error: 'Failed to get provider auth methods', code: 'ClientError' })
   })
+
+  it('waits for plugin activation before listing the auth methods', async () => {
+    const client = createStubOpenCodeClient()
+    const providerList = vi.mocked(client.api.provider.list)
+    const integrationList = vi.mocked(client.api.integration.list)
+    integrationList.mockResolvedValueOnce({ location: LOCATION, data: [integrationFixture()] })
+
+    const res = await createOAuthApp(client).request('/oauth/auth-methods')
+
+    expect(res.status).toBe(200)
+    expect(integrationList).toHaveBeenCalledTimes(1)
+    expect(providerList).toHaveBeenCalledBefore(integrationList)
+  })
 })
 
 describe('oauth routes /:id/oauth/authorize', () => {
@@ -190,19 +203,6 @@ describe('oauth routes /:id/oauth/authorize', () => {
       error: 'Missing required form field: deploymentType',
       code: 'InvalidRequestError',
     })
-  })
-
-  it('retries once after a loading integration becomes available', async () => {
-    const client = createStubOpenCodeClient()
-    const connect = vi.mocked(client.api.integration.oauth.connect)
-    connect.mockRejectedValueOnce(taggedError('IntegrationNotFoundError', 'Integration not found: github-copilot'))
-
-    const res = await authorizeRequest(createOAuthApp(client))
-
-    expect(res.status).toBe(200)
-    expect((await readJson(res, OAuthAuthorizeResponseSchema)).attemptID).toBe('con_stub')
-    expect(connect).toHaveBeenCalledTimes(2)
-    expect(vi.mocked(client.api.integration.get)).toHaveBeenCalledWith({ integrationID: 'github-copilot' })
   })
 
   it('returns 404 when the integration is gone', async () => {

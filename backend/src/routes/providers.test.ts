@@ -277,22 +277,6 @@ describe('providers routes', () => {
       expect(await readJson(res, CredentialStatusResponseSchema)).toEqual({ hasCredentials: false })
     })
 
-    it('retries once after a loading integration becomes available', async () => {
-      const client = createStubOpenCodeClient()
-      const get = vi.mocked(client.api.integration.get)
-      get.mockRejectedValueOnce(taggedError('IntegrationNotFoundError', 'Integration not found: anthropic'))
-      get.mockResolvedValue({
-        location: LOCATION,
-        data: integrationFixture({ connections: [credentialConnection('cred_1')] }),
-      })
-
-      const res = await createCredentialApp(client).request('/providers/anthropic/credentials/status')
-
-      expect(res.status).toBe(200)
-      expect(await readJson(res, CredentialStatusResponseSchema)).toEqual({ hasCredentials: true })
-      expect(get).toHaveBeenCalledTimes(3)
-    })
-
     it('returns 404 for a missing integration', async () => {
       vi.useFakeTimers()
       try {
@@ -363,17 +347,29 @@ describe('providers routes', () => {
       expect(vi.mocked(client.api.integration.connect.key)).not.toHaveBeenCalled()
     })
 
-    it('retries once after a loading integration becomes available', async () => {
+    it('waits for plugin activation before connecting the key', async () => {
       const client = createStubOpenCodeClient()
+      const providerList = vi.mocked(client.api.provider.list)
       const connectKey = vi.mocked(client.api.integration.connect.key)
-      connectKey.mockRejectedValueOnce(taggedError('IntegrationNotFoundError', 'Integration not found: anthropic'))
 
       const res = await connectRequest(createCredentialApp(client))
 
       expect(res.status).toBe(200)
-      expect(await readJson(res, SuccessResponseSchema)).toEqual({ success: true })
-      expect(connectKey).toHaveBeenCalledTimes(2)
-      expect(vi.mocked(client.api.integration.get)).toHaveBeenCalledWith({ integrationID: 'anthropic' })
+      expect(connectKey).toHaveBeenCalledTimes(1)
+      expect(providerList).toHaveBeenCalledBefore(connectKey)
+    })
+
+    it('returns the plugin-activation failure without connecting the key', async () => {
+      const client = createStubOpenCodeClient()
+      vi.mocked(client.api.provider.list).mockRejectedValueOnce(
+        taggedError('ServiceUnavailableError', 'Plugins are still loading'),
+      )
+
+      const res = await connectRequest(createCredentialApp(client))
+
+      expect(res.status).toBe(502)
+      expect(await readJson(res, ErrorResponseSchema)).toEqual({ error: 'Plugins are still loading' })
+      expect(vi.mocked(client.api.integration.connect.key)).not.toHaveBeenCalled()
     })
 
     it('returns 404 for a missing integration', async () => {
@@ -448,23 +444,6 @@ describe('providers routes', () => {
       expect(vi.mocked(client.api.credential.remove)).not.toHaveBeenCalled()
     })
 
-    it('retries once after a loading integration becomes available', async () => {
-      const client = createStubOpenCodeClient()
-      const get = vi.mocked(client.api.integration.get)
-      get.mockRejectedValueOnce(taggedError('IntegrationNotFoundError', 'Integration not found: anthropic'))
-      get.mockResolvedValue({
-        location: LOCATION,
-        data: integrationFixture({ connections: [credentialConnection('cred_1')] }),
-      })
-
-      const res = await createCredentialApp(client).request('/providers/anthropic/credentials', { method: 'DELETE' })
-
-      expect(res.status).toBe(200)
-      expect(await readJson(res, SuccessResponseSchema)).toEqual({ success: true })
-      expect(vi.mocked(client.api.credential.remove)).toHaveBeenCalledWith({ credentialID: 'cred_1' })
-      expect(get).toHaveBeenCalledTimes(3)
-    })
-
     it('returns 404 for a missing integration', async () => {
       vi.useFakeTimers()
       try {
@@ -533,8 +512,6 @@ describe.skipIf(!openCodeBinary)('providers routes against a real OpenCode 2 ser
       })
       const app = new Hono()
       app.route('/providers', createProvidersRoutes(client))
-
-      await client.api.integration.list()
 
       const rejected = await app.request('/providers/azure/credentials', {
         method: 'POST',

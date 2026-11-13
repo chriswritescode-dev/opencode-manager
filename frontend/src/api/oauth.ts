@@ -1,6 +1,7 @@
 import { API_BASE_URL } from "@/config"
 import { z } from "zod"
 import type { FormAnswer, IntegrationInfo, IntegrationMethod } from "@opencode-manager/shared/opencode"
+import { awaitOpenCodePlugins } from "@opencode-manager/shared/opencode"
 import { OAuthAttemptStatusSchema, OAuthAuthorizeResponseSchema } from "@opencode-manager/shared/schemas"
 import type { OAuthAttemptStatus, OAuthAuthorizeResponse } from "@opencode-manager/shared/schemas"
 import { fetchWrapper, fetchWrapperVoid } from "./fetchWrapper"
@@ -147,7 +148,10 @@ export const oauthApi = {
   },
 
   getIntegrations: async (): Promise<IntegrationInfo[]> => {
-    const { data } = await callOpenCode((api) => api.integration.list())
+    const { data } = await callOpenCode(async (api) => {
+      await awaitOpenCodePlugins(api)
+      return api.integration.list()
+    })
     return data
   },
 }
