@@ -217,7 +217,7 @@ function mobileModelList() {
   return list
 }
 
-function lastModelStateRequest(fetchFake: ReturnType<typeof renderQuickSelect>['fetchFake']) {
+function lastModelStateRequest(fetchFake: Awaited<ReturnType<typeof renderQuickSelect>>['fetchFake']) {
   return fetchFake.lastRequest('POST', '/api/providers/model-state')?.body
 }
 
