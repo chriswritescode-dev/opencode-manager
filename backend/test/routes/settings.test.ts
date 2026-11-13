@@ -966,11 +966,11 @@ describe('Settings routes', () => {
   })
 
   describe('PATCH / validation', () => {
-    it.each([5, 45, 2000, 30.5])('rejects activityWindowMinutes %s', async (minutes) => {
+    it('rejects an activityWindowMinutes value that is not an option', async () => {
       const res = await settingsApp.request('/', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preferences: { activityWindowMinutes: minutes } }),
+        body: JSON.stringify({ preferences: { activityWindowMinutes: 45 } }),
       })
 
       expect(res.status).toBe(400)

@@ -44,14 +44,10 @@ describe('session pins routes', () => {
     const { pins } = await readJson(res, SessionPinListSchema)
     expect(pins).toHaveLength(1)
     expect(pins[0]).toMatchObject({ sessionId: 'ses_1', directory: '/w/a' })
-  })
 
-  it('GET / returns pins after creation', async () => {
-    await togglePin(app, 'ses_1', '/w/a', true)
-
-    const res = await app.request('/session-pins')
-    expect(res.status).toBe(200)
-    expect((await readJson(res, SessionPinListSchema)).pins).toHaveLength(1)
+    const listRes = await app.request('/session-pins')
+    expect(listRes.status).toBe(200)
+    expect((await readJson(listRes, SessionPinListSchema)).pins).toHaveLength(1)
   })
 
   it('PUT / with pinned: false removes the pin', async () => {

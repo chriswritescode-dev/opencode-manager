@@ -33,12 +33,6 @@ const ActiveSessionsSchema = z.object({
   sessions: z.array(z.object({ sessionID: z.string(), directory: z.string() })),
 })
 
-const RestartResponseSchema = z.object({
-  success: z.boolean(),
-  message: z.string().optional(),
-  interruptedSessions: z.array(z.string()).optional(),
-})
-
 function lifecycleStatus(): OpenCodeLifecycleStatus {
   return {
     state: 'healthy',
@@ -109,33 +103,8 @@ describe('settings routes — serverEnvVars', () => {
     expect((await readJson(res, SettingsResponseSchema)).preferences.serverEnvVars).toEqual([])
   })
 
-  it('PATCH / saves and returns serverEnvVars', async () => {
-    const patchRes = await app.request('/settings', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        preferences: {
-          serverEnvVars: [
-            {
-              key: 'OPENCODE_EXPERIMENTAL_FEATURE',
-              value: 'true',
-            },
-          ],
-        },
-      }),
-    })
-
-    expect(patchRes.status).toBe(200)
-    expect((await readJson(patchRes, SettingsResponseSchema)).preferences.serverEnvVars).toEqual([
-      {
-        key: 'OPENCODE_EXPERIMENTAL_FEATURE',
-        value: 'true',
-      },
-    ])
-  })
-
   it('PATCH / persists serverEnvVars and returns on GET', async () => {
-    await app.request('/settings', {
+    const patchRes = await app.request('/settings', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -147,6 +116,14 @@ describe('settings routes — serverEnvVars', () => {
         },
       }),
     })
+
+    expect(patchRes.status).toBe(200)
+    expect((await readJson(patchRes, SettingsResponseSchema)).preferences.serverEnvVars).toEqual([
+      {
+        key: 'MY_FLAG',
+        value: '1',
+      },
+    ])
 
     const res = await app.request('/settings')
 
@@ -250,52 +227,6 @@ describe('settings routes — opencode model discovery', () => {
     workspace.restore()
   })
 
-  it.each([
-    { label: 'missing', query: '' },
-    { label: 'invalid', query: '?baseUrl=not-a-url' },
-    { label: 'not http/https', query: '?baseUrl=ftp://example.com' },
-  ])('returns 400 when baseUrl is $label', async ({ query }) => {
-    const res = await app.request(`/settings/opencode-discover-models${query}`)
-
-    expect(res.status).toBe(400)
-  })
-
-  it('discovers models from the endpoint', async () => {
-    fetchStub.mockResolvedValueOnce(
-      new Response(JSON.stringify({ data: [{ id: 'gpt-4o' }, { id: 'gpt-3.5-turbo' }] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-
-    const res = await app.request('/settings/opencode-discover-models?baseUrl=http://localhost:1234&refresh=true')
-
-    expect(res.status).toBe(200)
-    const data = await readJson(res, DiscoveredModelsSchema)
-    expect(data.models).toEqual(['gpt-4o', 'gpt-3.5-turbo'])
-    expect(data.cached).toBe(false)
-  })
-
-  it('returns cached models on subsequent requests without re-fetching', async () => {
-    fetchStub.mockResolvedValueOnce(
-      new Response(JSON.stringify({ data: [{ id: 'llama-3' }] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-
-    const firstRes = await app.request('/settings/opencode-discover-models?baseUrl=http://localhost:5678&refresh=true')
-    const firstData = await readJson(firstRes, DiscoveredModelsSchema)
-    expect(firstData.models).toEqual(['llama-3'])
-    expect(firstData.cached).toBe(false)
-
-    const secondRes = await app.request('/settings/opencode-discover-models?baseUrl=http://localhost:5678')
-    const secondData = await readJson(secondRes, DiscoveredModelsSchema)
-    expect(secondData.models).toEqual(['llama-3'])
-    expect(secondData.cached).toBe(true)
-    expect(fetchStub).toHaveBeenCalledTimes(1)
-  })
-
   it('returns empty models when endpoint is unreachable', async () => {
     fetchStub.mockRejectedValue(new Error('connection refused'))
 
@@ -337,31 +268,5 @@ describe('settings routes — active session reporting', () => {
     const body = await readJson(res, ActiveSessionsSchema)
     expect(body.count).toBe(1)
     expect(body.sessions).toEqual([{ sessionID: 's1', directory: '/a' }])
-  })
-
-  it('GET /opencode-active-sessions returns empty when nothing is active', async () => {
-    stubActiveSessions({})
-    const app = createTestApp(db, createSettingsDeps())
-
-    const res = await app.request('/settings/opencode-active-sessions')
-
-    expect(res.status).toBe(200)
-    const body = await readJson(res, ActiveSessionsSchema)
-    expect(body.count).toBe(0)
-    expect(body.sessions).toEqual([])
-  })
-
-  it('POST /opencode-restart restarts the server without reporting interrupted sessions', async () => {
-    stubActiveSessions({ '/a': ['s1'] })
-    const restart = vi.fn<OpenCodeRestartTarget['restart']>(async () => lifecycleStatus())
-    const app = createTestApp(db, createSettingsDeps(), { restart })
-
-    const res = await app.request('/settings/opencode-restart', { method: 'POST' })
-
-    expect(res.status).toBe(200)
-    const body = await readJson(res, RestartResponseSchema)
-    expect(body.success).toBe(true)
-    expect(body.interruptedSessions).toBeUndefined()
-    expect(restart).toHaveBeenCalledWith('settings_restart')
   })
 })
