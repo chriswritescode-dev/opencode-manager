@@ -1,121 +1,170 @@
-import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { useState } from 'react'
+import type { ComponentProps } from 'react'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
+import { buildServerDirectoryKey } from '@opencode-manager/shared/schemas'
 import { ModelQuickSelect } from './ModelQuickSelect'
-import { buildModelSections } from '@/lib/modelSections'
-import type { ModelInfo } from '@opencode-manager/shared/opencode'
-import type { Provider } from '@/api/providers'
+import { useModelStore, locationAgentKey } from '@/stores/modelStore'
+import { installElementScrollMetrics, installWindowSize } from '@/test/browserFakes'
+import { renderWithProviders } from '@/test/render'
+import type { FetchRoute } from '@/test/fetchFake'
 
-const mocks = vi.hoisted(() => ({
-  useModelSelection: vi.fn(),
-  useModelSections: vi.fn(),
-  deferredSearchValue: { current: null as string | null },
-}))
-
-vi.mock('react', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react')>()
-  return {
-    ...actual,
-    useDeferredValue: (value: string) => mocks.deferredSearchValue.current ?? value,
-  }
-})
-
-vi.mock('@/hooks/useModelSelection', () => ({
-  useModelSelection: mocks.useModelSelection,
-}))
-
-vi.mock('@/hooks/useVariants', () => ({
-  useVariants: () => ({
-    availableVariants: [],
-    currentVariant: undefined,
-    setVariant: vi.fn(),
-    cycleVariant: vi.fn(),
-    clearVariant: vi.fn(),
-    hasVariants: false,
-  }),
-}))
-
-vi.mock('@/hooks/useModelSections', () => ({
-  useModelSections: mocks.useModelSections,
-}))
-
-const providers: Provider[] = [
-  {
-    id: 'opencode-go',
-    name: 'OpenCode Go',
-    models: [{ id: 'go-1', modelID: 'go-1', name: 'Go Model One', released: 0, free: false }],
-  },
-  {
-    id: 'opencode',
-    name: 'OpenCode',
-    models: [{ id: 'zen-1', modelID: 'zen-1', name: 'Zen One', released: 0, free: false }],
-  },
-  {
-    id: 'anthropic',
-    name: 'Anthropic',
-    models: [
-      { id: 'claude-sonnet-4', modelID: 'claude-sonnet-4', name: 'Claude Sonnet 4', released: 0, free: false },
-      { id: 'claude-opus-5-5-fast', modelID: 'claude-opus-5-5', name: 'Claude Opus 5.5', released: 0, free: false },
-    ],
-  },
-  {
-    id: 'openai',
-    name: 'OpenAI',
-    models: [{ id: 'gpt-5', modelID: 'gpt-5', name: 'GPT-5', released: 0, free: false }],
-  },
-]
+type QuickSelectProps = ComponentProps<typeof ModelQuickSelect>
 
 interface Selection {
   providerID: string
   modelID: string
 }
 
-function selection(providerID: string, modelID: string): Selection {
-  return { providerID, modelID }
+interface CatalogModel {
+  id: string
+  providerID: string
+  name: string
+  contextLimit?: number
+  released?: number
 }
 
-interface SelectionOptions {
+interface CatalogProvider {
+  id: string
+  name: string
+  activation?: 'auto' | 'enabled' | 'disabled'
+}
+
+interface QuickState {
   favorite?: Selection[]
   recent?: Selection[]
-  model?: Selection | null
-  info?: ModelInfo
-  defaultModel?: string
+  model?: Selection
+  defaultModel?: Selection
+  providers?: CatalogProvider[]
+  models?: CatalogModel[]
 }
 
-function setModelSelection(options: SelectionOptions = {}) {
-  const favorite = options.favorite ?? []
-  const recent = options.recent ?? []
-  const model = options.model ?? null
-  const setModel = vi.fn()
-  const toggleFavorite = vi.fn()
-  const removeRecentModel = vi.fn()
-  const modelState = { favorite, recent, variant: {} }
+const defaultProviders: CatalogProvider[] = [
+  { id: 'opencode-go', name: 'OpenCode Go' },
+  { id: 'opencode', name: 'OpenCode' },
+  { id: 'anthropic', name: 'Anthropic' },
+  { id: 'openai', name: 'OpenAI' },
+]
 
-  mocks.useModelSelection.mockReturnValue({
-    model,
-    modelString: model ? `${model.providerID}/${model.modelID}` : null,
-    info: options.info,
-    activeAgent: null,
-    recentModels: recent,
-    favoriteModels: favorite,
-    configured: null,
-    modelState,
-    setModel,
-    setActiveAgent: vi.fn(),
-    toggleFavorite,
-    removeRecentModel,
-    isModelReady: true,
-  })
+const defaultModels: CatalogModel[] = [
+  { id: 'go-1', providerID: 'opencode-go', name: 'Go Model One' },
+  { id: 'zen-1', providerID: 'opencode', name: 'Zen One' },
+  { id: 'claude-sonnet-4', providerID: 'anthropic', name: 'Claude Sonnet 4', contextLimit: 200000, released: 2 },
+  { id: 'claude-opus-5-5-fast', providerID: 'anthropic', name: 'Claude Opus 5.5', contextLimit: 1000000, released: 1 },
+  { id: 'gpt-5', providerID: 'openai', name: 'GPT-5' },
+]
 
-  mocks.useModelSections.mockReturnValue({
-    providers,
-    sections: buildModelSections(providers, modelState, options.defaultModel),
-    defaultModel: options.defaultModel ?? null,
-    modelState,
-    isLoading: false,
-  })
+const modelDirectoryKey = locationAgentKey(buildServerDirectoryKey(LOCAL_OPENCODE_SERVER_ID, ''), undefined)
 
-  return { setModel, toggleFavorite, removeRecentModel }
+const originalClientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
+
+beforeAll(() => {
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 600 })
+})
+
+afterAll(() => {
+  if (originalClientHeight) {
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalClientHeight)
+    return
+  }
+  Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
+})
+
+function rawModel(model: CatalogModel) {
+  return {
+    id: model.id,
+    modelID: model.id,
+    providerID: model.providerID,
+    name: model.name,
+    capabilities: {},
+    enabled: true,
+    status: 'active',
+    limit: { context: model.contextLimit ?? 200000, output: 8192 },
+    time: { released: model.released ?? 1 },
+    cost: [{ input: 3, output: 15 }],
+    variants: [],
+  }
+}
+
+function selectionRoutes(state: QuickState): FetchRoute[] {
+  return [
+    {
+      method: 'GET',
+      path: '/api/opencode/api/provider',
+      respond: () => ({ json: { data: state.providers ?? defaultProviders } }),
+    },
+    {
+      method: 'GET',
+      path: '/api/opencode/api/model',
+      respond: () => ({ json: { data: (state.models ?? defaultModels).map(rawModel) } }),
+    },
+    {
+      method: 'GET',
+      path: '/api/opencode/api/model/default',
+      respond: () => ({ json: { data: state.defaultModel ?? null } }),
+    },
+    { method: 'GET', path: '/api/opencode/api/config', respond: () => ({ json: {} }) },
+    {
+      method: 'GET',
+      path: '/api/providers/model-state',
+      respond: () => ({
+        json: { favorite: state.favorite ?? [], recent: state.recent ?? [], variant: {} },
+      }),
+    },
+    {
+      method: 'POST',
+      path: '/api/providers/model-state',
+      respond: () => ({ json: { favorite: state.favorite ?? [], recent: state.recent ?? [], variant: {} } }),
+    },
+  ]
+}
+
+function QuickSelectHarness({
+  initial,
+  bind,
+}: {
+  initial: Partial<QuickSelectProps>
+  bind: (update: (next: Partial<QuickSelectProps>) => void) => void
+}) {
+  const [props, setProps] = useState(initial)
+  bind((next) => setProps((current) => ({ ...current, ...next })))
+  return <ModelQuickSelect {...props} open={props.open ?? true} />
+}
+
+async function renderQuickSelect(props: Partial<QuickSelectProps> = {}, state: QuickState = {}) {
+  if (state.model) useModelStore.setState({ newSessionPicks: { [modelDirectoryKey]: state.model } })
+  let update: (next: Partial<QuickSelectProps>) => void = () => undefined
+  const result = renderWithProviders(
+    <QuickSelectHarness
+      initial={props}
+      bind={(nextUpdate) => {
+        update = nextUpdate
+      }}
+    />,
+    {
+      auth: false,
+      theme: false,
+      toaster: false,
+      fetchRoutes: selectionRoutes(state),
+    },
+  )
+  await waitFor(() => expect(result.fetchFake.lastRequest('GET', '/api/opencode/api/model')).toBeDefined())
+  await waitFor(() => expect(result.queryClient.isFetching()).toBe(0))
+
+  return {
+    ...result,
+    update: async (next: Partial<QuickSelectProps>) => {
+      await act(async () => {
+        update(next)
+      })
+    },
+  }
+}
+
+function selection(providerID: string, modelID: string): Selection {
+  return { providerID, modelID }
 }
 
 function sectionFor(title: string) {
@@ -136,16 +185,17 @@ function isBefore(first: HTMLElement, second: HTMLElement) {
 const DARK_ONLY_CLASS = /text-white|bg-zinc-950|bg-white\/|border-white\//
 
 function findDarkOnlyClassOffenders(root: HTMLElement) {
-  return Array.from(root.querySelectorAll<HTMLElement>('*')).filter((element) =>
+  return Array.from(root.querySelectorAll('*')).filter((element) =>
     DARK_ONLY_CLASS.test(element.getAttribute('class') ?? ''),
   )
 }
 
-async function openSelector(user: ReturnType<typeof userEvent.setup>) {
-  render(
+async function openSelector(user: ReturnType<typeof userEvent.setup>, state: QuickState = {}) {
+  renderWithProviders(
     <ModelQuickSelect>
       <span>Select model</span>
     </ModelQuickSelect>,
+    { auth: false, theme: false, toaster: false, fetchRoutes: selectionRoutes(state) },
   )
 
   await user.click(screen.getByText('Select model'))
@@ -160,36 +210,16 @@ function focusDetachedTextarea() {
   return textarea
 }
 
-const originalInnerWidth = window.innerWidth
-
-function setViewportWidth(width: number) {
-  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width })
-}
-
 function mobileModelList() {
-  const lists = Array.from(document.querySelectorAll<HTMLElement>('.overflow-y-auto.px-4.pb-4'))
+  const lists = Array.from(document.querySelectorAll('.overflow-y-auto.px-4.pb-4'))
   const list = lists.find((element) => !element.classList.contains('pt-2'))
   if (!list) throw new Error('No mobile model list found')
   return list
 }
 
-afterEach(() => {
-  document.querySelectorAll('textarea').forEach((element) => element.remove())
-  setViewportWidth(originalInnerWidth)
-  mocks.deferredSearchValue.current = null
-})
-
-beforeAll(() => {
-  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
-    configurable: true,
-    get: () => 600,
-  })
-})
-
-beforeEach(() => {
-  vi.clearAllMocks()
-  setModelSelection()
-})
+function lastModelStateRequest(fetchFake: ReturnType<typeof renderQuickSelect>['fetchFake']) {
+  return fetchFake.lastRequest('POST', '/api/providers/model-state')?.body
+}
 
 describe('ModelQuickSelect theme tokens', () => {
   it('renders the quick view with theme tokens instead of dark-only classes', async () => {
@@ -214,19 +244,19 @@ describe('ModelQuickSelect theme tokens', () => {
 })
 
 describe('ModelQuickSelect controlled open', () => {
-  it('uses the controlled open prop as the source of truth', () => {
+  it('uses the controlled open prop as the source of truth', async () => {
     const onOpenChange = vi.fn()
-    const { rerender } = render(<ModelQuickSelect open={false} onOpenChange={onOpenChange} />)
+    const { update } = await renderQuickSelect({ open: false, onOpenChange })
 
     expect(screen.queryByRole('dialog', { name: 'Select model' })).not.toBeInTheDocument()
 
-    rerender(<ModelQuickSelect open onOpenChange={onOpenChange} />)
+    await update({ open: true })
 
     expect(screen.getByRole('dialog', { name: 'Select model' })).toBeInTheDocument()
   })
 
-  it('renders only the sheet without a trigger when no children are provided', () => {
-    render(<ModelQuickSelect open />)
+  it('renders only the sheet without a trigger when no children are provided', async () => {
+    await renderQuickSelect({ open: true })
 
     expect(screen.getByRole('dialog', { name: 'Select model' })).toBeInTheDocument()
     expect(document.querySelector('[data-model-select-trigger]')).toBeNull()
@@ -235,7 +265,7 @@ describe('ModelQuickSelect controlled open', () => {
   it('resets the internal navigation state when the sheet is closed through the component', async () => {
     const user = userEvent.setup()
     const onOpenChange = vi.fn()
-    render(<ModelQuickSelect open onOpenChange={onOpenChange} />)
+    await renderQuickSelect({ onOpenChange })
 
     await user.click(screen.getByRole('button', { name: /More models/ }))
     expect(screen.getByPlaceholderText('Search models...')).toBeInTheDocument()
@@ -249,10 +279,8 @@ describe('ModelQuickSelect controlled open', () => {
 })
 
 describe('ModelQuickSelect quick view', () => {
-  it('lists every valid favorite in model.json order', () => {
-    setModelSelection({ favorite: [selection('anthropic', 'claude-sonnet-4'), selection('openai', 'gpt-5')] })
-
-    render(<ModelQuickSelect open />)
+  it('lists every valid favorite in catalog order', async () => {
+    await renderQuickSelect({}, { favorite: [selection('anthropic', 'claude-sonnet-4'), selection('openai', 'gpt-5')] })
 
     const section = sectionFor('Favorites')
     expect(section.textContent).toContain('Claude Sonnet 4')
@@ -260,47 +288,50 @@ describe('ModelQuickSelect quick view', () => {
     expect(section.textContent!.indexOf('Claude Sonnet 4')).toBeLessThan(section.textContent!.indexOf('GPT-5'))
   })
 
-  it('keeps a favorite listed when it is also the default model', () => {
-    setModelSelection({
-      favorite: [selection('anthropic', 'claude-sonnet-4'), selection('openai', 'gpt-5')],
-      defaultModel: 'openai/gpt-5',
-    })
-
-    render(<ModelQuickSelect open />)
+  it('keeps a favorite listed when it is also the default model', async () => {
+    await renderQuickSelect(
+      {},
+      {
+        favorite: [selection('anthropic', 'claude-sonnet-4'), selection('openai', 'gpt-5')],
+        defaultModel: selection('openai', 'gpt-5'),
+      },
+    )
 
     const section = sectionFor('Favorites')
     expect(section.textContent).toContain('Claude Sonnet 4')
     expect(section.textContent).toContain('GPT-5')
   })
 
-  it('lists the valid recents that are not favorites', () => {
-    setModelSelection({
-      favorite: [selection('anthropic', 'claude-sonnet-4')],
-      recent: [selection('anthropic', 'claude-sonnet-4'), selection('openai', 'gpt-5')],
-    })
-
-    render(<ModelQuickSelect open />)
+  it('lists the valid recents that are not favorites', async () => {
+    await renderQuickSelect(
+      {},
+      {
+        favorite: [selection('anthropic', 'claude-sonnet-4')],
+        recent: [selection('anthropic', 'claude-sonnet-4'), selection('openai', 'gpt-5')],
+      },
+    )
 
     const section = sectionFor('Recent')
     expect(section.textContent).toContain('GPT-5')
     expect(section.textContent).not.toContain('Claude Sonnet 4')
   })
 
-  it('keeps the active model listed with its check mark', () => {
-    setModelSelection({
-      favorite: [selection('anthropic', 'claude-sonnet-4')],
-      model: selection('anthropic', 'claude-sonnet-4'),
-    })
-
-    render(<ModelQuickSelect open />)
+  it('keeps the active model listed with its check mark', async () => {
+    await renderQuickSelect(
+      {},
+      {
+        favorite: [selection('anthropic', 'claude-sonnet-4')],
+        model: selection('anthropic', 'claude-sonnet-4'),
+      },
+    )
 
     const section = sectionFor('Favorites')
     expect(section.textContent).toContain('Claude Sonnet 4')
     expect(section.querySelector('.text-highlight')).not.toBeNull()
   })
 
-  it('shows the first catalog models under Models when there are no favorites or recents', () => {
-    render(<ModelQuickSelect open />)
+  it('shows the first catalog models under Models when there are no favorites or recents', async () => {
+    await renderQuickSelect()
 
     const section = sectionFor('Models')
     expect(section.textContent).toContain('Go Model One')
@@ -309,38 +340,49 @@ describe('ModelQuickSelect quick view', () => {
     expect(section.textContent).not.toContain('GPT-5')
   })
 
-  it('shows the catalog name of an active model that is not in the provider sections', () => {
-    setModelSelection({
-      model: selection('openai', 'gpt-5-legacy'),
-      info: { providerID: 'openai', id: 'gpt-5-legacy', name: 'GPT-5 Legacy' } as ModelInfo,
-    })
-
-    render(<ModelQuickSelect open />)
+  it('shows the catalog name of an active model whose provider is not in the provider sections', async () => {
+    await renderQuickSelect(
+      {},
+      {
+        providers: [...defaultProviders, { id: 'legacy', name: 'Legacy', activation: 'disabled' }],
+        models: [...defaultModels, { id: 'gpt-5-legacy', providerID: 'legacy', name: 'GPT-5 Legacy' }],
+        model: selection('legacy', 'gpt-5-legacy'),
+      },
+    )
 
     expect(screen.getByText('GPT-5 Legacy')).toBeInTheDocument()
   })
 
-  it('calls the favorite and remove-recent handlers', async () => {
+  it('writes the favorite and remove-recent changes to the server', async () => {
     const user = userEvent.setup()
-    const { toggleFavorite, removeRecentModel } = setModelSelection({
-      favorite: [selection('anthropic', 'claude-sonnet-4')],
-      recent: [selection('openai', 'gpt-5')],
-    })
-
-    render(<ModelQuickSelect open />)
+    const { fetchFake } = await renderQuickSelect(
+      {},
+      {
+        favorite: [selection('anthropic', 'claude-sonnet-4')],
+        recent: [selection('openai', 'gpt-5')],
+      },
+    )
 
     await user.click(screen.getByRole('button', { name: 'Remove from favorites' }))
-    expect(toggleFavorite).toHaveBeenCalledWith(selection('anthropic', 'claude-sonnet-4'))
+    await waitFor(() =>
+      expect(fetchFake.lastRequest('POST', '/api/providers/model-state')?.body).toEqual({
+        favorite: selection('anthropic', 'claude-sonnet-4'),
+      }),
+    )
 
     await user.click(screen.getByRole('button', { name: 'Remove from recent' }))
-    expect(removeRecentModel).toHaveBeenCalledWith(selection('openai', 'gpt-5'))
+    await waitFor(() =>
+      expect(fetchFake.lastRequest('POST', '/api/providers/model-state')?.body).toEqual({
+        removeRecent: selection('openai', 'gpt-5'),
+      }),
+    )
   })
 })
 
 describe('ModelQuickSelect more models', () => {
   it('lists providers in catalog order', async () => {
     const user = userEvent.setup()
-    render(<ModelQuickSelect open />)
+    await renderQuickSelect()
 
     await user.click(screen.getByRole('button', { name: /More models/ }))
 
@@ -352,9 +394,7 @@ describe('ModelQuickSelect more models', () => {
 
   it('keeps a favorite visible in its provider list and count', async () => {
     const user = userEvent.setup()
-    setModelSelection({ favorite: [selection('openai', 'gpt-5')] })
-
-    render(<ModelQuickSelect open />)
+    await renderQuickSelect({}, { favorite: [selection('openai', 'gpt-5')] })
 
     await user.click(screen.getByRole('button', { name: /More models/ }))
 
@@ -368,9 +408,7 @@ describe('ModelQuickSelect more models', () => {
 
   it('searches into one flat list with favorites first', async () => {
     const user = userEvent.setup()
-    setModelSelection({ favorite: [selection('openai', 'gpt-5')] })
-
-    render(<ModelQuickSelect open />)
+    await renderQuickSelect({}, { favorite: [selection('openai', 'gpt-5')] })
 
     await user.click(screen.getByRole('button', { name: /More models/ }))
     await user.type(screen.getByPlaceholderText('Search models...'), '5')
@@ -384,7 +422,7 @@ describe('ModelQuickSelect more models', () => {
 
   it('scopes the search to the selected provider', async () => {
     const user = userEvent.setup()
-    render(<ModelQuickSelect open />)
+    await renderQuickSelect()
 
     await user.click(screen.getByRole('button', { name: /More models/ }))
     await user.click(screen.getAllByRole('button', { name: /Anthropic 2 models/ })[0])
@@ -394,56 +432,56 @@ describe('ModelQuickSelect more models', () => {
     expect(screen.queryByText('GPT-5')).not.toBeInTheDocument()
   })
 
-  it('selects a model and closes the sheet', async () => {
+  it('selects a model and records it as recent', async () => {
     const user = userEvent.setup()
-    const { setModel } = setModelSelection({ favorite: [selection('anthropic', 'claude-sonnet-4')] })
-
-    render(<ModelQuickSelect open />)
+    const { fetchFake } = await renderQuickSelect({}, { favorite: [selection('anthropic', 'claude-sonnet-4')] })
 
     const section = sectionFor('Favorites')
     await user.click(within(section).getByRole('button', { name: /Claude Sonnet 4/ }))
 
-    expect(setModel).toHaveBeenCalledWith(selection('anthropic', 'claude-sonnet-4'))
+    expect(lastModelStateRequest(fetchFake)).toEqual({
+      recent: selection('anthropic', 'claude-sonnet-4'),
+    })
   })
 })
 
 describe('ModelQuickSelect keyboard navigation', () => {
-  it('moves the active quick row with ArrowDown and selects it with Enter', () => {
-    const { setModel } = setModelSelection({ model: selection('opencode-go', 'go-1') })
-
-    render(<ModelQuickSelect open />)
+  it('moves the active quick row with ArrowDown and selects it with Enter', async () => {
+    const { fetchFake } = await renderQuickSelect({}, { model: selection('opencode-go', 'go-1') })
 
     const textarea = focusDetachedTextarea()
 
     expect(fireEvent.keyDown(textarea, { key: 'ArrowDown' })).toBe(false)
     expect(fireEvent.keyDown(textarea, { key: 'Enter' })).toBe(false)
 
-    expect(setModel).toHaveBeenCalledWith(selection('opencode', 'zen-1'))
+    await waitFor(() =>
+      expect(lastModelStateRequest(fetchFake)).toEqual({ recent: selection('opencode', 'zen-1') }),
+    )
   })
 
-  it('clamps at the first quick row and jumps to the last with End', () => {
-    const { setModel } = setModelSelection({ model: selection('opencode-go', 'go-1') })
-
-    render(<ModelQuickSelect open />)
+  it('clamps at the first quick row and jumps to the last with End', async () => {
+    const { fetchFake } = await renderQuickSelect({}, { model: selection('opencode-go', 'go-1') })
 
     const dialog = screen.getByRole('dialog', { name: 'Select model' })
 
     fireEvent.keyDown(dialog, { key: 'ArrowUp' })
     fireEvent.keyDown(dialog, { key: 'Enter' })
-    expect(setModel).toHaveBeenLastCalledWith(selection('opencode-go', 'go-1'))
+    await waitFor(() =>
+      expect(lastModelStateRequest(fetchFake)).toEqual({ recent: selection('opencode-go', 'go-1') }),
+    )
 
-    setModel.mockClear()
+    fetchFake.reset()
 
     fireEvent.keyDown(dialog, { key: 'End' })
     fireEvent.keyDown(dialog, { key: 'Enter' })
-    expect(setModel).toHaveBeenCalledWith(selection('anthropic', 'claude-sonnet-4'))
+    await waitFor(() =>
+      expect(lastModelStateRequest(fetchFake)).toEqual({ recent: selection('anthropic', 'claude-sonnet-4') }),
+    )
   })
 
   it('navigates the search results with the arrow keys and Enter', async () => {
     const user = userEvent.setup()
-    const { setModel } = setModelSelection()
-
-    render(<ModelQuickSelect open />)
+    const { fetchFake } = await renderQuickSelect()
 
     await user.click(screen.getByRole('button', { name: /More models/ }))
     const searchInput = screen.getByPlaceholderText('Search models...')
@@ -454,24 +492,27 @@ describe('ModelQuickSelect keyboard navigation', () => {
     expect(fireEvent.keyDown(searchInput, { key: 'ArrowDown' })).toBe(false)
     expect(fireEvent.keyDown(searchInput, { key: 'Enter' })).toBe(false)
 
-    expect(setModel).toHaveBeenCalledWith(selection('openai', 'gpt-5'))
+    await waitFor(() => expect(lastModelStateRequest(fetchFake)).toEqual({ recent: selection('openai', 'gpt-5') }))
   })
 
-  it('does not select a model when Enter is pressed on a row button', () => {
-    const { setModel } = setModelSelection({ favorite: [selection('anthropic', 'claude-sonnet-4')] })
-
-    render(<ModelQuickSelect open />)
+  it('does not select a model when Enter is pressed on a row button', async () => {
+    const { fetchFake } = await renderQuickSelect({}, { favorite: [selection('anthropic', 'claude-sonnet-4')] })
 
     const star = screen.getByRole('button', { name: /favorites/ })
     star.focus()
 
     fireEvent.keyDown(star, { key: 'Enter' })
 
-    expect(setModel).not.toHaveBeenCalled()
+    expect(lastModelStateRequest(fetchFake)).toBeUndefined()
   })
 
-  it('does not intercept arrow keys when the sheet is closed', () => {
-    render(<ModelQuickSelect />)
+  it('does not intercept arrow keys when the sheet is closed', async () => {
+    renderWithProviders(<ModelQuickSelect />, {
+      auth: false,
+      theme: false,
+      toaster: false,
+      fetchRoutes: selectionRoutes({}),
+    })
 
     const textarea = focusDetachedTextarea()
 
@@ -480,10 +521,9 @@ describe('ModelQuickSelect keyboard navigation', () => {
 
   it('ignores keyboard navigation when the mobile provider list hides the models', async () => {
     const user = userEvent.setup()
-    const { setModel } = setModelSelection()
-    setViewportWidth(500)
+    installWindowSize(500)
+    const { fetchFake } = await renderQuickSelect()
 
-    render(<ModelQuickSelect open />)
     await user.click(screen.getByRole('button', { name: /More models/ }))
 
     const textarea = focusDetachedTextarea()
@@ -491,15 +531,14 @@ describe('ModelQuickSelect keyboard navigation', () => {
     expect(fireEvent.keyDown(textarea, { key: 'ArrowDown' })).toBe(true)
     expect(fireEvent.keyDown(textarea, { key: 'Enter' })).toBe(true)
 
-    expect(setModel).not.toHaveBeenCalled()
+    expect(lastModelStateRequest(fetchFake)).toBeUndefined()
   })
 
   it('navigates the provider models that are visible on mobile', async () => {
     const user = userEvent.setup()
-    const { setModel } = setModelSelection()
-    setViewportWidth(500)
+    installWindowSize(500)
+    const { fetchFake } = await renderQuickSelect()
 
-    render(<ModelQuickSelect open />)
     await user.click(screen.getByRole('button', { name: /More models/ }))
     await user.click(screen.getAllByRole('button', { name: /Anthropic 2 models/ })[0])
 
@@ -508,59 +547,55 @@ describe('ModelQuickSelect keyboard navigation', () => {
     expect(fireEvent.keyDown(textarea, { key: 'ArrowDown' })).toBe(false)
     expect(fireEvent.keyDown(textarea, { key: 'Enter' })).toBe(false)
 
-    expect(setModel).toHaveBeenCalledWith(selection('anthropic', 'claude-opus-5-5-fast'))
+    await waitFor(() =>
+      expect(lastModelStateRequest(fetchFake)).toEqual({
+        recent: selection('anthropic', 'claude-opus-5-5-fast'),
+      }),
+    )
   })
 
-  it('ignores keydown events while an IME composition is active', () => {
-    const { setModel } = setModelSelection({ model: selection('opencode-go', 'go-1') })
-
-    render(<ModelQuickSelect open />)
+  it('ignores keydown events while an IME composition is active', async () => {
+    const { fetchFake } = await renderQuickSelect({}, { model: selection('opencode-go', 'go-1') })
 
     const textarea = focusDetachedTextarea()
 
     expect(fireEvent.keyDown(textarea, { key: 'ArrowDown', isComposing: true })).toBe(true)
     expect(fireEvent.keyDown(textarea, { key: 'Enter', isComposing: true })).toBe(true)
 
-    expect(setModel).not.toHaveBeenCalled()
+    expect(lastModelStateRequest(fetchFake)).toBeUndefined()
   })
 
   it('does not select while the deferred search query is still catching up', async () => {
     const user = userEvent.setup()
-    const { setModel } = setModelSelection()
+    const { fetchFake } = await renderQuickSelect()
 
-    render(<ModelQuickSelect open />)
     await user.click(screen.getByRole('button', { name: /More models/ }))
 
     const searchInput = screen.getByPlaceholderText('Search models...')
-    mocks.deferredSearchValue.current = ''
-    await user.type(searchInput, '5')
+    act(() => {
+      fireEvent.change(searchInput, { target: { value: '5' } })
+      fireEvent.keyDown(searchInput, { key: 'Enter' })
+    })
 
-    expect(fireEvent.keyDown(searchInput, { key: 'Enter' })).toBe(false)
-
-    expect(setModel).not.toHaveBeenCalled()
+    expect(lastModelStateRequest(fetchFake)).toBeUndefined()
   })
 
   it('scrolls the mobile provider model list to follow the active row', async () => {
     const user = userEvent.setup()
-    const clientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
-    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 60 })
-    setViewportWidth(500)
+    installWindowSize(500)
+    const scrollFake = installElementScrollMetrics({ clientHeight: 60 })
+    await renderQuickSelect()
 
-    try {
-      render(<ModelQuickSelect open />)
-      await user.click(screen.getByRole('button', { name: /More models/ }))
-      await user.click(screen.getAllByRole('button', { name: /Anthropic 2 models/ })[0])
+    await user.click(screen.getByRole('button', { name: /More models/ }))
+    await user.click(screen.getAllByRole('button', { name: /Anthropic 2 models/ })[0])
 
-      const list = mobileModelList()
-      expect(list.scrollTop).toBe(0)
+    const list = mobileModelList()
+    expect(scrollFake.getScrollTop(list)).toBe(0)
 
-      const textarea = focusDetachedTextarea()
-      fireEvent.keyDown(textarea, { key: 'ArrowDown' })
+    const textarea = focusDetachedTextarea()
+    fireEvent.keyDown(textarea, { key: 'ArrowDown' })
 
-      expect(list.scrollTop).toBe(60)
-    } finally {
-      Object.defineProperty(HTMLElement.prototype, 'clientHeight', clientHeight!)
-    }
+    expect(scrollFake.getScrollTop(list)).toBe(60)
   })
 })
 
@@ -568,8 +603,8 @@ describe('ModelQuickSelect context strip', () => {
   const session = { id: 'ses_1' }
   const usage = { totalTokens: 12000, usagePercentage: 6, contextLimit: 200000 }
 
-  it('shows the used and limit tokens with the percentage and meter', () => {
-    render(<ModelQuickSelect open session={session} contextUsage={usage} onCompact={vi.fn()} />)
+  it('shows the used and limit tokens with the percentage and meter', async () => {
+    await renderQuickSelect({ session, contextUsage: usage, onCompact: vi.fn() })
 
     const summary = screen.getByTestId('context-usage-summary')
 
@@ -579,13 +614,11 @@ describe('ModelQuickSelect context strip', () => {
     expect(screen.getByTestId('context-usage-meter-fill')).toHaveStyle({ width: '6%' })
   })
 
-  it('tints the summary with the warning and destructive tones', () => {
-    const { rerender } = render(
-      <ModelQuickSelect open session={session} contextUsage={{ ...usage, usagePercentage: 60 }} />,
-    )
+  it('tints the summary with the warning and destructive tones', async () => {
+    const { update } = await renderQuickSelect({ session, contextUsage: { ...usage, usagePercentage: 60 } })
     expect(screen.getByTestId('context-usage-summary')).toHaveClass('text-warning')
 
-    rerender(<ModelQuickSelect open session={session} contextUsage={{ ...usage, usagePercentage: 85 }} />)
+    await update({ contextUsage: { ...usage, usagePercentage: 85 } })
     expect(screen.getByTestId('context-usage-summary')).toHaveClass('text-destructive')
   })
 
@@ -593,110 +626,53 @@ describe('ModelQuickSelect context strip', () => {
     const user = userEvent.setup()
     const onCompact = vi.fn()
 
-    render(<ModelQuickSelect open session={session} contextUsage={usage} onCompact={onCompact} />)
+    await renderQuickSelect({ session, contextUsage: usage, onCompact })
 
     await user.click(screen.getByRole('button', { name: 'Compact session' }))
 
     expect(onCompact).toHaveBeenCalledTimes(1)
   })
 
-  it('disables compaction while compacting or without a session', () => {
+  it('disables compaction while compacting or without a session', async () => {
     const onCompact = vi.fn()
-    const { rerender } = render(
-      <ModelQuickSelect open session={session} contextUsage={usage} isCompacting onCompact={onCompact} />,
-    )
+    const { update } = await renderQuickSelect({ session, contextUsage: usage, isCompacting: true, onCompact })
 
     expect(screen.getByRole('button', { name: 'Compact session' })).toBeDisabled()
 
-    rerender(<ModelQuickSelect open contextUsage={usage} onCompact={onCompact} />)
+    await update({ session: undefined })
 
     expect(screen.getByRole('button', { name: 'Compact session' })).toBeDisabled()
     expect(onCompact).not.toHaveBeenCalled()
   })
 
-  it('falls back to tokens and an empty meter without a known limit', () => {
-    render(
-      <ModelQuickSelect
-        open
-        session={session}
-        contextUsage={{ totalTokens: 12000, usagePercentage: null, contextLimit: null }}
-      />,
-    )
+  it('falls back to tokens and an empty meter without a known limit', async () => {
+    await renderQuickSelect({
+      session,
+      contextUsage: { totalTokens: 12000, usagePercentage: null, contextLimit: null },
+    })
 
     expect(screen.getByTestId('context-usage-summary')).toHaveTextContent('12k tokens')
     expect(screen.getByTestId('context-usage-meter-fill')).toHaveStyle({ width: '0%' })
   })
 
-  it('omits the strip without context usage', () => {
-    render(<ModelQuickSelect open session={session} />)
+  it('omits the strip without context usage', async () => {
+    await renderQuickSelect({ session })
 
     expect(screen.queryByTestId('context-usage-strip')).not.toBeInTheDocument()
   })
 })
 
 describe('ModelQuickSelect model descriptions', () => {
-  const limitedProviders: Provider[] = [
-    {
-      id: 'anthropic',
-      name: 'Anthropic',
-      models: [
-        {
-          id: 'claude-sonnet-4',
-          modelID: 'claude-sonnet-4',
-          name: 'Claude Sonnet 4',
-          released: 0,
-          free: false,
-          limit: { context: 200000, output: 8192 },
-        },
-        {
-          id: 'claude-opus-5-5',
-          modelID: 'claude-opus-5-5',
-          name: 'Claude Opus 5.5',
-          released: 0,
-          free: false,
-          limit: { context: 1000000, output: 8192 },
-        },
-      ],
-    },
-  ]
-
-  function selectModel(modelID: string) {
-    const modelState = { favorite: [], recent: [], variant: {} }
-    mocks.useModelSelection.mockReturnValue({
-      model: { providerID: 'anthropic', modelID },
-      modelString: `anthropic/${modelID}`,
-      info: undefined,
-      activeAgent: null,
-      recentModels: [],
-      favoriteModels: [],
-      configured: null,
-      modelState,
-      setModel: vi.fn(),
-      setActiveAgent: vi.fn(),
-      toggleFavorite: vi.fn(),
-      removeRecentModel: vi.fn(),
-      isModelReady: true,
-    })
-    mocks.useModelSections.mockReturnValue({
-      providers: limitedProviders,
-      sections: buildModelSections(limitedProviders, modelState, null),
-      defaultModel: null,
-      modelState,
-      isLoading: false,
-    })
-  }
-
-  it('formats the context limit like the context strip', () => {
-    selectModel('claude-sonnet-4')
-    render(<ModelQuickSelect open />)
+  it('formats the context limit like the context strip', async () => {
+    await renderQuickSelect({}, { model: selection('anthropic', 'claude-sonnet-4') })
 
     expect(screen.getByText('Anthropic · 200k context', { selector: 'p' })).toBeInTheDocument()
   })
 
-  it('formats million-token limits without a trailing decimal', () => {
-    selectModel('claude-opus-5-5')
-    render(<ModelQuickSelect open />)
+  it('formats million-token limits without a trailing decimal', async () => {
+    await renderQuickSelect({}, { model: selection('anthropic', 'claude-opus-5-5-fast') })
 
     expect(screen.getByText('Anthropic · 1M context', { selector: 'p' })).toBeInTheDocument()
   })
 })
+

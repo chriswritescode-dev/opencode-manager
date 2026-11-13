@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react'
+import { z } from 'zod'
 import { FileTree } from './FileTree'
 import { FileOperations } from './FileOperations'
 import { FilePreview } from './FilePreview'
@@ -12,6 +13,8 @@ import { FolderOpen, Upload, RefreshCw, X } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
 import { useMobile } from '@/hooks/useMobile'
 import { getFileApiUrl, useFile } from '@/api/files'
+
+const fileSavedDetailSchema = z.object({ path: z.string(), content: z.string().optional() })
 
 export interface FileBrowserHandle {
   goBack: () => void
@@ -71,13 +74,11 @@ async function traverseFileSystemEntry(
   const items: UploadItem[] = []
   const relativePath = basePath ? `${basePath}/${entry.name}` : entry.name
 
-  if (entry.isFile) {
-    const fileEntry = entry as FileSystemFileEntry
-    const file = await readFileEntry(fileEntry)
+  if (entry instanceof FileSystemFileEntry) {
+    const file = await readFileEntry(entry)
     items.push({ file, relativePath })
-  } else if (entry.isDirectory) {
-    const dirEntry = entry as FileSystemDirectoryEntry
-    const dirReader = dirEntry.createReader()
+  } else if (entry instanceof FileSystemDirectoryEntry) {
+    const dirReader = entry.createReader()
     let entries: FileSystemEntry[] = []
     let batch: FileSystemEntry[]
     
@@ -126,7 +127,7 @@ function getUploadItemsFromFileList(fileList: FileList): UploadItem[] {
   const items: UploadItem[] = []
   for (let i = 0; i < fileList.length; i++) {
     const file = fileList[i]
-    const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
+    const relativePath = file.webkitRelativePath || file.name
     items.push({ file, relativePath })
   }
   return items
@@ -258,7 +259,6 @@ useEffect(() => {
       setSelectedFile(fullFileData)
       onFileSelect?.(fullFileData)
       
-      // On mobile, open preview in modal
       if (stacked) {
         setIsPreviewModalOpen(true)
         onPreviewStateChange?.(true)
@@ -473,13 +473,16 @@ useEffect(() => {
   }, [initialFileData, stacked, onPreviewStateChange])
 
   useEffect(() => {
-    const handleFileSaved = (event: CustomEvent<{ path: string; content?: string }>) => {
-      if (selectedFile && selectedFile.path === event.detail.path) {
-        if (event.detail.content !== undefined) {
+    const handleFileSaved = (event: Event) => {
+      if (!(event instanceof CustomEvent)) return
+      const parsedDetail = fileSavedDetailSchema.safeParse(event.detail)
+      if (!selectedFile || !parsedDetail.success) return
+      if (selectedFile.path === parsedDetail.data.path) {
+        if (parsedDetail.data.content !== undefined) {
           const nextFile = {
             ...selectedFile,
-            content: encodeBase64(event.detail.content),
-            size: new Blob([event.detail.content]).size,
+            content: encodeBase64(parsedDetail.data.content),
+            size: new Blob([parsedDetail.data.content]).size,
             lastModified: new Date(),
           }
           setSelectedFile(nextFile)
@@ -491,8 +494,8 @@ useEffect(() => {
       }
     }
 
-    window.addEventListener('fileSaved', handleFileSaved as EventListener)
-    return () => window.removeEventListener('fileSaved', handleFileSaved as EventListener)
+    window.addEventListener('fileSaved', handleFileSaved)
+    return () => window.removeEventListener('fileSaved', handleFileSaved)
   }, [selectedFile, handleFileSelect, onFileSelect])
 
   useEffect(() => {
@@ -600,7 +603,6 @@ useEffect(() => {
         
         {uploadDialog}
         
-        {/* Mobile: Full width file listing, Desktop: Split view */}
         <div className="flex-1 flex overflow-hidden min-h-0 h-full">
           {compact && !isMobile && isPreviewModalOpen && selectedFile && !selectedFile.isDirectory ? (
             <div className="flex-1 min-h-0 overflow-hidden">
@@ -654,7 +656,6 @@ useEffect(() => {
           </div>
           )}
           
-          {/* Desktop only: Preview panel */}
           {!stacked && (
             <div className="flex-1 overflow-y-auto min-h-0 h-full">
               {selectedFile && !selectedFile.isDirectory ? (
@@ -668,7 +669,6 @@ useEffect(() => {
           )}
         </div>
 
-{/* Mobile: File Preview Modal */}
         <MobileFilePreviewModal 
           isOpen={isMobile && isPreviewModalOpen}
           onClose={handleCloseModal}
@@ -718,7 +718,6 @@ useEffect(() => {
         </CardHeader>
         
         <CardContent className="flex-1 flex overflow-hidden min-h-0">
-          {/* Mobile: Full width file listing, Desktop: Split view */}
           <div className={`${stacked ? 'w-full' : 'w-1/3'} border-r pr-4 flex flex-col min-h-0`}>
             <div className="flex items-center gap-2 mb-4 flex-shrink-0">
               <Input
@@ -756,7 +755,6 @@ useEffect(() => {
             )}
           </div>
           
-          {/* Desktop only: Preview panel */}
           {!stacked && (
             <div className="flex-1 overflow-y-auto min-h-0 ">
               {selectedFile && !selectedFile.isDirectory ? (
@@ -771,7 +769,6 @@ useEffect(() => {
         </CardContent>
       </Card>
 
-{/* Mobile: File Preview Modal */}
       <MobileFilePreviewModal 
         isOpen={isMobile && isPreviewModalOpen}
         onClose={handleCloseModal}

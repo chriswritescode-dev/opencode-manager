@@ -24,7 +24,7 @@ async function expectImageLoaded(image: Locator): Promise<void> {
   await image.scrollIntoViewIfNeeded()
   await expect(image).toBeVisible()
   await expect
-    .poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth), { timeout: 30_000 })
+    .poll(() => image.evaluate((element) => (element instanceof HTMLImageElement ? element.naturalWidth : 0)), { timeout: 30_000 })
     .toBeGreaterThan(0)
 }
 
@@ -60,7 +60,7 @@ test.describe('inline markdown images', () => {
 
     const repoDetailResponse = await request.get(`/api/repos/${repo.id}`)
     expect(repoDetailResponse.ok()).toBe(true)
-    const { localPath } = (await repoDetailResponse.json()) as { localPath: string }
+    const { localPath } = await repoDetailResponse.json()
 
     const webpResponse = await request.get(rawFileUrl(`${localPath}/docs/img/pic.webp`))
     expect(webpResponse.ok()).toBe(true)

@@ -20,7 +20,11 @@ const resetStore = () => {
   })
 }
 
-const trackOf = (bar: HTMLElement) => bar.firstElementChild as HTMLElement
+const trackOf = (bar: HTMLElement) => {
+  const track = bar.firstElementChild
+  if (!(track instanceof HTMLElement)) throw new Error('expected a track element')
+  return track
+}
 
 describe('ComposerActivityBar', () => {
   beforeEach(() => {
@@ -60,7 +64,7 @@ describe('ComposerActivityBar', () => {
     const track = trackOf(screen.getByRole('progressbar', { name: 'Session working' }))
     expect(track).toHaveClass('scanner-track', 'relative', 'h-1.5', 'md:h-2', 'w-full')
 
-    const children = Array.from(track.children) as HTMLElement[]
+    const children = Array.from(track.children)
     expect(children).toHaveLength(1)
     expect(children[0]).toHaveClass('scanner-sweep')
   })

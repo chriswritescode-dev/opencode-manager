@@ -2,11 +2,34 @@ import { Hono } from 'hono'
 import { Database } from 'bun:sqlite'
 import { SettingsService } from '../services/settings'
 import { logger } from '../utils/logger'
+import { toContentfulStatus } from '../utils/error-utils'
+import { z } from 'zod'
 import {
   normalizeToBaseUrl,
   discoverModelsCached,
 } from '../utils/discovery-cache'
-import { type STTConfig } from '@opencode-manager/shared'
+
+const SttTranscriptionResultSchema = z.object({
+  text: z.string().optional(),
+})
+
+const SttErrorDetailsSchema = z.object({
+  error: z.object({ message: z.string() }).optional(),
+  detail: z.object({ message: z.string() }).optional(),
+  message: z.string().optional(),
+})
+
+function parseSttErrorDetails(errorText: string): string {
+  try {
+    const parsed = SttErrorDetailsSchema.safeParse(JSON.parse(errorText))
+    if (!parsed.success) {
+      return errorText
+    }
+    return parsed.data.error?.message || parsed.data.detail?.message || parsed.data.message || errorText
+  } catch {
+    return errorText
+  }
+}
 
 export function createSTTRoutes(db: Database) {
   const app = new Hono()
@@ -24,7 +47,7 @@ export function createSTTRoutes(db: Database) {
 
       const settingsService = new SettingsService(db)
       const settings = settingsService.getSettings(userId)
-      const sttConfig = settings.preferences.stt as STTConfig | undefined
+      const sttConfig = settings.preferences.stt
 
       if (!sttConfig?.enabled) {
         return c.json({ error: 'STT is not enabled' }, 400)
@@ -82,21 +105,9 @@ export function createSTTRoutes(db: Database) {
       if (!response.ok) {
         const errorText = await response.text()
         logger.error(`STT API error: ${response.status} - ${errorText}`)
-        const status = response.status >= 400 && response.status < 600 ? response.status as 400 | 500 : 500
+        const status = response.status >= 400 && response.status < 600 ? toContentfulStatus(response.status) : 500
 
-        let errorDetails = errorText
-        try {
-          const errorJson = JSON.parse(errorText)
-          if (errorJson.error?.message) {
-            errorDetails = errorJson.error.message
-          } else if (errorJson.detail?.message) {
-            errorDetails = errorJson.detail.message
-          } else if (errorJson.message) {
-            errorDetails = errorJson.message
-          }
-        } catch {
-          // Use raw error text if parsing fails
-        }
+        const errorDetails = parseSttErrorDetails(errorText)
 
         return c.json({
           error: 'STT API request failed',
@@ -104,18 +115,20 @@ export function createSTTRoutes(db: Database) {
         }, status)
       }
 
-      const result = await response.json() as { text?: string } & Record<string, unknown>
+      const rawResult = await response.json()
+      const parsedResult = SttTranscriptionResultSchema.safeParse(rawResult)
+      const transcribedText = parsedResult.success ? parsedResult.data.text : undefined
 
-      if (!result.text || typeof result.text !== 'string') {
-        logger.error('STT API response missing text field:', { result })
-        return c.json({ 
-          error: 'STT API returned invalid response', 
-          details: `Response missing text field. Full response: ${JSON.stringify(result)}` 
+      if (!transcribedText) {
+        logger.error('STT API response missing text field:', { result: rawResult })
+        return c.json({
+          error: 'STT API returned invalid response',
+          details: `Response missing text field. Full response: ${JSON.stringify(rawResult)}`
         }, 500)
       }
 
-      logger.info(`STT transcription successful: ${result.text.substring(0, 50)}...`)
-      return c.json({ text: result.text })
+      logger.info(`STT transcription successful: ${transcribedText.substring(0, 50)}...`)
+      return c.json({ text: transcribedText })
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         return new Response(null, { status: 499 })
@@ -132,7 +145,7 @@ export function createSTTRoutes(db: Database) {
 
       const settingsService = new SettingsService(db)
       const settings = settingsService.getSettings(userId)
-      const sttConfig = settings.preferences.stt as STTConfig | undefined
+      const sttConfig = settings.preferences.stt
 
       if (!sttConfig?.endpoint) {
         return c.json({ error: 'STT not configured' }, 400)
@@ -153,7 +166,7 @@ export function createSTTRoutes(db: Database) {
             ...sttConfig,
             availableModels: models,
             lastModelsFetch: Date.now(),
-          } as STTConfig,
+          },
         }, userId)
       }
 
@@ -168,7 +181,7 @@ export function createSTTRoutes(db: Database) {
     const userId = c.req.query('userId') || 'default'
     const settingsService = new SettingsService(db)
     const settings = settingsService.getSettings(userId)
-    const sttConfig = settings.preferences.stt as STTConfig | undefined
+    const sttConfig = settings.preferences.stt
 
     return c.json({
       enabled: sttConfig?.enabled || false,

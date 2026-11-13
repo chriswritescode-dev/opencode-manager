@@ -1,10 +1,10 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Database } from 'bun:sqlite'
-import type { FileDiffInfo, ModelInfo, SessionInfo, SessionMessageInfo } from '@opencode-manager/shared/opencode'
-import { WALKTHROUGH_GENERATION_TIMEOUT_MS, type SchedulePermissionRule } from '@opencode-manager/shared/schemas'
+import type { FileDiffInfo, OpenCodeApi, SessionInfo, SessionMessageUser } from '@opencode-manager/shared/opencode'
+import { WALKTHROUGH_GENERATION_TIMEOUT_MS } from '@opencode-manager/shared/schemas'
 import {
   claimChangeWalkthroughGeneration,
   getChangeWalkthrough,
@@ -12,11 +12,10 @@ import {
 } from '../../src/db/change-walkthroughs'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
-import type { OpenCodeClient } from '../../src/services/opencode/client'
 import { SettingsService } from '../../src/services/settings'
-import type { GitService } from '../../src/services/git/GitService'
+import { createGitService, type GitService } from '../../src/services/git/GitService'
 import type { SSEEvent } from '../../src/services/sse-aggregator'
-import { stubLoadedModelCatalog } from '../helpers/stub-opencode-client'
+import { createStubOpenCodeClient, modelInfo, sessionInfo } from '../helpers/stub-opencode-client'
 import { createCommittedRepo, createGitAuthService, createOrigin, cloneOrigin, git, uniqueName } from '../helpers/git-fixtures'
 import {
   ChangeWalkthroughService,
@@ -27,8 +26,11 @@ import { computeChangesHash } from '../../src/services/walkthrough-outline'
 
 const SESSION_ID = 'ses_walkthrough'
 
-function userMessage(id: string): SessionMessageInfo {
-  return { id, type: 'user', time: { created: 0 }, text: id } as SessionMessageInfo
+type SessionCreateInput = NonNullable<Parameters<OpenCodeApi['session']['create']>[0]>
+type SessionCreatePermissions = NonNullable<SessionCreateInput['permissions']>
+
+function userMessage(id: string): SessionMessageUser {
+  return { id, type: 'user', time: { created: 0 }, text: id }
 }
 
 function change(file: string, patch: string, status: FileDiffInfo['status'] = 'modified'): FileDiffInfo {
@@ -50,21 +52,26 @@ interface FakeSession {
 }
 
 function createFakeClient(sessions: Record<string, FakeSession>) {
-  const createCalls: Array<Record<string, unknown>> = []
+  const createCalls: SessionCreateInput[] = []
   const promptCalls: Array<{ sessionID: string; text: string }> = []
   const interruptCalls: string[] = []
   let createSeq = 0
-  let createImpl: (input: Record<string, unknown>) => Promise<{ id: string; title?: string }> = async () => ({
-    id: `ses_walk_${++createSeq}`,
-  })
+  let createImpl: (input: SessionCreateInput) => Promise<SessionInfo> = async () => sessionInfo({ id: `ses_walk_${++createSeq}` })
 
-  const client = {
+  const catalog = [
+    modelInfo(),
+    modelInfo({ id: 'claude-sonnet-4', modelID: 'claude-sonnet-4', providerID: 'anthropic', name: 'Claude Sonnet 4' }),
+    modelInfo({ id: 'gpt-5', modelID: 'gpt-5', name: 'GPT-5' }),
+  ]
+  const location = { directory: '/abs/repo' }
+
+  const client = createStubOpenCodeClient({
     api: {
-      ...stubLoadedModelCatalog([
-        { providerID: 'openai', id: 'gpt-5-mini', enabled: true },
-        { providerID: 'anthropic', id: 'claude-sonnet-4', enabled: true },
-        { providerID: 'openai', id: 'gpt-5', enabled: true },
-      ] as ModelInfo[]),
+      config: { get: vi.fn(async () => []) },
+      model: {
+        list: vi.fn(async () => ({ location, data: catalog })),
+        default: vi.fn(async () => ({ location, data: catalog[0] ?? null })),
+      },
       session: {
         get: vi.fn(async ({ sessionID }: { sessionID: string }) => {
           const config = sessions[sessionID]
@@ -74,11 +81,7 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
           if (config.info instanceof Error) {
             throw config.info
           }
-          return config.info ?? ({
-            id: sessionID,
-            title: `Title ${sessionID}`,
-            location: { directory: '/abs/repo' },
-          } as SessionInfo)
+          return config.info ?? sessionInfo({ id: sessionID, title: `Title ${sessionID}`, location: { directory: '/abs/repo' } })
         }),
         diff: vi.fn(async ({ sessionID }: { sessionID: string }) => {
           const config = sessions[sessionID]
@@ -87,15 +90,27 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
           }
           return config?.changes ?? []
         }),
-        create: vi.fn(async (input: Record<string, unknown>) => {
+        create: vi.fn(async (input?: SessionCreateInput) => {
+          if (!input) {
+            throw new Error('Expected session create input')
+          }
           createCalls.push(input)
           return createImpl(input)
         }),
         prompt: vi.fn(async (input: { sessionID: string; text: string }) => {
           promptCalls.push(input)
+          return {
+            id: `msg_${input.sessionID}`,
+            sessionID: input.sessionID,
+            time: { created: 0 },
+            type: 'user' as const,
+            payload: { text: input.text },
+            delivery: 'steer' as const,
+          }
         }),
         interrupt: vi.fn(async ({ sessionID }: { sessionID: string }) => {
           interruptCalls.push(sessionID)
+          return { interrupted: true }
         }),
       },
       message: {
@@ -107,18 +122,21 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
         }),
       },
     },
-    forwardRaw: vi.fn(),
-  } as unknown as OpenCodeClient
+  })
 
   return {
     client,
     createCalls,
     promptCalls,
     interruptCalls,
-    setCreateImpl: (impl: (input: Record<string, unknown>) => Promise<{ id: string; title?: string }>) => {
+    setCreateImpl: (impl: (input: SessionCreateInput) => Promise<SessionInfo>) => {
       createImpl = impl
     },
   }
+}
+
+function createSessions(): Record<string, FakeSession> {
+  return {}
 }
 
 function createTestDb(): Database {
@@ -127,14 +145,27 @@ function createTestDb(): Database {
   return db
 }
 
-function sessionEvent(type: string, sessionID: string): SSEEvent {
-  return {
+type WalkthroughSessionEventType = 'session.execution.succeeded' | 'session.execution.interrupted' | 'session.deleted'
+
+function sessionEvent(type: WalkthroughSessionEventType, sessionID: string): SSEEvent {
+  const head = {
     id: `evt_${type}_${sessionID}`,
     created: Date.now(),
-    type,
     location: { directory: '/abs/repo' },
     data: { sessionID },
-  } as unknown as SSEEvent
+  }
+  if (type === 'session.deleted') {
+    return { ...head, type: 'session.deleted', durable: { aggregateID: sessionID, seq: 1, version: 2 } }
+  }
+  if (type === 'session.execution.interrupted') {
+    return {
+      ...head,
+      type: 'session.execution.interrupted',
+      durable: { aggregateID: sessionID, seq: 1, version: 1 },
+      data: { sessionID, reason: 'user' },
+    }
+  }
+  return { ...head, type: 'session.execution.succeeded', durable: { aggregateID: sessionID, seq: 1, version: 1 } }
 }
 
 const walkthroughRepoRoot = mkdtempSync(path.join(tmpdir(), 'walkthrough-service-'))
@@ -178,20 +209,21 @@ function refExists(repo: string, ref: string): boolean {
 }
 
 function sessionAt(directory: string, id: string = SESSION_ID): SessionInfo {
-  return { id, title: 'Title', location: { directory } } as SessionInfo
+  return sessionInfo({ id, title: 'Title', location: { directory } })
 }
 
-function outputDirFromPermissions(permissions: SchedulePermissionRule[]): string {
-  const rule = permissions.at(-2)!
+function outputDirFromPermissions(permissions: SessionCreatePermissions): string {
+  const rule = permissions.at(-2)
+  if (!rule) throw new Error('Expected the walkthrough permission rules')
   return rule.resource.slice(0, -'/*'.length)
 }
 
-function artifactPathFor(call: Record<string, unknown>): string {
-  const outputDir = outputDirFromPermissions(call.permissions as SchedulePermissionRule[])
+function artifactPathFor(call: SessionCreateInput): string {
+  const outputDir = outputDirFromPermissions(call.permissions ?? [])
   return path.join(outputDir, 'index.html')
 }
 
-function writeArtifact(call: Record<string, unknown>): string {
+function writeArtifact(call: SessionCreateInput): string {
   const artifactPath = artifactPathFor(call)
   writeFileSync(artifactPath, '<html><body>walkthrough</body></html>')
   return artifactPath
@@ -234,18 +266,19 @@ describe('buildWalkthroughSessionPrompt', () => {
 
 describe('ChangeWalkthroughService', () => {
   let db: Database
-  let sessions: Record<string, FakeSession>
+  let sessions: ReturnType<typeof createSessions>
   let fake: ReturnType<typeof createFakeClient>
   let service: ChangeWalkthroughService
   let gitService: GitService
-  let fetchRemoteRef: ReturnType<typeof vi.fn>
+  let fetchRemoteRef: MockInstance<GitService['fetchRemoteRef']>
 
   beforeEach(() => {
     db = createTestDb()
-    sessions = { [SESSION_ID]: { changes: THREE_HUNKS, info: sessionAt('/abs/repo') } }
+    sessions = createSessions()
+    sessions[SESSION_ID] = { changes: THREE_HUNKS, info: sessionAt('/abs/repo') }
     fake = createFakeClient(sessions)
-    fetchRemoteRef = vi.fn(async () => {})
-    gitService = { fetchRemoteRef } as unknown as GitService
+    gitService = createGitService(createGitAuthService())
+    fetchRemoteRef = vi.spyOn(gitService, 'fetchRemoteRef')
     service = new ChangeWalkthroughService(db, fake.client, new SettingsService(db), createGitAuthService(), gitService, {
       walkthroughsRoot,
     })
@@ -294,8 +327,7 @@ describe('ChangeWalkthroughService', () => {
     expect(created.model).toEqual({ providerID: 'openai', id: 'gpt-5-mini' })
     expect(created.location).toEqual({ directory: '/abs/repo' })
 
-    const permissions = created.permissions as SchedulePermissionRule[]
-    const outputDir = outputDirFromPermissions(permissions)
+    const outputDir = outputDirFromPermissions(created.permissions ?? [])
     expect(outputDir.startsWith(path.join(walkthroughsRoot, SESSION_ID))).toBe(true)
     expect(existsSync(outputDir)).toBe(true)
 
@@ -343,7 +375,7 @@ describe('ChangeWalkthroughService', () => {
 
   it('spawns a new session and generation directory when regenerate is set', async () => {
     await service.startGeneration(SESSION_ID, {})
-    const firstDir = outputDirFromPermissions(fake.createCalls[0]!.permissions as SchedulePermissionRule[])
+    const firstDir = outputDirFromPermissions(fake.createCalls[0]!.permissions ?? [])
     updateChangeWalkthrough(db, SESSION_ID, 'session', ['generating'], {
       status: 'ready',
       publishedAt: 1,
@@ -353,7 +385,7 @@ describe('ChangeWalkthroughService', () => {
     await service.startGeneration(SESSION_ID, { regenerate: true })
 
     expect(fake.createCalls).toHaveLength(2)
-    const secondDir = outputDirFromPermissions(fake.createCalls[1]!.permissions as SchedulePermissionRule[])
+    const secondDir = outputDirFromPermissions(fake.createCalls[1]!.permissions ?? [])
     expect(secondDir).not.toBe(firstDir)
     expect(existsSync(secondDir)).toBe(true)
   })
@@ -427,7 +459,7 @@ describe('ChangeWalkthroughService', () => {
 
     await expect(service.startGeneration(SESSION_ID, {})).rejects.toMatchObject({ status: 502 })
 
-    const outputDir = outputDirFromPermissions(fake.createCalls[0]!.permissions as SchedulePermissionRule[])
+    const outputDir = outputDirFromPermissions(fake.createCalls[0]!.permissions ?? [])
     expect(existsSync(outputDir)).toBe(false)
     expect(fake.interruptCalls).toContain('ses_walk_1')
   })
@@ -444,12 +476,12 @@ describe('ChangeWalkthroughService', () => {
 
   it('resolves the walkthrough model preference over the request and session model', async () => {
     new SettingsService(db).updateSettings({ walkthroughModel: 'openai/gpt-5' })
-    sessions[SESSION_ID]!.info = {
+    sessions[SESSION_ID]!.info = sessionInfo({
       id: SESSION_ID,
       title: 'Title',
       model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
       location: { directory: '/abs/repo' },
-    } as SessionInfo
+    })
 
     await service.startGeneration(SESSION_ID, { model: 'openai/gpt-5-mini' })
 
@@ -457,12 +489,12 @@ describe('ChangeWalkthroughService', () => {
   })
 
   it('uses the request model over the session model', async () => {
-    sessions[SESSION_ID]!.info = {
+    sessions[SESSION_ID]!.info = sessionInfo({
       id: SESSION_ID,
       title: 'Title',
       model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
       location: { directory: '/abs/repo' },
-    } as SessionInfo
+    })
 
     await service.startGeneration(SESSION_ID, { model: 'openai/gpt-5-mini' })
 
@@ -568,9 +600,6 @@ describe('ChangeWalkthroughService', () => {
     it('fetches the refs during generation and deletes them with the session', async () => {
       const repo = createPullRequestRepo()
       sessions[SESSION_ID] = { changes: THREE_HUNKS, info: sessionAt(repo) }
-      fetchRemoteRef.mockImplementation(async (target: { fullPath: string }, remote: string, refspecs: string[]) => {
-        git(['fetch', remote, ...refspecs], target.fullPath)
-      })
 
       const headRef = `refs/ocm-walkthrough/${SESSION_ID}/pr/1/head`
       const baseRef = `refs/ocm-walkthrough/${SESSION_ID}/pr/1/base/main`
@@ -590,20 +619,18 @@ describe('ChangeWalkthroughService', () => {
     })
   })
 
-  it('clears the cached hash and its epoch when the session is deleted', async () => {
+  it('re-reads the diff after the session is deleted and comes back', async () => {
     await service.startGeneration(SESSION_ID, {})
-    await service.getState(SESSION_ID)
-
-    const internals = service as unknown as {
-      currentHashes: Map<string, string>
-      hashEpochs: Map<string, number>
-    }
-    expect(internals.currentHashes.size).toBeGreaterThan(0)
+    const diffMock = vi.mocked(fake.client.api.session.diff)
+    expect(diffMock).toHaveBeenCalledTimes(1)
 
     service.handleEvent(sessionEvent('session.deleted', SESSION_ID))
+    sessions[SESSION_ID] = { changes: THREE_HUNKS, info: sessionAt('/abs/repo') }
 
-    expect(internals.currentHashes.size).toBe(0)
-    expect(internals.hashEpochs.size).toBe(0)
+    const state = await service.getState(SESSION_ID)
+
+    expect(diffMock).toHaveBeenCalledTimes(2)
+    expect(state.currentDiffHash).toBe(computeChangesHash(THREE_HUNKS))
   })
 
   it('drops a hash read that completes after the session is deleted', async () => {
@@ -620,14 +647,11 @@ describe('ChangeWalkthroughService', () => {
     resolveDiff(THREE_HUNKS)
     await pending
 
-    const internals = service as unknown as {
-      currentHashes: Map<string, string>
-      hashEpochs: Map<string, number>
-      pendingHashReads: Map<string, number>
-    }
-    expect(internals.currentHashes.size).toBe(0)
-    expect(internals.hashEpochs.size).toBe(0)
-    expect(internals.pendingHashReads.size).toBe(0)
+    sessions[SESSION_ID] = { changes: [change('src/a.ts', hunkPatch(99))], info: sessionAt('/abs/repo') }
+    const state = await service.getState(SESSION_ID)
+
+    expect(diffMock).toHaveBeenCalledTimes(2)
+    expect(state.currentDiffHash).toBe(computeChangesHash([change('src/a.ts', hunkPatch(99))]))
   })
 
   describe('walkthrough session lifecycle', () => {
@@ -698,7 +722,7 @@ describe('ChangeWalkthroughService', () => {
 
     it('interrupts the previous walkthrough session when regenerating a ready walkthrough', async () => {
       await service.startGeneration(SESSION_ID, {})
-      const firstDir = outputDirFromPermissions(fake.createCalls[0]!.permissions as SchedulePermissionRule[])
+      const firstDir = outputDirFromPermissions(fake.createCalls[0]!.permissions ?? [])
       updateChangeWalkthrough(db, SESSION_ID, 'session', ['generating'], {
         status: 'ready',
         publishedAt: 1,
@@ -713,7 +737,7 @@ describe('ChangeWalkthroughService', () => {
     })
 
     it('cancels a generation interrupted before the walkthrough session is recorded', async () => {
-      let resolveCreate: (session: { id: string }) => void = () => {}
+      let resolveCreate: (session: SessionInfo) => void = () => {}
       fake.setCreateImpl(() => new Promise((resolve) => {
         resolveCreate = resolve
       }))
@@ -723,7 +747,7 @@ describe('ChangeWalkthroughService', () => {
 
       expect(await service.cancelGeneration(SESSION_ID)).toBe(true)
 
-      resolveCreate({ id: 'ses_walk_late' })
+      resolveCreate(sessionInfo({ id: 'ses_walk_late' }))
       await starting
 
       expect(fake.promptCalls).toHaveLength(0)
@@ -873,8 +897,7 @@ describe('ChangeWalkthroughService', () => {
 
     it('does not retain a changes snapshot when the run settles during the read', async () => {
       await service.startGeneration(SESSION_ID, {})
-      const internals = service as unknown as { changesSnapshots: Map<string, FileDiffInfo[]> }
-      internals.changesSnapshots.clear()
+      service.handleEvent(sessionEvent('session.execution.succeeded', 'ses_walk_1'))
 
       const diffMock = vi.mocked(fake.client.api.session.diff)
       let resolveDiff: (changes: FileDiffInfo[]) => void = () => {}
@@ -886,12 +909,8 @@ describe('ChangeWalkthroughService', () => {
       await vi.waitFor(() => expect(diffMock).toHaveBeenCalledTimes(2))
 
       service.handleEvent(sessionEvent('session.execution.succeeded', 'ses_walk_1'))
-      expect(internals.changesSnapshots.has('ses_walk_1')).toBe(false)
-
       resolveDiff(THREE_HUNKS)
       await pending
-
-      expect(internals.changesSnapshots.has('ses_walk_1')).toBe(false)
 
       await service.readChangesForWalkthroughSession('ses_walk_1')
       expect(diffMock).toHaveBeenCalledTimes(3)
@@ -977,20 +996,34 @@ describe('ChangeWalkthroughService', () => {
     })
 
     it('settles a published walkthrough and clears its timer when the walkthrough session is deleted', async () => {
-      await service.startGeneration(SESSION_ID, {})
-      writeArtifact(fake.createCalls[0]!)
-      await service.publishFromWalkthroughSession('ses_walk_1')
-      const internals = service as unknown as { timers: Map<string, ReturnType<typeof setTimeout>> }
-      expect(internals.timers.size).toBe(1)
+      vi.useFakeTimers()
+      try {
+        const timed = new ChangeWalkthroughService(
+          db,
+          fake.client,
+          new SettingsService(db),
+          createGitAuthService(),
+          gitService,
+          { walkthroughsRoot, generationTimeoutMs: 1000 },
+        )
+        await timed.startGeneration(SESSION_ID, {})
+        writeArtifact(fake.createCalls[0]!)
+        await timed.publishFromWalkthroughSession('ses_walk_1')
 
-      service.handleEvent(sessionEvent('session.deleted', 'ses_walk_1'))
+        timed.handleEvent(sessionEvent('session.deleted', 'ses_walk_1'))
 
-      const state = await service.getState(SESSION_ID)
-      expect(state.walkthrough?.status).toBe('ready')
-      expect(state.generating).toBe(false)
-      expect(state.running).toBe(false)
-      expect(internals.timers.size).toBe(0)
-      expect(getChangeWalkthrough(db, SESSION_ID, 'session')).not.toBeNull()
+        const state = await timed.getState(SESSION_ID)
+        expect(state.walkthrough?.status).toBe('ready')
+        expect(state.generating).toBe(false)
+        expect(state.running).toBe(false)
+        expect(getChangeWalkthrough(db, SESSION_ID, 'session')).not.toBeNull()
+
+        const interruptsBefore = fake.interruptCalls.length
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(fake.interruptCalls).toHaveLength(interruptsBefore)
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it('removes the walkthrough directory when the target session is deleted', async () => {

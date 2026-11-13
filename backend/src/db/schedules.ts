@@ -3,14 +3,15 @@ import {
   LOCAL_OPENCODE_SERVER_ID,
   ScheduleJobSchema,
   ScheduleMcpServersSchema,
+  ScheduleModeSchema,
   SchedulePermissionConfigSchema,
   ScheduleRunSchema,
+  ScheduleRunStatusSchema,
   ScheduleSandboxConfigSchema,
   ScheduleSkillMetadataSchema,
   ScheduleWorkspaceModeSchema,
   type ScheduleJob,
   type ScheduleMcpServer,
-  type ScheduleMode,
   type SchedulePermissionConfig,
   type ScheduleRun,
   type ScheduleRunStatus,
@@ -20,57 +21,82 @@ import {
 } from '@opencode-manager/shared/schemas'
 import { ASSISTANT_REPO_ID, ASSISTANT_REPO_NAME, ASSISTANT_REPO_PATH, getRepoDisplayName } from '@opencode-manager/shared/utils'
 import type { ScheduleJobPersistenceInput } from '../services/schedule-config'
+import { z } from 'zod'
+import { selectRow, selectRows } from './rows'
 
-interface ScheduleJobRow {
-  id: number
-  repo_id: number | null
-  server_id: string
-  directory: string | null
-  name: string
-  description: string | null
-  enabled: number
-  show_in_inbox: number
-  schedule_mode: ScheduleMode | null
-  interval_minutes: number | null
-  cron_expression: string | null
-  timezone: string | null
-  agent_slug: string | null
-  prompt: string
-  model: string | null
-  skill_metadata: string | null
-  permission_config: string | null
-  mcp_servers: string | null
-  branch: string | null
-  workspace_mode: ScheduleWorkspaceMode | null
-  sandbox_config: string | null
-  created_at: number
-  updated_at: number
-  last_run_at: number | null
-  next_run_at: number | null
-}
+const ScheduleJobRowSchema = z.object({
+  id: z.number(),
+  repo_id: z.number().nullable(),
+  server_id: z.string().nullish(),
+  directory: z.string().nullish(),
+  name: z.string(),
+  description: z.string().nullish(),
+  enabled: z.number(),
+  show_in_inbox: z.number().nullish(),
+  schedule_mode: ScheduleModeSchema.nullish(),
+  interval_minutes: z.number().nullish(),
+  cron_expression: z.string().nullish(),
+  timezone: z.string().nullish(),
+  agent_slug: z.string().nullish(),
+  prompt: z.string(),
+  model: z.string().nullish(),
+  skill_metadata: z.string().nullish(),
+  permission_config: z.string().nullish(),
+  mcp_servers: z.string().nullish(),
+  branch: z.string().nullish(),
+  workspace_mode: z.string().nullish(),
+  sandbox_config: z.string().nullish(),
+  created_at: z.number(),
+  updated_at: z.number(),
+  last_run_at: z.number().nullish(),
+  next_run_at: z.number().nullish(),
+})
 
-interface ScheduleRunRow {
-  id: number
-  job_id: number
-  repo_id: number | null
-  server_id: string
-  trigger_source: string
-  status: string
-  started_at: number
-  finished_at: number | null
-  viewed_at: number | null
-  created_at: number
-  session_id: string | null
-  session_title: string | null
-  log_text: string | null
-  response_text: string | null
-  error_text: string | null
-  run_branch: string | null
-  commit_hash: string | null
-  worktree_path: string | null
-}
+type ScheduleJobRow = z.infer<typeof ScheduleJobRowSchema>
 
-function parseSkillMetadata(raw: string | null) {
+const ScheduleRunRowSchema = z.object({
+  id: z.number(),
+  job_id: z.number(),
+  repo_id: z.number().nullable(),
+  server_id: z.string().nullish(),
+  trigger_source: z.string(),
+  status: z.string(),
+  started_at: z.number(),
+  finished_at: z.number().nullish(),
+  viewed_at: z.number().nullish(),
+  created_at: z.number(),
+  session_id: z.string().nullish(),
+  session_title: z.string().nullish(),
+  log_text: z.string().nullish(),
+  response_text: z.string().nullish(),
+  error_text: z.string().nullish(),
+  run_branch: z.string().nullish(),
+  commit_hash: z.string().nullish(),
+  worktree_path: z.string().nullish(),
+})
+
+type ScheduleRunRow = z.infer<typeof ScheduleRunRowSchema>
+
+const ScheduleJobIdRowSchema = z.object({ id: z.number() })
+
+const ScheduleRunArtifactRowSchema = z.object({
+  id: z.number(),
+  status: ScheduleRunStatusSchema,
+  run_branch: z.string().nullable(),
+  worktree_path: z.string().nullable(),
+})
+
+const ScheduleJobWorktreeOwnerRowSchema = z.object({
+  id: z.number(),
+  repo_id: z.number(),
+  name: z.string(),
+})
+
+const ShowInInboxRowSchema = z.object({ show_in_inbox: z.number() })
+
+const UnreadScheduleRunCountRowSchema = z.object({ total: z.number(), failed: z.number() })
+
+function parseSkillMetadata(raw: string | null | undefined) {
   if (!raw) {
     return null
   }
@@ -84,7 +110,7 @@ function parseSkillMetadata(raw: string | null) {
   }
 }
 
-function parsePermissionConfig(raw: string | null): SchedulePermissionConfig | null {
+function parsePermissionConfig(raw: string | null | undefined): SchedulePermissionConfig | null {
   if (!raw) {
     return null
   }
@@ -98,7 +124,7 @@ function parsePermissionConfig(raw: string | null): SchedulePermissionConfig | n
   }
 }
 
-function parseMcpServers(raw: string | null): ScheduleMcpServer[] {
+function parseMcpServers(raw: string | null | undefined): ScheduleMcpServer[] {
   if (!raw) {
     return []
   }
@@ -111,7 +137,7 @@ function parseMcpServers(raw: string | null): ScheduleMcpServer[] {
   }
 }
 
-function parseSandboxConfig(raw: string | null): ScheduleSandboxConfig | null {
+function parseSandboxConfig(raw: string | null | undefined): ScheduleSandboxConfig | null {
   if (!raw) {
     return null
   }
@@ -124,7 +150,7 @@ function parseSandboxConfig(raw: string | null): ScheduleSandboxConfig | null {
   }
 }
 
-function normalizeWorkspaceMode(raw: string | null): ScheduleWorkspaceMode {
+function normalizeWorkspaceMode(raw: string | null | undefined): ScheduleWorkspaceMode {
   const result = ScheduleWorkspaceModeSchema.safeParse(raw)
   return result.success ? result.data : 'worktree'
 }
@@ -207,32 +233,27 @@ function serializeSandboxConfig(sandbox: ScheduleJobPersistenceInput['sandbox'])
 }
 
 export function listScheduleJobsByRepo(db: Database, repoId: number): ScheduleJob[] {
-  const stmt = db.prepare('SELECT * FROM schedule_jobs WHERE repo_id IS ? ORDER BY created_at DESC')
-  const rows = stmt.all(repoId) as ScheduleJobRow[]
+  const rows = selectRows(db, ScheduleJobRowSchema, 'SELECT * FROM schedule_jobs WHERE repo_id IS ? ORDER BY created_at DESC', repoId)
   return rows.map(rowToScheduleJob)
 }
 
 export function listScheduleJobsByServer(db: Database, serverId: string): ScheduleJob[] {
-  const stmt = db.prepare('SELECT * FROM schedule_jobs WHERE server_id = ? ORDER BY created_at DESC')
-  const rows = stmt.all(serverId) as ScheduleJobRow[]
+  const rows = selectRows(db, ScheduleJobRowSchema, 'SELECT * FROM schedule_jobs WHERE server_id = ? ORDER BY created_at DESC', serverId)
   return rows.map(rowToScheduleJob)
 }
 
 export function listScheduleJobIdsByRepo(db: Database, repoId: number): number[] {
-  const stmt = db.prepare('SELECT id FROM schedule_jobs WHERE repo_id IS ? ORDER BY created_at DESC')
-  const rows = stmt.all(repoId) as Array<{ id: number }>
+  const rows = selectRows(db, ScheduleJobIdRowSchema, 'SELECT id FROM schedule_jobs WHERE repo_id IS ? ORDER BY created_at DESC', repoId)
   return rows.map((row) => row.id)
 }
 
 export function listEnabledScheduleJobs(db: Database): ScheduleJob[] {
-  const stmt = db.prepare('SELECT * FROM schedule_jobs WHERE enabled = 1 ORDER BY id ASC')
-  const rows = stmt.all() as ScheduleJobRow[]
+  const rows = selectRows(db, ScheduleJobRowSchema, 'SELECT * FROM schedule_jobs WHERE enabled = 1 ORDER BY id ASC')
   return rows.map(rowToScheduleJob)
 }
 
 export function getScheduleJobById(db: Database, repoId: number | null, jobId: number): ScheduleJob | null {
-  const stmt = db.prepare('SELECT * FROM schedule_jobs WHERE repo_id IS ? AND id = ?')
-  const row = stmt.get(repoId, jobId) as ScheduleJobRow | undefined
+  const row = selectRow(db, ScheduleJobRowSchema, 'SELECT * FROM schedule_jobs WHERE repo_id IS ? AND id = ?', repoId, jobId)
   return row ? rowToScheduleJob(row) : null
 }
 
@@ -348,12 +369,16 @@ export interface ScheduleRunArtifact {
 }
 
 export function listScheduleRunArtifactsByJob(db: Database, repoId: number | null, jobId: number): ScheduleRunArtifact[] {
-  const rows = db
-    .prepare('SELECT id, status, run_branch, worktree_path FROM schedule_runs WHERE repo_id IS ? AND job_id = ? ORDER BY id DESC')
-    .all(repoId, jobId) as { id: number; status: string; run_branch: string | null; worktree_path: string | null }[]
+  const rows = selectRows(
+    db,
+    ScheduleRunArtifactRowSchema,
+    'SELECT id, status, run_branch, worktree_path FROM schedule_runs WHERE repo_id IS ? AND job_id = ? ORDER BY id DESC',
+    repoId,
+    jobId,
+  )
   return rows.map((row) => ({
     id: row.id,
-    status: row.status as ScheduleRunStatus,
+    status: row.status,
     runBranch: row.run_branch,
     worktreePath: row.worktree_path,
   }))
@@ -366,7 +391,7 @@ export interface ScheduleJobWorktreeOwner {
 }
 
 export function listScheduleJobWorktreeOwners(db: Database): ScheduleJobWorktreeOwner[] {
-  const rows = db.prepare('SELECT id, repo_id, name FROM schedule_jobs WHERE repo_id IS NOT NULL').all() as Array<{ id: number; repo_id: number; name: string }>
+  const rows = selectRows(db, ScheduleJobWorktreeOwnerRowSchema, 'SELECT id, repo_id, name FROM schedule_jobs WHERE repo_id IS NOT NULL')
   return rows.map((row) => ({ id: row.id, repoId: row.repo_id, name: row.name }))
 }
 
@@ -392,7 +417,12 @@ export function deleteScheduleRunsByIds(db: Database, repoId: number | null, job
   return result.changes
 }
 
-export function cleanupOrphanedSchedules(db: Database): { orphanedJobs: number; orphanedRuns: number } {
+export interface OrphanedScheduleCleanup {
+  orphanedJobs: number
+  orphanedRuns: number
+}
+
+export function cleanupOrphanedSchedules(db: Database): OrphanedScheduleCleanup {
   const runStmt = db.prepare(`
     DELETE FROM schedule_runs
     WHERE (repo_id IS NOT NULL AND repo_id != ? AND repo_id NOT IN (SELECT id FROM repos))
@@ -453,12 +483,6 @@ export function createScheduleRun(
   return run
 }
 
-/**
- * Finishes a schedule run and stores its session output. A completed run of a
- * job that does not announce itself in the inbox is marked viewed at the same
- * timestamp, so quiet schedules never surface as unread; failed and cancelled
- * runs stay unread, and the job's setting at finish time decides the outcome.
- */
 export function updateScheduleRun(
   db: Database,
   repoId: number | null,
@@ -574,8 +598,7 @@ export function updateScheduleRunWorktree(
 }
 
 export function getScheduleRunById(db: Database, repoId: number | null, jobId: number, runId: number): ScheduleRun | null {
-  const stmt = db.prepare('SELECT * FROM schedule_runs WHERE repo_id IS ? AND job_id = ? AND id = ?')
-  const row = stmt.get(repoId, jobId, runId) as ScheduleRunRow | undefined
+  const row = selectRow(db, ScheduleRunRowSchema, 'SELECT * FROM schedule_runs WHERE repo_id IS ? AND job_id = ? AND id = ?', repoId, jobId, runId)
   return row ? rowToScheduleRun(row) : null
 }
 
@@ -584,57 +607,74 @@ export function getScheduleRunBySessionId(
   sessionId: string,
   serverId: string = LOCAL_OPENCODE_SERVER_ID,
 ): ScheduleRun | null {
-  const stmt = db.prepare('SELECT * FROM schedule_runs WHERE server_id = ? AND session_id = ? ORDER BY started_at DESC LIMIT 1')
-  const row = stmt.get(serverId, sessionId) as ScheduleRunRow | undefined
+  const row = selectRow(
+    db,
+    ScheduleRunRowSchema,
+    'SELECT * FROM schedule_runs WHERE server_id = ? AND session_id = ? ORDER BY started_at DESC LIMIT 1',
+    serverId,
+    sessionId,
+  )
   return row ? rowToScheduleRun(row) : null
 }
 
-/**
- * Reports whether the latest run for a session belongs to a job that stays out
- * of the inbox. Sessions without a run, and sessions of announcing jobs, are
- * not quiet.
- */
 export function isQuietScheduleRunSession(
   db: Database,
   sessionId: string,
   serverId: string = LOCAL_OPENCODE_SERVER_ID,
 ): boolean {
-  const stmt = db.prepare(`
+  const row = selectRow(
+    db,
+    ShowInInboxRowSchema,
+    `
     SELECT sj.show_in_inbox
     FROM schedule_runs sr
     JOIN schedule_jobs sj ON sj.id = sr.job_id
     WHERE sr.server_id = ? AND sr.session_id = ?
     ORDER BY sr.started_at DESC
     LIMIT 1
-  `)
-  const row = stmt.get(serverId, sessionId) as { show_in_inbox: number } | undefined
+  `,
+    serverId,
+    sessionId,
+  )
   return row?.show_in_inbox === 0
 }
 
 export function getRunningScheduleRunByJob(db: Database, repoId: number | null, jobId: number): ScheduleRun | null {
-  const stmt = db.prepare(`
+  const row = selectRow(
+    db,
+    ScheduleRunRowSchema,
+    `
     SELECT * FROM schedule_runs
     WHERE repo_id IS ? AND job_id = ? AND status = 'running'
     ORDER BY started_at DESC
     LIMIT 1
-  `)
-  const row = stmt.get(repoId, jobId) as ScheduleRunRow | undefined
+  `,
+    repoId,
+    jobId,
+  )
   return row ? rowToScheduleRun(row) : null
 }
 
 export function listRunningScheduleRuns(db: Database, limit: number = 100): ScheduleRun[] {
-  const stmt = db.prepare(`
+  const rows = selectRows(
+    db,
+    ScheduleRunRowSchema,
+    `
     SELECT * FROM schedule_runs
     WHERE status = 'running'
     ORDER BY started_at ASC
     LIMIT ?
-  `)
-  const rows = stmt.all(limit) as ScheduleRunRow[]
+  `,
+    limit,
+  )
   return rows.map(rowToScheduleRun)
 }
 
 export function listScheduleRunsByJob(db: Database, repoId: number | null, jobId: number, limit: number = 20): ScheduleRun[] {
-  const stmt = db.prepare(`
+  const rows = selectRows(
+    db,
+    ScheduleRunRowSchema,
+    `
     SELECT
       id,
       job_id,
@@ -658,8 +698,11 @@ export function listScheduleRunsByJob(db: Database, repoId: number | null, jobId
     WHERE repo_id IS ? AND job_id = ?
     ORDER BY started_at DESC
     LIMIT ?
-  `)
-  const rows = stmt.all(repoId, jobId, limit) as ScheduleRunRow[]
+  `,
+    repoId,
+    jobId,
+    limit,
+  )
   return rows.map(rowToScheduleRun)
 }
 
@@ -680,32 +723,41 @@ export interface ScheduleJobWithRepo extends ScheduleJob {
   lastRun: ScheduleRunSummary | null
 }
 
-interface ScheduleJobWithRepoRow extends ScheduleJobRow {
-  repo_url: string | null
-  repo_path: string | null
-  repo_name: string | null
-  repo_source_path: string | null
-  server_name: string | null
-  last_run_id: number | null
-  last_run_status: string | null
-  last_run_started_at: number | null
-  last_run_finished_at: number | null
-  last_run_viewed_at: number | null
-  last_run_error_text: string | null
-  last_run_response_head: string | null
+const ScheduleJobWithRepoRowSchema = ScheduleJobRowSchema.extend({
+  repo_url: z.string().nullish(),
+  repo_path: z.string().nullish(),
+  repo_name: z.string().nullish(),
+  repo_source_path: z.string().nullish(),
+  server_name: z.string().nullish(),
+  last_run_id: z.number().nullish(),
+  last_run_status: ScheduleRunStatusSchema.nullish(),
+  last_run_started_at: z.number().nullish(),
+  last_run_finished_at: z.number().nullish(),
+  last_run_viewed_at: z.number().nullish(),
+  last_run_error_text: z.string().nullish(),
+  last_run_response_head: z.string().nullish(),
+})
+
+type ScheduleJobWithRepoRow = z.infer<typeof ScheduleJobWithRepoRowSchema>
+
+const RepoDisplayRowSchema = z.object({
+  repo_id: z.number().nullable(),
+  repo_path: z.string().nullish(),
+  repo_name: z.string().nullish(),
+  repo_url: z.string().nullish(),
+  repo_source_path: z.string().nullish(),
+  directory: z.string().nullish(),
+  server_name: z.string().nullish(),
+})
+
+type RepoDisplayRow = z.infer<typeof RepoDisplayRowSchema>
+
+interface RepoDisplay {
+  repoName: string
+  repoPath: string
 }
 
-interface RepoDisplayRow {
-  repo_id: number | null
-  repo_path: string | null
-  repo_name: string | null
-  repo_url?: string | null
-  repo_source_path?: string | null
-  directory?: string | null
-  server_name?: string | null
-}
-
-function resolveRepoDisplay(row: RepoDisplayRow): { repoName: string; repoPath: string } {
+function resolveRepoDisplay(row: RepoDisplayRow): RepoDisplay {
   if (row.repo_id === null) {
     return { repoName: row.server_name ?? 'Linked server', repoPath: row.directory ?? '' }
   }
@@ -725,13 +777,17 @@ function buildLastRunSummary(row: ScheduleJobWithRepoRow): ScheduleRunSummary | 
   if (row.last_run_id === null || row.last_run_id === undefined) {
     return null
   }
+  const status = ScheduleRunStatusSchema.safeParse(row.last_run_status)
+  if (!status.success) {
+    return null
+  }
 
   return {
     id: row.last_run_id,
-    status: row.last_run_status as ScheduleRunStatus,
+    status: status.data,
     startedAt: row.last_run_started_at ?? 0,
-    finishedAt: row.last_run_finished_at,
-    viewedAt: row.last_run_viewed_at,
+    finishedAt: row.last_run_finished_at ?? null,
+    viewedAt: row.last_run_viewed_at ?? null,
     preview: extractReportPreview(row.last_run_status === 'failed' ? row.last_run_error_text : row.last_run_response_head),
   }
 }
@@ -747,7 +803,7 @@ function rowToScheduleJobWithRepo(row: ScheduleJobWithRepoRow): ScheduleJobWithR
 }
 
 export function listAllScheduleJobsWithRepos(db: Database): ScheduleJobWithRepo[] {
-  const stmt = db.prepare(`
+  const rows = selectRows(db, ScheduleJobWithRepoRowSchema, `
     SELECT
       sj.*, r.repo_url, r.local_path as repo_path, r.name as repo_name, r.source_path as repo_source_path,
       os.name AS server_name,
@@ -766,7 +822,6 @@ export function listAllScheduleJobsWithRepos(db: Database): ScheduleJobWithRepo[
     )
     ORDER BY COALESCE(r.local_path, sj.directory, ''), sj.name
   `)
-  const rows = stmt.all() as ScheduleJobWithRepoRow[]
   return rows.map(rowToScheduleJobWithRepo)
 }
 
@@ -777,15 +832,17 @@ export interface ScheduleRunWithContext extends ScheduleRun {
   serverName: string | null
 }
 
-interface ScheduleRunWithContextRow extends ScheduleRunRow {
-  job_name: string
-  repo_path: string | null
-  repo_name: string | null
-  repo_url: string | null
-  repo_source_path: string | null
-  directory?: string | null
-  server_name?: string | null
-}
+const ScheduleRunWithContextRowSchema = ScheduleRunRowSchema.extend({
+  job_name: z.string(),
+  repo_path: z.string().nullish(),
+  repo_name: z.string().nullish(),
+  repo_url: z.string().nullish(),
+  repo_source_path: z.string().nullish(),
+  directory: z.string().nullish(),
+  server_name: z.string().nullish(),
+})
+
+type ScheduleRunWithContextRow = z.infer<typeof ScheduleRunWithContextRowSchema>
 
 function rowToScheduleRunWithContext(row: ScheduleRunWithContextRow): ScheduleRunWithContext {
   return {
@@ -846,7 +903,11 @@ export function listAllScheduleRuns(db: Database, options: ListAllRunsOptions = 
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
-  const stmt = db.prepare(`
+  params.push(limit, offset)
+  const rows = selectRows(
+    db,
+    ScheduleRunWithContextRowSchema,
+    `
     SELECT
       sr.id, sr.job_id, sr.repo_id, sr.server_id, sr.trigger_source, sr.status,
       sr.started_at, sr.finished_at, sr.created_at,
@@ -863,10 +924,9 @@ export function listAllScheduleRuns(db: Database, options: ListAllRunsOptions = 
     ${whereClause}
     ORDER BY sr.started_at DESC
     LIMIT ? OFFSET ?
-  `)
-
-  params.push(limit, offset)
-  const rows = stmt.all(...params) as ScheduleRunWithContextRow[]
+  `,
+    ...params,
+  )
   return rows.map(rowToScheduleRunWithContext)
 }
 
@@ -882,12 +942,7 @@ function normalizeReportLine(rawLine: string): string {
     .trim()
 }
 
-/**
- * Reduces a finished run's markdown report to a single short, plain-text line
- * suitable for a notification or list preview, preferring the first heading
- * over any conversational preamble.
- */
-export function extractReportPreview(text: string | null): string | null {
+export function extractReportPreview(text: string | null | undefined): string | null {
   if (!text) {
     return null
   }
@@ -911,12 +966,15 @@ export interface ScheduleRunWithUnreadPreview extends ScheduleRunWithContext {
   preview: string | null
 }
 
-interface UnreadScheduleRunRow extends ScheduleRunWithContextRow {
-  response_head: string | null
-}
+const UnreadScheduleRunRowSchema = ScheduleRunWithContextRowSchema.extend({
+  response_head: z.string().nullish(),
+})
 
 export function listUnreadScheduleRuns(db: Database, limit: number = 20): ScheduleRunWithUnreadPreview[] {
-  const stmt = db.prepare(`
+  const rows = selectRows(
+    db,
+    UnreadScheduleRunRowSchema,
+    `
     SELECT
       sr.id, sr.job_id, sr.repo_id, sr.server_id, sr.trigger_source, sr.status,
       sr.started_at, sr.finished_at, sr.created_at,
@@ -933,24 +991,33 @@ export function listUnreadScheduleRuns(db: Database, limit: number = 20): Schedu
     WHERE sr.status IN ('completed', 'failed') AND sr.viewed_at IS NULL
     ORDER BY (sr.status = 'failed') DESC, sr.finished_at DESC
     LIMIT ?
-  `)
-  const rows = stmt.all(limit) as UnreadScheduleRunRow[]
+  `,
+    limit,
+  )
   return rows.map((row) => ({
     ...rowToScheduleRunWithContext(row),
     preview: extractReportPreview(row.status === 'failed' ? row.error_text : row.response_head),
   }))
 }
 
-export function countUnreadScheduleRuns(db: Database): { total: number; failed: number } {
-  const stmt = db.prepare(`
+export interface UnreadScheduleRunCount {
+  total: number
+  failed: number
+}
+
+export function countUnreadScheduleRuns(db: Database): UnreadScheduleRunCount {
+  const row = selectRow(
+    db,
+    UnreadScheduleRunCountRowSchema,
+    `
     SELECT
       COUNT(*) AS total,
       COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed
     FROM schedule_runs
     WHERE status IN ('completed', 'failed') AND viewed_at IS NULL
-  `)
-  const row = stmt.get() as { total: number; failed: number }
-  return { total: Number(row.total), failed: Number(row.failed) }
+  `,
+  )
+  return { total: Number(row?.total ?? 0), failed: Number(row?.failed ?? 0) }
 }
 
 export function markScheduleRunViewed(db: Database, runId: number): boolean {

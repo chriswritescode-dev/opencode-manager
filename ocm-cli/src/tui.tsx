@@ -1,4 +1,3 @@
-/** @jsxImportSource @opentui/solid */
 import { createSignal, createEffect, onCleanup, Show } from 'solid-js'
 import { Plugin } from '@opencode/plugin/tui'
 import type { HueScale } from '@opencode/theme/tui'

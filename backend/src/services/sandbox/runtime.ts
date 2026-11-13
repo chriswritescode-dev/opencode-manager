@@ -8,12 +8,21 @@ import {
   getOpenCodeToolOutputPath,
 } from '@opencode-manager/shared/config/env'
 import { DEFAULT_SANDBOX_IDLE_STOP_MINUTES, DEFAULT_SANDBOX_MAX_RUNNING_VMS } from '@opencode-manager/shared/schemas'
-import { executeCommand } from '../../utils/process'
+import { executeCommand, type ExecuteCommandResult } from '../../utils/process'
+import { getErrorMessage } from '../../utils/error-utils'
 import { isPathWithinRoot, mkdirSafe } from '../../utils/fs-safe'
 import { logger } from '../../utils/logger'
+import { getErrorCode } from '../error-code'
+import {
+  JsonValueSchema,
+  parseJsonObject,
+  parseJsonString,
+  type JsonObject,
+  type JsonValue,
+} from '@opencode-manager/shared/utils'
 import { SettingsService } from '../settings'
 import { CredentialProvider } from '../credential-provider'
-import type { RepoEnvService } from '../repo-env'
+import type { RepoEnvResolver } from '../repo-env'
 import { getGitIdentityEnvForDirectory } from '../git-identity'
 import { getProcessIdentityAttestationError } from '../opencode/process-identity'
 import { detectSandboxCapability } from './capability'
@@ -65,9 +74,17 @@ export type SandboxShellTarget = {
   resources: { cpus: number; memoryMib: number }
 }
 
+export type SandboxShellSandboxPlan = {
+  mode: 'sandbox'
+  name: string
+  workdir: string
+  env?: Record<string, string>
+  mask?: string[]
+}
+
 export type SandboxShellPlan =
   | { mode: 'host' }
-  | { mode: 'sandbox'; name: string; workdir: string; env?: Record<string, string>; mask?: string[] }
+  | SandboxShellSandboxPlan
   | { mode: 'blocked'; reason: string }
 
 export type SandboxStatus = {
@@ -138,9 +155,8 @@ async function validateSandboxVmMountRoots(spec: SandboxVmSpec): Promise<void> {
     try {
       stat = await lstat(root)
     } catch (error) {
-      const errorCode = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
-      if (errorCode !== 'ENOENT') {
-        throw new Error(`cannot inspect sandbox mount root ${root}: ${error instanceof Error ? error.message : String(error)}`)
+      if (getErrorCode(error) !== 'ENOENT') {
+        throw new Error(`cannot inspect sandbox mount root ${root}: ${getErrorMessage(error)}`)
       }
       if (!creatableRoots.has(root)) {
         throw new Error(`sandbox mount root ${root} does not exist`)
@@ -253,35 +269,44 @@ async function bootSessionSandboxFromListing(spec: SandboxVmSpec, maxRunningVms:
 
 type SandboxAttestation = { trusted: true } | { trusted: false; reason: string }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function resolveInspectSpec(config: unknown): Record<string, unknown> | null {
-  if (!isRecord(config)) return null
-  const wrapped = config.spec
-  if (isRecord(wrapped) && (isRecord(wrapped.image) || Array.isArray(wrapped.mounts) || isRecord(wrapped.labels) || isRecord(wrapped.network))) {
+function resolveInspectSpec(config: JsonValue | undefined): JsonObject | null {
+  const record = parseJsonObject(config)
+  if (record === null) return null
+  const wrapped = parseJsonObject(record.spec)
+  if (
+    wrapped !== null &&
+    (parseJsonObject(wrapped.image) !== null ||
+      Array.isArray(wrapped.mounts) ||
+      parseJsonObject(wrapped.labels) !== null ||
+      parseJsonObject(wrapped.network) !== null)
+  ) {
     return wrapped
   }
-  if (isRecord(config.image) || Array.isArray(config.mounts) || isRecord(config.labels) || isRecord(config.network)) {
-    return config
+  if (
+    parseJsonObject(record.image) !== null ||
+    Array.isArray(record.mounts) ||
+    parseJsonObject(record.labels) !== null ||
+    parseJsonObject(record.network) !== null
+  ) {
+    return record
   }
   return null
 }
 
-function inspectImageReference(image: unknown): string | null {
-  if (!isRecord(image)) return null
-  const oci = image.Oci
-  if (!isRecord(oci) || typeof oci.reference !== 'string') return null
-  return oci.reference
+function inspectImageReference(image: JsonValue | undefined): string | null {
+  const imageRecord = parseJsonObject(image)
+  if (imageRecord === null) return null
+  const oci = parseJsonObject(imageRecord.Oci)
+  if (oci === null) return null
+  return parseJsonString(oci.reference)
 }
 
-function sameStringArray(left: unknown, right: unknown): boolean {
+function sameStringArray(left: JsonValue | undefined, right: JsonValue | undefined): boolean {
   if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false
   return left.every((value, index) => value === right[index])
 }
 
-function emptyArrayMismatch(value: unknown, path: string): string | null {
+function emptyArrayMismatch(value: JsonValue | undefined, path: string): string | null {
   if (!Array.isArray(value) || value.length > 0) {
     return `sandbox configuration ${path} must be empty`
   }
@@ -294,25 +319,32 @@ type ParsedSandboxMount =
   | { kind: 'named'; name: string; guest: string; readonly: boolean }
   | { kind: 'other' }
 
-function parseInspectMount(mount: unknown): ParsedSandboxMount | null {
-  if (!isRecord(mount) || typeof mount.type !== 'string') return null
-  const readonly = (isRecord(mount.options) && mount.options.readonly === true) || mount.readonly === true
-  if (mount.type === 'Bind') {
-    if (typeof mount.host !== 'string' || typeof mount.guest !== 'string') return null
-    return { kind: 'bind', host: mount.host, guest: mount.guest, readonly }
+function parseInspectMount(mount: JsonObject): ParsedSandboxMount | null {
+  const type = parseJsonString(mount.type)
+  if (type === null) return null
+  const options = parseJsonObject(mount.options)
+  const readonly = options?.readonly === true || mount.readonly === true
+  if (type === 'Bind') {
+    const host = parseJsonString(mount.host)
+    const guest = parseJsonString(mount.guest)
+    if (host === null || guest === null) return null
+    return { kind: 'bind', host, guest, readonly }
   }
-  if (mount.type === 'Tmpfs') {
-    if (typeof mount.guest !== 'string') return null
-    return { kind: 'tmpfs', guest: mount.guest, readonly }
+  if (type === 'Tmpfs') {
+    const guest = parseJsonString(mount.guest)
+    if (guest === null) return null
+    return { kind: 'tmpfs', guest, readonly }
   }
-  if (mount.type === 'Named') {
-    if (typeof mount.name !== 'string' || typeof mount.guest !== 'string') return null
-    return { kind: 'named', name: mount.name, guest: mount.guest, readonly }
+  if (type === 'Named') {
+    const name = parseJsonString(mount.name)
+    const guest = parseJsonString(mount.guest)
+    if (name === null || guest === null) return null
+    return { kind: 'named', name, guest, readonly }
   }
   return { kind: 'other' }
 }
 
-async function attestSandboxConfig(spec: SandboxVmSpec, config: unknown): Promise<SandboxAttestation> {
+async function attestSandboxConfig(spec: SandboxVmSpec, config: JsonValue | undefined): Promise<SandboxAttestation> {
   const inspectedSpec = resolveInspectSpec(config)
   if (inspectedSpec === null) {
     return { trusted: false, reason: 'msb inspect returned an unexpected config shape' }
@@ -320,8 +352,8 @@ async function attestSandboxConfig(spec: SandboxVmSpec, config: unknown): Promis
 
   const canonical = buildCanonicalSandboxSpec(spec)
 
-  const labels = isRecord(inspectedSpec.labels) ? inspectedSpec.labels : {}
-  const canonicalLabels = isRecord(canonical.labels) ? canonical.labels : {}
+  const labels = parseJsonObject(inspectedSpec.labels) ?? {}
+  const canonicalLabels = canonical.labels
   if (labels['ocm.managed'] !== 'true') {
     return { trusted: false, reason: 'sandbox is not labelled ocm.managed=true' }
   }
@@ -346,20 +378,18 @@ async function attestSandboxConfig(spec: SandboxVmSpec, config: unknown): Promis
   if (canonicalImageReference !== null && imageReference !== canonicalImageReference) {
     return { trusted: false, reason: `sandbox image ${imageReference} does not match ${canonicalImageReference}` }
   }
-  const image = isRecord(inspectedSpec.image) ? inspectedSpec.image : {}
-  const oci = isRecord(image.Oci) ? image.Oci : null
-  const rootDisk = oci !== null && isRecord(oci.root_disk) ? oci.root_disk : null
+  const image = parseJsonObject(inspectedSpec.image) ?? {}
+  const oci = parseJsonObject(image.Oci)
+  const rootDisk = oci === null ? null : parseJsonObject(oci.root_disk)
   if (rootDisk !== null && rootDisk.kind === 'disk-image') {
     return { trusted: false, reason: 'sandbox image must not attach a host disk image' }
   }
 
-  const canonicalMounts = Array.isArray(canonical.mounts) ? canonical.mounts : []
   const expectedRoots = new Set<string>()
   const expectedRealRoots = new Set<string>()
-  const expectedNamedMounts: Array<{ name: string; guest: string }> = []
-  for (const rawMount of canonicalMounts) {
-    const mount = parseInspectMount(rawMount)
-    if (mount?.kind === 'bind') {
+  const expectedNamedMounts: { name: string; guest: string }[] = []
+  for (const mount of canonical.mounts) {
+    if (mount.type === 'Bind') {
       const resolvedRoot = path.resolve(mount.host)
       expectedRoots.add(resolvedRoot)
       try {
@@ -367,35 +397,39 @@ async function attestSandboxConfig(spec: SandboxVmSpec, config: unknown): Promis
       } catch {
         return { trusted: false, reason: `cannot resolve the canonical bind mount root ${resolvedRoot}` }
       }
-    } else if (mount?.kind === 'named') {
+    } else {
       expectedNamedMounts.push({ name: mount.name, guest: mount.guest })
     }
   }
 
-  const canonicalResources = isRecord(canonical.resources) ? canonical.resources : {}
+  const canonicalResources = canonical.resources
   const expectedTmpfsSizeMib = resolveSandboxRuntimeTmpfsSizeMib(canonicalResources.memory_mib)
   if (expectedTmpfsSizeMib === null) {
     return { trusted: false, reason: 'sandbox memory is not a positive finite number; cannot derive the runtime tmpfs size' }
   }
 
-  const mounts = Array.isArray(inspectedSpec.mounts) ? inspectedSpec.mounts : []
+  const rawMounts = inspectedSpec.mounts
+  const mounts = Array.isArray(rawMounts) ? rawMounts : []
   const bindRoots = new Set<string>()
   let runtimeTmpfsSeen = false
   let dockerDataVolumeSeen = false
   for (let mountIndex = 0; mountIndex < mounts.length; mountIndex++) {
-    const rawMount = mounts[mountIndex]
+    const rawMount = parseJsonObject(mounts[mountIndex])
+    if (rawMount === null) {
+      return { trusted: false, reason: 'sandbox has an unrecognized mount entry' }
+    }
     const mount = parseInspectMount(rawMount)
     if (mount === null) {
       return { trusted: false, reason: 'sandbox has an unrecognized mount entry' }
     }
+    const mountOptions = parseJsonObject(rawMount.options)
     if (mount.kind === 'bind') {
       const hostPath = path.resolve(mount.host)
       if (mount.readonly) {
         return { trusted: false, reason: 'sandbox has a read-only project bind mount' }
       }
-      const mountOptions = isRecord(rawMount) && isRecord(rawMount.options) ? rawMount.options : {}
       for (const flag of ['noexec', 'nosuid', 'nodev'] as const) {
-        if (mountOptions[flag] === true) {
+        if (mountOptions?.[flag] === true) {
           return {
             trusted: false,
             reason: `sandbox configuration mounts[${mountIndex}].options.${flag} does not match the canonical specification`,
@@ -441,7 +475,6 @@ async function attestSandboxConfig(spec: SandboxVmSpec, config: unknown): Promis
       bindRoots.add(hostPath)
     } else if (mount.kind === 'tmpfs') {
       const guestPath = path.resolve(mount.guest)
-      const tmpfsMountOptions = isRecord(rawMount) && isRecord(rawMount.options) ? rawMount.options : {}
       if (guestPath !== SANDBOX_RUNTIME_TMPFS_GUEST) {
         return { trusted: false, reason: `sandbox has an unexpected tmpfs mount at ${mount.guest}` }
       }
@@ -450,7 +483,7 @@ async function attestSandboxConfig(spec: SandboxVmSpec, config: unknown): Promis
       }
       runtimeTmpfsSeen = true
       for (const flag of ['readonly', 'noexec', 'nosuid', 'nodev'] as const) {
-        if (tmpfsMountOptions[flag] !== false) {
+        if (mountOptions?.[flag] !== false) {
           return {
             trusted: false,
             reason: `sandbox configuration mounts[${mountIndex}].options.${flag} does not match the canonical specification`,
@@ -477,9 +510,8 @@ async function attestSandboxConfig(spec: SandboxVmSpec, config: unknown): Promis
       ) {
         return { trusted: false, reason: 'sandbox has an unexpected named volume mount' }
       }
-      const namedMountOptions = isRecord(rawMount) && isRecord(rawMount.options) ? rawMount.options : {}
       for (const flag of ['readonly', 'noexec', 'nosuid', 'nodev'] as const) {
-        if (namedMountOptions[flag] !== false) {
+        if (mountOptions?.[flag] !== false) {
           return {
             trusted: false,
             reason: `sandbox configuration mounts[${mountIndex}].options.${flag} does not match the canonical specification`,
@@ -518,7 +550,7 @@ async function attestSandboxConfig(spec: SandboxVmSpec, config: unknown): Promis
     return { trusted: false, reason: 'sandbox is missing the Docker data volume mount' }
   }
 
-  const resources = isRecord(inspectedSpec.resources) ? inspectedSpec.resources : {}
+  const resources = parseJsonObject(inspectedSpec.resources) ?? {}
   if (resources.cpus !== canonicalResources.cpus) {
     return { trusted: false, reason: `sandbox cpus ${String(resources.cpus)} does not match ${String(canonicalResources.cpus)}` }
   }
@@ -532,8 +564,8 @@ async function attestSandboxConfig(spec: SandboxVmSpec, config: unknown): Promis
     return { trusted: false, reason: `sandbox max memory does not match ${String(canonicalResources.max_memory_mib)}` }
   }
 
-  const runtime = isRecord(inspectedSpec.runtime) ? inspectedSpec.runtime : {}
-  const canonicalRuntime = isRecord(canonical.runtime) ? canonical.runtime : {}
+  const runtime = parseJsonObject(inspectedSpec.runtime) ?? {}
+  const canonicalRuntime = canonical.runtime
   if (runtime.workdir !== canonicalRuntime.workdir) {
     return { trusted: false, reason: `sandbox workdir ${String(runtime.workdir)} does not match ${String(canonicalRuntime.workdir)}` }
   }
@@ -549,7 +581,8 @@ async function attestSandboxConfig(spec: SandboxVmSpec, config: unknown): Promis
   if (runtime.shell !== canonicalRuntime.shell) {
     return { trusted: false, reason: 'sandbox configuration runtime.shell does not match the canonical specification' }
   }
-  if (!isRecord(runtime.scripts) || Object.keys(runtime.scripts).length > 0) {
+  const scripts = parseJsonObject(runtime.scripts)
+  if (scripts === null || Object.keys(scripts).length > 0) {
     return { trusted: false, reason: 'sandbox configuration runtime.scripts must be empty' }
   }
   if (runtime.hostname !== canonicalRuntime.hostname) {
@@ -562,7 +595,7 @@ async function attestSandboxConfig(spec: SandboxVmSpec, config: unknown): Promis
     return { trusted: false, reason: 'sandbox configuration runtime.disable_metrics_sample does not match the canonical specification' }
   }
 
-  const network = isRecord(inspectedSpec.network) ? inspectedSpec.network : {}
+  const network = parseJsonObject(inspectedSpec.network) ?? {}
   if (network.enabled !== true) {
     return { trusted: false, reason: 'sandbox networking is disabled' }
   }
@@ -583,10 +616,11 @@ async function attestSandboxConfig(spec: SandboxVmSpec, config: unknown): Promis
 
   const secretsConfig = network.secrets
   if (secretsConfig !== undefined && secretsConfig !== null) {
-    if (!isRecord(secretsConfig) || !Array.isArray(secretsConfig.secrets)) {
+    const secretsRecord = parseJsonObject(secretsConfig)
+    if (secretsRecord === null || !Array.isArray(secretsRecord.secrets)) {
       return { trusted: false, reason: 'sandbox configuration network.secrets is malformed' }
     }
-    if (secretsConfig.secrets.length > 0) {
+    if (secretsRecord.secrets.length > 0) {
       return { trusted: false, reason: 'sandbox configuration network.secrets must be empty' }
     }
   }
@@ -605,7 +639,7 @@ async function attestSandboxConfig(spec: SandboxVmSpec, config: unknown): Promis
   if (inspectedSpec.security_profile !== 'default') {
     return { trusted: false, reason: 'sandbox configuration security_profile must be default' }
   }
-  const lifecycle = isRecord(inspectedSpec.lifecycle) ? inspectedSpec.lifecycle : {}
+  const lifecycle = parseJsonObject(inspectedSpec.lifecycle) ?? {}
   if (lifecycle.ephemeral !== false) {
     return { trusted: false, reason: 'sandbox configuration lifecycle.ephemeral must be false' }
   }
@@ -616,7 +650,8 @@ async function attestSandboxConfig(spec: SandboxVmSpec, config: unknown): Promis
     return { trusted: false, reason: 'sandbox configuration lifecycle.idle_timeout_secs must be empty' }
   }
   if (inspectedSpec.manifest_digest !== undefined && inspectedSpec.manifest_digest !== null) {
-    if (typeof inspectedSpec.manifest_digest !== 'string' || inspectedSpec.manifest_digest === '') {
+    const manifestDigest = parseJsonString(inspectedSpec.manifest_digest)
+    if (manifestDigest === null || manifestDigest === '') {
       return { trusted: false, reason: 'sandbox manifest digest is malformed' }
     }
   }
@@ -625,21 +660,20 @@ async function attestSandboxConfig(spec: SandboxVmSpec, config: unknown): Promis
 }
 
 type SandboxInspectOutcome =
-  | { kind: 'parsed'; record: Record<string, unknown> }
+  | { kind: 'parsed'; record: JsonObject }
   | { kind: 'failed'; reason: string }
 
 async function inspectSandbox(name: string): Promise<SandboxInspectOutcome> {
-  let result: string | { exitCode: number; stdout: string; stderr: string }
+  let listing: ExecuteCommandResult
   try {
-    result = (await executeCommand([sandboxExecutablePath(), ...buildSandboxInspectArgs(name)], {
+    listing = await executeCommand([sandboxExecutablePath(), ...buildSandboxInspectArgs(name)], {
       ignoreExitCode: true,
       silent: true,
       timeout: SANDBOX_LS_TIMEOUT_MS,
-    })) as string | { exitCode: number; stdout: string; stderr: string }
+    })
   } catch (error) {
-    return { kind: 'failed', reason: `msb inspect failed: ${error instanceof Error ? error.message : String(error)}` }
+    return { kind: 'failed', reason: `msb inspect failed: ${getErrorMessage(error)}` }
   }
-  const listing = typeof result === 'string' ? { exitCode: 0, stdout: result, stderr: '' } : result
 
   if (listing.exitCode !== 0) {
     return {
@@ -648,16 +682,17 @@ async function inspectSandbox(name: string): Promise<SandboxInspectOutcome> {
     }
   }
 
-  let parsed: unknown
+  let payload: JsonValue
   try {
-    parsed = JSON.parse(listing.stdout)
+    payload = JsonValueSchema.parse(JSON.parse(listing.stdout))
   } catch {
     return { kind: 'failed', reason: 'msb inspect returned malformed JSON' }
   }
-  if (!isRecord(parsed)) {
+  const record = parseJsonObject(payload)
+  if (record === null) {
     return { kind: 'failed', reason: 'msb inspect returned an unexpected JSON shape' }
   }
-  return { kind: 'parsed', record: parsed }
+  return { kind: 'parsed', record }
 }
 
 async function attestSessionSandbox(spec: SandboxVmSpec, running: boolean): Promise<SandboxAttestation> {
@@ -684,12 +719,12 @@ async function cacheSandboxImage(): Promise<void> {
 
 async function pingSandboxAgent(name: string): Promise<boolean> {
   try {
-    const result = (await executeCommand([sandboxExecutablePath(), ...buildSandboxPingArgs(name)], {
+    const result = await executeCommand([sandboxExecutablePath(), ...buildSandboxPingArgs(name)], {
       ignoreExitCode: true,
       silent: true,
       timeout: SANDBOX_AGENT_PING_TIMEOUT_MS,
-    })) as string | { exitCode: number; stdout: string; stderr: string }
-    return typeof result === 'string' || result.exitCode === 0
+    })
+    return result.exitCode === 0
   } catch {
     return false
   }
@@ -724,7 +759,7 @@ async function provisionSandboxExecUserPasswd(name: string): Promise<void> {
   if (!(await waitForSandboxAgent(name))) {
     throw new Error('the sandbox agent did not become reachable before the exec user could be provisioned')
   }
-  let lastError: unknown = null
+  let lastError = ''
   const deadline = Date.now() + ENV.SANDBOX.START_TIMEOUT_MS
   for (let attempt = 0; attempt < SANDBOX_PROVISION_ATTEMPTS; attempt++) {
     if (attempt > 0) {
@@ -743,13 +778,11 @@ async function provisionSandboxExecUserPasswd(name: string): Promise<void> {
       }
       return
     } catch (error) {
-      lastError = error
+      lastError = getErrorMessage(error)
       if (Date.now() >= deadline) break
     }
   }
-  throw new Error(
-    `provisioning the sandbox exec user passwd entry failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
-  )
+  throw new Error(`provisioning the sandbox exec user passwd entry failed: ${lastError}`)
 }
 
 function ensureSandboxExecUserProvisioned(name: string): Promise<void> {
@@ -832,12 +865,11 @@ async function runSandboxCreate(spec: SandboxVmSpec): Promise<void> {
   }
 }
 
-async function executeSandboxCreate(args: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-  const result = (await executeCommand([sandboxExecutablePath(), ...args], {
+async function executeSandboxCreate(args: string[]): Promise<ExecuteCommandResult> {
+  return await executeCommand([sandboxExecutablePath(), ...args], {
     ignoreExitCode: true,
     timeout: ENV.SANDBOX.START_TIMEOUT_MS,
-  })) as string | { exitCode: number; stdout: string; stderr: string }
-  return typeof result === 'string' ? { exitCode: 0, stdout: result, stderr: '' } : result
+  })
 }
 
 async function removeSessionSandboxVm(name: string): Promise<void> {
@@ -868,55 +900,47 @@ function removeSandboxVmAndVolume(name: string): Promise<void> {
 }
 
 async function runSandboxRemoval(args: string[], missingPattern: RegExp, label: string): Promise<void> {
-  const result = (await executeCommand([sandboxExecutablePath(), ...args], {
+  const removal = await executeCommand([sandboxExecutablePath(), ...args], {
     ignoreExitCode: true,
     timeout: SANDBOX_LS_TIMEOUT_MS,
-  })) as string | { exitCode: number; stdout: string; stderr: string }
-  const removal = typeof result === 'string' ? { exitCode: 0, stdout: result, stderr: '' } : result
+  })
   if (removal.exitCode === 0) return
   if (missingPattern.test(removal.stderr)) return
   throw new Error(`${label} failed with code ${removal.exitCode}: ${removal.stderr || removal.stdout}`)
 }
 
-type SandboxLsEntry = {
-  name?: unknown
-  status?: unknown
-  state?: unknown
-}
-
-async function listSandboxes(): Promise<SandboxLsEntry[]> {
-  const result = (await executeCommand([sandboxExecutablePath(), ...buildSandboxListArgs()], {
+async function listSandboxes(): Promise<JsonValue[]> {
+  const listing = await executeCommand([sandboxExecutablePath(), ...buildSandboxListArgs()], {
     ignoreExitCode: true,
     silent: true,
     timeout: SANDBOX_LS_TIMEOUT_MS,
-  })) as string | { exitCode: number; stdout: string; stderr: string }
-  const listing = typeof result === 'string' ? { exitCode: 0, stdout: result, stderr: '' } : result
+  })
 
   if (listing.exitCode !== 0) {
     throw new Error(`msb ls failed with code ${listing.exitCode}: ${listing.stderr || listing.stdout}`)
   }
 
-  let parsed: unknown
+  let parsed: JsonValue
   try {
-    parsed = JSON.parse(listing.stdout)
+    parsed = JsonValueSchema.parse(JSON.parse(listing.stdout))
   } catch {
     throw new Error(`msb ls returned malformed JSON (${listing.stdout.slice(0, 200)})`)
   }
   if (!Array.isArray(parsed)) {
     throw new Error('msb ls returned an unexpected JSON shape (expected a top-level array)')
   }
-  return parsed as SandboxLsEntry[]
+  return parsed
 }
 
-function sandboxEntryRunning(entry: SandboxLsEntry): boolean {
+function sandboxEntryRunning(entry: JsonObject): boolean {
   const status = entry.status ?? entry.state
   return String(status).toLowerCase() === 'running'
 }
 
-function findSessionSandboxEntry(entries: SandboxLsEntry[], name: string): { running: boolean } | null {
+function findSessionSandboxEntry(entries: JsonValue[], name: string): { running: boolean } | null {
   for (const value of entries) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
-    const entry = value as SandboxLsEntry
+    const entry = parseJsonObject(value)
+    if (entry === null) continue
     if (entry.name !== name) continue
     return { running: sandboxEntryRunning(entry) }
   }
@@ -925,11 +949,11 @@ function findSessionSandboxEntry(entries: SandboxLsEntry[], name: string): { run
 }
 
 async function startSessionSandbox(name: string): Promise<void> {
-  const result = (await executeCommand([sandboxExecutablePath(), ...buildSandboxStartArgs(name)], {
+  const result = await executeCommand([sandboxExecutablePath(), ...buildSandboxStartArgs(name)], {
     ignoreExitCode: true,
     timeout: ENV.SANDBOX.START_TIMEOUT_MS,
-  })) as string | { exitCode: number; stdout: string; stderr: string }
-  if (typeof result === 'string' || result.exitCode === 0) {
+  })
+  if (result.exitCode === 0) {
     return
   }
 
@@ -959,11 +983,12 @@ async function admitVmStart(name: string, maxRunningVms: number): Promise<void> 
   const entries = await listSandboxes()
   const running: string[] = []
   for (const value of entries) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
-    const entry = value as SandboxLsEntry
-    if (typeof entry.name !== 'string' || entry.name === name) continue
-    if (!SESSION_SANDBOX_NAME_PATTERN.test(entry.name)) continue
-    if (sandboxEntryRunning(entry)) running.push(entry.name)
+    const entry = parseJsonObject(value)
+    if (entry === null) continue
+    const entryName = parseJsonString(entry.name)
+    if (entryName === null || entryName === name) continue
+    if (!SESSION_SANDBOX_NAME_PATTERN.test(entryName)) continue
+    if (sandboxEntryRunning(entry)) running.push(entryName)
   }
   if (running.length < maxRunningVms) return
 
@@ -978,16 +1003,15 @@ async function admitVmStart(name: string, maxRunningVms: number): Promise<void> 
   }
   candidates.sort((left, right) => left.lastUsedAt - right.lastUsedAt)
   const victim = candidates[0]!
-  let stopResult: { exitCode: number; stdout: string; stderr: string }
+  let stopResult: ExecuteCommandResult
   try {
-    const result = (await executeCommand([sandboxExecutablePath(), ...buildSandboxStopArgs(victim.vmName)], {
+    stopResult = await executeCommand([sandboxExecutablePath(), ...buildSandboxStopArgs(victim.vmName)], {
       ignoreExitCode: true,
       timeout: SANDBOX_STOP_TIMEOUT_MS,
-    })) as string | { exitCode: number; stdout: string; stderr: string }
-    stopResult = typeof result === 'string' ? { exitCode: 0, stdout: result, stderr: '' } : result
+    })
   } catch (error) {
     throw new Error(
-      `could not stop idle sandbox VM ${victim.vmName} to stay within the limit of ${maxRunningVms} running sandbox VMs: ${error instanceof Error ? error.message : String(error)}`,
+      `could not stop idle sandbox VM ${victim.vmName} to stay within the limit of ${maxRunningVms} running sandbox VMs: ${getErrorMessage(error)}`,
     )
   }
   if (stopResult.exitCode !== 0) {
@@ -1007,27 +1031,26 @@ function ensureIdleSweepStarted(db: Database): void {
   idleSweepTimer = setInterval(() => {
     void sweepIdleSandboxes(db)
   }, SANDBOX_IDLE_SWEEP_INTERVAL_MS)
-  const timer = idleSweepTimer as { unref?: () => void }
-  timer.unref?.()
+  idleSweepTimer.unref()
 }
 
 async function sweepIdleSandboxes(db: Database): Promise<void> {
   if (shutdownRequested || stopInProgress) return
   const idleStopMinutes = sandboxIdleStopMinutes(db)
   const threshold = Math.max(idleStopMinutes * 60000, ENV.SANDBOX.EXEC_TIMEOUT_MS)
-  let entries: SandboxLsEntry[]
+  let entries: JsonValue[]
   try {
     entries = await listSandboxes()
   } catch (error) {
-    logger.warn(`Failed to list sandboxes for the idle sweep: ${error instanceof Error ? error.message : String(error)}`)
+    logger.warn(`Failed to list sandboxes for the idle sweep: ${getErrorMessage(error)}`)
     return
   }
   for (const value of entries) {
     if (shutdownRequested || stopInProgress) return
-    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
-    const entry = value as SandboxLsEntry
-    const name = entry.name
-    if (typeof name !== 'string' || !SESSION_SANDBOX_NAME_PATTERN.test(name)) continue
+    const entry = parseJsonObject(value)
+    if (entry === null) continue
+    const name = parseJsonString(entry.name)
+    if (name === null || !SESSION_SANDBOX_NAME_PATTERN.test(name)) continue
     const state = vmStates.get(name)
     if (state !== undefined && (state.inFlightBoot !== null || state.inFlightRemoval !== null)) continue
     const lastActivity = Math.max(state?.lastUsedAt ?? 0, idleSweepStartedAt)
@@ -1036,7 +1059,7 @@ async function sweepIdleSandboxes(db: Database): Promise<void> {
       await removeSandboxVmAndVolume(name)
       logger.info(`Removed idle sandbox ${name} and its Docker data volume`)
     } catch (error) {
-      logger.warn(`Failed to remove idle sandbox ${name}: ${error instanceof Error ? error.message : String(error)}`)
+      logger.warn(`Failed to remove idle sandbox ${name}: ${getErrorMessage(error)}`)
     }
   }
 }
@@ -1052,7 +1075,7 @@ function sandboxMaxRunningVms(db: Database): number {
 export class SandboxRuntimeService {
   constructor(
     private readonly db: Database,
-    private readonly repoEnvService?: RepoEnvService,
+    private readonly repoEnvService?: RepoEnvResolver,
   ) {}
 
   async prepareSandboxOnBoot(): Promise<void> {
@@ -1072,12 +1095,13 @@ export class SandboxRuntimeService {
     const capability = detectSandboxCapability()
     const attestationError = capability.available ? getProcessIdentityAttestationError() : null
     const reason = capability.reason ?? attestationError
-    return {
+    const status: SandboxStatus = {
       available: capability.available && attestationError === null,
       enabled: this.isEnabled(),
-      ...(reason !== null && reason !== undefined ? { reason } : {}),
-      ...(capability.msbVersion !== undefined ? { msbVersion: capability.msbVersion } : {}),
     }
+    if (reason !== null && reason !== undefined) status.reason = reason
+    if (capability.msbVersion !== undefined) status.msbVersion = capability.msbVersion
+    return status
   }
 
   async planShell(directory: string, target: SandboxShellTarget, enforced = false): Promise<SandboxShellPlan> {
@@ -1129,16 +1153,17 @@ export class SandboxRuntimeService {
         Object.assign(env, repoEnv.env)
         mask = repoEnv.maskValues
       }
-      return {
+      const plan: SandboxShellSandboxPlan = {
         mode: 'sandbox',
         name: spec.name,
         workdir: workDirectory,
-        ...(Object.keys(env).length > 0 ? { env } : {}),
-        ...(mask.length > 0 ? { mask } : {}),
       }
+      if (Object.keys(env).length > 0) plan.env = env
+      if (mask.length > 0) plan.mask = mask
+      return plan
     } catch (error) {
       logger.error('Failed to prepare the session sandbox', error)
-      return { mode: 'blocked', reason: error instanceof Error ? error.message : String(error) }
+      return { mode: 'blocked', reason: getErrorMessage(error) }
     }
   }
 
@@ -1180,11 +1205,10 @@ export class SandboxRuntimeService {
     for (const state of vmStates.values()) {
       state.lastKnownRunningAt = null
     }
-    const result = (await executeCommand([sandboxExecutablePath(), ...buildSandboxStopManagedArgs()], {
+    const stopResult = await executeCommand([sandboxExecutablePath(), ...buildSandboxStopManagedArgs()], {
       ignoreExitCode: true,
       timeout: SANDBOX_STOP_TIMEOUT_MS,
-    })) as string | { exitCode: number; stdout: string; stderr: string }
-    const stopResult = typeof result === 'string' ? { exitCode: 0, stdout: result, stderr: '' } : result
+    })
     if (stopResult.exitCode !== 0) {
       try {
         await confirmManagedSandboxesStopped()
@@ -1203,9 +1227,10 @@ export class SandboxRuntimeService {
 
 async function confirmManagedSandboxesStopped(): Promise<void> {
   for (const value of await listSandboxes()) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
-    const entry = value as SandboxLsEntry
-    if (typeof entry.name !== 'string' || !SESSION_SANDBOX_NAME_PATTERN.test(entry.name)) continue
+    const entry = parseJsonObject(value)
+    if (entry === null) continue
+    const name = parseJsonString(entry.name)
+    if (name === null || !SESSION_SANDBOX_NAME_PATTERN.test(name)) continue
     if (sandboxEntryRunning(entry)) {
       throw new Error('msb stop failed to stop the sandbox microVMs; a managed microVM is still running')
     }

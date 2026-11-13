@@ -1,17 +1,12 @@
+import { selectTableColumns } from '../rows'
 import type { Migration } from '../migration-runner'
-
-interface ColumnInfo {
-  name: string
-  notnull: number
-  dflt_value: string | null
-}
 
 const migration: Migration = {
   id: '017-schedule-run-workspace-id',
   legacy: { version: 17, name: 'schedule-run-workspace-id' },
 
   up(db) {
-    const cols = db.prepare('PRAGMA table_info(schedule_runs)').all() as ColumnInfo[]
+    const cols = selectTableColumns(db, 'schedule_runs')
     if (!cols.some((c) => c.name === 'workspace_id')) {
       db.run('ALTER TABLE schedule_runs ADD COLUMN workspace_id TEXT')
     }
@@ -19,8 +14,6 @@ const migration: Migration = {
 
   down(_db) {
     void _db
-    // no-op: SQLite drop-column requires table rebuild; column is nullable so
-    // leaving it in place is safe for rollback scenarios.
   },
 }
 

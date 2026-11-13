@@ -38,8 +38,7 @@ describe('useVisualViewport', () => {
     if (originalVisualViewport) {
       Object.defineProperty(window, 'visualViewport', originalVisualViewport)
     } else {
-      // @ts-expect-error allow delete
-      delete window.visualViewport
+      Reflect.deleteProperty(window, 'visualViewport')
     }
     Object.defineProperty(window, 'innerHeight', {
       writable: true,

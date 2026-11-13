@@ -19,8 +19,7 @@ function setViewportWidth(width: number) {
 
 function stubPageWidth(width: number): () => void {
   const main = document.createElement('main')
-  main.getBoundingClientRect = () =>
-    ({ width, height: 800, top: 0, left: 0, right: width, bottom: 800, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
+  main.getBoundingClientRect = () => new DOMRect(0, 0, width, 800)
   document.body.append(main)
   return () => main.remove()
 }

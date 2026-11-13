@@ -5,11 +5,6 @@ import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 
 export const OPENCODE_FAILURE_TOAST_ID = 'opencode-server-failure'
 
-/**
- * Raises one persistent error toast per distinct terminal OpenCode server
- * failure (startup failure or exhausted recovery), offering to open the Logs
- * settings tab or restart the server, and announces when the server recovers.
- */
 export function useOpenCodeFailureToast(enabled: boolean, onRestart: () => void) {
   const { data: health } = useServerHealth(enabled)
   const { openTab } = useSettingsDialog()

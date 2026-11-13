@@ -1,36 +1,34 @@
+import { z } from 'zod'
 import { API_BASE_URL } from '@/config'
 import { fetchWrapper, FetchError } from './fetchWrapper'
 
-export interface STTModelsResponse {
-  models: string[]
-  cached: boolean
-}
+const sttModelsResponseSchema = z.object({ models: z.array(z.string()), cached: z.boolean() })
+const sttStatusResponseSchema = z.object({
+  enabled: z.boolean(),
+  configured: z.boolean(),
+  provider: z.enum(['external', 'builtin']),
+  model: z.string(),
+})
+const sttTranscribeResponseSchema = z.object({ text: z.string() })
+const sttErrorResponseSchema = z.object({ error: z.string(), details: z.string().optional() })
 
-export interface STTStatusResponse {
-  enabled: boolean
-  configured: boolean
-  provider: 'external' | 'builtin'
-  model: string
-}
+export type STTModelsResponse = z.infer<typeof sttModelsResponseSchema>
 
-export interface STTTranscribeResponse {
-  text: string
-}
+export type STTStatusResponse = z.infer<typeof sttStatusResponseSchema>
 
-export interface STTErrorResponse {
-  error: string
-  details?: string
-}
+export type STTTranscribeResponse = z.infer<typeof sttTranscribeResponseSchema>
+
+export type STTErrorResponse = z.infer<typeof sttErrorResponseSchema>
 
 export const sttApi = {
   getModels: async (userId = 'default', forceRefresh = false): Promise<STTModelsResponse> => {
-    return fetchWrapper(`${API_BASE_URL}/api/stt/models`, {
+    return fetchWrapper(`${API_BASE_URL}/api/stt/models`, sttModelsResponseSchema, {
       params: { userId, ...(forceRefresh && { refresh: 'true' }) },
     })
   },
 
   getStatus: async (userId = 'default'): Promise<STTStatusResponse> => {
-    return fetchWrapper(`${API_BASE_URL}/api/stt/status`, {
+    return fetchWrapper(`${API_BASE_URL}/api/stt/status`, sttStatusResponseSchema, {
       params: { userId },
     })
   },
@@ -77,11 +75,14 @@ export const sttApi = {
       signal?.removeEventListener('abort', onAbort)
 
       if (!response.ok) {
-        const data = await response.json().catch(() => ({ error: 'Transcription failed' }))
-        throw new FetchError(data.error || 'Transcription failed', response.status)
+        const parsedError = sttErrorResponseSchema.safeParse(await response.json().catch(() => null))
+        throw new FetchError(
+          (parsedError.success ? parsedError.data.error : undefined) || 'Transcription failed',
+          response.status,
+        )
       }
 
-      return response.json()
+      return sttTranscribeResponseSchema.parse(await response.json())
     } catch (error) {
       clearTimeout(timeoutId)
       signal?.removeEventListener('abort', onAbort)

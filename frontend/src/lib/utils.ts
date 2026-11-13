@@ -33,7 +33,6 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-/** Keeps the last `maxSegments` segments of an absolute path, replacing the rest with `/...`. */
 export function shortenPath(path: string, maxSegments = 3): string {
   const segments = path.split('/').filter(Boolean)
   if (segments.length === 0) return '/'
@@ -41,19 +40,17 @@ export function shortenPath(path: string, maxSegments = 3): string {
   return `/.../${segments.slice(-maxSegments).join('/')}`
 }
 
-/** Returns the final segment of a directory path, or the path itself when it has none. */
 export function getDirectoryName(path: string): string {
   return path.split('/').filter(Boolean).at(-1) ?? path
 }
 
 export function randomId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
+  if ('crypto' in globalThis && globalThis.crypto.randomUUID !== undefined) {
+    return globalThis.crypto.randomUUID()
   }
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`
 }
 
-/** Formats a millisecond duration as `Xh Ym`, `Xm Ys`, or `Xs`, clamped to zero. */
 export function formatDuration(ms: number): string {
   const totalSeconds = Math.max(0, Math.round(ms / 1000))
   const hours = Math.floor(totalSeconds / 3600)
@@ -95,87 +92,66 @@ export function sanitizeForTTS(text: string): string {
 
   let sanitized = text
 
-  // Remove code blocks entirely (not readable for TTS)
   sanitized = sanitized.replace(/```[\s\S]*?```/g, '')
 
-  // Remove inline code, keep content: `code` -> code
   sanitized = sanitized.replace(/`([^`]+)`/g, '$1')
 
-  // Remove markdown images: ![alt](url) -> alt (must run before link regex to avoid leaving stray !)
   sanitized = sanitized.replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
 
-  // Remove markdown links, keep display text: [text](url) -> text
   sanitized = sanitized.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
 
-  // Remove bold markers: **text** -> text or __text__ -> text
   sanitized = sanitized.replace(/\*\*([^*]+)\*\*/g, '$1')
   sanitized = sanitized.replace(/__([^_]+)__/g, '$1')
 
-  // Remove italic markers: *text* -> text or _text_ -> text
   sanitized = sanitized.replace(/\*([^*]+)\*/g, '$1')
   sanitized = sanitized.replace(/_([^_]+)_/g, '$1')
 
-  // Remove strikethrough: ~~text~~ -> text
   sanitized = sanitized.replace(/~~([^~]+)~~/g, '$1')
 
-  // Remove headers: ### Header -> Header
   sanitized = sanitized.replace(/^#{1,6}\s+/gm, '')
 
   sanitized = sanitized.replace(/^\s*(?:(?:[-*+]|\d+\.)\s+)?\[[ xX]\]\s+/gm, '')
 
-  // Remove list markers: - item, * item, + item, or 1. item -> item
   sanitized = sanitized.replace(/^\s*[-*+]\s+/gm, '')
   sanitized = sanitized.replace(/^\s*\d+\.\s+/gm, '')
 
-  // Remove blockquotes: > quote -> quote
   sanitized = sanitized.replace(/^>\s+/gm, '')
 
-  // Remove horizontal rules and setext heading underlines: ---, ***, ___ or ===
   sanitized = sanitized.replace(/^(\*\*\*|---|___|={3,})\s*$/gm, '')
 
-  // Remove footnote references: [^1] -> remove
   sanitized = sanitized.replace(/\[\^[^\]]+\]/g, '')
 
-  // Remove citation references: [1] or [1,2] -> remove
   sanitized = sanitized.replace(/\[\d+(,\d+)*\]/g, '')
 
-  // Remove HTML tags: <tag> -> remove
   sanitized = sanitized.replace(/<[^>]*>/g, '')
 
-  // Process tables: handle line-by-line for proper cell separation
   const lines = sanitized.split('\n')
   const processedLines: string[] = []
 
   for (const line of lines) {
     const trimmed = line.trim()
     
-    // Skip table separator rows (only dashes, pipes, equals, spaces)
     if (/^[|\s\-_=]+$/.test(trimmed)) {
       continue
     }
 
-    // Handle table rows (contain pipes)
     if (trimmed.includes('|')) {
-      // Remove pipes and multiple spaces
       const cells = trimmed.split('|')
         .map(s => s.trim())
         .filter(s => s.length > 0)
         .join(' ')
       if (cells) processedLines.push(cells)
     } else if (trimmed) {
-      // Non-table line
       processedLines.push(trimmed)
     }
   }
 
   sanitized = processedLines.join('\n')
 
-  // Clean up whitespace
   sanitized = sanitized.replace(/\n{3,}/g, '\n\n')
   sanitized = sanitized.replace(/[ \t]{2,}/g, ' ')
   sanitized = sanitized.trim()
 
-  // Fix common punctuation spacing issues
   sanitized = sanitized.replace(/\s+([.,!?;:])/g, '$1')
 
   return sanitized

@@ -1,374 +1,288 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, act } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { LocationCatcher } from '@/test/test-utils'
+import { describe, expect, it } from 'vitest'
+import { screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { Route, Routes } from 'react-router-dom'
 import { GlobalSchedules } from '../GlobalSchedules'
+import { createTestQueryClient, renderWithProviders } from '@/test/render'
+import { LocationCatcher } from '@/test/test-components'
+import {
+  makeRepo,
+  makeScheduleJobWithRepo,
+  makeScheduleRunWithContext,
+} from '@/test/fixtures/api'
+import type { FetchRoute, RecordedFetchRequest } from '@/test/fetchFake'
+import type { ScheduleJobWithRepo, ScheduleRunWithContext } from '@opencode-manager/shared/types'
 
-const mocks = vi.hoisted(() => ({
-  useAllSchedules: vi.fn(),
-  useAllScheduleRuns: vi.fn(),
-  useCreateRepoSchedule: vi.fn(),
-  useUpdateScheduleTarget: vi.fn(),
-  useDeleteScheduleTarget: vi.fn(),
-  useRunScheduleTarget: vi.fn(),
-  useCancelScheduleTargetRun: vi.fn(),
-  useUnreadScheduleRuns: vi.fn(),
-  useScheduleUrlState: vi.fn(),
-  ScheduleJobsTable: vi.fn(() => null),
-  ScheduleRunsTable: vi.fn(() => null),
-  ScheduleRunDrawer: vi.fn(() => null),
-}))
+const repo = makeRepo({ id: 1, name: 'my-repo', fullPath: '/home/user/my-repo' })
 
-vi.mock('@/hooks/useSchedules', () => ({
-  useAllSchedules: mocks.useAllSchedules,
-  useAllScheduleRuns: mocks.useAllScheduleRuns,
-  useCreateRepoSchedule: mocks.useCreateRepoSchedule,
-  useUpdateScheduleTarget: mocks.useUpdateScheduleTarget,
-  useDeleteScheduleTarget: mocks.useDeleteScheduleTarget,
-  useRunScheduleTarget: mocks.useRunScheduleTarget,
-  useCancelScheduleTargetRun: mocks.useCancelScheduleTargetRun,
-  useUnreadScheduleRuns: mocks.useUnreadScheduleRuns,
-}))
-
-vi.mock('@/hooks/useScheduleUrlState', () => ({
-  useScheduleUrlState: mocks.useScheduleUrlState,
-}))
-
-vi.mock('@/components/notifications/ScheduleReportsBell', () => ({
-  ScheduleReportsBell: vi.fn(() => null),
-}))
-
-vi.mock('@/components/schedules', () => ({
-  ScheduleJobDialog: vi.fn(() => null),
-  ScheduleJobsTable: mocks.ScheduleJobsTable,
-  ScheduleRunsTable: mocks.ScheduleRunsTable,
-  ScheduleRunDrawer: mocks.ScheduleRunDrawer,
-  ScheduleListToolbar: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
-  PromptsTab: vi.fn(() => null),
-  ScheduleRepoSwitcher: ({ name }: { name: string }) => <div>{name}</div>,
-}))
-
-function makeRun(overrides: Record<string, unknown> = {}) {
-  return {
-    id: 1,
-    jobId: 7,
-    repoId: 42,
-    triggerSource: 'manual',
-    status: 'completed',
-    startedAt: Date.UTC(2026, 2, 9, 12, 0, 0),
-    finishedAt: Date.UTC(2026, 2, 9, 12, 5, 0),
-    viewedAt: 123,
-    createdAt: Date.UTC(2026, 2, 9, 12, 0, 0),
-    sessionId: 'ses-1',
-    sessionTitle: 'Run title',
-    logText: null,
-    responseText: null,
-    errorText: null,
-    runBranch: null,
-    commitHash: null,
-    worktreePath: null,
-    jobName: 'Weekly summary',
-    repoName: 'my-repo',
-    repoPath: '/home/user/my-repo',
-    ...overrides,
-  }
+interface GlobalSchedulesRenderOptions {
+  route?: string
+  jobs?: ScheduleJobWithRepo[]
+  historyRuns?: ScheduleRunWithContext[]
+  selectedRuns?: (runId: number, request: RecordedFetchRequest) => ScheduleRunWithContext[]
+  selectedStatus?: number
+  selectedPending?: boolean
+  seedSelectedRun?: ScheduleRunWithContext
 }
 
-function makeJob(overrides: Record<string, unknown> = {}) {
-  return {
-    id: 7,
-    repoId: 42,
-    name: 'Weekly summary',
-    description: 'Summarize the week',
-    enabled: true,
-    scheduleMode: 'interval',
-    intervalMinutes: 60,
-    cronExpression: null,
-    timezone: null,
-    agentSlug: null,
-    prompt: 'Summarize the week',
-    model: null,
-    skillMetadata: null,
-    permissionConfig: null,
-    mcpServers: [],
-    branch: null,
-    createdAt: 0,
-    updatedAt: 0,
-    lastRunAt: null,
-    nextRunAt: null,
-    repoName: 'my-repo',
-    repoPath: '/home/user/my-repo',
-    repoUrl: 'https://example.com/my-repo',
-    lastRun: null,
-    ...overrides,
-  }
+function selectedRunLookup(request: RecordedFetchRequest): ScheduleRunWithContext[] {
+  const runId = Number(request.searchParams.get('runId') ?? 0)
+  return [makeScheduleRunWithContext({ id: runId, jobId: 7, jobName: `Run ${runId}`, sessionTitle: `Run ${runId}` })]
 }
 
-function createMockScheduleUrlState(overrides: Record<string, unknown> = {}) {
-  return {
-    scheduleTab: 'runs',
-    setScheduleTab: vi.fn(),
-    dialog: null,
-    promptDialog: null,
-    jobId: null,
-    runId: null,
-    templateId: null,
-    openNewJob: vi.fn(),
-    openEditJob: vi.fn(),
-    openDeleteJob: vi.fn(),
-    openNewTemplate: vi.fn(),
-    openEditTemplate: vi.fn(),
-    openDeleteTemplate: vi.fn(),
-    openImportTemplate: vi.fn(),
-    closeDialog: vi.fn(),
-    closePromptDialog: vi.fn(),
-    selectRun: vi.fn(),
-    selectJobAndView: vi.fn(),
-    selectJobAndCloseDialog: vi.fn(),
-    replaceUrlParams: vi.fn(),
-    ...overrides,
-  }
-}
-
-let mainRunsResult: { data: unknown; isLoading: boolean; isError?: boolean }
-let selectedRunResult: { data: unknown; isLoading: boolean; isError?: boolean; refetch?: () => void }
-
-const createWrapper = () => {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
+function buildRoutes(options: GlobalSchedulesRenderOptions): FetchRoute[] {
+  return [
+    { method: 'GET', path: '/api/schedules/all', respond: () => ({ json: { jobs: options.jobs ?? [] } }) },
+    {
+      method: 'GET',
+      path: '/api/schedules/all/runs',
+      respond: (request) => {
+        if (request.searchParams.get('limit') === '1') {
+          if (options.selectedPending) return new Promise<never>(() => undefined)
+          const runId = Number(request.searchParams.get('runId') ?? 0)
+          if (options.selectedStatus && options.selectedStatus !== 200) {
+            return { status: options.selectedStatus, json: { error: 'Run lookup failed' } }
+          }
+          const respond = options.selectedRuns ?? selectedRunLookup
+          return { json: { runs: respond(runId, request) } }
+        }
+        return { json: { runs: options.historyRuns ?? [] } }
+      },
     },
-  })
-  return ({ children }: { children: React.ReactNode }) =>
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    { method: 'GET', path: '/api/schedules/all/runs/unread', respond: () => ({ json: { runs: [], total: 0, failed: 0 } }) },
+    { method: 'GET', path: '/api/repos/:id', respond: () => ({ json: repo }) },
+    { method: 'POST', path: '/api/schedules/all/runs/:runId/viewed', respond: () => ({ json: { updated: true } }) },
+    {
+      method: 'GET',
+      path: '/api/repos/:id/schedules/:jobId/runs/:runId',
+      respond: (_request, params) => ({
+        json: {
+          run: makeScheduleRunWithContext({ id: Number(params.runId), jobId: Number(params.jobId) }),
+        },
+      }),
+    },
+  ]
 }
 
-const renderGlobalSchedules = () => {
-  return render(
-    <MemoryRouter initialEntries={['/schedules']}>
-      <GlobalSchedules />
-    </MemoryRouter>,
-    { wrapper: createWrapper() }
-  )
-}
-
-const renderGlobalSchedulesWithLocation = () => {
+function renderGlobalSchedules(options: GlobalSchedulesRenderOptions = {}) {
+  const queryClient = createTestQueryClient()
+  if (options.seedSelectedRun) {
+    const runId = options.seedSelectedRun.id
+    queryClient.setQueryData(['all-schedule-runs', { limit: 1, runId }], [options.seedSelectedRun])
+  }
   const capturedPathname = { current: '' }
   const capturedSearch = { current: '' }
-  render(
-    <MemoryRouter initialEntries={['/schedules']}>
-      <LocationCatcher capturedSearch={capturedSearch} capturedPathname={capturedPathname} />
-      <GlobalSchedules />
-    </MemoryRouter>,
-    { wrapper: createWrapper() }
+  const result = renderWithProviders(
+    <>
+      <LocationCatcher capturedPathname={capturedPathname} capturedSearch={capturedSearch} />
+      <Routes>
+        <Route path="/schedules" element={<GlobalSchedules />} />
+        <Route path="/servers/:serverId/projects" element={<div>server project route</div>} />
+        <Route path="/repos/:id/schedules" element={<div>repo schedules route</div>} />
+      </Routes>
+    </>,
+    {
+      route: options.route ?? '/schedules',
+      queryClient,
+      fetchRoutes: buildRoutes(options),
+    },
   )
-  return { capturedPathname, capturedSearch }
+  return { ...result, capturedPathname, capturedSearch }
 }
 
-const runsTableProps = () => mocks.ScheduleRunsTable.mock.calls.at(-1)?.[0] as {
-  runs: Array<{ id: number }>
-  selectedRunId: number | null
-}
-
-const drawerProps = () => mocks.ScheduleRunDrawer.mock.calls.at(-1)?.[0] as {
-  run: { id: number } | null
-  open: boolean
-  runLoading: boolean
-  runError: boolean
-  onRetry?: () => void
-  onClose: () => void
-}
-
-const jobsTableProps = () => mocks.ScheduleJobsTable.mock.calls.at(-1)?.[0] as {
-  onOpen: (job: unknown) => void
+function historyRuns(count: number): ScheduleRunWithContext[] {
+  return Array.from({ length: count }, (_, index) =>
+    makeScheduleRunWithContext({
+      id: index + 1,
+      jobId: 7,
+      jobName: `Run ${index + 1}`,
+      sessionTitle: `Run ${index + 1}`,
+    }),
+  )
 }
 
 describe('GlobalSchedules run history', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mainRunsResult = { data: [], isLoading: false }
-    selectedRunResult = { data: undefined, isLoading: false, isError: false }
-
-    mocks.useAllScheduleRuns.mockImplementation((params: { limit?: number }) =>
-      params.limit === 1 ? selectedRunResult : mainRunsResult
-    )
-    mocks.useAllSchedules.mockReturnValue({ data: [], isLoading: false, error: null })
-    mocks.useCreateRepoSchedule.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useUpdateScheduleTarget.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useDeleteScheduleTarget.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useRunScheduleTarget.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useCancelScheduleTargetRun.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useUnreadScheduleRuns.mockReturnValue({ data: { runs: [], total: 0, failed: 0 } })
-    mocks.useScheduleUrlState.mockReturnValue(createMockScheduleUrlState())
-  })
-
-  it('loads and pins a selected run outside the loaded history', () => {
-    const historyRuns = Array.from({ length: 50 }, (_, index) => makeRun({ id: index + 1, sessionTitle: `Run ${index + 1}` }))
-    mainRunsResult = { data: historyRuns, isLoading: false }
-    selectedRunResult = { data: [makeRun({ id: 999, sessionTitle: 'Deep linked run' })], isLoading: false, isError: false }
-    mocks.useScheduleUrlState.mockReturnValue(createMockScheduleUrlState({ scheduleTab: 'runs', runId: 999 }))
-
-    renderGlobalSchedules()
-
-    expect(mocks.useAllScheduleRuns).toHaveBeenCalledWith({ limit: 1, runId: 999 }, true)
-    const props = runsTableProps()
-    expect(props.selectedRunId).toBe(999)
-    expect(props.runs.some((run) => run.id === 999)).toBe(true)
-    expect(drawerProps().run?.id).toBe(999)
-  })
-
-  it('does not duplicate a selected run already present in history', () => {
-    mainRunsResult = { data: [makeRun({ id: 5 }), makeRun({ id: 6 })], isLoading: false }
-    mocks.useScheduleUrlState.mockReturnValue(createMockScheduleUrlState({ scheduleTab: 'runs', runId: 5 }))
-
-    renderGlobalSchedules()
-
-    expect(mocks.useAllScheduleRuns).toHaveBeenCalledWith({ limit: 1, runId: 5 }, false)
-    const props = runsTableProps()
-    expect(props.runs.filter((run) => run.id === 5)).toHaveLength(1)
-  })
-
-  it('reports loading through the drawer while the selected run lookup is pending', () => {
-    selectedRunResult = { data: undefined, isLoading: true, isError: false }
-    mocks.useScheduleUrlState.mockReturnValue(createMockScheduleUrlState({ scheduleTab: 'runs', runId: 999 }))
-
-    renderGlobalSchedules()
-
-    expect(drawerProps().runLoading).toBe(true)
-    expect(drawerProps().run).toBeNull()
-    expect(mocks.ScheduleRunsTable).toHaveBeenCalled()
-  })
-
-  it('reports not found through the drawer when the selected run lookup returns empty', () => {
-    selectedRunResult = { data: [], isLoading: false, isError: false }
-    mocks.useScheduleUrlState.mockReturnValue(createMockScheduleUrlState({ scheduleTab: 'runs', runId: 999 }))
-
-    renderGlobalSchedules()
-
-    expect(drawerProps().run).toBeNull()
-    expect(drawerProps().runLoading).toBe(false)
-    expect(drawerProps().runError).toBe(false)
-    expect(mocks.ScheduleRunsTable).toHaveBeenCalled()
-  })
-
-  it('reports an error with a retry through the drawer when the lookup fails', () => {
-    const refetch = vi.fn()
-    selectedRunResult = { data: undefined, isLoading: false, isError: true, refetch }
-    mocks.useScheduleUrlState.mockReturnValue(createMockScheduleUrlState({ scheduleTab: 'runs', runId: 999 }))
-
-    renderGlobalSchedules()
-
-    expect(drawerProps().runError).toBe(true)
-
-    drawerProps().onRetry?.()
-    expect(refetch).toHaveBeenCalledTimes(1)
-  })
-
-  it('renders the cached selected run when a background refetch fails', () => {
-    selectedRunResult = { data: [makeRun({ id: 999, sessionTitle: 'Deep linked run' })], isLoading: false, isError: true }
-    mocks.useScheduleUrlState.mockReturnValue(createMockScheduleUrlState({ scheduleTab: 'runs', runId: 999 }))
-
-    renderGlobalSchedules()
-
-    expect(drawerProps().runError).toBe(false)
-    expect(drawerProps().run?.id).toBe(999)
-    const props = runsTableProps()
-    expect(props.selectedRunId).toBe(999)
-    expect(props.runs.filter((run) => run.id === 999)).toHaveLength(1)
-  })
-
-  it('re-queries when the selected run id changes', () => {
-    mainRunsResult = { data: [], isLoading: false }
-    selectedRunResult = { data: [makeRun({ id: 999 })], isLoading: false, isError: false }
-    mocks.useScheduleUrlState.mockReturnValue(createMockScheduleUrlState({ scheduleTab: 'runs', runId: 999 }))
-
-    const { rerender } = renderGlobalSchedules()
-
-    expect(mocks.useAllScheduleRuns).toHaveBeenCalledWith({ limit: 1, runId: 999 }, true)
-
-    selectedRunResult = { data: [makeRun({ id: 1000 })], isLoading: false, isError: false }
-    mocks.useScheduleUrlState.mockReturnValue(createMockScheduleUrlState({ scheduleTab: 'runs', runId: 1000 }))
-
-    rerender(
-      <MemoryRouter initialEntries={['/schedules']}>
-        <GlobalSchedules />
-      </MemoryRouter>
-    )
-
-    expect(mocks.useAllScheduleRuns).toHaveBeenCalledWith({ limit: 1, runId: 1000 }, true)
-    expect(runsTableProps().runs.some((run) => run.id === 1000)).toBe(true)
-  })
-
-  it('ignores cached selected run data when the selection is cleared', () => {
-    mainRunsResult = { data: [], isLoading: false }
-    selectedRunResult = { data: [makeRun({ id: 999, sessionTitle: 'Deep linked run' })], isLoading: false, isError: false }
-    mocks.useScheduleUrlState.mockReturnValue(createMockScheduleUrlState({ scheduleTab: 'runs', runId: 999 }))
-
-    const { rerender } = renderGlobalSchedules()
-
-    expect(runsTableProps().runs.some((run) => run.id === 999)).toBe(true)
-
-    mocks.ScheduleRunsTable.mockClear()
-    mocks.useScheduleUrlState.mockReturnValue(createMockScheduleUrlState({ scheduleTab: 'runs', runId: null }))
-
-    rerender(
-      <MemoryRouter initialEntries={['/schedules']}>
-        <GlobalSchedules />
-      </MemoryRouter>
-    )
-
-    expect(drawerProps().open).toBe(false)
-    expect(runsTableProps().runs.some((run) => run.id === 999)).toBe(false)
-  })
-
-  it('queries the selected run on the jobs tab as well', () => {
-    mocks.useScheduleUrlState.mockReturnValue(createMockScheduleUrlState({ scheduleTab: 'jobs', runId: 999 }))
-
-    renderGlobalSchedules()
-
-    expect(mocks.useAllScheduleRuns).toHaveBeenCalledWith({ limit: 1, runId: 999 }, true)
-  })
-
-  it('opens the report drawer from a job row that has a last run', () => {
-    const selectRun = vi.fn()
-    mocks.useAllSchedules.mockReturnValue({
-      data: [makeJob({ lastRun: { id: 5, status: 'completed', startedAt: 0, finishedAt: 1, viewedAt: 1, preview: null } })],
-      isLoading: false,
-      error: null,
+  it('pins the selected run outside the loaded history and loads it by id', async () => {
+    const { fetchFake } = renderGlobalSchedules({
+      route: '/schedules?scheduleTab=runs&runId=999',
+      historyRuns: historyRuns(50),
+      selectedRuns: () => [
+        makeScheduleRunWithContext({ id: 999, jobId: 7, jobName: 'Deep linked run' }),
+      ],
     })
-    mocks.useScheduleUrlState.mockReturnValue(createMockScheduleUrlState({ scheduleTab: 'jobs', runId: null, selectRun }))
 
-    renderGlobalSchedules()
+    expect(await screen.findByRole('dialog', { name: 'Deep linked run' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open run Deep linked run' })).toBeInTheDocument()
+    const lookup = fetchFake.findRequests('GET', '/api/schedules/all/runs').filter(
+      (request) => request.searchParams.get('limit') === '1',
+    )
+    const lastLookup = lookup[lookup.length - 1]
+    expect(lastLookup?.searchParams.get('runId')).toBe('999')
+  })
 
-    jobsTableProps().onOpen(makeJob({ lastRun: { id: 5 } }))
+  it('does not duplicate a selected run already present in history', async () => {
+    const runs = historyRuns(6)
+    renderGlobalSchedules({
+      route: '/schedules?scheduleTab=runs&runId=5',
+      historyRuns: runs,
+      seedSelectedRun: runs[4],
+    })
 
-    expect(selectRun).toHaveBeenCalledWith(5)
+    expect(await screen.findByRole('button', { name: 'Open run Run 5' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Open run Run 5' })).toHaveLength(1)
+    expect(await screen.findByRole('dialog', { name: 'Run 5' })).toBeInTheDocument()
+  })
+
+  it('shows a loading drawer while the selected run lookup is pending', async () => {
+    renderGlobalSchedules({
+      route: '/schedules?scheduleTab=runs&runId=999',
+      selectedPending: true,
+    })
+
+    const drawer = await screen.findByRole('dialog', { name: 'Run' })
+    expect(drawer).toBeInTheDocument()
+    expect(within(drawer).queryByText('Run not found')).not.toBeInTheDocument()
+  })
+
+  it('reports a missing selected run in the drawer', async () => {
+    renderGlobalSchedules({
+      route: '/schedules?scheduleTab=runs&runId=999',
+      selectedRuns: () => [],
+    })
+
+    expect(await screen.findByText('Run not found')).toBeInTheDocument()
+  })
+
+  it('reports a failed selected run lookup and retries it', async () => {
+    const { fetchFake } = renderGlobalSchedules({
+      route: '/schedules?scheduleTab=runs&runId=999',
+      selectedStatus: 500,
+    })
+
+    expect(await screen.findByText('Failed to load run')).toBeInTheDocument()
+    const before = fetchFake.findRequests('GET', '/api/schedules/all/runs').length
+
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    await waitFor(() => {
+      expect(fetchFake.findRequests('GET', '/api/schedules/all/runs').length).toBeGreaterThan(before)
+    })
+  })
+
+  it('shows the cached selected run when a background refetch fails', async () => {
+    const cachedRun = makeScheduleRunWithContext({ id: 999, jobId: 7, jobName: 'Deep linked run' })
+    renderGlobalSchedules({
+      route: '/schedules?scheduleTab=runs&runId=999',
+      selectedStatus: 500,
+      seedSelectedRun: cachedRun,
+    })
+
+    expect(await screen.findByRole('dialog', { name: 'Deep linked run' })).toBeInTheDocument()
+    expect(screen.queryByText('Failed to load run')).not.toBeInTheDocument()
+  })
+
+  it('loads the newly selected run when the selection changes', async () => {
+    const user = userEvent.setup()
+    renderGlobalSchedules({
+      route: '/schedules?scheduleTab=runs&runId=999',
+      historyRuns: [
+        makeScheduleRunWithContext({ id: 1000, jobId: 7, jobName: 'Run 1000' }),
+      ],
+      selectedRuns: (runId) => [
+        makeScheduleRunWithContext({ id: runId, jobId: 7, jobName: `Run ${runId}` }),
+      ],
+    })
+
+    expect(await screen.findByRole('dialog', { name: 'Run 999' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Open run Run 1000' }))
+
+    expect(await screen.findByRole('dialog', { name: 'Run 1000' })).toBeInTheDocument()
+  })
+
+  it('drops the selected run from the table when the selection is cleared', async () => {
+    const user = userEvent.setup()
+    renderGlobalSchedules({
+      route: '/schedules?scheduleTab=runs&runId=999',
+      historyRuns: [makeScheduleRunWithContext({ id: 1, jobId: 7, jobName: 'Run 1' })],
+      selectedRuns: () => [
+        makeScheduleRunWithContext({ id: 999, jobId: 7, jobName: 'Deep linked run' }),
+      ],
+    })
+
+    expect(await screen.findByRole('button', { name: 'Open run Deep linked run' })).toBeInTheDocument()
+
+    await user.click(within(await screen.findByRole('dialog', { name: 'Deep linked run' })).getByRole('button', { name: 'Close' }))
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Open run Deep linked run' })).not.toBeInTheDocument()
+    })
+  })
+
+  it('loads the selected run on the jobs tab as well', async () => {
+    renderGlobalSchedules({
+      route: '/schedules?scheduleTab=jobs&runId=999',
+      jobs: [makeScheduleJobWithRepo({ id: 7, name: 'Weekly summary' })],
+      selectedRuns: () => [
+        makeScheduleRunWithContext({ id: 999, jobId: 7, jobName: 'Deep linked run' }),
+      ],
+    })
+
+    expect(await screen.findByRole('dialog', { name: 'Deep linked run' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open Weekly summary' })).toBeInTheDocument()
+  })
+
+  it('opens the report drawer from a job row that has a last run', async () => {
+    const user = userEvent.setup()
+    renderGlobalSchedules({
+      jobs: [
+        makeScheduleJobWithRepo({
+          id: 7,
+          name: 'Weekly summary',
+          lastRun: {
+            id: 5,
+            status: 'completed',
+            startedAt: 0,
+            finishedAt: 1,
+            viewedAt: 1,
+            preview: null,
+          },
+        }),
+      ],
+      selectedRuns: () => [
+        makeScheduleRunWithContext({ id: 5, jobId: 7, jobName: 'Last run report' }),
+      ],
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Open Weekly summary' }))
+
+    expect(await screen.findByRole('dialog', { name: 'Last run report' })).toBeInTheDocument()
   })
 
   it('opens a linked-server job on its project page', async () => {
-    const job = makeJob({ repoId: null, serverId: 'srv_kitchen', directory: '/home/me/app', lastRun: null })
-    mocks.useAllSchedules.mockReturnValue({ data: [job], isLoading: false, error: null })
-    mocks.useScheduleUrlState.mockReturnValue(createMockScheduleUrlState({ scheduleTab: 'jobs', runId: null }))
-
-    const { capturedPathname, capturedSearch } = renderGlobalSchedulesWithLocation()
-
-    act(() => {
-      jobsTableProps().onOpen(job)
+    const user = userEvent.setup()
+    const { capturedPathname, capturedSearch } = renderGlobalSchedules({
+      jobs: [
+        makeScheduleJobWithRepo({
+          id: 7,
+          name: 'Deploy report',
+          repoId: null,
+          serverId: 'srv_kitchen',
+          directory: '/home/me/app',
+          lastRun: null,
+        }),
+      ],
     })
 
-    await waitFor(() => {
-      expect(capturedPathname.current).toBe('/servers/srv_kitchen/projects')
-    })
+    await user.click(await screen.findByRole('button', { name: 'Open Deploy report' }))
+
+    await waitFor(() => expect(capturedPathname.current).toBe('/servers/srv_kitchen/projects'))
     expect(capturedSearch.current).toBe('?directory=%2Fhome%2Fme%2Fapp')
   })
 
-  it('keeps the jobs tab visible with the empty state when there are no jobs', () => {
-    mocks.useScheduleUrlState.mockReturnValue(createMockScheduleUrlState({ scheduleTab: 'jobs', runId: null }))
-
+  it('keeps the jobs tab visible with the empty state when there are no jobs', async () => {
     renderGlobalSchedules()
 
-    expect(screen.getByText('No schedules yet')).toBeInTheDocument()
+    expect(await screen.findByText('No schedules yet')).toBeInTheDocument()
   })
 })

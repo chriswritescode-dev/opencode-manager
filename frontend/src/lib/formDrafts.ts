@@ -1,4 +1,7 @@
 import type { FormAnswer } from '@opencode-manager/shared/opencode'
+import { FormAnswerSchema } from '@opencode-manager/shared/schemas'
+import { parseJsonText } from '@opencode-manager/shared/utils'
+import { z } from 'zod'
 
 export interface FormDraft {
   answer: FormAnswer
@@ -6,59 +9,23 @@ export interface FormDraft {
   customDrafts: Record<string, string>
 }
 
+const FormDraftSchema = z.object({
+  answer: FormAnswerSchema,
+  customValues: z.record(z.string(), z.array(z.string())),
+  customDrafts: z.record(z.string(), z.string()),
+})
+
 const DRAFT_KEY_PREFIX = 'opencode-manager:form-draft:'
 
 function draftKey(formId: string): string {
   return `${DRAFT_KEY_PREFIX}${formId}`
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
-}
-
-function isFormValue(value: unknown): boolean {
-  return (
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean' ||
-    isStringArray(value)
-  )
-}
-
-function isStringRecord(value: unknown): value is Record<string, string> {
-  return isRecord(value) && Object.values(value).every((entry) => typeof entry === 'string')
-}
-
-function isStringArrayRecord(value: unknown): value is Record<string, string[]> {
-  return isRecord(value) && Object.values(value).every(isStringArray)
-}
-
 function parseDraft(raw: string): FormDraft | undefined {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    return undefined
-  }
-  if (!isRecord(parsed)) return undefined
-  const { answer, customValues, customDrafts } = parsed
-  if (!isRecord(answer) || !Object.values(answer).every(isFormValue)) return undefined
-  if (!isStringArrayRecord(customValues)) return undefined
-  if (!isStringRecord(customDrafts)) return undefined
-  return {
-    answer: answer as FormAnswer,
-    customValues,
-    customDrafts,
-  }
+  const parsed = FormDraftSchema.safeParse(parseJsonText(raw))
+  return parsed.success ? parsed.data : undefined
 }
 
-/**
- * Returns the persisted draft for a form, or `undefined` when none exists or the stored value is invalid.
- */
 export function loadFormDraft(formId: string): FormDraft | undefined {
   try {
     const raw = sessionStorage.getItem(draftKey(formId))
@@ -68,9 +35,6 @@ export function loadFormDraft(formId: string): FormDraft | undefined {
   }
 }
 
-/**
- * Persists a form draft, ignoring storage failures such as disabled storage or an exceeded quota.
- */
 export function saveFormDraft(formId: string, draft: FormDraft): void {
   try {
     sessionStorage.setItem(draftKey(formId), JSON.stringify(draft))
@@ -79,9 +43,6 @@ export function saveFormDraft(formId: string, draft: FormDraft): void {
   }
 }
 
-/**
- * Removes the persisted draft for a form, ignoring storage failures.
- */
 export function clearFormDraft(formId: string): void {
   try {
     sessionStorage.removeItem(draftKey(formId))

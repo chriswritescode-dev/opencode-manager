@@ -49,7 +49,7 @@ Each item is tagged with a theme to help you find work in your area of interest:
 
 ### Code Style
 
-- New and changed code uses doc comments only (JSDoc/TSDoc on the declaration they document); no inline or explanatory comments
+- New and changed code has no comments of any kind (including JSDoc and lint-disable directives); code must be self-documenting
 - Strict TypeScript with proper typing
 - Named imports only
 - DRY principles - check for existing patterns before adding new ones
@@ -80,7 +80,7 @@ cd backend && bun test <filename>               # Run a Bun-only suite (test/rou
 ### Linting and Type Checking
 
 ```bash
-pnpm lint              # Lint CLI, frontend, and backend
+pnpm lint              # Lint the repository with Oxlint
 pnpm typecheck         # Type-check CLI, frontend, and backend
 ```
 

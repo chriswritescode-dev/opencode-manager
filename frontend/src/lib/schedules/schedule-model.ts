@@ -1,8 +1,8 @@
 import type { ModelInfo } from '@opencode-manager/shared/opencode'
 import { isModelAvailable } from '@/lib/modelCatalog'
 
-function normalizeModel(model: unknown): string | null {
-  if (typeof model !== 'string') return null
+function normalizeModel(model: string | null | undefined): string | null {
+  if (model === null || model === undefined) return null
   const trimmed = model.trim()
   return trimmed ? trimmed : null
 }

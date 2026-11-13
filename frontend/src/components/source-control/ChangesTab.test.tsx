@@ -1,36 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect } from 'vitest'
+import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useGitStatus } from '@/api/git'
+import { renderWithProviders } from '@/test/render'
+import { makeSettingsResponse, makeUserPreferences } from '@/test/fixtures/api'
+import type { FetchRoute } from '@/test/fetchFake'
 import type { GitStatusResponse } from '@/types/git'
 import { ChangesTab } from './ChangesTab'
 
-const { commitMutate } = vi.hoisted(() => ({ commitMutate: vi.fn() }))
-
-vi.mock('@/hooks/useGit', () => ({
-  useGit: () => ({
-    commit: { mutate: commitMutate, isPending: false },
-    stageFiles: { mutate: vi.fn(), isPending: false },
-    unstageFiles: { mutate: vi.fn(), isPending: false },
-    discardFiles: { mutate: vi.fn(), isPending: false },
-    generateCommitMessage: { mutate: vi.fn(), isPending: false },
-  }),
-}))
-
-vi.mock('@/api/git', () => ({
-  useGitStatus: vi.fn(),
-}))
-
-vi.mock('./RepoGitIdentitySelect', () => ({
-  RepoGitIdentitySelect: () => null,
-}))
-
-vi.mock('@/components/file-browser/FileDiffView', () => ({
-  FileDiffView: () => null,
-}))
-
-const stagedStatus: GitStatusResponse = {
+const statusWithChanges: GitStatusResponse = {
   branch: 'main',
   ahead: 0,
   behind: 0,
@@ -42,50 +19,67 @@ const stagedStatus: GitStatusResponse = {
   ],
 }
 
-function renderTab() {
-  vi.mocked(useGitStatus).mockReturnValue({
-    data: stagedStatus,
-    isLoading: false,
-    error: null,
-  } as unknown as ReturnType<typeof useGitStatus>)
+const statusAfterCommit: GitStatusResponse = {
+  branch: 'main',
+  ahead: 0,
+  behind: 0,
+  hasChanges: true,
+  operation: null,
+  files: [{ path: 'todo.txt', status: 'modified', staged: false }],
+}
 
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <ChangesTab repoId={1} onFileSelect={vi.fn()} isMobile={false} />
-    </QueryClientProvider>,
-  )
+function renderTab(commit: FetchRoute['respond']) {
+  return renderWithProviders(<ChangesTab repoId={1} onFileSelect={() => {}} isMobile={false} />, {
+    auth: false,
+    theme: false,
+    toaster: true,
+    fetchRoutes: [
+      { method: 'GET', path: '/api/repos/1/git/status', respond: () => ({ json: statusWithChanges }) },
+      {
+        method: 'GET',
+        path: '/api/repos/1/git-identity',
+        respond: () => ({ json: { name: 'Alpha', email: 'alpha@example.com', scope: 'repository', presetId: 'a' } }),
+      },
+      { method: 'POST', path: '/api/repos/1/git/commit', respond: commit },
+      {
+        method: 'GET',
+        path: '/api/settings',
+        respond: () => ({
+          json: makeSettingsResponse({
+            preferences: makeUserPreferences({
+              gitIdentities: [{ id: 'a', name: 'Alpha', email: 'alpha@example.com' }],
+            }),
+          }),
+        }),
+      },
+    ],
+  })
+}
+
+async function commitMessage(user: ReturnType<typeof userEvent.setup>, message: string) {
+  await user.type(await screen.findByPlaceholderText('Commit message...'), message)
+  await user.click(screen.getByRole('button', { name: /^Commit/ }))
 }
 
 describe('ChangesTab commit message', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
   it('keeps the message when the commit fails', async () => {
     const user = userEvent.setup()
-    renderTab()
+    const { fetchFake } = renderTab(() => ({ status: 500, json: { error: 'Commit failed' } }))
 
-    await user.type(screen.getByPlaceholderText('Commit message...'), 'fix the thing')
-    await user.click(screen.getByRole('button', { name: /^Commit/ }))
+    await commitMessage(user, 'fix the thing')
 
-    expect(commitMutate).toHaveBeenCalledWith(
-      { message: 'fix the thing' },
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
-    )
+    expect(fetchFake.lastRequest('POST', '/api/repos/1/git/commit')?.body).toEqual({ message: 'fix the thing' })
+    expect(await screen.findByText('Commit failed')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('Commit message...')).toHaveValue('fix the thing')
   })
 
   it('clears the message after a successful commit', async () => {
     const user = userEvent.setup()
-    commitMutate.mockImplementation((_variables, options?: { onSuccess?: () => void }) => {
-      options?.onSuccess?.()
-    })
-    renderTab()
+    renderTab(() => ({ json: statusAfterCommit }))
 
-    await user.type(screen.getByPlaceholderText('Commit message...'), 'fix the thing')
-    await user.click(screen.getByRole('button', { name: /^Commit/ }))
+    await commitMessage(user, 'fix the thing')
 
+    await screen.findByText('Commit created')
     expect(screen.getByPlaceholderText('Commit message...')).toHaveValue('')
   })
 })

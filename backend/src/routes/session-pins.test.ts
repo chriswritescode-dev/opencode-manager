@@ -1,20 +1,21 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { Hono } from 'hono'
-import { Database } from 'bun:sqlite'
-import { migrate } from '../db/migration-runner'
-import { allMigrations } from '../db/migrations'
+import type { Database } from 'bun:sqlite'
+import { z } from 'zod'
+import { SessionPinSchema } from '@opencode-manager/shared/schemas'
+import { createTestDatabase } from '../../test/helpers/test-database'
+import { readJson } from '../../test/helpers/read-json'
 import { createSessionPinRoutes } from './session-pins'
 
-function createTestApp(db: Database): Hono {
-  const app = new Hono()
-  app.route('/session-pins', createSessionPinRoutes(db))
-  return app
-}
+const SessionPinListSchema = z.object({ pins: z.array(SessionPinSchema) })
+const ErrorSchema = z.object({ error: z.string() })
 
-function createTestDb(): Database {
-  const db = new Database(':memory:')
-  migrate(db, allMigrations)
-  return db
+async function togglePin(app: Hono, sessionId: string, directory: string, pinned: boolean): Promise<Response> {
+  return app.request('/session-pins', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId, directory, pinned }),
+  })
 }
 
 describe('session pins routes', () => {
@@ -22,8 +23,9 @@ describe('session pins routes', () => {
   let app: Hono
 
   beforeEach(() => {
-    db = createTestDb()
-    app = createTestApp(db)
+    db = createTestDatabase()
+    app = new Hono()
+    app.route('/session-pins', createSessionPinRoutes(db))
   })
 
   afterEach(() => {
@@ -33,60 +35,36 @@ describe('session pins routes', () => {
   it('GET / returns empty pins list initially', async () => {
     const res = await app.request('/session-pins')
     expect(res.status).toBe(200)
-    const data = await res.json() as { pins: unknown[] }
-    expect(data.pins).toEqual([])
+    expect((await readJson(res, SessionPinListSchema)).pins).toEqual([])
   })
 
   it('PUT / creates a pin and returns updated list', async () => {
-    const res = await app.request('/session-pins', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: 'ses_1', directory: '/w/a', pinned: true }),
-    })
+    const res = await togglePin(app, 'ses_1', '/w/a', true)
     expect(res.status).toBe(200)
-    const data = await res.json() as { pins: Array<{ sessionId: string; directory: string }> }
-    expect(data.pins).toHaveLength(1)
-    expect(data.pins[0]).toMatchObject({ sessionId: 'ses_1', directory: '/w/a' })
+    const { pins } = await readJson(res, SessionPinListSchema)
+    expect(pins).toHaveLength(1)
+    expect(pins[0]).toMatchObject({ sessionId: 'ses_1', directory: '/w/a' })
   })
 
   it('GET / returns pins after creation', async () => {
-    await app.request('/session-pins', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: 'ses_1', directory: '/w/a', pinned: true }),
-    })
+    await togglePin(app, 'ses_1', '/w/a', true)
 
     const res = await app.request('/session-pins')
     expect(res.status).toBe(200)
-    const data = await res.json() as { pins: unknown[] }
-    expect(data.pins).toHaveLength(1)
+    expect((await readJson(res, SessionPinListSchema)).pins).toHaveLength(1)
   })
 
   it('PUT / with pinned: false removes the pin', async () => {
-    await app.request('/session-pins', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: 'ses_1', directory: '/w/a', pinned: true }),
-    })
+    await togglePin(app, 'ses_1', '/w/a', true)
 
-    const res = await app.request('/session-pins', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: 'ses_1', directory: '/w/a', pinned: false }),
-    })
+    const res = await togglePin(app, 'ses_1', '/w/a', false)
     expect(res.status).toBe(200)
-    const data = await res.json() as { pins: unknown[] }
-    expect(data.pins).toHaveLength(0)
+    expect((await readJson(res, SessionPinListSchema)).pins).toHaveLength(0)
   })
 
   it('PUT / with invalid body returns 400', async () => {
-    const res = await app.request('/session-pins', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: '', directory: '/w/a', pinned: true }),
-    })
+    const res = await togglePin(app, '', '/w/a', true)
     expect(res.status).toBe(400)
-    const data = await res.json() as { error: string }
-    expect(data.error).toBe('Invalid request')
+    expect((await readJson(res, ErrorSchema)).error).toBe('Invalid request')
   })
 })

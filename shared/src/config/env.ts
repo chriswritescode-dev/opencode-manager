@@ -8,7 +8,6 @@ try {
   const { config } = await import('dotenv')
   config({ path: path.resolve(process.cwd(), '.env') })
 } catch {
-  // dotenv not available (e.g., in production Docker), env vars already set
 }
 
 const getEnvString = (key: string, defaultValue: string): string => {
@@ -170,13 +169,14 @@ export const getOpenCodeConfigFilePath = () => path.join(ENV.WORKSPACE.BASE_PATH
 export const getAgentsMdPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR, 'AGENTS.md')
 export const getDatabasePath = () => ENV.DATABASE.PATH
 
-export const getTrustedOrigins = (): string[] =>
-  ENV.AUTH.TRUSTED_ORIGINS
+export const parseTrustedOrigins = (configured: string): string[] =>
+  configured
     .split(',')
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0)
 
-/** Reports whether a request Origin is one of the configured trusted origins. */
+export const getTrustedOrigins = (): string[] => parseTrustedOrigins(ENV.AUTH.TRUSTED_ORIGINS)
+
 export const isTrustedOrigin = (
   origin: string | undefined,
   options: { requireOrigin?: boolean } = {},

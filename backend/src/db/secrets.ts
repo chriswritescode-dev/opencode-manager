@@ -1,9 +1,13 @@
 import type { Database } from 'bun:sqlite'
+import { z } from 'zod'
 import { decryptSecret, encryptSecret } from '../utils/crypto'
 import { logger } from '../utils/logger'
+import { selectRow } from './rows'
+
+const SecretValueRowSchema = z.object({ value: z.string() })
 
 export function readEncryptedSecret(db: Database, key: string): string | null {
-  const row = db.prepare('SELECT value FROM app_secrets WHERE key = ?').get(key) as { value: string } | undefined
+  const row = selectRow(db, SecretValueRowSchema, 'SELECT value FROM app_secrets WHERE key = ?', key)
   if (!row) return null
 
   try {

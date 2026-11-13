@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { locationAgentKey, useModelStore, type ActiveAgent, type ModelPick, type ModelSelection } from '@/stores/modelStore'
-import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { useOpenCodeServerId } from '@/contexts/opencode-server-context'
 import { serverScopedKey } from '@/lib/serverScope'
 import { buildServerDirectoryKey } from '@opencode-manager/shared/schemas'
 import { useProviders } from './useProviders'
@@ -368,7 +368,7 @@ export function useModelSelection(
       ? {
           providerID: selection.providerID,
           id: selection.modelID,
-          ...(selection.variant ? { variant: selection.variant } : {}),
+          variant: selection.variant,
         }
       : null,
     activeAgent,

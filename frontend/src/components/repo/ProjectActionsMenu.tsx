@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { TerminalInfo } from '@opencode-manager/shared/types'
 import { FetchError } from '@opencode-manager/shared'
+import { z } from 'zod'
 import { isRunningActionTerminal } from '@opencode-manager/shared/utils'
 import type {
   ProjectConfigResponse,
@@ -46,13 +47,10 @@ interface PendingTrust {
   executable: NonNullable<ProjectConfigResponse['repoFile']['executable']>
 }
 
-function untrustedHash(error: unknown): string | null {
-  if (!(error instanceof FetchError) || error.code !== 'REPO_CONFIG_UNTRUSTED') return null
-  const details = error.details
-  if (details && typeof details === 'object' && typeof (details as { hash?: unknown }).hash === 'string') {
-    return (details as { hash: string }).hash
-  }
-  return null
+function untrustedHash(cause: unknown): string | null {
+  if (!(cause instanceof FetchError) || cause.code !== 'REPO_CONFIG_UNTRUSTED') return null
+  const parsed = z.object({ hash: z.string() }).safeParse(cause.details)
+  return parsed.success ? parsed.data.hash : null
 }
 
 export function ProjectActionsMenu({ repoId, directory }: ProjectActionsMenuProps) {

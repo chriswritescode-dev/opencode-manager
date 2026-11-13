@@ -8,10 +8,6 @@ import { getRepoBranchLabel } from '@/lib/utils'
 import { findRepoForDirectory, normalizeDirectory } from '@/components/navigation/sidebar-session-tree'
 import { isWorktreeSibling, type RepoSibling } from '@opencode-manager/shared/utils'
 
-/**
- * The plain directory of a session-status directory value when it belongs to the local server,
- * or null for a remote session's server-keyed directory.
- */
 function localDirectoryOf(directory?: string | null): string | null {
   if (!directory) return null
   const { serverId, directory: parsed } = parseServerDirectoryKey(directory)
@@ -20,10 +16,6 @@ function localDirectoryOf(directory?: string | null): string | null {
 
 export const MS_PER_MINUTE = 60_000
 
-/**
- * Human-readable label for an activity window in minutes: whole hours when the value divides
- * evenly into hours, otherwise minutes.
- */
 export function formatActivityWindow(minutes: number): string {
   if (minutes % 60 === 0) {
     const hours = minutes / 60
@@ -33,7 +25,6 @@ export function formatActivityWindow(minutes: number): string {
   return `${minutes} minutes`
 }
 
-/** Empty-state copy for the activity list naming the window it searched. */
 export function formatActivityEmptyMessage(minutes: number): string {
   return `No active or recent sessions in the last ${formatActivityWindow(minutes)}`
 }
@@ -43,16 +34,12 @@ export type ActiveWorkState = 'needs-input' | 'running' | 'recent'
 export interface ActiveWorkItem {
   key: string
   session: Session
-  /** The local repo the session runs in; null for a session owned by a linked server. */
   repo: Repo | null
-  /** The linked server that owns the session; null for a local repo session. */
   serverId: string | null
-  /** The owning linked server's display name; null for a local repo session. */
   serverName: string | null
   state: ActiveWorkState
   updatedAt: number
   outcome?: ChildOutcome
-  /** The worktree's branch when the session runs in a worktree of `repo`; null otherwise. */
   worktreeBranch?: string | null
   path: string
 }
@@ -86,16 +73,17 @@ export function rootSessionID(
   return currentID
 }
 
-/**
- * Rolls every active or pending session id up to its root. `needsInput` and `running` may both
- * contain a root; callers apply the needs-input over running priority when grouping.
- */
+export interface ActiveRoots {
+  needsInput: Set<string>
+  running: Set<string>
+}
+
 export function collectActiveRoots(input: {
   statuses: ReadonlyMap<string, SessionStatusType>
   parents: ReadonlyMap<string, string | null>
   runningShells: ReadonlyMap<string, { sessionID: string }>
   pendingInputSessionIDs: Iterable<string>
-}): { needsInput: Set<string>; running: Set<string> } {
+}): ActiveRoots {
   const { statuses, parents, runningShells, pendingInputSessionIDs } = input
 
   const needsInput = new Set<string>()
@@ -129,7 +117,6 @@ interface ServerActivityIndexInput extends ActivityIndexInput {
 
 type ActivityIndex = Map<string, 'needs-input' | 'running'>
 
-/** Caches one built value per input snapshot, matching the input fields the value depends on. */
 function cacheByInput<I, V>(
   compute: (input: I) => V,
   sameInput: (left: I, right: I) => boolean,
@@ -161,11 +148,6 @@ function sameServerActivityInput(
   return sameActivityInput(left, right) && left.sessionServers === right.sessionServers
 }
 
-/**
- * Rolls every active or pending session onto the index key its directory resolves to. Pending
- * input marks its own and its root's key as needs-input; non-idle sessions and running shells mark
- * running unless needs-input already claimed the key.
- */
 function computeActivityIndex(
   input: ActivityIndexInput,
   keyOf: (sessionID: string, directory: string | null | undefined) => string | null,
@@ -215,26 +197,15 @@ const repoActivityIndex = cacheByInput<ActivityIndexInput, ActivityIndex>(
   sameActivityInput,
 )
 
-/**
- * Indexes active sessions by normalized directory for repo badges. Pending input marks its own and
- * its root's directory as needs-input; non-idle sessions and running shells mark running unless
- * needs-input already claimed the directory. Shared across rows per store snapshot by reference.
- */
 export function buildRepoActivityIndex(input: ActivityIndexInput): ActivityIndex {
   return repoActivityIndex(input)
 }
 
-/** The server and plain directory named by a session-status directory value. */
 export interface SessionDirectoryScope {
   serverId: string
   directory: string | null
 }
 
-/**
- * Resolves a session-status directory value to its owning server and plain directory. A
- * server-keyed value names its owner, otherwise the session-server entry does; everything else
- * belongs to the local server.
- */
 export function sessionScopeOfDirectory(
   directory: string | null | undefined,
   sessionServerId?: string,
@@ -261,19 +232,10 @@ const serverActivityIndex = cacheByInput<ServerActivityIndexInput, ActivityIndex
   sameServerActivityInput,
 )
 
-/**
- * Indexes active sessions by owning linked server and directory for server badges. A session
- * belongs to the server named by its server-keyed directory, otherwise to its session-server entry;
- * local sessions are never indexed. Keys are `<serverId>|<directory>`, with an empty directory when
- * the session's directory is unknown.
- */
 export function buildServerActivityIndex(input: ServerActivityIndexInput): ActivityIndex {
   return serverActivityIndex(input)
 }
 
-/**
- * A linked server's activity from a prebuilt server index. Needs-input outranks running.
- */
 export function serverActivityFromIndex(
   serverId: string,
   index: ReadonlyMap<string, 'needs-input' | 'running'>,
@@ -290,9 +252,6 @@ export function serverActivityFromIndex(
   return running ? 'running' : null
 }
 
-/**
- * A linked server project's activity from a prebuilt server index, keyed by server and directory.
- */
 export function projectActivityFromIndex(
   serverId: string,
   directory: string,
@@ -301,10 +260,6 @@ export function projectActivityFromIndex(
   return index.get(serverIndexKey(serverId, directory)) ?? null
 }
 
-/**
- * The repo's activity from a prebuilt index, checking each of its own paths and the directories of
- * the worktrees it owns. Needs-input outranks running.
- */
 export function repoActivityFromIndex(
   repo: Repo,
   index: ReadonlyMap<string, 'needs-input' | 'running'>,
@@ -333,10 +288,6 @@ export function repoActivityFromIndex(
   return running ? 'running' : null
 }
 
-/**
- * True when some indexed active directory matches no repo, so a session is active in a directory
- * outside the repo list (such as a worktree) and the worktree lookup is worth running.
- */
 export function hasUnmatchedActiveDirectory(
   index: ReadonlyMap<string, 'needs-input' | 'running'>,
   repos: Repo[],
@@ -347,21 +298,13 @@ export function hasUnmatchedActiveDirectory(
   return false
 }
 
-/** A worktree directory and the repo that owns it, discovered from that repo's siblings. */
 export interface ActiveWorktree {
   directory: string
   ownerRepo: Repo
   branch: string | null
-  /** True when the worktree belongs to a schedule rather than an interactive session. */
   isSchedule: boolean
 }
 
-/**
- * Collects the worktrees discovered through each repo's siblings, keyed by directory so a session
- * running in a worktree resolves to its owning repo. A repo's siblings include the worktrees of its
- * whole OpenCode project, so the same worktree can come back from several repos: the non-worktree
- * repo wins so a worktree session opens on the main repo, and duplicates are dropped.
- */
 export function buildWorktreeActivity(
   repos: Repo[],
   siblingResults: ReadonlyArray<{ data?: RepoSibling[] }>,
@@ -391,10 +334,6 @@ export function buildWorktreeActivity(
   return worktrees
 }
 
-/**
- * The branch of the workspace a session runs in: the matching sibling's branch when the session
- * directory is one of the repo's siblings (a worktree), otherwise the repo's own branch.
- */
 export function resolveSessionBranch(
   repo: Pick<Repo, 'currentBranch' | 'branch'>,
   directory: string | null | undefined,
@@ -408,10 +347,6 @@ export function resolveSessionBranch(
   return sibling.currentBranch ?? sibling.branch ?? null
 }
 
-/**
- * Whether the worktree lookup is worth running: true when some non-archived session that matches no
- * repo is either updated inside the window or has its root active (needs-input or running).
- */
 export function needsWorktreeLookup(input: {
   now: number
   windowMs: number
@@ -434,15 +369,6 @@ export function needsWorktreeLookup(input: {
   })
 }
 
-/**
- * Groups the given sessions into needs-input, running, and recent roots. A session appears in
- * exactly one group (needs-input over running over recent) and only when it resolves to a local
- * repo or to an owning linked server. A session owned by a linked server keeps its own row in any
- * state, opening on that server instead of a local repo. A recent session in a schedule worktree is
- * omitted so schedules only surface while they need attention. The input may mix roots and children;
- * children never become items, but their latest update time rolls up into the root's `updatedAt` and
- * decides the recent window and ordering.
- */
 export function buildActiveWork(input: {
   now: number
   windowMs: number

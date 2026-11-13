@@ -1,58 +1,64 @@
-import { isRecord } from '@opencode-manager/shared/utils'
 import { V1_ENTITY_PATHS, type OpenCodeConfigV1EntityPath } from './opencode-config-file'
+import { parseJsonObject, parseJsonString, type JsonObject, type JsonValue } from '@opencode-manager/shared/utils'
 
 const CONFIG_REFERENCE_PATTERN = /\{(?:env|file):[^}]+\}/
 
 type FieldAlias = readonly [v2Prefix: readonly string[], v1Prefix: readonly string[]]
 
-const V1_FIELD_ALIASES: Readonly<Record<string, readonly FieldAlias[]>> = {
-  agents: [
-    [['system'], ['prompt']],
-    [['request', 'body', 'temperature'], ['temperature']],
-    [['request', 'body', 'top_p'], ['top_p']],
-    [['request', 'body'], ['options']],
+const V1_FIELD_ALIASES = new Map<string, readonly FieldAlias[]>([
+  [
+    'agents',
+    [
+      [['system'], ['prompt']],
+      [['request', 'body', 'temperature'], ['temperature']],
+      [['request', 'body', 'top_p'], ['top_p']],
+      [['request', 'body'], ['options']],
+    ],
   ],
-  providers: [
-    [['settings', 'baseURL'], ['api']],
-    [['headers'], ['options', 'headers']],
-    [['body'], ['options', 'body']],
-    [['settings'], ['options']],
+  [
+    'providers',
+    [
+      [['settings', 'baseURL'], ['api']],
+      [['headers'], ['options', 'headers']],
+      [['body'], ['options', 'body']],
+      [['settings'], ['options']],
+    ],
   ],
-  'mcp.servers': [
-    [['oauth', 'client_id'], ['oauth', 'clientId']],
-    [['oauth', 'client_secret'], ['oauth', 'clientSecret']],
-    [['oauth', 'redirect_uri'], ['oauth', 'redirectUri']],
+  [
+    'mcp.servers',
+    [
+      [['oauth', 'client_id'], ['oauth', 'clientId']],
+      [['oauth', 'client_secret'], ['oauth', 'clientSecret']],
+      [['oauth', 'redirect_uri'], ['oauth', 'redirectUri']],
+    ],
   ],
-}
+])
 
 interface RawEntityCandidate {
-  entity: unknown
+  entity: JsonValue | undefined
   aliases: readonly FieldAlias[]
 }
 
-/** Reads a nested config value by object keys and array indices, or `undefined` when absent. */
-export function readConfigValueAtPath(value: unknown, path: readonly string[]): unknown {
-  let current = value
+export function readConfigValueAtPath(value: JsonValue | undefined, path: readonly string[]): JsonValue | undefined {
+  let current: JsonValue | undefined = Array.isArray(value)
+    ? value
+    : parseJsonString(value) ?? parseJsonObject(value) ?? undefined
   for (const segment of path) {
     if (Array.isArray(current)) {
       current = current[Number(segment)]
       continue
     }
-    if (!isRecord(current) || !Object.prototype.hasOwnProperty.call(current, segment)) return undefined
-    current = current[segment]
+    const container = parseJsonObject(current)
+    if (container === null || !Object.prototype.hasOwnProperty.call(container, segment)) return undefined
+    current = container[segment]
   }
   return current
 }
 
-/** Whether `path` begins with every segment of `prefix`, used to match field-alias prefixes. */
 function startsWithPath(path: readonly string[], prefix: readonly string[]): boolean {
   return prefix.length <= path.length && prefix.every((segment, index) => path[index] === segment)
 }
 
-/**
- * Finds the raw `{env:…}` or `{file:…}` reference stored for `path` in any candidate entity,
- * also checking each alias-mapped path. Returns undefined when no candidate holds a reference there.
- */
 function readRawReference(candidates: readonly RawEntityCandidate[], path: readonly string[]): string | undefined {
   for (const candidate of candidates) {
     const paths = [
@@ -63,122 +69,114 @@ function readRawReference(candidates: readonly RawEntityCandidate[], path: reado
     ]
     for (const rawPath of paths) {
       const raw = readConfigValueAtPath(candidate.entity, rawPath)
-      if (typeof raw === 'string' && CONFIG_REFERENCE_PATTERN.test(raw)) return raw
+      const reference = parseJsonString(raw)
+      if (reference !== null && CONFIG_REFERENCE_PATTERN.test(reference)) return reference
     }
   }
   return undefined
 }
 
-/**
- * Walks a patch value and swaps each string that still equals its resolved counterpart for the raw
- * config reference at the same path. Returns a new value; edited strings and strings without a
- * stored reference are kept as given.
- */
 function restoreEntityReferences(
-  next: unknown,
+  next: JsonValue | undefined,
   path: readonly string[],
-  resolvedEntity: unknown,
+  resolvedEntity: JsonValue | undefined,
   candidates: readonly RawEntityCandidate[],
-): unknown {
-  if (typeof next === 'string') {
-    if (readConfigValueAtPath(resolvedEntity, path) !== next) return next
-    return readRawReference(candidates, path) ?? next
+): JsonValue | undefined {
+  const text = parseJsonString(next)
+  if (text !== null) {
+    if (readConfigValueAtPath(resolvedEntity, path) !== text) return text
+    return readRawReference(candidates, path) ?? text
   }
   if (Array.isArray(next)) {
-    return next.map((item, index) => restoreEntityReferences(item, [...path, String(index)], resolvedEntity, candidates))
+    const restored: JsonValue[] = []
+    next.forEach((item, index) => {
+      const restoredItem = restoreEntityReferences(item, [...path, String(index)], resolvedEntity, candidates)
+      if (restoredItem !== undefined) restored.push(restoredItem)
+    })
+    return restored
   }
-  if (isRecord(next)) {
-    return Object.fromEntries(
-      Object.entries(next).map(([key, value]) => [key, restoreEntityReferences(value, [...path, key], resolvedEntity, candidates)]),
-    )
+  const container = parseJsonObject(next)
+  if (container !== null) {
+    const restored: JsonObject = {}
+    for (const [key, value] of Object.entries(container)) {
+      const restoredValue = restoreEntityReferences(value, [...path, key], resolvedEntity, candidates)
+      if (restoredValue !== undefined) restored[key] = restoredValue
+    }
+    return restored
   }
   return next
 }
 
-/**
- * Returns the single entity name the patch removes but the resolved container still contains, or
- * undefined when the patch removes zero or several names.
- */
-function findRenameSource(
-  patchContainer: Record<string, unknown>,
-  resolvedContainer: Record<string, unknown>,
-): string | undefined {
+function findRenameSource(patchContainer: JsonObject, resolvedContainer: JsonObject): string | undefined {
   const removed = Object.keys(patchContainer).filter(
     (name) => patchContainer[name] === null && Object.prototype.hasOwnProperty.call(resolvedContainer, name),
   )
   return removed.length === 1 ? removed[0] : undefined
 }
 
-/**
- * Restores references for every named entity in a patch container, resolving the source entity from
- * the resolved container or from a single rename within the same patch. Returns the patch container
- * unchanged when the resolved container is not an object.
- */
 function restoreContainerReferences(
   mapping: OpenCodeConfigV1EntityPath,
-  patchContainer: Record<string, unknown>,
-  resolved: Record<string, unknown>,
-  raw: Record<string, unknown>,
-): Record<string, unknown> {
-  const resolvedContainer = readConfigValueAtPath(resolved, mapping.v2Path)
-  if (!isRecord(resolvedContainer)) return patchContainer
-  const rawV2Container = readConfigValueAtPath(raw, mapping.v2Path)
-  const rawV1Container = readConfigValueAtPath(raw, mapping.v1Path)
-  const aliases = V1_FIELD_ALIASES[mapping.v2Path.join('.')] ?? []
+  patchContainer: JsonObject,
+  resolved: JsonValue | undefined,
+  raw: JsonValue | undefined,
+): JsonObject {
+  const resolvedContainer = parseJsonObject(readConfigValueAtPath(resolved, mapping.v2Path))
+  if (resolvedContainer === null) return patchContainer
+  const rawV2Container = parseJsonObject(readConfigValueAtPath(raw, mapping.v2Path))
+  const rawV1Container = parseJsonObject(readConfigValueAtPath(raw, mapping.v1Path))
+  const aliases = V1_FIELD_ALIASES.get(mapping.v2Path.join('.')) ?? []
 
-  return Object.fromEntries(
-    Object.entries(patchContainer).map(([name, value]) => {
-      if (!isRecord(value)) return [name, value]
-      const sourceName = Object.prototype.hasOwnProperty.call(resolvedContainer, name)
-        ? name
-        : findRenameSource(patchContainer, resolvedContainer)
-      if (sourceName === undefined) return [name, value]
+  const restored: JsonObject = {}
+  for (const [name, value] of Object.entries(patchContainer)) {
+    const entity = parseJsonObject(value)
+    if (entity === null) {
+      restored[name] = value
+      continue
+    }
+    const sourceName = Object.prototype.hasOwnProperty.call(resolvedContainer, name)
+      ? name
+      : findRenameSource(patchContainer, resolvedContainer)
+    if (sourceName === undefined) {
+      restored[name] = value
+      continue
+    }
 
-      const candidates: RawEntityCandidate[] = [
-        { entity: isRecord(rawV2Container) ? rawV2Container[sourceName] : undefined, aliases: [] },
-      ]
-      if (!mapping.reservedNames?.includes(sourceName)) {
-        candidates.push({ entity: isRecord(rawV1Container) ? rawV1Container[sourceName] : undefined, aliases })
-      }
-      return [name, restoreEntityReferences(value, [], resolvedContainer[sourceName], candidates)]
-    }),
-  )
+    const candidates: RawEntityCandidate[] = [
+      { entity: rawV2Container === null ? undefined : rawV2Container[sourceName], aliases: [] },
+    ]
+    if (!mapping.reservedNames?.includes(sourceName)) {
+      candidates.push({ entity: rawV1Container === null ? undefined : rawV1Container[sourceName], aliases })
+    }
+    const restoredEntity = restoreEntityReferences(entity, [], resolvedContainer[sourceName], candidates)
+    if (restoredEntity !== undefined) restored[name] = restoredEntity
+  }
+  return restored
 }
 
-/**
- * Returns a copy of `target` with `value` written at `path`, creating intermediate plain objects
- * where they are missing. An empty path returns `target` itself.
- */
-function setValueAtPath(target: Record<string, unknown>, path: readonly string[], value: unknown): Record<string, unknown> {
+function setValueAtPath(target: JsonObject, path: readonly string[], value: JsonValue): JsonObject {
   const [head, ...rest] = path
   if (head === undefined) return target
-  const child = target[head]
+  const child = parseJsonObject(target[head]) ?? {}
   return {
     ...target,
-    [head]: rest.length === 0 ? value : setValueAtPath(isRecord(child) ? child : {}, rest, value),
+    [head]: rest.length === 0 ? value : setValueAtPath(child, rest, value),
   }
 }
 
-/** Whether a merge patch names an agent, command, provider or MCP server, the only places references are restored. */
-export function patchNamesOpenCodeConfigEntities(patch: Record<string, unknown>): boolean {
-  return V1_ENTITY_PATHS.some((mapping) => mapping.named && isRecord(readConfigValueAtPath(patch, mapping.v2Path)))
+export function patchNamesOpenCodeConfigEntities(patch: JsonValue | undefined): boolean {
+  return V1_ENTITY_PATHS.some(
+    (mapping) => mapping.named && parseJsonObject(readConfigValueAtPath(patch, mapping.v2Path)) !== null,
+  )
 }
 
-/**
- * Keeps `{env:…}` and `{file:…}` references in a merge patch of named config entities.
- *
- * Settings edits entities from OpenCode's resolved config, so an untouched field arrives with its
- * substituted value. A string that still equals the resolved value is replaced by the reference
- * stored in the raw config: the same entity, the entity being renamed, or its v1 definition.
- */
 export function restoreOpenCodeConfigReferences(
-  patch: Record<string, unknown>,
-  resolved: Record<string, unknown>,
-  raw: Record<string, unknown>,
-): Record<string, unknown> {
+  patch: JsonObject,
+  resolved: JsonValue | undefined,
+  raw: JsonValue | undefined,
+): JsonObject {
   return V1_ENTITY_PATHS.filter((mapping) => mapping.named).reduce((current, mapping) => {
-    const patchContainer = readConfigValueAtPath(current, mapping.v2Path)
-    if (!isRecord(patchContainer)) return current
+    const patchContainer = parseJsonObject(readConfigValueAtPath(current, mapping.v2Path))
+    if (patchContainer === null) return current
     return setValueAtPath(current, mapping.v2Path, restoreContainerReferences(mapping, patchContainer, resolved, raw))
   }, patch)
 }

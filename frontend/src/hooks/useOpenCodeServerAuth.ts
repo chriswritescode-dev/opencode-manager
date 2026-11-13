@@ -1,6 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getOpenCodeServerAuth, updateOpenCodeServerAuth } from '@/api/settings'
-import type { OpenCodeServerAuthStatus as OpenCodeServerAuthStatusType } from '@/api/settings'
 
 export function useOpenCodeServerAuth() {
   const queryClient = useQueryClient()
@@ -25,7 +24,7 @@ export function useOpenCodeServerAuth() {
   })
 
   return {
-    status: query.data as OpenCodeServerAuthStatusType | undefined,
+    status: query.data,
     isLoading: query.isLoading,
     setPassword,
     clearPassword,

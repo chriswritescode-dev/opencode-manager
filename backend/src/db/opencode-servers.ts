@@ -2,18 +2,22 @@ import { randomBytes } from 'node:crypto'
 import type { Database } from 'bun:sqlite'
 import type { OpenCodeServer } from '@opencode-manager/shared/schemas'
 import { trimUrlTrailingSlashes } from '@opencode-manager/shared/utils'
+import { z } from 'zod'
 import { deleteSecret, readEncryptedSecret, writeEncryptedSecret } from './secrets'
+import { selectRow, selectRows } from './rows'
 
-interface OpenCodeServerRow {
-  id: string
-  name: string
-  base_url: string
-  username: string
-  enabled: number
-  created_at: number
-  updated_at: number
-  has_password: number
-}
+const OpenCodeServerRowSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  base_url: z.string(),
+  username: z.string(),
+  enabled: z.number(),
+  created_at: z.number(),
+  updated_at: z.number(),
+  has_password: z.number(),
+})
+
+type OpenCodeServerRow = z.infer<typeof OpenCodeServerRowSchema>
 
 export interface OpenCodeServerInsert {
   name: string
@@ -61,16 +65,12 @@ function mapRow(row: OpenCodeServerRow): OpenCodeServer {
 }
 
 export function listOpenCodeServers(db: Database): OpenCodeServer[] {
-  const rows = db
-    .prepare(`${SELECT_SERVER} ORDER BY s.name COLLATE NOCASE, s.created_at`)
-    .all() as OpenCodeServerRow[]
+  const rows = selectRows(db, OpenCodeServerRowSchema, `${SELECT_SERVER} ORDER BY s.name COLLATE NOCASE, s.created_at`)
   return rows.map(mapRow)
 }
 
 export function getOpenCodeServer(db: Database, serverId: string): OpenCodeServer | null {
-  const row = db
-    .prepare(`${SELECT_SERVER} WHERE s.id = ?`)
-    .get(serverId) as OpenCodeServerRow | undefined
+  const row = selectRow(db, OpenCodeServerRowSchema, `${SELECT_SERVER} WHERE s.id = ?`, serverId)
   return row ? mapRow(row) : null
 }
 

@@ -10,17 +10,9 @@ import {
   type DevicePairingLinksResponse,
 } from '@opencode-manager/shared/schemas'
 
-const loggerMocks = vi.hoisted(() => ({
-  info: vi.fn(),
-  warn: vi.fn(),
-  error: vi.fn(),
-  debug: vi.fn(),
-}))
-
-vi.mock('../../src/utils/logger', () => ({ logger: loggerMocks }))
-
-import { createTestDb } from '../helpers/assistant-workspace'
-import { expectNoSecretsLogged } from '../helpers/log-assertions'
+import { z } from 'zod'
+import { createTestDatabase } from '../helpers/test-database'
+import { expectLoggedMessage, expectNoSecretsLogged } from '../helpers/log-assertions'
 import { CLOUDFLARE_HEADERS, CLOUDFLARE_SECRET_VALUES } from '../helpers/remote-access-headers'
 import { writeEncryptedSecret } from '../../src/db/secrets'
 import {
@@ -28,6 +20,7 @@ import {
   REMOTE_ACCESS_HEADERS_SECRET_KEY,
 } from '../../src/services/remote-access-headers'
 import { createDevicePairingRoutes } from '../../src/routes/device-pairing'
+import { readJson } from '../helpers/read-json'
 
 const CODE = 'pairing-code-0123456789abcdef'
 const EXPIRES_AT = new Date('2026-10-22T12:00:00.000Z')
@@ -52,6 +45,9 @@ const LINKS_FAILED_ERROR = 'Failed to create device pairing links'
 const SENSITIVE_VALUES = [CODE, ...CLOUDFLARE_SECRET_VALUES]
 
 const COOKIE_HEADER = 'session=test-session'
+
+const PairingErrorSchema = z.object({ error: z.string(), code: z.string() })
+const ErrorResponseSchema = z.object({ error: z.string() })
 
 const createMintPairingCode = () =>
   vi.fn<(headers: Headers) => Promise<{ code: string; expiresAt: Date }>>(async () => ({
@@ -78,7 +74,7 @@ describe('device pairing link routes', () => {
   beforeEach(() => {
     allowPrivateNetwork = false
     development = false
-    db = createTestDb()
+    db = createTestDatabase()
     remoteAccessHeaders = new RemoteAccessHeadersService(db)
     remoteAccessHeaders.replace({ headers: CLOUDFLARE_HEADERS })
     mintPairingCode = createMintPairingCode()
@@ -99,12 +95,9 @@ describe('device pairing link routes', () => {
     vi.clearAllMocks()
   })
 
-  const postLinks = (origin?: string, body?: unknown) => {
-    const headers: Record<string, string> = {
-      'content-type': 'application/json',
-      cookie: COOKIE_HEADER,
-    }
-    if (origin) headers.origin = origin
+  const postLinks = (origin?: string, body?: { name?: string }) => {
+    const headers = new Headers({ 'content-type': 'application/json', cookie: COOKIE_HEADER })
+    if (origin) headers.set('origin', origin)
 
     return app.request('/device-pairing/links', {
       method: 'POST',
@@ -139,7 +132,7 @@ describe('device pairing link routes', () => {
 
     expect(res.status).toBe(400)
     expect(res.headers.get('Cache-Control')).toBe('no-store')
-    const body = await res.json() as { error: string; code: string }
+    const body = await readJson(res, PairingErrorSchema)
     expect(body.error).toBe(untrustedOriginError('https://evil.example'))
     expect(body.error).toContain('AUTH_TRUSTED_ORIGINS')
     expect(body.code).toBe('untrusted-origin')
@@ -284,7 +277,8 @@ describe('device pairing link routes', () => {
     expect(res.headers.get('Cache-Control')).toBe('no-store')
     await expect(res.json()).resolves.toEqual({ error: LINKS_FAILED_ERROR })
 
-    expectNoSecretsLogged(loggerMocks, SENSITIVE_VALUES)
+    expectLoggedMessage(LINKS_FAILED_ERROR, 'error')
+    expectNoSecretsLogged(SENSITIVE_VALUES)
   })
 
   describe('GET availability', () => {
@@ -383,7 +377,7 @@ describe('device pairing link routes', () => {
 
       expect(res.status).toBe(400)
       expect(res.headers.get('Cache-Control')).toBe('no-store')
-      const body = await res.json() as { error: string }
+      const body = await readJson(res, ErrorResponseSchema)
       expect(body.error).toContain('origin query parameter')
       expect(mintPairingCode).not.toHaveBeenCalled()
     })
@@ -396,7 +390,7 @@ describe('device pairing link routes', () => {
       const res = await getAvailability(origin)
 
       expect(res.status).toBe(400)
-      const body = await res.json() as { error: string }
+      const body = await readJson(res, ErrorResponseSchema)
       expect(body.error).toContain('absolute http or https URL')
       expect(mintPairingCode).not.toHaveBeenCalled()
     })

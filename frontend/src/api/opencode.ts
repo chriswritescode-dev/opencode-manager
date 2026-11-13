@@ -40,38 +40,15 @@ export type OpenCodeLocationInfo = Awaited<ReturnType<OpenCodeApi['location']['g
 
 export type OpenCodeProject = Awaited<ReturnType<OpenCodeApi['project']['list']>>[number]
 
-/** A project paired with the timestamp that represents its most recent activity. */
 export interface RemoteProjectActivity {
   project: OpenCodeProject
   activityAt: number
 }
 
-/**
- * Orders projects from the most to the least recently updated.
- *
- * A project's own update time covers metadata edits and registration, not work, so this is the
- * ordering used when no session evidence is available.
- *
- * @param projects Projects to order.
- * @returns A new array with the projects sorted by update time; the input is left untouched.
- */
 export function sortProjectsByUpdatedAt(projects: OpenCodeProject[]): OpenCodeProject[] {
   return [...projects].sort((a, b) => b.time.updated - a.time.updated)
 }
 
-/**
- * Derives each project's activity time from the newest session of the server that belongs to it and
- * orders projects by that time.
- *
- * Session update times record work; a project's own update time only records metadata edits and
- * registration, so projects without a session in the given page fall back to it and sort after the
- * session-backed ones. `time.active` is deliberately unused: OpenCode stamps it on every location
- * boot, including boots caused by other clients and idle evictions.
- *
- * @param projects Projects of one server.
- * @param sessions Sessions of that server, as returned by a first session page.
- * @returns The projects with their activity time, most recently active first.
- */
 export function rankProjectsBySessionActivity(
   projects: OpenCodeProject[],
   sessions: SessionInfo[],
@@ -102,24 +79,10 @@ export function rankProjectsBySessionActivity(
     })
 }
 
-/**
- * Returns the display name of a project, falling back to the name of its directory.
- *
- * @param project Project whose name is resolved.
- * @returns The trimmed project name, or the last segment of its canonical directory.
- */
 export function remoteProjectName(project: OpenCodeProject): string {
   return project.name?.trim() || getDirectoryName(project.canonical)
 }
 
-/**
- * Finds the project that owns a directory, matching its canonical directory and anything nested
- * inside it. Nested projects share a canonical prefix, so the deepest match owns the directory.
- *
- * @param projects Projects of the server that owns the directory.
- * @param directory Directory whose owning project is resolved.
- * @returns The owning project, or undefined when the directory belongs to none of them.
- */
 export function findRemoteProjectForDirectory(
   projects: OpenCodeProject[],
   directory: string,
@@ -184,17 +147,13 @@ type PromptFields = Pick<SendPromptInput, 'text' | 'files' | 'agents' | 'skills'
 function buildPromptFields(input: PromptFields) {
   return {
     text: input.text,
-    ...(input.files ? { files: input.files } : {}),
-    ...(input.agents ? { agents: input.agents } : {}),
-    ...(input.skills ? { skills: input.skills } : {}),
-    ...(input.delivery ? { delivery: input.delivery } : {}),
+    files: input.files,
+    agents: input.agents,
+    skills: input.skills,
+    delivery: input.delivery,
   }
 }
 
-/**
- * Fetches one page of sessions for the given list options and normalizes the
- * server cursor so the end of the list is `undefined` rather than null.
- */
 export async function listSessionPage(input: SessionPageInput, serverId?: string): Promise<SessionPage> {
   const { data, cursor } = await callOpenCode((api) => api.session.list(input), serverId)
   return { items: data, nextCursor: cursor.next ?? undefined }
@@ -212,14 +171,6 @@ export async function getSession(sessionID: string, serverId?: string): Promise<
   return callOpenCode((api) => api.session.get({ sessionID }), serverId)
 }
 
-/**
- * Reads a session goal through the OpenCode goal RPC.
- *
- * @param sessionID The session whose goal is read.
- * @param directory Directory of the session's project, once it is known.
- * @param serverId Server that owns the session, when it is not the local one.
- * @returns The goal, or an unsupported result when the server has no goal RPC.
- */
 export async function getSessionGoal(
   sessionID: string,
   directory: string | undefined,
@@ -233,9 +184,9 @@ export async function createSession(input: CreateSessionInput, serverId?: string
   return callOpenCode(
     (api) =>
       api.session.create({
-        ...(input.title !== undefined ? { title: input.title } : {}),
-        ...(input.agent !== undefined ? { agent: input.agent } : {}),
-        ...(model ? { model } : {}),
+        title: input.title,
+        agent: input.agent,
+        model,
         location: { directory: input.directory },
       }),
     serverId,
@@ -255,7 +206,7 @@ export async function forkSession(sessionID: string, before?: string, serverId?:
     (api) =>
       api.session.fork({
         sessionID,
-        ...(before ? { before } : {}),
+        before,
       }),
     serverId,
   )
@@ -267,7 +218,7 @@ export async function addSessionContext(sessionID: string, text: string, serverI
 
 async function createSessionThen(
   input: CreateSessionInput,
-  step: (session: SessionInfo) => Promise<unknown>,
+  step: (session: SessionInfo) => Promise<void>,
   serverId?: string,
 ): Promise<SessionInfo> {
   const session = await createSession(input, serverId)
@@ -295,7 +246,9 @@ export async function createSessionWithPrompt(
 ): Promise<SessionInfo> {
   return createSessionThen(
     input,
-    (session) => sendPrompt({ sessionID: session.id, text }, serverId),
+    async (session) => {
+      await sendPrompt({ sessionID: session.id, text }, serverId)
+    },
     serverId,
   )
 }
@@ -308,7 +261,6 @@ export async function switchSessionAgent(sessionID: string, agent: string, serve
   await callOpenCode((api) => api.session.switchAgent({ sessionID, agent }), serverId)
 }
 
-/** Sends a session prompt with client metadata derived from the current viewport. */
 export async function sendPrompt(input: SendPromptInput, serverId?: string): Promise<SessionInboxUser> {
   return callOpenCode(
     (api) =>
@@ -365,15 +317,6 @@ export async function backgroundSession(sessionID: string, serverId?: string): P
   await callOpenCode((api) => api.session.background({ sessionID }), serverId)
 }
 
-/**
- * Stores one instruction entry on a session, which the model is told about at
- * the next step boundary.
- *
- * @param sessionID The session that receives the instruction.
- * @param key Stable key of the instruction entry.
- * @param text Instruction text stored under the key.
- * @param serverId Server that owns the session, when it is not the local one.
- */
 export async function putSessionInstruction(
   sessionID: string,
   key: string,
@@ -386,13 +329,6 @@ export async function putSessionInstruction(
   )
 }
 
-/**
- * Removes one instruction entry from a session.
- *
- * @param sessionID The session that holds the instruction.
- * @param key Stable key of the instruction entry.
- * @param serverId Server that owns the session, when it is not the local one.
- */
 export async function removeSessionInstruction(
   sessionID: string,
   key: string,
@@ -404,13 +340,6 @@ export async function removeSessionInstruction(
   )
 }
 
-/**
- * Lists the keys of the instruction entries a session holds.
- *
- * @param sessionID The session whose instruction keys are read.
- * @param serverId Server that owns the session, when it is not the local one.
- * @returns The stored instruction keys, in the order the server reports them.
- */
 export async function listSessionInstructionKeys(
   sessionID: string,
   serverId?: string,
@@ -523,10 +452,6 @@ export async function listPendingPermissions(
   return data
 }
 
-/**
- * Replies to a pending permission request with the user's decision, sending the
- * optional message only when one is supplied.
- */
 export async function replyPermission(
   sessionID: string,
   requestID: string,
@@ -540,7 +465,7 @@ export async function replyPermission(
         sessionID,
         requestID,
         decision,
-        ...(message ? { message } : {}),
+        message,
       }),
     serverId,
   )
@@ -578,8 +503,9 @@ export async function listSessionMessages(
     (api) =>
       api.message.list({
         sessionID,
-        ...(input.limit === undefined ? {} : { limit: input.limit }),
-        ...(input.cursor === undefined ? { order: 'desc' as const } : { cursor: input.cursor }),
+        limit: input.limit,
+        cursor: input.cursor,
+        order: input.cursor === undefined ? 'desc' : undefined,
       }),
     serverId,
   )

@@ -1,83 +1,85 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { VersionSelectDialog } from './VersionSelectDialog'
-import { settingsApi } from '@/api/settings'
-import { refreshOpenCodeServerCaches } from '@/lib/queryInvalidation'
+import { renderWithProviders } from '@/test/render'
+import type { FetchRoute, FetchRouteResult } from '@/test/fetchFake'
 
-vi.mock('@/api/settings', () => ({
-  settingsApi: {
-    getOpenCodeVersions: vi.fn(),
-    installOpenCodeVersion: vi.fn(),
-  },
-}))
+const releases = [
+  { version: '2.1.0', tag: 'v2.1.0', name: '', publishedAt: '2026-01-01T00:00:00Z' },
+  { version: '2.0.15', tag: 'v2.0.15', name: '', publishedAt: '2025-12-01T00:00:00Z' },
+]
 
-vi.mock('@/lib/toast', () => ({
-  showToast: { success: vi.fn(), error: vi.fn(), loading: vi.fn(), dismiss: vi.fn() },
-}))
-vi.mock('@/lib/queryInvalidation', () => ({
-  refreshOpenCodeServerCaches: vi.fn(),
-}))
+interface DialogRenderOptions {
+  currentVersion?: string
+  install?: () => FetchRouteResult | Promise<FetchRouteResult>
+}
 
-const mockGetOpenCodeVersions = settingsApi.getOpenCodeVersions as ReturnType<typeof vi.fn>
-const mockInstallOpenCodeVersion = settingsApi.installOpenCodeVersion as ReturnType<typeof vi.fn>
-
-function renderDialog(open = true) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <VersionSelectDialog open={open} onOpenChange={vi.fn()} />
-    </QueryClientProvider>,
-  )
+function renderDialog(options: DialogRenderOptions = {}) {
+  const onOpenChange = vi.fn()
+  const fetchRoutes: FetchRoute[] = [
+    {
+      method: 'GET',
+      path: '/api/settings/opencode-versions',
+      respond: () => ({ json: { versions: releases, currentVersion: options.currentVersion ?? '2.0.15' } }),
+    },
+    {
+      method: 'POST',
+      path: '/api/settings/opencode-install-version',
+      respond: options.install ?? (() => ({
+        json: { success: true, message: 'Installed OpenCode v2.1.0', newVersion: '2.1.0' },
+      })),
+    },
+  ]
+  const result = renderWithProviders(<VersionSelectDialog open onOpenChange={onOpenChange} />, {
+    auth: false,
+    theme: false,
+    tts: false,
+    fetchRoutes,
+  })
+  return { ...result, onOpenChange }
 }
 
 describe('VersionSelectDialog', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockGetOpenCodeVersions.mockResolvedValue({
-      versions: [
-        { version: '2.1.0', tag: 'v2.1.0', name: '', publishedAt: '2026-01-01T00:00:00Z' },
-        { version: '2.0.15', tag: 'v2.0.15', name: '', publishedAt: '2025-12-01T00:00:00Z' },
-      ],
-      currentVersion: '2.0.15',
-    })
-    mockInstallOpenCodeVersion.mockResolvedValue({ success: true, message: 'ok', oldVersion: null, newVersion: '2.1.0' })
-  })
-
-  it('lists versions and allows selection', async () => {
+  it('lists versions and requires a selection before installing', async () => {
     const user = userEvent.setup()
     renderDialog()
 
-    expect(await screen.findByText('v2.1.0')).toBeInTheDocument()
-    const row = screen.getByRole('button', { name: /v2\.1\.0/ })
-    expect(row).toBeEnabled()
+    expect(await screen.findByRole('button', { name: /v2\.1\.0/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /v2\.0\.15/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /Select version/i })).toBeDisabled()
 
-    await user.click(row)
+    await user.click(screen.getByRole('button', { name: /v2\.1\.0/ }))
 
     expect(screen.getByRole('button', { name: /^Install$/i })).toBeEnabled()
   })
 
-  it('installs the selected version', async () => {
-    mockGetOpenCodeVersions.mockResolvedValue({
-      versions: [
-        { version: '2.1.0', tag: 'v2.1.0', name: '', publishedAt: '2026-01-01T00:00:00Z' },
-        { version: '2.0.15', tag: 'v2.0.15', name: '', publishedAt: '2025-12-01T00:00:00Z' },
-      ],
-      currentVersion: '2.0.14',
-    })
-
+  it('installs the selected version and closes the dialog', async () => {
     const user = userEvent.setup()
-    renderDialog()
+    const { fetchFake, onOpenChange } = renderDialog({ currentVersion: '2.0.14' })
 
-    expect(await screen.findByText('v2.1.0')).toBeInTheDocument()
-    const versionRow = screen.getByRole('button', { name: /v2\.1\.0/ })
-
-    await user.click(versionRow)
+    await user.click(await screen.findByRole('button', { name: /v2\.1\.0/ }))
     await user.click(screen.getByRole('button', { name: /^Install$/i }))
 
-    expect(mockInstallOpenCodeVersion).toHaveBeenCalledWith('2.1.0')
-    expect(refreshOpenCodeServerCaches).toHaveBeenCalledWith(expect.any(QueryClient), '2.1.0')
+    expect(fetchFake.lastRequest('POST', '/api/settings/opencode-install-version')?.body).toEqual({
+      version: '2.1.0',
+    })
+    expect(await screen.findByText('Installed OpenCode v2.1.0')).toBeInTheDocument()
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it('reports a failed install and keeps the dialog open', async () => {
+    const user = userEvent.setup()
+    const { onOpenChange } = renderDialog({
+      currentVersion: '2.0.14',
+      install: () => ({ status: 500, json: { error: 'install failed' } }),
+    })
+
+    await user.click(await screen.findByRole('button', { name: /v2\.1\.0/ }))
+    await user.click(screen.getByRole('button', { name: /^Install$/i }))
+
+    expect(await screen.findByText('Failed to install version')).toBeInTheDocument()
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+    expect(screen.getByRole('button', { name: /^Install$/i })).toBeEnabled()
   })
 })

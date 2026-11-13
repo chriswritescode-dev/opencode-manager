@@ -20,10 +20,6 @@ interface RankOptions<T> {
 const SEGMENT_SEPARATOR = /[-_./\s]/
 const MIN_DESCRIPTION_QUERY_LENGTH = 3
 
-/**
- * Matches a query against a name, falling back to the description for queries of three or more characters.
- * Lower tiers are better: exact, prefix, segment acronym, substring, subsequence, description.
- */
 export function matchText(query: string, name: string, description?: string): TextMatch | null {
   const needle = query.toLowerCase()
   const haystack = name.toLowerCase()
@@ -44,10 +40,6 @@ export function matchText(query: string, name: string, description?: string): Te
   return null
 }
 
-/**
- * Filters and orders items by match tier, then by position in `recent`, then alphabetically.
- * An empty query lists recent items first, followed by the rest alphabetically.
- */
 export function rankByMatch<T>(items: T[], query: string, options: RankOptions<T>): RankedMatch<T>[] {
   const recent = options.recent ?? []
   const recentIndex = (item: T) => {

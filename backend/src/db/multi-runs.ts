@@ -1,11 +1,15 @@
 import type { Database } from 'bun:sqlite'
 import {
+  MultiRunEntryStatusSchema,
   MultiRunFusionSourceSchema,
+  MultiRunFusionStatusSchema,
   type MultiRunEntryStatus,
   type MultiRunFusionSource,
   type MultiRunFusionStatus,
   type MultiRunTarget,
 } from '@opencode-manager/shared/schemas'
+import { z } from 'zod'
+import { selectRow, selectRows } from './rows'
 
 export interface MultiRunEntryRecord {
   id: number
@@ -84,46 +88,61 @@ export interface MultiRunFusionPatch {
   error?: string | null
 }
 
-interface MultiRunRow {
-  id: number
-  repo_id: number | null
-  server_id: string
-  directory: string | null
-  name: string
-  prompt: string
-  isolated: number
-  base_ref: string | null
-  created_at: number
-}
+const MultiRunRowSchema = z.object({
+  id: z.number(),
+  repo_id: z.number().nullable(),
+  server_id: z.string(),
+  directory: z.string().nullable(),
+  name: z.string(),
+  prompt: z.string(),
+  isolated: z.number(),
+  base_ref: z.string().nullable(),
+  created_at: z.number(),
+})
 
-interface MultiRunEntryRow {
-  id: number
-  multi_run_id: number
-  model: string
-  status: MultiRunEntryStatus
-  session_id: string | null
-  directory: string | null
-  error: string | null
-  created_at: number
-  updated_at: number
-}
+type MultiRunRow = z.infer<typeof MultiRunRowSchema>
 
-interface MultiRunFusionRow {
-  id: number
-  multi_run_id: number
-  request_id: string
-  model: string
-  instructions: string | null
-  isolated: number
-  base_ref: string | null
-  sources: string
-  status: MultiRunFusionStatus
-  session_id: string | null
-  directory: string | null
-  error: string | null
-  created_at: number
-  updated_at: number
-}
+const MultiRunEntryRowSchema = z.object({
+  id: z.number(),
+  multi_run_id: z.number(),
+  model: z.string(),
+  status: MultiRunEntryStatusSchema,
+  session_id: z.string().nullable(),
+  directory: z.string().nullable(),
+  error: z.string().nullable(),
+  created_at: z.number(),
+  updated_at: z.number(),
+})
+
+type MultiRunEntryRow = z.infer<typeof MultiRunEntryRowSchema>
+
+const MultiRunFusionRowSchema = z.object({
+  id: z.number(),
+  multi_run_id: z.number(),
+  request_id: z.string(),
+  model: z.string(),
+  instructions: z.string().nullable(),
+  isolated: z.number(),
+  base_ref: z.string().nullable(),
+  sources: z.string(),
+  status: MultiRunFusionStatusSchema,
+  session_id: z.string().nullable(),
+  directory: z.string().nullable(),
+  error: z.string().nullable(),
+  created_at: z.number(),
+  updated_at: z.number(),
+})
+
+type MultiRunFusionRow = z.infer<typeof MultiRunFusionRowSchema>
+
+const MultiRunIdRowSchema = z.object({ multi_run_id: z.number() })
+
+const MultiRunFusionRefRowSchema = z.object({
+  multi_run_id: z.number(),
+  request_id: z.string(),
+})
+
+const MultiRunIsolatedRowSchema = z.object({ isolated: z.number() })
 
 const MULTI_RUN_COLUMNS = 'id, repo_id, server_id, directory, name, prompt, isolated, base_ref, created_at'
 
@@ -242,9 +261,7 @@ export function createMultiRunWithEntries(
 }
 
 export function getMultiRun(db: Database, id: number): MultiRunRecord | null {
-  const row = db
-    .prepare(`SELECT ${MULTI_RUN_COLUMNS} FROM multi_runs WHERE id = ?`)
-    .get(id) as MultiRunRow | undefined
+  const row = selectRow(db, MultiRunRowSchema, `SELECT ${MULTI_RUN_COLUMNS} FROM multi_runs WHERE id = ?`, id)
   if (!row) {
     return null
   }
@@ -257,26 +274,33 @@ export function listMultiRuns(db: Database, target: MultiRunTarget, limit: numbe
       ? ['repo_id = ?', [target.repoId] as const]
       : ['server_id = ? AND directory = ?', [target.serverId, target.directory] as const]
 
-  const rows = db
-    .prepare(`
+  const rows = selectRows(
+    db,
+    MultiRunRowSchema,
+    `
       SELECT ${MULTI_RUN_COLUMNS} FROM multi_runs
       WHERE ${where}
       ORDER BY created_at DESC, id DESC
       LIMIT ?
-    `)
-    .all(...params, limit) as MultiRunRow[]
+    `,
+    ...params,
+    limit,
+  )
   if (rows.length === 0) {
     return []
   }
 
   const placeholders = rows.map(() => '?').join(', ')
-  const entryRows = db
-    .prepare(`
+  const entryRows = selectRows(
+    db,
+    MultiRunEntryRowSchema,
+    `
       SELECT ${MULTI_RUN_ENTRY_COLUMNS} FROM multi_run_entries
       WHERE multi_run_id IN (${placeholders})
       ORDER BY multi_run_id ASC, id ASC
-    `)
-    .all(...rows.map((row) => row.id)) as MultiRunEntryRow[]
+    `,
+    ...rows.map((row) => row.id),
+  )
 
   const entriesByRun = new Map<number, MultiRunEntryRow[]>()
   for (const row of rows) {
@@ -286,13 +310,16 @@ export function listMultiRuns(db: Database, target: MultiRunTarget, limit: numbe
     entriesByRun.get(entryRow.multi_run_id)?.push(entryRow)
   }
 
-  const fusionRows = db
-    .prepare(`
+  const fusionRows = selectRows(
+    db,
+    MultiRunFusionRowSchema,
+    `
       SELECT ${MULTI_RUN_FUSION_COLUMNS} FROM multi_run_fusions
       WHERE multi_run_id IN (${placeholders})
       ORDER BY multi_run_id ASC, id ASC
-    `)
-    .all(...rows.map((row) => row.id)) as MultiRunFusionRow[]
+    `,
+    ...rows.map((row) => row.id),
+  )
 
   const fusionsByRun = new Map<number, MultiRunFusionRow[]>()
   for (const row of rows) {
@@ -308,16 +335,18 @@ export function listMultiRuns(db: Database, target: MultiRunTarget, limit: numbe
 }
 
 export function getMultiRunEntry(db: Database, multiRunId: number, entryId: number): MultiRunEntryRecord | null {
-  const row = db
-    .prepare(`SELECT ${MULTI_RUN_ENTRY_COLUMNS} FROM multi_run_entries WHERE id = ? AND multi_run_id = ?`)
-    .get(entryId, multiRunId) as MultiRunEntryRow | undefined
+  const row = selectRow(
+    db,
+    MultiRunEntryRowSchema,
+    `SELECT ${MULTI_RUN_ENTRY_COLUMNS} FROM multi_run_entries WHERE id = ? AND multi_run_id = ?`,
+    entryId,
+    multiRunId,
+  )
   if (!row) {
     return null
   }
 
-  const group = db.prepare('SELECT isolated FROM multi_runs WHERE id = ?').get(multiRunId) as
-    | { isolated: number }
-    | undefined
+  const group = selectRow(db, MultiRunIsolatedRowSchema, 'SELECT isolated FROM multi_runs WHERE id = ?', multiRunId)
   return mapEntryRow(row, group?.isolated === 1)
 }
 
@@ -331,9 +360,7 @@ export function updateMultiRunEntry(
     return null
   }
 
-  const row = db.prepare('SELECT multi_run_id FROM multi_run_entries WHERE id = ?').get(entryId) as
-    | { multi_run_id: number }
-    | undefined
+  const row = selectRow(db, MultiRunIdRowSchema, 'SELECT multi_run_id FROM multi_run_entries WHERE id = ?', entryId)
   if (!row) {
     return null
   }
@@ -345,9 +372,13 @@ export function getMultiRunFusionByRequest(
   multiRunId: number,
   requestId: string,
 ): MultiRunFusionRecord | null {
-  const row = db
-    .prepare(`SELECT ${MULTI_RUN_FUSION_COLUMNS} FROM multi_run_fusions WHERE multi_run_id = ? AND request_id = ?`)
-    .get(multiRunId, requestId) as MultiRunFusionRow | undefined
+  const row = selectRow(
+    db,
+    MultiRunFusionRowSchema,
+    `SELECT ${MULTI_RUN_FUSION_COLUMNS} FROM multi_run_fusions WHERE multi_run_id = ? AND request_id = ?`,
+    multiRunId,
+    requestId,
+  )
   if (!row) {
     return null
   }
@@ -402,9 +433,12 @@ export function updateMultiRunFusion(
     return null
   }
 
-  const row = db.prepare('SELECT multi_run_id, request_id FROM multi_run_fusions WHERE id = ?').get(fusionId) as
-    | { multi_run_id: number; request_id: string }
-    | undefined
+  const row = selectRow(
+    db,
+    MultiRunFusionRefRowSchema,
+    'SELECT multi_run_id, request_id FROM multi_run_fusions WHERE id = ?',
+    fusionId,
+  )
   if (!row) {
     return null
   }
@@ -456,15 +490,21 @@ function runGuardedStatusUpdate(
 }
 
 function loadEntries(db: Database, multiRunId: number): MultiRunEntryRow[] {
-  return db
-    .prepare(`SELECT ${MULTI_RUN_ENTRY_COLUMNS} FROM multi_run_entries WHERE multi_run_id = ? ORDER BY id ASC`)
-    .all(multiRunId) as MultiRunEntryRow[]
+  return selectRows(
+    db,
+    MultiRunEntryRowSchema,
+    `SELECT ${MULTI_RUN_ENTRY_COLUMNS} FROM multi_run_entries WHERE multi_run_id = ? ORDER BY id ASC`,
+    multiRunId,
+  )
 }
 
 function loadFusions(db: Database, multiRunId: number): MultiRunFusionRow[] {
-  return db
-    .prepare(`SELECT ${MULTI_RUN_FUSION_COLUMNS} FROM multi_run_fusions WHERE multi_run_id = ? ORDER BY id ASC`)
-    .all(multiRunId) as MultiRunFusionRow[]
+  return selectRows(
+    db,
+    MultiRunFusionRowSchema,
+    `SELECT ${MULTI_RUN_FUSION_COLUMNS} FROM multi_run_fusions WHERE multi_run_id = ? ORDER BY id ASC`,
+    multiRunId,
+  )
 }
 
 function toMultiRunRecord(

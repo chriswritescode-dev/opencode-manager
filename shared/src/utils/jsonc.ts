@@ -1,6 +1,7 @@
 import { parse as parseJsoncLib, parseTree, findNodeAtLocation, type ParseError, type JSONPath } from 'jsonc-parser/lib/esm/main.js'
+import { JsonValueSchema, type JsonValue } from './json'
 
-export function parseJsonc<T = unknown>(content: string): T {
+export function parseJsonc(content: string): JsonValue {
   const errors: ParseError[] = []
   const result = parseJsoncLib(content, errors, {
     allowTrailingComma: true,
@@ -13,7 +14,7 @@ export function parseJsonc<T = unknown>(content: string): T {
     throw new SyntaxError(message)
   }
 
-  return result as T
+  return JsonValueSchema.parse(result)
 }
 
 export function getParseErrorMessage(error: number, content: string, offset: number | undefined): string {
@@ -28,25 +29,25 @@ export function getParseErrorMessage(error: number, content: string, offset: num
   return `${message} at line ${line}, column ${col}`
 }
 
-function getErrorMessageByCode(error: number): string {
-  const errorMessages: Record<number, string> = {
-    1: 'Invalid symbol',
-    2: 'Invalid number format',
-    3: 'Property name expected',
-    4: 'Value expected',
-    5: 'Colon expected',
-    6: 'Comma expected',
-    7: 'Trailing comma not allowed',
-    8: 'Unexpected end of input',
-    9: 'Invalid comment',
-  }
+const JSONC_ERROR_MESSAGES = new Map<number, string>([
+  [1, 'Invalid symbol'],
+  [2, 'Invalid number format'],
+  [3, 'Property name expected'],
+  [4, 'Value expected'],
+  [5, 'Colon expected'],
+  [6, 'Comma expected'],
+  [7, 'Trailing comma not allowed'],
+  [8, 'Unexpected end of input'],
+  [9, 'Invalid comment'],
+])
 
-  return errorMessages[error] || 'Invalid JSONC'
+function getErrorMessageByCode(error: number): string {
+  return JSONC_ERROR_MESSAGES.get(error) || 'Invalid JSONC'
 }
 
-export function parseJsoncErrorLine(error: unknown): number | null {
-  if (!(error instanceof SyntaxError)) return null
-  const match = error.message.match(/at line (\d+)/)
+export function parseJsoncErrorLine(cause: unknown): number | null {
+  if (!(cause instanceof SyntaxError)) return null
+  const match = cause.message.match(/at line (\d+)/)
   return match ? Number(match[1]) : null
 }
 

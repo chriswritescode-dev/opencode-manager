@@ -33,7 +33,7 @@ function isSamePick(left: ModelPick | undefined, right: ModelPick | undefined): 
   )
 }
 
-if (typeof localStorage !== 'undefined') localStorage.removeItem('opencode-model-selection')
+if ('localStorage' in globalThis) localStorage.removeItem('opencode-model-selection')
 
 export const useModelStore = create<ModelStore>()((set, get) => ({
   newSessionPicks: {},

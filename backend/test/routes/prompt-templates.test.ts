@@ -1,80 +1,46 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-
-const mocks = vi.hoisted(() => ({
-  promptService: {
-    list: vi.fn(),
-    getById: vi.fn(),
-    create: vi.fn(),
-    update: vi.fn(),
-    delete: vi.fn(),
-  },
-}))
-
-vi.mock('../../src/services/prompt-templates', () => ({
-  PromptTemplateService: vi.fn().mockImplementation(() => mocks.promptService),
-  PromptTemplateServiceError: class PromptTemplateServiceError extends Error {
-    constructor(message: string, public statusCode: number = 500) {
-      super(message)
-      this.name = 'PromptTemplateServiceError'
-    }
-  },
-}))
-
-vi.mock('../../src/utils/logger', () => ({
-  logger: {
-    info: vi.fn(),
-    error: vi.fn(),
-    warn: vi.fn(),
-  },
-}))
-
+import { beforeEach, describe, expect, it } from 'vitest'
+import type { Database } from 'bun:sqlite'
+import { z } from 'zod'
+import type { CreatePromptTemplateRequest } from '@opencode-manager/shared/schemas'
+import { PromptTemplateSchema } from '@opencode-manager/shared/schemas'
 import { createPromptTemplateRoutes } from '../../src/routes/prompt-templates'
-import { PromptTemplateServiceError } from '../../src/services/prompt-templates'
+import { createTestDatabase } from '../helpers/test-database'
+import { readJson } from '../helpers/read-json'
+
+const TemplatesResponseSchema = z.object({ templates: z.array(PromptTemplateSchema) })
+const TemplateResponseSchema = z.object({ template: PromptTemplateSchema })
+const ErrorResponseSchema = z.object({ error: z.string() })
+
+const newTemplate: CreatePromptTemplateRequest = {
+  title: 'Test Template',
+  category: 'Test',
+  cadenceHint: 'Daily',
+  suggestedName: 'Test job name',
+  suggestedDescription: 'Test description',
+  description: 'Test description',
+  prompt: 'Test prompt content',
+}
 
 describe('prompt template routes', () => {
+  let db: Database
   let app: ReturnType<typeof createPromptTemplateRoutes>
 
   beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.promptService.list.mockReset()
-    mocks.promptService.getById.mockReset()
-    mocks.promptService.create.mockReset()
-    mocks.promptService.update.mockReset()
-    mocks.promptService.delete.mockReset()
-
-    app = createPromptTemplateRoutes({} as never)
+    db = createTestDatabase()
+    app = createPromptTemplateRoutes(db)
   })
 
-  it('lists all templates including seeded ones from migration', async () => {
-    const mockTemplates = [
-      { id: 1, title: 'Repo Health Report', category: 'Health', cadence_hint: 'Daily', suggested_name: 'repo-health', suggested_description: 'Report', description: 'Report', prompt: 'Check health' },
-      { id: 2, title: 'Dependency Watchlist', category: 'Dependencies', cadence_hint: 'Weekly', suggested_name: 'dep-watch', suggested_description: 'Watch deps', description: 'Watch', prompt: 'Watch deps' },
-    ]
-    mocks.promptService.list.mockReturnValue(mockTemplates)
-
+  it('lists the templates seeded by the migration', async () => {
     const response = await app.request('/')
     expect(response.status).toBe(200)
 
-    const body = await response.json() as { templates: Array<{ id: number; title: string }> }
-    expect(body.templates.length).toBe(2)
-    expect(body.templates[0]?.title).toBe('Repo Health Report')
-    expect(body.templates[1]?.title).toBe('Dependency Watchlist')
+    const body = await readJson(response, TemplatesResponseSchema)
+    expect(body.templates.map((template) => template.title)).toEqual(
+      expect.arrayContaining(['Repo Health Report', 'Dependency Watchlist']),
+    )
   })
 
   it('creates a template and returns 201', async () => {
-    const newTemplate = {
-      title: 'Test Template',
-      category: 'Test',
-      cadenceHint: 'Daily',
-      suggestedName: 'Test job name',
-      suggestedDescription: 'Test description',
-      description: 'Test description',
-      prompt: 'Test prompt content',
-    }
-
-    const createdTemplate = { id: 1, ...newTemplate }
-    mocks.promptService.create.mockReturnValue(createdTemplate)
-
     const response = await app.request('/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -82,55 +48,66 @@ describe('prompt template routes', () => {
     })
 
     expect(response.status).toBe(201)
-    const body = await response.json() as { template: { id: number; title: string } }
+    const body = await readJson(response, TemplateResponseSchema)
     expect(body.template.title).toBe('Test Template')
-    expect(body.template.id).toBe(1)
+    expect(body.template.id).toBeGreaterThan(0)
+
+    const persisted = await readJson(await app.request(`/${body.template.id}`), TemplateResponseSchema)
+    expect(persisted.template).toEqual(body.template)
   })
 
   it('gets a template by id', async () => {
-    const mockTemplate = { id: 1, title: 'Get Test', category: 'Test', cadence_hint: 'Daily', suggested_name: 'get-test', suggested_description: '', description: '', prompt: 'Test prompt' }
-    mocks.promptService.getById.mockReturnValue(mockTemplate)
+    const created = await readJson(
+      await app.request('/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newTemplate),
+      }),
+      TemplateResponseSchema,
+    )
 
-    const getResponse = await app.request('/1')
-    expect(getResponse.status).toBe(200)
+    const response = await app.request(`/${created.template.id}`)
 
-    const body = await getResponse.json() as { template: { id: number; title: string } }
-    expect(body.template.id).toBe(1)
-    expect(body.template.title).toBe('Get Test')
+    expect(response.status).toBe(200)
+    const body = await readJson(response, TemplateResponseSchema)
+    expect(body.template.id).toBe(created.template.id)
+    expect(body.template.title).toBe('Test Template')
   })
 
-  it('returns 404 for missing template', async () => {
-    mocks.promptService.getById.mockImplementation(() => {
-      throw new PromptTemplateServiceError('Template not found', 404)
-    })
-
+  it('returns 404 for a missing template', async () => {
     const response = await app.request('/99999')
-    expect(response.status).toBe(404)
 
-    const body = await response.json() as { error: string }
+    expect(response.status).toBe(404)
+    const body = await readJson(response, ErrorResponseSchema)
     expect(body.error).toBe('Template not found')
   })
 
-  it('updates a template', async () => {
-    const updatedTemplate = { id: 1, title: 'Updated Title', category: 'Test', cadence_hint: 'Daily', suggested_name: 'updated', suggested_description: '', description: '', prompt: 'Test prompt' }
-    mocks.promptService.update.mockReturnValue(updatedTemplate)
+  it('updates a template and persists the change', async () => {
+    const created = await readJson(
+      await app.request('/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newTemplate),
+      }),
+      TemplateResponseSchema,
+    )
 
-    const updateResponse = await app.request('/1', {
+    const updateResponse = await app.request(`/${created.template.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: 'Updated Title' }),
     })
 
     expect(updateResponse.status).toBe(200)
-    const body = await updateResponse.json() as { template: { title: string } }
-    expect(body.template.title).toBe('Updated Title')
+    const updated = await readJson(updateResponse, TemplateResponseSchema)
+    expect(updated.template.title).toBe('Updated Title')
+
+    const persisted = await readJson(await app.request(`/${created.template.id}`), TemplateResponseSchema)
+    expect(persisted.template.title).toBe('Updated Title')
+    expect(persisted.template.prompt).toBe(newTemplate.prompt)
   })
 
-  it('returns 404 when updating missing template', async () => {
-    mocks.promptService.update.mockImplementation(() => {
-      throw new PromptTemplateServiceError('Template not found', 404)
-    })
-
+  it('returns 404 when updating a missing template', async () => {
     const response = await app.request('/99999', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -141,23 +118,24 @@ describe('prompt template routes', () => {
   })
 
   it('deletes a template and returns 204', async () => {
-    mocks.promptService.delete.mockReturnValue(undefined)
+    const created = await readJson(
+      await app.request('/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newTemplate),
+      }),
+      TemplateResponseSchema,
+    )
 
-    const deleteResponse = await app.request('/1', {
-      method: 'DELETE',
-    })
-
+    const deleteResponse = await app.request(`/${created.template.id}`, { method: 'DELETE' })
     expect(deleteResponse.status).toBe(204)
+
+    const getResponse = await app.request(`/${created.template.id}`)
+    expect(getResponse.status).toBe(404)
   })
 
-  it('returns 404 when deleting missing template', async () => {
-    mocks.promptService.delete.mockImplementation(() => {
-      throw new PromptTemplateServiceError('Template not found', 404)
-    })
-
-    const response = await app.request('/99999', {
-      method: 'DELETE',
-    })
+  it('returns 404 when deleting a missing template', async () => {
+    const response = await app.request('/99999', { method: 'DELETE' })
 
     expect(response.status).toBe(404)
   })

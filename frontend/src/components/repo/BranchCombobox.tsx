@@ -20,10 +20,6 @@ interface BranchComboboxProps {
   listClassName?: string
 }
 
-/**
- * Searchable branch picker listing local branches plus origin-only remote branches,
- * which are the only refs the backend can resolve.
- */
 export function BranchCombobox({
   repoId,
   value,

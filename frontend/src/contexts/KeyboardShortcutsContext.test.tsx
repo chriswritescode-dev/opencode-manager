@@ -1,19 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, render, renderHook, screen } from '@testing-library/react'
-import type { ReactNode } from 'react'
-import { KeyboardShortcutsProvider, useShortcutActions, type ShortcutActions } from './KeyboardShortcutsContext'
-
-const { preferences } = vi.hoisted(() => ({
-  preferences: {
-    leaderKey: 'Ctrl+X',
-    keyboardShortcuts: { submit: 'Ctrl+Enter', abort: 'Escape', newSession: 'N' } as Record<string, string>,
-    directShortcuts: ['submit', 'abort'],
-  },
-}))
-
-vi.mock('@/hooks/useSettings', () => ({
-  useSettings: () => ({ preferences }),
-}))
+import { act, renderHook, screen, waitFor } from '@testing-library/react'
+import { useState, type ReactNode } from 'react'
+import {
+  DEFAULT_DIRECT_SHORTCUTS,
+  DEFAULT_KEYBOARD_SHORTCUTS,
+  type UserPreferences,
+} from '@/api/types/settings'
+import { makeSettingsResponse, makeUserPreferences } from '@/test/fixtures/api'
+import { renderWithProviders } from '@/test/render'
+import { KeyboardShortcutsProvider } from './KeyboardShortcutsContext'
+import { useShortcutActions, type ShortcutActions } from './keyboard-shortcuts-context'
 
 function pressKey(target: Element, init: KeyboardEventInit) {
   const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })
@@ -39,8 +35,35 @@ function ConditionalLayer({ show, actions }: { show: boolean; actions: ShortcutA
   return <ActionLayer actions={actions} />
 }
 
-function renderProvider(children: ReactNode) {
-  return render(<KeyboardShortcutsProvider>{children}</KeyboardShortcutsProvider>)
+let setPageLayerVisible: (visible: boolean) => void = () => undefined
+
+function HideableLayer({ actions }: { actions: ShortcutActions }) {
+  const [visible, setVisible] = useState(true)
+  setPageLayerVisible = setVisible
+  return <ConditionalLayer show={visible} actions={actions} />
+}
+
+function withShortcuts(
+  keyboardShortcuts: Partial<typeof DEFAULT_KEYBOARD_SHORTCUTS> = {},
+  directShortcuts: string[] = [...DEFAULT_DIRECT_SHORTCUTS],
+): UserPreferences {
+  return makeUserPreferences({
+    keyboardShortcuts: { ...DEFAULT_KEYBOARD_SHORTCUTS, ...keyboardShortcuts },
+    directShortcuts,
+  })
+}
+
+async function renderProvider(children: ReactNode, preferences: UserPreferences = withShortcuts()) {
+  const result = renderWithProviders(<KeyboardShortcutsProvider>{children}</KeyboardShortcutsProvider>, {
+    auth: false,
+    theme: false,
+    toaster: false,
+    fetchRoutes: [
+      { method: 'GET', path: '/api/settings', respond: () => ({ json: makeSettingsResponse({ preferences }) }) },
+    ],
+  })
+  await waitFor(() => expect(result.queryClient.getQueryData(['settings', 'default'])).toBeDefined())
+  return result
 }
 
 describe('KeyboardShortcutsProvider', () => {
@@ -48,10 +71,10 @@ describe('KeyboardShortcutsProvider', () => {
     document.body.innerHTML = ''
   })
 
-  it('matches stored Enter and Escape bindings against Return and Esc key events', () => {
+  it('matches stored Enter and Escape bindings against Return and Esc key events', async () => {
     const submit = vi.fn()
     const abort = vi.fn()
-    renderProvider(<ActionLayer actions={{ submit, abort }} />)
+    await renderProvider(<ActionLayer actions={{ submit, abort }} />, withShortcuts({ submit: 'Ctrl+Enter' }))
     const prompt = mountElement('textarea', { 'data-prompt-input': '' })
 
     pressKey(prompt, { key: 'Enter', ctrlKey: true })
@@ -61,9 +84,9 @@ describe('KeyboardShortcutsProvider', () => {
     expect(abort).toHaveBeenCalledTimes(1)
   })
 
-  it('activates the leader from the prompt and runs the follow-up action without typing it', () => {
+  it('activates the leader from the prompt and runs the follow-up action without typing it', async () => {
     const newSession = vi.fn()
-    renderProvider(<ActionLayer actions={{ newSession }} />)
+    await renderProvider(<ActionLayer actions={{ newSession }} />)
     const prompt = mountElement('textarea', { 'data-prompt-input': '' })
 
     expect(pressKey(prompt, { key: 'x', ctrlKey: true }).defaultPrevented).toBe(true)
@@ -73,9 +96,15 @@ describe('KeyboardShortcutsProvider', () => {
     expect(followUp.defaultPrevented).toBe(true)
   })
 
-  it('applies new default direct actions for users with stored preferences that predate them', () => {
+  it('applies new default direct actions for users with stored preferences that predate them', async () => {
     const variantCycle = vi.fn()
-    renderProvider(<ActionLayer actions={{ variantCycle }} />)
+    await renderProvider(
+      <ActionLayer actions={{ variantCycle }} />,
+      makeUserPreferences({
+        keyboardShortcuts: { submit: 'Ctrl+Enter', abort: 'Escape', newSession: 'N' },
+        directShortcuts: ['submit', 'abort'],
+      }),
+    )
     const input = mountElement('textarea')
 
     pressKey(input, { key: 't', ctrlKey: true })
@@ -83,10 +112,10 @@ describe('KeyboardShortcutsProvider', () => {
     expect(variantCycle).toHaveBeenCalledTimes(1)
   })
 
-  it('leaves submit to the focused input and only interrupts from the prompt', () => {
+  it('leaves submit to the focused input and only interrupts from the prompt', async () => {
     const submit = vi.fn()
     const abort = vi.fn()
-    renderProvider(<ActionLayer actions={{ submit, abort }} />)
+    await renderProvider(<ActionLayer actions={{ submit, abort }} />)
     const otherInput = mountElement('input')
     const prompt = mountElement('textarea', { 'data-prompt-input': '' })
 
@@ -99,96 +128,66 @@ describe('KeyboardShortcutsProvider', () => {
     expect(abort).toHaveBeenCalledTimes(1)
   })
 
-  it('submits from the prompt on plain Enter when submit is bound to Enter, leaving Enter alone elsewhere', () => {
-    const original = preferences.keyboardShortcuts
-    preferences.keyboardShortcuts = { ...original, submit: 'Return' }
-    try {
-      const submit = vi.fn()
-      renderProvider(<ActionLayer actions={{ submit }} />)
-      const prompt = mountElement('textarea', { 'data-prompt-input': '' })
-      const button = mountElement('button')
+  it('submits from the prompt on plain Enter when submit is bound to Enter, leaving Enter alone elsewhere', async () => {
+    const submit = vi.fn()
+    await renderProvider(<ActionLayer actions={{ submit }} />, withShortcuts({ submit: 'Return' }))
+    const prompt = mountElement('textarea', { 'data-prompt-input': '' })
+    const button = mountElement('button')
 
-      expect(pressKey(prompt, { key: 'Enter' }).defaultPrevented).toBe(true)
-      expect(submit).toHaveBeenCalledTimes(1)
+    expect(pressKey(prompt, { key: 'Enter' }).defaultPrevented).toBe(true)
+    expect(submit).toHaveBeenCalledTimes(1)
 
-      expect(pressKey(prompt, { key: 'Enter', shiftKey: true }).defaultPrevented).toBe(false)
-      expect(pressKey(prompt, { key: 'Enter', isComposing: true }).defaultPrevented).toBe(false)
-      expect(pressKey(button, { key: 'Enter' }).defaultPrevented).toBe(false)
-      expect(pressKey(document.body, { key: 'Enter' }).defaultPrevented).toBe(false)
-      expect(submit).toHaveBeenCalledTimes(1)
-    } finally {
-      preferences.keyboardShortcuts = original
-    }
+    expect(pressKey(prompt, { key: 'Enter', shiftKey: true }).defaultPrevented).toBe(false)
+    expect(pressKey(prompt, { key: 'Enter', isComposing: true }).defaultPrevented).toBe(false)
+    expect(pressKey(button, { key: 'Enter' }).defaultPrevented).toBe(false)
+    expect(pressKey(document.body, { key: 'Enter' }).defaultPrevented).toBe(false)
+    expect(submit).toHaveBeenCalledTimes(1)
   })
 
-  it('cycles the agent with a direct Tab only from the prompt, keeping Tab for focus elsewhere', () => {
-    const original = { keyboardShortcuts: preferences.keyboardShortcuts, directShortcuts: preferences.directShortcuts }
-    preferences.keyboardShortcuts = { ...original.keyboardShortcuts, toggleMode: 'Tab' }
-    preferences.directShortcuts = ['submit', 'abort', 'toggleMode']
-    try {
-      const toggleMode = vi.fn()
-      renderProvider(<ActionLayer actions={{ toggleMode }} />)
-      const prompt = mountElement('textarea', { 'data-prompt-input': '' })
-      const button = mountElement('button')
-      const otherInput = mountElement('input')
+  it('cycles the agent with a direct Tab only from the prompt, keeping Tab for focus elsewhere', async () => {
+    const toggleMode = vi.fn()
+    await renderProvider(<ActionLayer actions={{ toggleMode }} />, withShortcuts({ toggleMode: 'Tab' }))
+    const prompt = mountElement('textarea', { 'data-prompt-input': '' })
+    const button = mountElement('button')
+    const otherInput = mountElement('input')
 
-      expect(pressKey(button, { key: 'Tab' }).defaultPrevented).toBe(false)
-      expect(pressKey(document.body, { key: 'Tab' }).defaultPrevented).toBe(false)
-      expect(pressKey(otherInput, { key: 'Tab' }).defaultPrevented).toBe(false)
-      expect(toggleMode).not.toHaveBeenCalled()
+    expect(pressKey(button, { key: 'Tab' }).defaultPrevented).toBe(false)
+    expect(pressKey(document.body, { key: 'Tab' }).defaultPrevented).toBe(false)
+    expect(pressKey(otherInput, { key: 'Tab' }).defaultPrevented).toBe(false)
+    expect(toggleMode).not.toHaveBeenCalled()
 
-      expect(pressKey(prompt, { key: 'Tab' }).defaultPrevented).toBe(true)
-      expect(toggleMode).toHaveBeenCalledTimes(1)
-    } finally {
-      preferences.keyboardShortcuts = original.keyboardShortcuts
-      preferences.directShortcuts = original.directShortcuts
-    }
+    expect(pressKey(prompt, { key: 'Tab' }).defaultPrevented).toBe(true)
+    expect(toggleMode).toHaveBeenCalledTimes(1)
   })
 
-  it('never runs a prompt-only shortcut on a key that types a character', () => {
-    const original = { keyboardShortcuts: preferences.keyboardShortcuts, directShortcuts: preferences.directShortcuts }
-    preferences.keyboardShortcuts = { ...original.keyboardShortcuts, toggleMode: 'T' }
-    preferences.directShortcuts = ['submit', 'abort', 'toggleMode']
-    try {
-      const toggleMode = vi.fn()
-      renderProvider(<ActionLayer actions={{ toggleMode }} />)
-      const prompt = mountElement('textarea', { 'data-prompt-input': '' })
+  it('never runs a prompt-only shortcut on a key that types a character', async () => {
+    const toggleMode = vi.fn()
+    await renderProvider(<ActionLayer actions={{ toggleMode }} />, withShortcuts({ toggleMode: 'T' }))
+    const prompt = mountElement('textarea', { 'data-prompt-input': '' })
 
-      expect(pressKey(prompt, { key: 't' }).defaultPrevented).toBe(false)
-      expect(toggleMode).not.toHaveBeenCalled()
-    } finally {
-      preferences.keyboardShortcuts = original.keyboardShortcuts
-      preferences.directShortcuts = original.directShortcuts
-    }
+    expect(pressKey(prompt, { key: 't' }).defaultPrevented).toBe(false)
+    expect(toggleMode).not.toHaveBeenCalled()
   })
 
-  it('clears the prompt with a direct Ctrl+C only from the prompt', () => {
-    const original = { keyboardShortcuts: preferences.keyboardShortcuts, directShortcuts: preferences.directShortcuts }
-    preferences.keyboardShortcuts = { ...original.keyboardShortcuts, clearPrompt: 'Ctrl+C' }
-    preferences.directShortcuts = ['submit', 'abort', 'clearPrompt']
-    try {
-      const clearPrompt = vi.fn()
-      renderProvider(<ActionLayer actions={{ clearPrompt }} />)
-      const prompt = mountElement('textarea', { 'data-prompt-input': '' })
-      const otherInput = mountElement('textarea')
-      const button = mountElement('button')
+  it('clears the prompt with a direct Ctrl+C only from the prompt', async () => {
+    const clearPrompt = vi.fn()
+    await renderProvider(<ActionLayer actions={{ clearPrompt }} />, withShortcuts({ clearPrompt: 'Ctrl+C' }))
+    const prompt = mountElement('textarea', { 'data-prompt-input': '' })
+    const otherInput = mountElement('textarea')
+    const button = mountElement('button')
 
-      expect(pressKey(otherInput, { key: 'c', ctrlKey: true }).defaultPrevented).toBe(false)
-      expect(pressKey(button, { key: 'c', ctrlKey: true }).defaultPrevented).toBe(false)
-      expect(pressKey(document.body, { key: 'c', ctrlKey: true }).defaultPrevented).toBe(false)
-      expect(clearPrompt).not.toHaveBeenCalled()
+    expect(pressKey(otherInput, { key: 'c', ctrlKey: true }).defaultPrevented).toBe(false)
+    expect(pressKey(button, { key: 'c', ctrlKey: true }).defaultPrevented).toBe(false)
+    expect(pressKey(document.body, { key: 'c', ctrlKey: true }).defaultPrevented).toBe(false)
+    expect(clearPrompt).not.toHaveBeenCalled()
 
-      expect(pressKey(prompt, { key: 'c', ctrlKey: true }).defaultPrevented).toBe(true)
-      expect(clearPrompt).toHaveBeenCalledTimes(1)
-    } finally {
-      preferences.keyboardShortcuts = original.keyboardShortcuts
-      preferences.directShortcuts = original.directShortcuts
-    }
+    expect(pressKey(prompt, { key: 'c', ctrlKey: true }).defaultPrevented).toBe(true)
+    expect(clearPrompt).toHaveBeenCalledTimes(1)
   })
 
-  it('runs a direct half-page-down shortcut with Ctrl+D from the body and the prompt', () => {
+  it('runs a direct half-page-down shortcut with Ctrl+D from the body and the prompt', async () => {
     const halfPageDown = vi.fn()
-    renderProvider(<ActionLayer actions={{ halfPageDown }} />)
+    await renderProvider(<ActionLayer actions={{ halfPageDown }} />)
     const prompt = mountElement('textarea', { 'data-prompt-input': '' })
 
     expect(pressKey(document.body, { key: 'd', ctrlKey: true }).defaultPrevented).toBe(true)
@@ -198,9 +197,9 @@ describe('KeyboardShortcutsProvider', () => {
     expect(halfPageDown).toHaveBeenCalledTimes(2)
   })
 
-  it('runs a direct half-page-up shortcut with Ctrl+U from the body and the prompt, never from another text field', () => {
+  it('runs a direct half-page-up shortcut with Ctrl+U from the body and the prompt, never from another text field', async () => {
     const halfPageUp = vi.fn()
-    renderProvider(<ActionLayer actions={{ halfPageUp }} />)
+    await renderProvider(<ActionLayer actions={{ halfPageUp }} />)
     const prompt = mountElement('textarea', { 'data-prompt-input': '' })
     const otherInput = mountElement('input')
 
@@ -212,28 +211,28 @@ describe('KeyboardShortcutsProvider', () => {
     expect(halfPageUp).toHaveBeenCalledTimes(2)
   })
 
-  it('does not abort while a dialog overlay is open, leaving Escape to the overlay', () => {
+  it('does not abort while a dialog overlay is open, leaving Escape to the overlay', async () => {
     const abort = vi.fn()
-    renderProvider(<ActionLayer actions={{ abort }} />)
+    await renderProvider(<ActionLayer actions={{ abort }} />)
     mountElement('div', { role: 'dialog', 'data-state': 'open' })
 
     expect(pressKey(document.body, { key: 'Escape' }).defaultPrevented).toBe(false)
     expect(abort).not.toHaveBeenCalled()
   })
 
-  it('aborts with Escape when no dialog overlay is open', () => {
+  it('aborts with Escape when no dialog overlay is open', async () => {
     const abort = vi.fn()
-    renderProvider(<ActionLayer actions={{ abort }} />)
+    await renderProvider(<ActionLayer actions={{ abort }} />)
     mountElement('div', { role: 'dialog', 'data-state': 'closed' })
 
     expect(pressKey(document.body, { key: 'Escape' }).defaultPrevented).toBe(true)
     expect(abort).toHaveBeenCalledTimes(1)
   })
 
-  it('runs leader and direct shortcuts from a terminal before it consumes the keys, passing other keys through', () => {
+  it('runs leader and direct shortcuts from a terminal before it consumes the keys, passing other keys through', async () => {
     const newSession = vi.fn()
     const toggleTerminal = vi.fn()
-    renderProvider(<ActionLayer actions={{ newSession, toggleTerminal }} />)
+    await renderProvider(<ActionLayer actions={{ newSession, toggleTerminal }} />)
     const terminal = mountElement('div', { 'data-terminal-id': 'pty-1' })
     const terminalInput = terminal.appendChild(document.createElement('textarea'))
     const shellInput = vi.fn()
@@ -253,11 +252,11 @@ describe('KeyboardShortcutsProvider', () => {
     expect(shellInput.mock.calls).toEqual([['l']])
   })
 
-  it('passes direct shortcuts through in a terminal while keeping the leader and toggleTerminal', () => {
+  it('passes direct shortcuts through in a terminal while keeping the leader and toggleTerminal', async () => {
     const variantCycle = vi.fn()
     const halfPageUp = vi.fn()
     const toggleTerminal = vi.fn()
-    renderProvider(<ActionLayer actions={{ variantCycle, halfPageUp, toggleTerminal }} />)
+    await renderProvider(<ActionLayer actions={{ variantCycle, halfPageUp, toggleTerminal }} />)
     const terminal = mountElement('div', { 'data-terminal-id': 'pty-2' })
     const terminalInput = terminal.appendChild(document.createElement('textarea'))
 
@@ -271,9 +270,9 @@ describe('KeyboardShortcutsProvider', () => {
     expect(toggleTerminal).toHaveBeenCalledTimes(1)
   })
 
-  it('ignores key events a component already handled', () => {
+  it('ignores key events a component already handled', async () => {
     const abort = vi.fn()
-    renderProvider(<ActionLayer actions={{ abort }} />)
+    await renderProvider(<ActionLayer actions={{ abort }} />)
     const element = mountElement('div')
     element.addEventListener('keydown', (event) => event.preventDefault())
 
@@ -282,20 +281,20 @@ describe('KeyboardShortcutsProvider', () => {
     expect(abort).not.toHaveBeenCalled()
   })
 
-  it('does not swallow a key whose action has no handler', () => {
-    renderProvider(<ActionLayer actions={{ abort: undefined }} />)
+  it('does not swallow a key whose action has no handler', async () => {
+    await renderProvider(<ActionLayer actions={{ abort: undefined }} />)
 
     expect(pressKey(document.body, { key: 'Escape' }).defaultPrevented).toBe(false)
   })
 
-  it('prefers a page layer over a global layer for the same action', () => {
+  it('prefers a page layer over a global layer for the same action', async () => {
     const globalAbort = vi.fn()
     const pageAbort = vi.fn()
-    renderProvider(
+    await renderProvider(
       <>
         <ActionLayer actions={{ abort: globalAbort }} scope="global" />
         <ActionLayer actions={{ abort: pageAbort }} scope="page" />
-      </>
+      </>,
     )
 
     pressKey(document.body, { key: 'Escape' })
@@ -304,13 +303,13 @@ describe('KeyboardShortcutsProvider', () => {
     expect(globalAbort).not.toHaveBeenCalled()
   })
 
-  it('falls through to the global handler when a page layer leaves the action undefined', () => {
+  it('falls through to the global handler when a page layer leaves the action undefined', async () => {
     const globalAbort = vi.fn()
-    renderProvider(
+    await renderProvider(
       <>
         <ActionLayer actions={{ abort: globalAbort }} scope="global" />
         <ActionLayer actions={{ abort: undefined }} scope="page" />
-      </>
+      </>,
     )
 
     pressKey(document.body, { key: 'Escape' })
@@ -318,47 +317,44 @@ describe('KeyboardShortcutsProvider', () => {
     expect(globalAbort).toHaveBeenCalledTimes(1)
   })
 
-  it('restores the global handler when a page layer unmounts', () => {
+  it('restores the global handler when a page layer unmounts', async () => {
     const globalAbort = vi.fn()
     const pageAbort = vi.fn()
-    const view = renderProvider(
+    await renderProvider(
       <>
         <ActionLayer actions={{ abort: globalAbort }} scope="global" />
-        <ConditionalLayer show actions={{ abort: pageAbort }} />
-      </>
+        <HideableLayer actions={{ abort: pageAbort }} />
+      </>,
     )
 
     pressKey(document.body, { key: 'Escape' })
     expect(pageAbort).toHaveBeenCalledTimes(1)
     expect(globalAbort).not.toHaveBeenCalled()
 
-    view.rerender(
-      <KeyboardShortcutsProvider>
-        <ActionLayer actions={{ abort: globalAbort }} scope="global" />
-        <ConditionalLayer show={false} actions={{ abort: pageAbort }} />
-      </KeyboardShortcutsProvider>
-    )
+    act(() => {
+      setPageLayerVisible(false)
+    })
 
     pressKey(document.body, { key: 'Escape' })
     expect(globalAbort).toHaveBeenCalledTimes(1)
   })
 
-  it('shows the leader indicator after the leader key and hides it after the follow-up key', () => {
+  it('shows the leader indicator after the leader key and hides it after the follow-up key', async () => {
     const newSession = vi.fn()
-    renderProvider(<ActionLayer actions={{ newSession }} />)
+    await renderProvider(<ActionLayer actions={{ newSession }} />)
 
     pressKey(document.body, { key: 'x', ctrlKey: true })
     expect(screen.getByText('Waiting for shortcut key...')).toBeInTheDocument()
 
     pressKey(document.body, { key: 'n' })
-    expect(screen.queryByText('Waiting for shortcut key...')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText('Waiting for shortcut key...')).not.toBeInTheDocument())
     expect(newSession).toHaveBeenCalledTimes(1)
   })
 
   it('throws when used outside the provider', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     expect(() => renderHook(() => useShortcutActions({ abort: vi.fn() }))).toThrow(
-      'useShortcutActions must be used within a KeyboardShortcutsProvider'
+      'useShortcutActions must be used within a KeyboardShortcutsProvider',
     )
     consoleError.mockRestore()
   })

@@ -1,1779 +1,1026 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { spawnSync } from 'child_process'
-import { Database } from 'bun:sqlite'
-import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
-import { migrate } from '../../src/db/migration-runner'
-import { allMigrations } from '../../src/db/migrations'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
+import { join } from 'path'
+import { tmpdir } from 'os'
+import { z } from 'zod'
+import { Database as SQLiteDatabase } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
+import { JsonValueSchema } from '@opencode-manager/shared/utils'
+import type { GitCredential } from '@opencode-manager/shared'
+import { ClientError, type OpenCodeApi } from '@opencode-manager/shared/opencode'
+import { createSettingsRoutes, type SettingsRouteDependencies } from '../../src/routes/settings'
+import { SettingsService } from '../../src/services/settings'
+import { GitAuthService } from '../../src/services/git-auth'
 import { getOrCreateInternalToken } from '../../src/services/internal-token'
-
-const mockGetSettings = vi.fn()
-const mockUpdateSettings = vi.fn()
-const mockResetSettings = vi.fn()
-const mockGetLastKnownGoodConfig = vi.fn()
-const {
-  mockReadOpenCodeConfigFile,
-  mockReadOpenCodeConfigSnapshot,
-  mockDeleteOpenCodeConfigFile,
-  mockArchiveBrokenOpenCodeConfigFile,
-  mockRestoreOpenCodeConfigSnapshot,
-  mockApplyOpenCodeConfigUpdate,
-} = vi.hoisted(() => ({
-  mockReadOpenCodeConfigFile: vi.fn(),
-  mockReadOpenCodeConfigSnapshot: vi.fn(),
-  mockDeleteOpenCodeConfigFile: vi.fn(),
-  mockArchiveBrokenOpenCodeConfigFile: vi.fn(),
-  mockRestoreOpenCodeConfigSnapshot: vi.fn(),
-  mockApplyOpenCodeConfigUpdate: vi.fn(),
-}))
-
-vi.mock('fs', () => ({
-  existsSync: vi.fn(() => false),
-  promises: {
-    mkdir: vi.fn(),
-    access: vi.fn(),
-    readFile: vi.fn(),
-    writeFile: vi.fn(),
-    stat: vi.fn(),
-    chmod: vi.fn(),
-    unlink: vi.fn(),
-    rm: vi.fn(),
-    readdir: vi.fn(),
-  },
-}))
-
-vi.mock('child_process', () => ({
-  spawnSync: vi.fn(),
-  spawn: vi.fn(),
-}))
-
-vi.mock('../../src/utils/logger', () => ({
-  logger: {
-    info: vi.fn(),
-    error: vi.fn(),
-    warn: vi.fn(),
-  },
-}))
-
-vi.mock('../../src/constants', () => ({
-  DEFAULT_AGENTS_MD: '# Test Agents MD',
-}))
-
-const {
-  mockGetOpenCodeServerPasswordSource,
-  mockGetStoredOpenCodeServerPasswordState,
-  mockClearOpenCodeServerPassword,
-  mockSetOpenCodeServerPassword,
-  mockRestoreOpenCodeServerPasswordState,
-} = vi.hoisted(() => ({
-  mockGetOpenCodeServerPasswordSource: vi.fn(),
-  mockGetStoredOpenCodeServerPasswordState: vi.fn(),
-  mockClearOpenCodeServerPassword: vi.fn(),
-  mockSetOpenCodeServerPassword: vi.fn(),
-  mockRestoreOpenCodeServerPasswordState: vi.fn(),
-}))
-
-vi.mock('../../src/services/settings', () => ({
-  SettingsService: vi.fn().mockImplementation(() => ({
-    getSettings: mockGetSettings,
-    updateSettings: mockUpdateSettings,
-    resetSettings: mockResetSettings,
-    getLastKnownGoodConfig: mockGetLastKnownGoodConfig,
-    getOpenCodeServerPasswordSource: mockGetOpenCodeServerPasswordSource,
-    getStoredOpenCodeServerPasswordState: mockGetStoredOpenCodeServerPasswordState,
-    clearOpenCodeServerPassword: mockClearOpenCodeServerPassword,
-    setOpenCodeServerPassword: mockSetOpenCodeServerPassword,
-    restoreOpenCodeServerPasswordState: mockRestoreOpenCodeServerPasswordState,
-  })),
-}))
-
-const {
-  mockListManagedSkills,
-  mockGetSkill,
-  mockCreateSkill,
-  mockUpdateSkill,
-  mockDeleteSkill,
-  mockInstallSkillFromGithubTree,
-  mockInstallSkillFromUploadedFiles,
-} = vi.hoisted(() => ({
-  mockListManagedSkills: vi.fn(),
-  mockGetSkill: vi.fn(),
-  mockCreateSkill: vi.fn(),
-  mockUpdateSkill: vi.fn(),
-  mockDeleteSkill: vi.fn(),
-  mockInstallSkillFromGithubTree: vi.fn(),
-  mockInstallSkillFromUploadedFiles: vi.fn(),
-}))
-
-vi.mock('../../src/services/skills', () => ({
-  listManagedSkills: mockListManagedSkills,
-  getSkill: mockGetSkill,
-  createSkill: mockCreateSkill,
-  updateSkill: mockUpdateSkill,
-  deleteSkill: mockDeleteSkill,
-  installSkillFromGithubTree: mockInstallSkillFromGithubTree,
-  installSkillFromUploadedFiles: mockInstallSkillFromUploadedFiles,
-}))
-
-const {
-  mockInstallOpenCodeDirectoryFiles,
-  mockListOpenCodeDirectoryFiles,
-  mockGetOpenCodeDirectoryFile,
-  mockUpdateOpenCodeDirectoryFile,
-  mockDeleteOpenCodeDirectoryFile,
-} = vi.hoisted(() => ({
-  mockInstallOpenCodeDirectoryFiles: vi.fn(),
-  mockListOpenCodeDirectoryFiles: vi.fn(),
-  mockGetOpenCodeDirectoryFile: vi.fn(),
-  mockUpdateOpenCodeDirectoryFile: vi.fn(),
-  mockDeleteOpenCodeDirectoryFile: vi.fn(),
-}))
-
-vi.mock('../../src/services/opencode-directory-files', () => ({
-  installOpenCodeDirectoryFiles: mockInstallOpenCodeDirectoryFiles,
-  listOpenCodeDirectoryFiles: mockListOpenCodeDirectoryFiles,
-  getOpenCodeDirectoryFile: mockGetOpenCodeDirectoryFile,
-  updateOpenCodeDirectoryFile: mockUpdateOpenCodeDirectoryFile,
-  deleteOpenCodeDirectoryFile: mockDeleteOpenCodeDirectoryFile,
-}))
-
-const { mockDiscoverModelsCached } = vi.hoisted(() => ({
-  mockDiscoverModelsCached: vi.fn(),
-}))
-
-vi.mock('../../src/utils/discovery-cache', () => ({
-  discoverModelsCached: mockDiscoverModelsCached,
-}))
-
-const { mockSyncManagerGitIdentityConfig } = vi.hoisted(() => ({
-  mockSyncManagerGitIdentityConfig: vi.fn(),
-}))
-
-vi.mock('../../src/services/git-identity', () => ({
-  syncManagerGitIdentityConfig: mockSyncManagerGitIdentityConfig,
-}))
-
-const { mockValidateSSHPrivateKey } = vi.hoisted(() => ({
-  mockValidateSSHPrivateKey: vi.fn(),
-}))
-
-vi.mock('../../src/utils/ssh-validation', () => ({
-  validateSSHPrivateKey: mockValidateSSHPrivateKey,
-}))
-
-const { mockWriteTemporarySSHKey, mockCleanupSSHKey } = vi.hoisted(() => ({
-  mockWriteTemporarySSHKey: vi.fn(),
-  mockCleanupSSHKey: vi.fn(),
-}))
-
-vi.mock('../../src/utils/ssh-key-manager', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/utils/ssh-key-manager')>()
-  return {
-    ...actual,
-    writeTemporarySSHKey: mockWriteTemporarySSHKey,
-    cleanupSSHKey: mockCleanupSSHKey,
-  }
-})
-
-vi.mock('../../src/services/file-operations', () => ({
-  writeFileContent: vi.fn(),
-  readFileContent: vi.fn(),
-  fileExists: vi.fn(),
-}))
-
-vi.mock('../../src/services/opencode-config-file', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/services/opencode-config-file')>()
-  return {
-    ...actual,
-    readOpenCodeConfigFile: mockReadOpenCodeConfigFile,
-    readOpenCodeConfigSnapshot: mockReadOpenCodeConfigSnapshot,
-    deleteOpenCodeConfigFile: mockDeleteOpenCodeConfigFile,
-    archiveBrokenOpenCodeConfigFile: mockArchiveBrokenOpenCodeConfigFile,
-    restoreOpenCodeConfigSnapshot: mockRestoreOpenCodeConfigSnapshot,
-    withOpenCodeConfigLock: (fn: () => Promise<unknown>) => fn(),
-  }
-})
-
-vi.mock('../../src/services/opencode-config-apply', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/services/opencode-config-apply')>()
-  return {
-    ...actual,
-    applyOpenCodeConfigUpdate: mockApplyOpenCodeConfigUpdate,
-  }
-})
-
-vi.mock('../../src/services/opencode/client', () => ({
-  createOpenCodeClient: () => ({
-    forwardRaw: vi.fn(),
-  }),
-}))
-
-vi.mock('../../src/services/opencode-single-server', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/services/opencode-single-server')>()
-  
-  class MockConfigReloadError extends Error {
-    validationIssues: Array<{ path: string; message: string }>
-
-    constructor(message: string, validationIssues: Array<{ path: string; message: string }> = []) {
-      super(message)
-      this.name = 'ConfigReloadError'
-      this.validationIssues = validationIssues
-    }
-  }
-
-  return {
-    ...actual,
-    opencodeServerManager: {
-      getVersion: vi.fn(),
-      fetchVersion: vi.fn(),
-      restart: vi.fn(),
-      clearStartupError: vi.fn(),
-      getLastStartupError: vi.fn(),
-      checkHealth: vi.fn().mockResolvedValue(true),
-      markRestartPending: vi.fn(),
-      isRestartPending: vi.fn(),
-      isSandboxEnforced: vi.fn(),
-      setDatabase: vi.fn(),
-    },
-    ConfigReloadError: MockConfigReloadError,
-  }
-})
-
-const openCodeInstallerMock = vi.hoisted(() => ({
-  installOpenCodeVersion: vi.fn(),
-}))
-
-vi.mock('../../src/services/opencode-installer', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/services/opencode-installer')>()
-  return {
-    ...actual,
-    installOpenCodeVersion: openCodeInstallerMock.installOpenCodeVersion,
-  }
-})
-
-vi.mock('../../src/services/opencode-import', () => ({
-  OpenCodeImportProtectionError: class OpenCodeImportProtectionError extends Error {
-    code = 'OPENCODE_IMPORT_PROTECTED'
-    detail: string
-
-    constructor(detail: string) {
-      super('OpenCode host import was blocked to protect existing workspace state')
-      this.detail = detail
-    }
-  },
-  getOpenCodeImportStatus: vi.fn(),
-  syncOpenCodeImport: vi.fn(),
-  getImportedSessionDirectories: vi.fn(),
-}))
-
-vi.mock('../../src/services/repo', () => ({
-  relinkReposFromSessionDirectories: vi.fn(),
-}))
-
-const sandboxRuntimeServiceMock = vi.hoisted(() => ({
-  SandboxRuntimeService: vi.fn(),
-}))
-
-vi.mock('../../src/services/sandbox/runtime', () => ({
-  SandboxRuntimeService: sandboxRuntimeServiceMock.SandboxRuntimeService,
-}))
-
-const capabilityMock = vi.hoisted(() => ({
-  detectSandboxCapability: vi.fn(),
-}))
-
-vi.mock('../../src/services/sandbox/capability', () => ({
-  detectSandboxCapability: capabilityMock.detectSandboxCapability,
-  resetSandboxCapabilityCache: vi.fn(),
-}))
-
-const resourcesMock = vi.hoisted(() => ({
-  sandboxResourceLimitError: vi.fn(),
-}))
-
-vi.mock('../../src/services/sandbox/resources', () => ({
-  sandboxResourceLimitError: resourcesMock.sandboxResourceLimitError,
-}))
-
-vi.mock('@opencode-manager/shared/config/env', () => ({
-  getWorkspacePath: vi.fn(() => '/tmp/test-workspace'),
-  getReposPath: vi.fn(() => '/tmp/test-repos'),
-  getOpenCodeConfigFilePath: vi.fn(() => '/tmp/test-workspace/.config/opencode.json'),
-  getOpenCodeHealthWatchPath: vi.fn(() => '/tmp/test-workspace/health-watch'),
-  getAgentsMdPath: vi.fn(() => '/tmp/test-workspace/AGENTS.md'),
-  getDatabasePath: vi.fn(() => ':memory:'),
-  getConfigPath: vi.fn(() => '/tmp/test-workspace/config'),
-  OPENCODE_CONFIG_SOURCE_NAMES: ['opencode.json', 'opencode.jsonc'],
-  ENV: {
-    SERVER: { PORT: 5003, HOST: '0.0.0.0', NODE_ENV: 'test' },
-    AUTH: { TRUSTED_ORIGINS: 'http://localhost:5173', SECRET: 'test-secret-for-encryption-key-32c' },
-    WORKSPACE: { BASE_PATH: '/tmp/test-workspace', REPOS_DIR: 'repos', CONFIG_DIR: 'config' },
-    OPENCODE: { PORT: 5551, HOST: '127.0.0.1' },
-    SANDBOX: { START_TIMEOUT_MS: 300000, EXEC_TIMEOUT_MS: 600000 },
-    DATABASE: { PATH: ':memory:' },
-    FILE_LIMITS: {
-      MAX_SIZE_BYTES: 1024 * 1024,
-      MAX_UPLOAD_SIZE_BYTES: 10 * 1024 * 1024,
-    },
-  },
-  FILE_LIMITS: {
-    MAX_SIZE_BYTES: 1024 * 1024,
-    MAX_UPLOAD_SIZE_BYTES: 10 * 1024 * 1024,
-  },
-}))
-
-import { createSettingsRoutes } from '../../src/routes/settings'
-import { clearOpenCodeVersionCache, OpenCodeInstallError } from '../../src/services/opencode-installer'
-import { getImportedSessionDirectories, getOpenCodeImportStatus, OpenCodeImportProtectionError, syncOpenCodeImport } from '../../src/services/opencode-import'
-import { relinkReposFromSessionDirectories } from '../../src/services/repo'
-import { opencodeServerManager } from '../../src/services/opencode-single-server'
-import { detectSandboxCapability } from '../../src/services/sandbox/capability'
+import { clearOpenCodeVersionCache } from '../../src/services/opencode-installer'
 import { forceProcessAttestation } from '../../src/services/opencode/process-identity'
+import { opencodeServerManager } from '../../src/services/opencode-single-server'
 import { sseAggregator } from '../../src/services/sse-aggregator'
-import { createRepo } from '../../src/db/queries'
-import { ClientError } from '@opencode-manager/shared/opencode'
-import type { OpenCodeClient } from '../../src/services/opencode/client'
+import { createStubOpenCodeClient, type OpenCodeApiOverrides } from '../helpers/stub-opencode-client'
+import { createTestDatabase } from '../helpers/test-database'
+import { applyTestEnv, createTempWorkspace, type TempWorkspace } from '../helpers/test-env'
+import { readJson } from '../helpers/read-json'
+import type { MockInstance } from 'vitest'
 
-const mockSpawnSync = spawnSync as ReturnType<typeof vi.fn>
-const mockGetVersion = opencodeServerManager.getVersion as ReturnType<typeof vi.fn>
-const mockFetchVersion = opencodeServerManager.fetchVersion as ReturnType<typeof vi.fn>
-const mockRestart = opencodeServerManager.restart as ReturnType<typeof vi.fn>
-const mockClearStartupError = opencodeServerManager.clearStartupError as ReturnType<typeof vi.fn>
-const mockGetLastStartupError = opencodeServerManager.getLastStartupError as ReturnType<typeof vi.fn>
-const mockIsSandboxEnforced = opencodeServerManager.isSandboxEnforced as ReturnType<typeof vi.fn>
-const mockGetOpenCodeImportStatus = getOpenCodeImportStatus as ReturnType<typeof vi.fn>
-const mockSyncOpenCodeImport = syncOpenCodeImport as ReturnType<typeof vi.fn>
-const mockGetImportedSessionDirectories = getImportedSessionDirectories as ReturnType<typeof vi.fn>
-const mockRelinkReposFromSessionDirectories = relinkReposFromSessionDirectories as ReturnType<typeof vi.fn>
-const mockDetectSandboxCapability = detectSandboxCapability as ReturnType<typeof vi.fn>
-const mockInstallOpenCodeVersion = openCodeInstallerMock.installOpenCodeVersion
+const ConfigFileSchema = z.object({
+  path: z.string(),
+  rawContent: z.string(),
+  isValid: z.boolean(),
+  content: z.record(z.string(), JsonValueSchema),
+})
+const ErrorSchema = z.object({ error: z.string(), details: JsonValueSchema.optional() })
+const ErrorWithPathsSchema = z.object({
+  error: z.string(),
+  details: z.array(z.object({ path: z.array(z.union([z.string(), z.number()])), message: z.string() })),
+})
+const ManagedConfigSchema = z.object({ info: z.record(z.string(), JsonValueSchema) })
+const McpConfigSchema = z.object({
+  revision: z.string(),
+  servers: z.array(z.record(z.string(), JsonValueSchema)),
+})
+const SettingsSchema = z.object({
+  preferences: z.record(z.string(), JsonValueSchema),
+  updatedAt: z.number(),
+  restartRequired: z.boolean().optional(),
+})
+const ImportStatusSchema = z.object({
+  configSourcePath: z.string().nullable(),
+  stateSourcePath: z.string().nullable(),
+  workspaceConfigPath: z.string(),
+  workspaceStatePath: z.string(),
+  workspaceStateExists: z.boolean(),
+})
+const ImportResultSchema = ImportStatusSchema.extend({
+  success: z.boolean().optional(),
+  serverRestarted: z.boolean().optional(),
+  configImported: z.boolean().optional(),
+  stateImported: z.boolean().optional(),
+  relinkedRepos: z.object({
+    relinkedCount: z.number(),
+    existingCount: z.number(),
+    nonRepoPathCount: z.number(),
+    duplicatePathCount: z.number(),
+  }),
+})
+const VersionsSchema = z.object({
+  versions: z.array(z.object({ version: z.string(), tag: z.string(), name: z.string(), publishedAt: z.string().nullable() })),
+  currentVersion: z.string().nullable(),
+})
+const UpgradeResultSchema = z.object({
+  success: z.boolean().optional(),
+  message: z.string().optional(),
+  oldVersion: z.string().nullable().optional(),
+  newVersion: z.string().nullable().optional(),
+  upgraded: z.boolean().optional(),
+  recovered: z.boolean().optional(),
+  error: z.string().optional(),
+  details: z.string().optional(),
+})
+const DirectoryFilesSchema = z.array(z.object({ kind: z.string(), name: z.string(), relativePath: z.string() }))
+const DirectoryFileSchema = z.object({
+  kind: z.string(),
+  name: z.string(),
+  relativePath: z.string(),
+  content: z.string().optional(),
+  restartRequired: z.boolean().optional(),
+  filesInstalled: z.array(z.string()).optional(),
+})
+const SkillSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  body: z.string(),
+  scope: z.string(),
+  location: z.string(),
+  repoId: z.number().optional(),
+  restartRequired: z.boolean().optional(),
+})
+const SkillListSchema = z.array(SkillSchema)
+const AuthStatusSchema = z.object({ isSet: z.boolean(), source: z.string() })
+const TokenSchema = z.object({ token: z.string() })
+const SessionsSchema = z.object({ count: z.number(), sessions: z.array(z.object({ sessionID: z.string(), directory: z.string() })) })
+const ModelsDiscoverySchema = z.object({ models: z.array(z.string()), cached: z.boolean() })
+const SshTestSchema = z.object({ success: z.boolean(), message: z.string() })
+const RemoteHeadersSchema = z.object({ headers: z.array(z.record(z.string(), JsonValueSchema)), unreadable: z.boolean() })
 
-describe('Settings Routes - OpenCode Upgrade', () => {
+type ConfigGetOutput = Awaited<ReturnType<OpenCodeApi['config']['get']>>
+type McpListOutput = Awaited<ReturnType<OpenCodeApi['mcp']['list']>>
+
+const REGISTRY_URL = 'https://registry.npmjs.org/@opencode/cli'
+
+function requestUrl(input: Parameters<typeof fetch>[0]): string {
+  if (input instanceof URL) return input.href
+  if (input instanceof Request) return input.url
+  return input
+}
+
+function jsonResponse(body: z.infer<typeof JsonValueSchema>, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+}
+
+function registryResponse(versions: string[], publishedAt: Record<string, string> = {}): Response {
+  const entries = versions.map((version) => [version, {}])
+  return jsonResponse({ versions: Object.fromEntries(entries), time: publishedAt })
+}
+
+describe('Settings routes', () => {
+  let workspace: TempWorkspace
+  let home: string
+  let restoreHome: () => void
+  let db: Database
+  let reload: ReturnType<typeof vi.fn>
+  let restart: ReturnType<typeof vi.fn>
+  let manager: SettingsRouteDependencies['openCodeManager']
+  let installer: ReturnType<typeof vi.fn>
+  let capability: ReturnType<typeof vi.fn>
+  let resourceLimitError: ReturnType<typeof vi.fn>
+  let syncIdentity: ReturnType<typeof vi.fn>
+  let deps: SettingsRouteDependencies
+  let fetchMock: MockInstance<typeof fetch>
   let settingsApp: ReturnType<typeof createSettingsRoutes>
-  let testDb: any
 
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockGetVersion.mockReset()
-    mockFetchVersion.mockReset()
-    mockRestart.mockReset()
-    mockClearStartupError.mockReset()
-    mockIsSandboxEnforced.mockReset()
-    mockGetSettings.mockReset()
-    mockUpdateSettings.mockReset()
-    mockResetSettings.mockReset()
-    mockGetLastKnownGoodConfig.mockReset()
-    mockGetOpenCodeImportStatus.mockReset()
-    mockSyncOpenCodeImport.mockReset()
-    mockGetImportedSessionDirectories.mockReset()
-    mockRelinkReposFromSessionDirectories.mockReset()
-    mockReadOpenCodeConfigFile.mockReset()
-    mockReadOpenCodeConfigSnapshot.mockReset()
-    mockDeleteOpenCodeConfigFile.mockReset()
-    mockArchiveBrokenOpenCodeConfigFile.mockReset()
-    mockRestoreOpenCodeConfigSnapshot.mockReset()
-    mockApplyOpenCodeConfigUpdate.mockReset()
-    mockSyncManagerGitIdentityConfig.mockReset()
-    mockSyncManagerGitIdentityConfig.mockResolvedValue({ identity: null, error: null })
-    mockDetectSandboxCapability.mockReset()
-    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 1.0.0' })
-    resourcesMock.sandboxResourceLimitError.mockReset()
-    resourcesMock.sandboxResourceLimitError.mockReturnValue(null)
-    mockInstallOpenCodeVersion.mockReset()
-    mockInstallOpenCodeVersion.mockResolvedValue('/home/node/.opencode/bin/opencode')
+  function configPath(...segments: string[]): string {
+    return join(workspace.path, '.config', 'opencode', ...segments)
+  }
+
+  function writeConfig(name: string, content: string): Promise<void> {
+    return mkdir(configPath(), { recursive: true }).then(() => writeFile(configPath(name), content))
+  }
+
+  function createApp(overrides: {
+    api?: OpenCodeApiOverrides
+    deps?: Partial<SettingsRouteDependencies>
+    supervisor?: { restart: ReturnType<typeof vi.fn> }
+  } = {}) {
+    const client = createStubOpenCodeClient({
+      api: {
+        location: { reload },
+        config: { get: vi.fn(async () => []) },
+        ...overrides.api,
+      },
+    })
+    return createSettingsRoutes(
+      db,
+      new GitAuthService(),
+      client,
+      overrides.supervisor ?? { restart },
+      { ...deps, ...overrides.deps },
+    )
+  }
+
+  function settings(): SettingsService {
+    return new SettingsService(db)
+  }
+
+  beforeEach(async () => {
+    workspace = createTempWorkspace('settings-routes-test-')
+    home = await mkdtemp(join(tmpdir(), 'settings-home-'))
+    restoreHome = applyTestEnv({ HOME: home, OPENCODE_SERVER_PASSWORD: undefined, OPENCODE_BIN: undefined })
+    db = createTestDatabase()
+    reload = vi.fn(async () => undefined)
+    restart = vi.fn(async () => ({ healthy: true }))
+    manager = {
+      getVersion: vi.fn(() => '2.2.5'),
+      fetchVersion: vi.fn(async () => '2.2.5'),
+      clearStartupError: vi.fn(),
+      getLastStartupError: vi.fn(() => null),
+      markRestartPending: vi.fn(),
+      restart: vi.fn(async () => undefined),
+      checkHealth: vi.fn(async () => true),
+    }
+    installer = vi.fn(async () => '/home/node/.opencode/bin/opencode')
+    capability = vi.fn(() => ({ available: true, msbVersion: 'msb 1.0.0' }))
+    resourceLimitError = vi.fn(() => null)
+    syncIdentity = vi.fn(async () => ({ identity: null, error: null }))
+    deps = {
+      openCodeManager: manager,
+      installOpenCodeVersion: installer,
+      detectSandboxCapability: capability,
+      sandboxResourceLimitError: resourceLimitError,
+      syncManagerGitIdentityConfig: syncIdentity,
+    }
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      if (requestUrl(input) === REGISTRY_URL) return registryResponse(['2.2.5'])
+      return new Response(null, { status: 404 })
+    })
+    await writeConfig('opencode.json', '{}')
     clearOpenCodeVersionCache()
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      versions: { '2.2.5': {} },
-      time: {},
-    }), { status: 200 })))
-    forceProcessAttestation(true)
-    sandboxRuntimeServiceMock.SandboxRuntimeService.mockReset()
-    sandboxRuntimeServiceMock.SandboxRuntimeService.mockImplementation(() => ({
-      isEnabled: () => false,
-    }))
-    
-    testDb = {} as any
-    settingsApp = createSettingsRoutes(testDb, { getGitEnvironment: vi.fn().mockReturnValue({}) } as any, createStubOpenCodeClient())
-
-    mockRestart.mockResolvedValue(undefined)
-    mockClearStartupError.mockReturnValue(undefined)
-    mockGetOpenCodeImportStatus.mockResolvedValue({
-      configSourcePath: null,
-      stateSourcePath: null,
-      workspaceConfigPath: '/tmp/test-workspace/.config/opencode/opencode.json',
-      workspaceStatePath: '/tmp/test-workspace/.opencode/state/opencode',
-      workspaceStateExists: false,
-    })
-    mockGetImportedSessionDirectories.mockResolvedValue({
-      directories: ['/Users/test/project-a', '/Users/test/project-b/apps/web'],
-    })
-    mockRelinkReposFromSessionDirectories.mockResolvedValue({
-      repos: [],
-      relinkedCount: 0,
-      existingCount: 0,
-      nonRepoPathCount: 0,
-      duplicatePathCount: 0,
-      errors: [],
-    })
+    settingsApp = createApp()
   })
 
-  afterEach(() => {
-    vi.unstubAllGlobals()
+  afterEach(async () => {
+    forceProcessAttestation(null)
+    vi.restoreAllMocks()
+    db.close()
+    restoreHome()
+    workspace.restore()
+    await rm(home, { recursive: true, force: true })
   })
 
   describe('OpenCode config routes', () => {
-    it('returns the on-disk config state from GET /opencode-config', async () => {
-      const fileState = {
-        path: '/tmp/test-workspace/.config/opencode.json',
-        content: { theme: 'dark' },
-        rawContent: '{"theme":"dark"}',
-        isValid: true,
-        updatedAt: 1,
-      }
-      mockReadOpenCodeConfigFile.mockResolvedValueOnce(fileState)
+    it('returns the on-disk config state', async () => {
+      await writeConfig('opencode.json', '{"theme":"dark"}')
 
-      const res = await settingsApp.fetch(new Request('http://localhost/opencode-config'))
-      const json = await res.json() as Record<string, unknown>
+      const res = await settingsApp.request('/opencode-config')
 
       expect(res.status).toBe(200)
-      expect(json).toEqual(fileState)
+      await expect(readJson(res, ConfigFileSchema)).resolves.toMatchObject({
+        path: configPath('opencode.json'),
+        rawContent: '{"theme":"dark"}',
+        isValid: true,
+        content: { theme: 'dark' },
+      })
     })
 
-    it('returns 404 from GET /opencode-config when no config file exists', async () => {
-      mockReadOpenCodeConfigFile.mockResolvedValueOnce(null)
+    it('returns 404 when no config file exists', async () => {
+      await rm(configPath('opencode.json'), { force: true })
 
-      const res = await settingsApp.fetch(new Request('http://localhost/opencode-config'))
-      const json = await res.json() as Record<string, unknown>
+      const res = await settingsApp.request('/opencode-config')
 
       expect(res.status).toBe(404)
-      expect(json.error).toBe('No OpenCode config file found')
-    })
-
-    it('returns the managed config merged from Manager source documents', async () => {
-      mockReadOpenCodeConfigSnapshot.mockResolvedValueOnce({
-        sources: [
-          { name: 'opencode.json', path: '/tmp/test-workspace/config/opencode.json', rawContent: '{}', content: {}, isValid: true, updatedAt: 1 },
-          { name: 'opencode.jsonc', path: '/tmp/test-workspace/config/opencode.jsonc', rawContent: '{}', content: {}, isValid: true, updatedAt: 1 },
-        ],
-        content: {},
-        revision: 'rev-managed',
-        updatedAt: 1,
-        path: '/tmp/test-workspace/config/opencode.jsonc',
-        rawContent: '{}',
-      })
-      const configGet = vi.fn(async () => [
-        { type: 'document', path: '/tmp/test-workspace/config/opencode.json', info: { theme: 'light', model: 'a/b' } },
-        { type: 'document', path: '/tmp/test-workspace/config/opencode.jsonc', info: { theme: 'dark' } },
-        { type: 'document', path: '/tmp/test-workspace/unmanaged.json', info: { theme: 'ignored' } },
-        { type: 'directory', path: '/tmp/test-workspace' },
-      ])
-      const app = createSettingsRoutes(
-        testDb,
-        { getGitEnvironment: vi.fn().mockReturnValue({}) } as any,
-        createStubOpenCodeClient({ api: { config: { get: configGet } } as unknown as OpenCodeClient['api'] }),
-      )
-
-      const res = await app.fetch(new Request('http://localhost/opencode-config/managed'))
-
-      expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({
-        info: { theme: 'dark', model: 'a/b' },
-      })
-      expect(configGet).toHaveBeenCalledWith({ location: { directory: '/tmp/test-workspace' } })
-    })
-
-    it('returns 503 from GET /opencode-config/managed when OpenCode is unavailable', async () => {
-      mockReadOpenCodeConfigSnapshot.mockResolvedValueOnce({
-        sources: [
-          { name: 'opencode.jsonc', path: '/tmp/test-workspace/config/opencode.jsonc', rawContent: '{}', content: {}, isValid: true, updatedAt: 1 },
-        ],
-        content: {},
-        revision: 'rev-managed',
-        updatedAt: 1,
-        path: '/tmp/test-workspace/config/opencode.jsonc',
-        rawContent: '{}',
-      })
-      const app = createSettingsRoutes(
-        testDb,
-        { getGitEnvironment: vi.fn().mockReturnValue({}) } as any,
-        createStubOpenCodeClient({
-          api: {
-            config: {
-              get: vi.fn(async () => {
-                throw new ClientError('Transport')
-              }),
-            },
-          } as unknown as OpenCodeClient['api'],
-        }),
-      )
-
-      const res = await app.fetch(new Request('http://localhost/opencode-config/managed'))
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(503)
-      expect(json.error).toBe('OpenCode server unavailable')
-    })
-
-    it('returns MCP servers from the managed config without a shape field', async () => {
-      mockReadOpenCodeConfigSnapshot.mockResolvedValueOnce({
-        sources: [
-          { name: 'opencode.jsonc', path: '/tmp/test-workspace/config/opencode.jsonc', rawContent: '{}', content: {}, isValid: true, updatedAt: 1 },
-        ],
-        content: {},
-        revision: 'rev-managed',
-        updatedAt: 1,
-        path: '/tmp/test-workspace/config/opencode.jsonc',
-        rawContent: '{}',
-      })
-      const configGet = vi.fn(async () => [
-        {
-          type: 'document',
-          path: '/tmp/test-workspace/config/opencode.jsonc',
-          info: { mcp: { servers: { local: { type: 'local', command: ['npx', 'local'] } } } },
-        },
-      ])
-      const mcpList = vi.fn(async () => ({
-        data: [{ name: 'local', status: { status: 'connected' } }],
-      }))
-      const app = createSettingsRoutes(
-        testDb,
-        { getGitEnvironment: vi.fn().mockReturnValue({}) } as any,
-        createStubOpenCodeClient({
-          api: { config: { get: configGet }, mcp: { list: mcpList } } as unknown as OpenCodeClient['api'],
-        }),
-      )
-
-      const res = await app.fetch(new Request('http://localhost/opencode-config/mcp'))
-      const json = await res.json() as { revision: string; servers: Array<Record<string, unknown>> }
-
-      expect(res.status).toBe(200)
-      expect(json).toEqual({
-        revision: 'rev-managed',
-        servers: [
-          { name: 'local', type: 'local', command: ['npx', 'local'], enabled: true, status: 'connected' },
-        ],
-      })
-      expect(json.servers.every((server) => !('shape' in server))).toBe(true)
-    })
-
-    it('maps a restart-pending apply result to 200 with restartRequired', async () => {
-      const config = {
-        path: '/tmp/test-workspace/.config/opencode.json',
-        content: { plugin: ['evil-plugin'] },
-        rawContent: '{"plugin":["evil-plugin"]}',
-        isValid: true,
-        updatedAt: 2,
-      }
-      mockApplyOpenCodeConfigUpdate.mockResolvedValueOnce({ status: 'restart_pending', config })
-
-      const res = await settingsApp.fetch(new Request('http://localhost/opencode-config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: '{"plugin":["evil-plugin"]}' }),
-      }))
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(200)
-      expect(json).toEqual({ ...config, restartRequired: true })
-      expect(mockApplyOpenCodeConfigUpdate).toHaveBeenCalledWith({
-        content: '{"plugin":["evil-plugin"]}',
-        source: undefined,
-        expectedRevision: undefined,
-        settingsService: expect.anything(),
-        openCodeClient: expect.anything(),
-      })
-    })
-
-    it('maps an unchanged applied result to 200 without requesting a restart', async () => {
-      const config = {
-        path: '/tmp/test-workspace/.config/opencode.json',
-        content: { theme: 'light' },
-        rawContent: '{"theme":"light"}',
-        isValid: true,
-        updatedAt: 3,
-      }
-      mockApplyOpenCodeConfigUpdate.mockResolvedValueOnce({ status: 'applied', config })
-
-      const res = await settingsApp.fetch(new Request('http://localhost/opencode-config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: { theme: 'light' } }),
-      }))
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(200)
-      expect(json).toEqual(config)
-      expect(mockApplyOpenCodeConfigUpdate).toHaveBeenCalledWith({
-        content: { theme: 'light' },
-        source: undefined,
-        expectedRevision: undefined,
-        settingsService: expect.anything(),
-        openCodeClient: expect.anything(),
-      })
-    })
-
-    it('returns 503 from a PATCH entity save when OpenCode cannot be read', async () => {
-      mockApplyOpenCodeConfigUpdate.mockRejectedValueOnce(new ClientError('Transport'))
-
-      const res = await settingsApp.fetch(new Request('http://localhost/opencode-config', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ patch: { agents: { reviewer: { description: 'new' } } } }),
-      }))
-
-      expect(res.status).toBe(503)
-      expect(await res.json()).toEqual({ error: 'OpenCode server unavailable' })
-    })
-
-    it('refuses a PATCH entity save with 409 while an OpenCode restart is pending', async () => {
-      vi.mocked(opencodeServerManager.isRestartPending).mockReturnValueOnce(true)
-
-      const res = await settingsApp.fetch(new Request('http://localhost/opencode-config', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ patch: { agents: { reviewer: { description: 'stale' } } } }),
-      }))
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(409)
-      expect(json.error).toContain('Restart OpenCode')
-      expect(mockApplyOpenCodeConfigUpdate).not.toHaveBeenCalled()
-    })
-
-    it('applies a PATCH that names no entity while an OpenCode restart is pending', async () => {
-      vi.mocked(opencodeServerManager.isRestartPending).mockReturnValueOnce(true)
-      mockApplyOpenCodeConfigUpdate.mockResolvedValueOnce({ status: 'applied', config: { revision: 'r2' } })
-
-      const res = await settingsApp.fetch(new Request('http://localhost/opencode-config', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ patch: { theme: 'dark' } }),
-      }))
-
-      expect(res.status).toBe(200)
-      expect(mockApplyOpenCodeConfigUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({ content: { theme: 'dark' }, mode: 'merge' }),
-      )
-    })
-
-    it('returns 400 when the PUT body fails schema validation', async () => {
-      const res = await settingsApp.fetch(new Request('http://localhost/opencode-config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: 123 }),
-      }))
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(400)
-      expect(json.error).toBe('Invalid config data')
-      expect(mockApplyOpenCodeConfigUpdate).not.toHaveBeenCalled()
-    })
-
-    it('returns 400 when the PUT body is malformed JSON', async () => {
-      const res = await settingsApp.fetch(new Request('http://localhost/opencode-config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: '{',
-      }))
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(400)
-      expect(json.error).toBe('Invalid JSON')
-      expect(mockApplyOpenCodeConfigUpdate).not.toHaveBeenCalled()
-    })
-
-    it('returns 400 when the PUT body is empty', async () => {
-      const res = await settingsApp.fetch(new Request('http://localhost/opencode-config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-      }))
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(400)
-      expect(json.error).toBe('Invalid JSON')
-      expect(mockApplyOpenCodeConfigUpdate).not.toHaveBeenCalled()
-    })
-
-    it('returns 500 when applying the config fails', async () => {
-      mockApplyOpenCodeConfigUpdate.mockRejectedValueOnce(new Error('write failed'))
-
-      const res = await settingsApp.fetch(new Request('http://localhost/opencode-config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: '{"theme":"light"}' }),
-      }))
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(500)
-      expect(json.error).toBe('Failed to update OpenCode config')
-    })
-
-    it('writes the last known good config and restarts on rollback', async () => {
-      mockGetLastKnownGoodConfig.mockReturnValueOnce('{"theme":"dark"}')
-      mockRestoreOpenCodeConfigSnapshot.mockResolvedValueOnce({
-        path: '/tmp/test-workspace/.config/opencode.json',
-        rawContent: '{"theme":"dark"}',
-        content: { theme: 'dark' },
-        isValid: true,
-        updatedAt: 1,
-      })
-      mockReadOpenCodeConfigFile.mockResolvedValueOnce({
-        path: '/tmp/test-workspace/.config/opencode.json',
-        rawContent: '{"theme":"dark"}',
-        content: { theme: 'dark' },
-        isValid: true,
-        updatedAt: 1,
-      })
-
-      const res = await settingsApp.fetch(new Request('http://localhost/opencode-rollback', { method: 'POST' }))
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(200)
-      expect(json).toEqual({ success: true, message: 'Server restarted with the previous working config' })
-      expect(mockRestoreOpenCodeConfigSnapshot).toHaveBeenCalledWith('{"theme":"dark"}')
-      expect(mockClearStartupError).toHaveBeenCalled()
-      expect(mockRestart).toHaveBeenCalled()
+      await expect(readJson(res, ErrorSchema)).resolves.toEqual({ error: 'No OpenCode config file found' })
     })
 
     it('returns 404 from rollback when no last known good config exists', async () => {
-      mockGetLastKnownGoodConfig.mockReturnValueOnce(null)
-
-      const res = await settingsApp.fetch(new Request('http://localhost/opencode-rollback', { method: 'POST' }))
-      const json = await res.json() as Record<string, unknown>
+      const res = await settingsApp.request('/opencode-rollback', { method: 'POST' })
 
       expect(res.status).toBe(404)
-      expect(json.error).toBe('No previous working config available for rollback')
-      expect(mockRestoreOpenCodeConfigSnapshot).not.toHaveBeenCalled()
+      await expect(readJson(res, ErrorSchema)).resolves.toEqual({ error: 'No previous working config available for rollback' })
+      expect(restart).not.toHaveBeenCalled()
     })
 
-    it('deletes the config file and restarts when the rollback reload fails', async () => {
-      mockGetLastKnownGoodConfig.mockReturnValueOnce('{"theme":"dark"}')
-      mockRestoreOpenCodeConfigSnapshot.mockResolvedValueOnce({
-        path: '/tmp/test-workspace/.config/opencode.json',
-        rawContent: '{"theme":"dark"}',
-        content: { theme: 'dark' },
-        isValid: true,
-        updatedAt: 1,
-      })
-      mockReadOpenCodeConfigFile.mockResolvedValueOnce(null)
-      mockDeleteOpenCodeConfigFile.mockResolvedValueOnce(true)
+    it('merges the managed config from Manager source documents', async () => {
+      await writeConfig('opencode.json', '{"theme":"light","model":"a/b"}')
+      await writeConfig('opencode.jsonc', '{"theme":"dark"}')
+      const documents: ConfigGetOutput = [
+        { type: 'document', path: configPath('opencode.json'), info: { model: 'a/b' } },
+        { type: 'document', path: configPath('opencode.jsonc'), info: { model: 'c/d' } },
+        { type: 'document', path: join(workspace.path, 'unmanaged.json'), info: { model: 'ignored' } },
+      ]
+      const configGet = vi.fn(async () => documents)
+      const app = createApp({ api: { config: { get: configGet } } })
 
-      const res = await settingsApp.fetch(new Request('http://localhost/opencode-rollback', { method: 'POST' }))
-      const json = await res.json() as Record<string, unknown>
+      const res = await app.request('/opencode-config/managed')
 
       expect(res.status).toBe(200)
-      expect(json).toEqual({
-        success: true,
-        message: 'Server restarted after deleting the broken config file. The previous working config remains available for rollback.',
-        fallback: true,
+      await expect(readJson(res, ManagedConfigSchema)).resolves.toEqual({ info: { model: 'c/d' } })
+      expect(configGet).toHaveBeenCalledWith({ location: { directory: workspace.path } })
+    })
+
+    it('returns 503 when OpenCode is unavailable for the managed config', async () => {
+      await writeConfig('opencode.jsonc', '{}')
+      const app = createApp({
+        api: { config: { get: vi.fn(async (): Promise<ConfigGetOutput> => { throw new ClientError('Transport') }) } },
       })
-      expect(mockRestoreOpenCodeConfigSnapshot).toHaveBeenCalledWith('{"theme":"dark"}')
-      expect(mockArchiveBrokenOpenCodeConfigFile).toHaveBeenCalled()
-      expect(mockDeleteOpenCodeConfigFile).toHaveBeenCalled()
-      expect(mockRestart).toHaveBeenCalled()
+
+      const res = await app.request('/opencode-config/managed')
+
+      expect(res.status).toBe(503)
+      await expect(readJson(res, ErrorSchema)).resolves.toEqual({ error: 'OpenCode server unavailable' })
+    })
+
+    it('lists configured MCP servers with their live status and no shape field', async () => {
+      await writeConfig('opencode.jsonc', '{"mcp":{"servers":{"local":{"type":"local","command":["npx","local"]}}}}')
+      const documents: ConfigGetOutput = [
+        {
+          type: 'document',
+          path: configPath('opencode.jsonc'),
+          info: { mcp: { servers: { local: { type: 'local', command: ['npx', 'local'] } } } },
+        },
+      ]
+      const servers: McpListOutput = {
+        location: { directory: workspace.path },
+        data: [{ name: 'local', status: { status: 'connected' } }],
+      }
+      const app = createApp({
+        api: {
+          config: { get: vi.fn(async () => documents) },
+          mcp: { list: vi.fn(async () => servers) },
+        },
+      })
+
+      const res = await app.request('/opencode-config/mcp')
+
+      expect(res.status).toBe(200)
+      const body = await readJson(res, McpConfigSchema)
+      expect(body.servers).toEqual([
+        { name: 'local', type: 'local', command: ['npx', 'local'], enabled: true, status: 'connected' },
+      ])
+      expect(body.servers.every((server) => !('shape' in server))).toBe(true)
+    })
+
+    it('writes a new config and reloads without a restart', async () => {
+      await writeConfig('opencode.json', '{"theme":"light"}')
+
+      const res = await settingsApp.request('/opencode-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: '{"theme":"dark"}' }),
+      })
+
+      expect(res.status).toBe(200)
+      await expect(readJson(res, ConfigFileSchema)).resolves.toMatchObject({ content: { theme: 'dark' } })
+      await expect(readFile(configPath('opencode.json'), 'utf-8')).resolves.toBe('{"theme":"dark"}')
+      expect(reload).toHaveBeenCalledTimes(1)
+      expect(restart).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ['a schema-invalid body', JSON.stringify({ content: 123 }), 'Invalid config data'],
+      ['malformed JSON', '{', 'Invalid JSON'],
+      ['an empty body', undefined, 'Invalid JSON'],
+    ])('returns 400 for %s', async (_label, body, expectedError) => {
+      const res = await settingsApp.request('/opencode-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      })
+
+      expect(res.status).toBe(400)
+      await expect(readJson(res, ErrorSchema)).resolves.toMatchObject({ error: expectedError })
+    })
+
+    it('maps an unreachable OpenCode to 503 and an unexpected failure to 500 for entity saves', async () => {
+      const unavailableApp = createApp({
+        api: { config: { get: vi.fn(async (): Promise<ConfigGetOutput> => { throw new ClientError('Transport') }) } },
+      })
+      const brokenApp = createApp({
+        api: { config: { get: vi.fn(async (): Promise<ConfigGetOutput> => { throw new Error('boom') }) } },
+      })
+      const patchBody = JSON.stringify({ patch: { agents: { reviewer: { description: 'new' } } } })
+
+      const unavailable = await unavailableApp.request('/opencode-config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: patchBody,
+      })
+      const broken = await brokenApp.request('/opencode-config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: patchBody,
+      })
+
+      expect(unavailable.status).toBe(503)
+      await expect(readJson(unavailable, ErrorSchema)).resolves.toEqual({ error: 'OpenCode server unavailable' })
+      expect(broken.status).toBe(500)
+      await expect(readJson(broken, ErrorSchema)).resolves.toMatchObject({ error: 'Failed to update OpenCode config' })
+    })
+
+    it('restores the last known good config and restarts the server', async () => {
+      await writeConfig('opencode.json', '{"theme":"broken"}')
+      settings().saveLastKnownGoodConfig('{"theme":"dark"}')
+
+      const res = await settingsApp.request('/opencode-rollback', { method: 'POST' })
+
+      expect(res.status).toBe(200)
+      await expect(readJson(res, z.object({ success: z.boolean(), message: z.string() }))).resolves.toEqual({
+        success: true,
+        message: 'Server restarted with the previous working config',
+      })
+      await expect(readFile(configPath('opencode.json'), 'utf-8')).resolves.toBe('{"theme":"dark"}')
+      expect(restart).toHaveBeenCalledTimes(1)
+    })
+
+    it('deletes the config and restarts with a fallback when the restore restart fails', async () => {
+      await writeConfig('opencode.json', '{"theme":"broken"}')
+      settings().saveLastKnownGoodConfig('{"theme":"dark"}')
+      restart.mockRejectedValueOnce(new Error('restart failed'))
+
+      const res = await settingsApp.request('/opencode-rollback', { method: 'POST' })
+
+      expect(res.status).toBe(200)
+      await expect(readJson(res, z.object({
+        success: z.boolean(),
+        message: z.string(),
+        fallback: z.boolean(),
+      }))).resolves.toMatchObject({ success: true, fallback: true })
+      await expect(readFile(configPath('opencode.json'), 'utf-8')).rejects.toThrow()
+      expect(restart).toHaveBeenCalledTimes(2)
+    })
+
+    it('reloads a patch that names no entities while a restart is pending, and blocks entity patches', async () => {
+      await writeConfig('opencode.json', '{"theme":"light"}')
+      settingsApp = createApp()
+      opencodeServerManager.markRestartPending()
+
+      const entityRes = await settingsApp.request('/opencode-config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patch: { agents: { reviewer: { description: 'stale' } } } }),
+      })
+      const plainRes = await settingsApp.request('/opencode-config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patch: { theme: 'dark' } }),
+      })
+
+      expect(entityRes.status).toBe(409)
+      await expect(readJson(entityRes, ErrorSchema)).resolves.toMatchObject({
+        error: 'OpenCode has not loaded the saved configuration yet. Restart OpenCode before editing entries.',
+      })
+      expect(plainRes.status).toBe(200)
+      await expect(readJson(plainRes, ConfigFileSchema)).resolves.toMatchObject({ content: { theme: 'dark' } })
+    })
+
+    it('reports restartRequired when the config reload fails', async () => {
+      await writeConfig('opencode.json', '{"theme":"light"}')
+      reload.mockRejectedValue(new Error('OpenCode server unavailable'))
+
+      const res = await settingsApp.request('/opencode-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: '{"theme":"dark"}' }),
+      })
+
+      expect(res.status).toBe(200)
+      await expect(readJson(res, ConfigFileSchema.extend({ restartRequired: z.boolean() }))).resolves.toMatchObject({
+        content: { theme: 'dark' },
+        restartRequired: true,
+      })
     })
   })
 
   describe('OpenCode import routes', () => {
-    it('should return import status', async () => {
-      mockGetOpenCodeImportStatus.mockResolvedValueOnce({
-        configSourcePath: '/import/opencode-config/opencode.json',
-        stateSourcePath: '/import/opencode-state',
-        workspaceConfigPath: '/tmp/test-workspace/.config/opencode/opencode.json',
-        workspaceStatePath: '/tmp/test-workspace/.opencode/state/opencode',
-        workspaceStateExists: true,
-      })
+    async function seedHostData(options: { config?: boolean; state?: boolean } = {}): Promise<void> {
+      if (options.config) {
+        const hostConfigDir = join(home, '.config', 'opencode')
+        await mkdir(hostConfigDir, { recursive: true })
+        await writeFile(join(hostConfigDir, 'opencode.json'), '{"theme":"imported"}')
+      }
+      if (options.state) {
+        const statePath = join(home, '.local', 'share', 'opencode')
+        await mkdir(statePath, { recursive: true })
+        const stateDb = new SQLiteDatabase(join(statePath, 'opencode.db'))
+        stateDb.run('CREATE TABLE session (directory TEXT)')
+        stateDb.run("INSERT INTO session (directory) VALUES ('/Users/test/project-a')")
+        stateDb.close()
+      }
+    }
 
-      const req = new Request('http://localhost/opencode-import/status')
-      const res = await settingsApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
+    it('reports importable host config and state', async () => {
+      await seedHostData({ config: true, state: true })
+
+      const res = await settingsApp.request('/opencode-import/status')
 
       expect(res.status).toBe(200)
-      expect(json.configSourcePath).toBe('/import/opencode-config/opencode.json')
-      expect(json.stateSourcePath).toBe('/import/opencode-state')
-      expect(mockGetOpenCodeImportStatus).toHaveBeenCalled()
+      await expect(readJson(res, ImportStatusSchema)).resolves.toMatchObject({
+        configSourcePath: join(home, '.config', 'opencode', 'opencode.json'),
+        stateSourcePath: join(home, '.local', 'share', 'opencode'),
+        workspaceConfigPath: configPath('opencode.json'),
+        workspaceStatePath: join(workspace.path, '.opencode', 'state', 'opencode'),
+        workspaceStateExists: false,
+      })
     })
 
-    it('should import host OpenCode data and restart the server', async () => {
-      mockSyncOpenCodeImport.mockResolvedValueOnce({
-        configSourcePath: '/import/opencode-config/opencode.json',
-        stateSourcePath: '/import/opencode-state',
-        workspaceConfigPath: '/tmp/test-workspace/.config/opencode/opencode.json',
-        workspaceStatePath: '/tmp/test-workspace/.opencode/state/opencode',
-        workspaceStateExists: true,
+    it('imports host config and state into the workspace and restarts', async () => {
+      await seedHostData({ config: true, state: true })
+
+      const res = await settingsApp.request('/opencode-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ overwriteState: true }),
+      })
+
+      expect(res.status).toBe(200)
+      const body = await readJson(res, ImportResultSchema)
+      expect(body).toMatchObject({
+        success: true,
+        serverRestarted: true,
         configImported: true,
         stateImported: true,
+        relinkedRepos: { relinkedCount: 0, existingCount: 0, nonRepoPathCount: 1, duplicatePathCount: 0 },
       })
+      await expect(readFile(configPath('opencode.json'), 'utf-8')).resolves.toBe('{"theme":"imported"}')
+      await expect(readFile(join(workspace.path, '.opencode', 'state', 'opencode', 'opencode.db'))).resolves.toBeDefined()
+      expect(restart).toHaveBeenCalledTimes(1)
+    })
 
-      const req = new Request('http://localhost/opencode-import?userId=default', {
+    it('imports only the config without touching workspace state', async () => {
+      await seedHostData({ config: true })
+
+      const res = await settingsApp.request('/opencode-import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ overwriteState: true }),
       })
-      const res = await settingsApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
 
       expect(res.status).toBe(200)
-      expect(json.success).toBe(true)
-      expect(json.serverRestarted).toBe(true)
-      expect(mockSyncOpenCodeImport).toHaveBeenCalledWith({
-        overwriteState: true,
-        protectExistingState: true,
-        settingsService: expect.anything(),
-      })
-      expect(mockGetImportedSessionDirectories).toHaveBeenCalledWith('/tmp/test-workspace/.opencode/state/opencode')
-      expect(mockRelinkReposFromSessionDirectories).toHaveBeenCalled()
-      expect(mockClearStartupError).toHaveBeenCalled()
-      expect(mockRestart).toHaveBeenCalled()
+      const body = await readJson(res, ImportResultSchema)
+      expect(body).toMatchObject({ success: true, configImported: true, stateImported: false })
+      await expect(readFile(join(workspace.path, '.opencode', 'state', 'opencode', 'opencode.db'))).rejects.toThrow()
     })
 
-    it('should return 404 when no importable host data exists', async () => {
-      mockSyncOpenCodeImport.mockResolvedValueOnce({
-        configSourcePath: null,
-        stateSourcePath: null,
-        workspaceConfigPath: '/tmp/test-workspace/.config/opencode/opencode.json',
-        workspaceStatePath: '/tmp/test-workspace/.opencode/state/opencode',
-        workspaceStateExists: true,
-        configImported: false,
-        stateImported: false,
-      })
-
-      const req = new Request('http://localhost/opencode-import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ overwriteState: true }),
-      })
-      const res = await settingsApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(404)
-      expect(json.error).toBe('No importable OpenCode host data found')
-      expect(mockRestart).not.toHaveBeenCalled()
-    })
-
-    it('should return 409 when import is blocked to protect workspace state', async () => {
-      mockSyncOpenCodeImport.mockRejectedValueOnce(
-        new OpenCodeImportProtectionError('Workspace state already exists and must be cleared before import')
-      )
-
-      const req = new Request('http://localhost/opencode-import', {
+    it('returns 404 when the host has no importable data', async () => {
+      const res = await settingsApp.request('/opencode-import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       })
-      const res = await settingsApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
 
-      expect(res.status).toBe(409)
-      expect(json.error).toBe('OpenCode host import was blocked to protect existing workspace state')
-      expect(json.code).toBe('OPENCODE_IMPORT_PROTECTED')
-      expect(json.detail).toBe('Workspace state already exists and must be cleared before import')
-      expect(mockRestart).not.toHaveBeenCalled()
+      expect(res.status).toBe(404)
+      await expect(readJson(res, ErrorSchema)).resolves.toMatchObject({ error: 'No importable OpenCode host data found' })
+      expect(restart).not.toHaveBeenCalled()
     })
 
-    it('should not call relink functions when only config is imported (stateImported: false)', async () => {
-      mockSyncOpenCodeImport.mockResolvedValueOnce({
-        configSourcePath: '/import/opencode-config/opencode.json',
-        stateSourcePath: '/import/opencode-state',
-        workspaceConfigPath: '/tmp/test-workspace/.config/opencode/opencode.json',
-        workspaceStatePath: '/tmp/test-workspace/.opencode/state/opencode',
-        workspaceStateExists: false,
-        configImported: true,
-        stateImported: false,
-      })
+    it('returns 409 when importing host state would overwrite existing workspace state', async () => {
+      await seedHostData({ state: true })
+      await mkdir(join(workspace.path, '.opencode', 'state', 'opencode'), { recursive: true })
+      const workspaceDb = createTestDatabase(join(workspace.path, '.opencode', 'state', 'opencode', 'opencode.db'))
+      workspaceDb.close()
 
-      const req = new Request('http://localhost/opencode-import?userId=default', {
+      const res = await settingsApp.request('/opencode-import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ overwriteState: true }),
+        body: JSON.stringify({}),
       })
-      const res = await settingsApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(200)
-      expect(json.success).toBe(true)
-      expect(json.serverRestarted).toBe(true)
-      expect(json.configImported).toBe(true)
-      expect(json.stateImported).toBe(false)
-      expect(mockGetImportedSessionDirectories).not.toHaveBeenCalled()
-      expect(mockRelinkReposFromSessionDirectories).not.toHaveBeenCalled()
-      expect(mockClearStartupError).toHaveBeenCalled()
-      expect(mockRestart).toHaveBeenCalled()
-      expect(json.relinkedRepos).toEqual({
-        repos: [],
-        relinkedCount: 0,
-        existingCount: 0,
-        nonRepoPathCount: 0,
-        duplicatePathCount: 0,
-        errors: [],
-      })
-    })
-  })
-
-  describe('POST /opencode-upgrade', () => {
-    describe('successful upgrade scenarios', () => {
-      it('should install the latest version and respond with success', async () => {
-        mockGetVersion.mockReturnValueOnce('2.1.1')
-        mockFetchVersion.mockResolvedValueOnce('2.2.5')
-        mockInstallOpenCodeVersion.mockResolvedValueOnce('/home/node/.opencode/bin/opencode')
-
-        const req = new Request('http://localhost/opencode-upgrade', {
-          method: 'POST'
-        })
-        const res = await settingsApp.fetch(req)
-        const json = await res.json() as Record<string, unknown>
-
-        expect(res.status).toBe(200)
-        expect(json.success).toBe(true)
-        expect(json.upgraded).toBe(true)
-        expect(json.oldVersion).toBe('2.1.1')
-        expect(json.newVersion).toBe('2.2.5')
-        expect(json.message).toBe('OpenCode upgraded from v2.1.1 to v2.2.5 and restarted')
-        expect(mockInstallOpenCodeVersion).toHaveBeenCalledWith('2.2.5')
-      })
-
-      it('should not install when the latest version is not newer', async () => {
-        mockGetVersion.mockReturnValueOnce('2.2.5')
-
-        const req = new Request('http://localhost/opencode-upgrade', {
-          method: 'POST'
-        })
-        const res = await settingsApp.fetch(req)
-        const json = await res.json() as Record<string, unknown>
-
-        expect(res.status).toBe(200)
-        expect(json.success).toBe(true)
-        expect(json.upgraded).toBe(false)
-        expect(json.message).toContain('already up to date')
-        expect(mockInstallOpenCodeVersion).not.toHaveBeenCalled()
-        expect(mockRestart).not.toHaveBeenCalled()
-      })
-
-      it('should replace an unsupported newer major with the latest supported release', async () => {
-        mockGetVersion.mockReturnValueOnce('3.0.0')
-        mockFetchVersion.mockResolvedValueOnce('2.2.5')
-        mockInstallOpenCodeVersion.mockResolvedValueOnce('/home/node/.opencode/bin/opencode')
-
-        const res = await settingsApp.fetch(new Request('http://localhost/opencode-upgrade', { method: 'POST' }))
-        const json = await res.json() as Record<string, unknown>
-
-        expect(res.status).toBe(200)
-        expect(json.upgraded).toBe(true)
-        expect(mockInstallOpenCodeVersion).toHaveBeenCalledWith('2.2.5')
-      })
-
-      it('should restart directly after a successful upgrade', async () => {
-        mockGetVersion.mockReturnValueOnce('2.1.1')
-        mockFetchVersion.mockResolvedValueOnce('2.2.5')
-        mockInstallOpenCodeVersion.mockResolvedValueOnce('/home/node/.opencode/bin/opencode')
-
-        const req = new Request('http://localhost/opencode-upgrade', {
-          method: 'POST'
-        })
-        await settingsApp.fetch(req)
-
-        expect(mockRestart).toHaveBeenCalledTimes(1)
-      })
-
-      it('allows upgrading while sandbox enforcement is active', async () => {
-        mockIsSandboxEnforced.mockReturnValue(true)
-        mockGetVersion.mockReturnValueOnce('2.1.1')
-        mockFetchVersion.mockResolvedValueOnce('2.2.5')
-        mockInstallOpenCodeVersion.mockResolvedValueOnce('/home/node/.opencode/bin/opencode')
-
-        const res = await settingsApp.fetch(new Request('http://localhost/opencode-upgrade', { method: 'POST' }))
-
-        expect(res.status).toBe(200)
-        expect(mockInstallOpenCodeVersion).toHaveBeenCalledWith('2.2.5')
-        expect(mockRestart).toHaveBeenCalled()
-      })
-    })
-
-    describe('failure and recovery scenarios', () => {
-      it('should attempt server recovery when the install fails after the binary swap started', async () => {
-        mockGetVersion.mockReturnValueOnce('2.1.1')
-          .mockReturnValueOnce('2.1.1')
-        mockInstallOpenCodeVersion.mockRejectedValueOnce(new OpenCodeInstallError('download failed', true))
-
-        const req = new Request('http://localhost/opencode-upgrade', {
-          method: 'POST'
-        })
-        const res = await settingsApp.fetch(req)
-        const json = await res.json() as Record<string, unknown>
-
-        expect(mockClearStartupError).toHaveBeenCalled()
-        expect(mockRestart).toHaveBeenCalled()
-        expect(res.status).toBe(400)
-        expect(json).toMatchObject({
-          upgraded: false,
-          recovered: true,
-          oldVersion: '2.1.1',
-          newVersion: '2.1.1'
-        })
-        expect(json.error).toContain('recovered')
-      })
-
-      it('should not restart the server when the install fails before the binary swap', async () => {
-        mockGetVersion.mockReturnValueOnce('2.1.1')
-        mockInstallOpenCodeVersion.mockRejectedValueOnce(new OpenCodeInstallError('download failed', false))
-
-        const req = new Request('http://localhost/opencode-upgrade', {
-          method: 'POST'
-        })
-        const res = await settingsApp.fetch(req)
-        const json = await res.json() as Record<string, unknown>
-
-        expect(mockRestart).not.toHaveBeenCalled()
-        expect(res.status).toBe(500)
-        expect(json).toMatchObject({
-          upgraded: false,
-          recovered: false,
-          oldVersion: '2.1.1',
-          newVersion: '2.1.1'
-        })
-      })
-
-      it('should return 500 when recovery fails', async () => {
-        mockGetVersion.mockReturnValueOnce('2.1.1')
-          .mockReturnValueOnce('2.1.1')
-        mockInstallOpenCodeVersion.mockRejectedValueOnce(new OpenCodeInstallError('download failed', true))
-        mockRestart.mockRejectedValueOnce(new Error('Restart failed'))
-
-        const req = new Request('http://localhost/opencode-upgrade', {
-          method: 'POST'
-        })
-        const res = await settingsApp.fetch(req)
-        const json = await res.json() as Record<string, unknown>
-
-        expect(res.status).toBe(500)
-        expect(json.recovered).toBe(false)
-      })
-    })
-
-    describe('version handling', () => {
-      it('should install and restart when getVersion returns null', async () => {
-        mockGetVersion.mockReturnValueOnce(null)
-        mockFetchVersion.mockResolvedValueOnce('2.2.5')
-        mockInstallOpenCodeVersion.mockResolvedValueOnce('/home/node/.opencode/bin/opencode')
-
-        const req = new Request('http://localhost/opencode-upgrade', {
-          method: 'POST'
-        })
-        const res = await settingsApp.fetch(req)
-        const json = await res.json() as Record<string, unknown>
-
-        expect(res.status).toBe(200)
-        expect(json.success).toBe(true)
-        expect(json.upgraded).toBe(true)
-        expect(json.oldVersion).toBe(null)
-        expect(json.newVersion).toBe('2.2.5')
-        expect(json.message).toBe('OpenCode v2.2.5 installed and restarted')
-        expect(mockFetchVersion).toHaveBeenCalled()
-        expect(mockClearStartupError).toHaveBeenCalled()
-        expect(mockRestart).toHaveBeenCalledTimes(1)
-      })
-
-      it('should fail recovery when the installed version cannot be detected', async () => {
-        mockGetVersion.mockReturnValueOnce(null)
-        mockFetchVersion.mockResolvedValueOnce(null)
-        mockInstallOpenCodeVersion.mockResolvedValueOnce('/home/node/.opencode/bin/opencode')
-
-        const req = new Request('http://localhost/opencode-upgrade', {
-          method: 'POST'
-        })
-        const res = await settingsApp.fetch(req)
-        const json = await res.json() as Record<string, unknown>
-
-        expect(res.status).toBe(400)
-        expect(json.success).toBe(false)
-        expect(json.upgraded).toBe(false)
-        expect(json.recovered).toBe(true)
-        expect(json.error).toBe('Upgrade failed but server recovered')
-        expect(json.details).toContain('did not result in version 2.2.5')
-        expect(mockRestart).toHaveBeenCalledTimes(1)
-      })
-
-      it('should not report success when an override still resolves to the older version', async () => {
-        mockGetVersion.mockReturnValueOnce('2.1.1')
-        mockFetchVersion.mockResolvedValueOnce('2.1.1')
-        mockInstallOpenCodeVersion.mockResolvedValueOnce('/home/node/.opencode/bin/opencode')
-
-        const res = await settingsApp.fetch(new Request('http://localhost/opencode-upgrade', { method: 'POST' }))
-        const json = await res.json() as Record<string, unknown>
-
-        expect(res.status).toBe(400)
-        expect(json.success).toBe(false)
-        expect(json.upgraded).toBe(false)
-        expect(json.recovered).toBe(true)
-        expect(json.error).toBe('Upgrade failed but server recovered')
-        expect(json.details).toContain('did not result in version 2.2.5')
-        expect(mockRestart).toHaveBeenCalledTimes(1)
-      })
-    })
-  })
-
-  describe('POST /opencode-install-version', () => {
-    describe('successful installation', () => {
-      it('should install specific version successfully', async () => {
-        mockGetVersion.mockReturnValueOnce('2.1.1')
-        mockFetchVersion.mockResolvedValueOnce('2.2.5')
-        mockInstallOpenCodeVersion.mockResolvedValueOnce('/home/node/.opencode/bin/opencode')
-
-        const req = new Request('http://localhost/opencode-install-version', {
-          method: 'POST',
-          body: JSON.stringify({ version: '2.2.5' }),
-          headers: { 'Content-Type': 'application/json' }
-        })
-        const res = await settingsApp.fetch(req)
-        const json = await res.json() as Record<string, unknown>
-
-        expect(res.status).toBe(200)
-        expect(json.success).toBe(true)
-        expect(json.newVersion).toBe('2.2.5')
-        expect(mockInstallOpenCodeVersion).toHaveBeenCalledWith('2.2.5')
-      })
-
-      it('does not report success when the requested version was not installed', async () => {
-        mockGetVersion.mockReturnValue('2.1.1')
-        mockFetchVersion.mockResolvedValueOnce('2.1.1')
-        mockInstallOpenCodeVersion.mockResolvedValueOnce('/home/node/.opencode/bin/opencode')
-
-        const res = await settingsApp.fetch(new Request('http://localhost/opencode-install-version', {
-          method: 'POST',
-          body: JSON.stringify({ version: '2.2.5' }),
-          headers: { 'Content-Type': 'application/json' }
-        }))
-        const json = await res.json() as Record<string, unknown>
-
-        expect(res.status).toBe(400)
-        expect(json.success).toBe(false)
-        expect(json.details).toContain('did not result in version 2.2.5')
-        expect(json.newVersion).toBe('2.1.1')
-      })
-
-      it('allows installing any version while sandbox enforcement is active', async () => {
-        mockIsSandboxEnforced.mockReturnValue(true)
-        mockGetVersion.mockReturnValueOnce('2.1.1')
-        mockFetchVersion.mockResolvedValueOnce('2.2.5')
-        mockInstallOpenCodeVersion.mockResolvedValueOnce('/home/node/.opencode/bin/opencode')
-
-        const res = await settingsApp.fetch(new Request('http://localhost/opencode-install-version', {
-          method: 'POST',
-          body: JSON.stringify({ version: '2.2.5' }),
-          headers: { 'Content-Type': 'application/json' }
-        }))
-
-        expect(res.status).toBe(200)
-        expect(mockInstallOpenCodeVersion).toHaveBeenCalledWith('2.2.5')
-      })
-
-      it('should install the bare version when the request carries a v prefix', async () => {
-        mockGetVersion.mockReturnValueOnce('2.1.1')
-        mockFetchVersion.mockResolvedValueOnce('2.2.5')
-        mockInstallOpenCodeVersion.mockResolvedValueOnce('/home/node/.opencode/bin/opencode')
-
-        const req = new Request('http://localhost/opencode-install-version', {
-          method: 'POST',
-          body: JSON.stringify({ version: 'v2.2.5' }),
-          headers: { 'Content-Type': 'application/json' }
-        })
-        await settingsApp.fetch(req)
-
-        expect(mockInstallOpenCodeVersion).toHaveBeenCalledWith('2.2.5')
-      })
-    })
-
-    describe('failure and recovery', () => {
-      it('should recover the server when the version install fails after the binary swap started', async () => {
-        mockGetVersion.mockReturnValueOnce('2.1.1')
-          .mockReturnValueOnce('2.1.1')
-        mockFetchVersion.mockResolvedValueOnce('2.1.1')
-        mockInstallOpenCodeVersion.mockRejectedValueOnce(new OpenCodeInstallError('download failed', true))
-
-        const req = new Request('http://localhost/opencode-install-version', {
-          method: 'POST',
-          body: JSON.stringify({ version: '2.2.5' }),
-          headers: { 'Content-Type': 'application/json' }
-        })
-        const res = await settingsApp.fetch(req)
-        const json = await res.json() as Record<string, unknown>
-
-        expect(mockRestart).toHaveBeenCalled()
-        expect(res.status).toBe(400)
-        expect(json.recovered).toBe(true)
-      })
-
-      it('should not restart the server when the version install fails before the binary swap', async () => {
-        mockGetVersion.mockReturnValueOnce('2.1.1')
-        mockInstallOpenCodeVersion.mockRejectedValueOnce(new OpenCodeInstallError('download failed', false))
-
-        const req = new Request('http://localhost/opencode-install-version', {
-          method: 'POST',
-          body: JSON.stringify({ version: '2.2.5' }),
-          headers: { 'Content-Type': 'application/json' }
-        })
-        const res = await settingsApp.fetch(req)
-        const json = await res.json() as Record<string, unknown>
-
-        expect(mockRestart).not.toHaveBeenCalled()
-        expect(res.status).toBe(500)
-        expect(json.recovered).toBe(false)
-      })
-    })
-
-    describe('validation', () => {
-      it('should reject empty version', async () => {
-        const req = new Request('http://localhost/opencode-install-version', {
-          method: 'POST',
-          body: JSON.stringify({ version: '' }),
-          headers: { 'Content-Type': 'application/json' }
-        })
-        const res = await settingsApp.fetch(req)
-
-        expect(res.status).toBe(400)
-      })
-
-      it('should reject missing version', async () => {
-        const req = new Request('http://localhost/opencode-install-version', {
-          method: 'POST',
-          body: JSON.stringify({}),
-          headers: { 'Content-Type': 'application/json' }
-        })
-        const res = await settingsApp.fetch(req)
-
-        expect(res.status).toBe(400)
-      })
-
-      it('should reject invalid version format with command injection attempt', async () => {
-        const req = new Request('http://localhost/opencode-install-version', {
-          method: 'POST',
-          body: JSON.stringify({ version: '1.2.27; cat /etc/passwd; #' }),
-          headers: { 'Content-Type': 'application/json' }
-        })
-        const res = await settingsApp.fetch(req)
-
-        expect(res.status).toBe(400)
-      })
-
-      it('should reject version with invalid format', async () => {
-        const req = new Request('http://localhost/opencode-install-version', {
-          method: 'POST',
-          body: JSON.stringify({ version: 'invalid' }),
-          headers: { 'Content-Type': 'application/json' }
-        })
-        const res = await settingsApp.fetch(req)
-
-        expect(res.status).toBe(400)
-      })
-
-      it('should reject an OpenCode 1.x version before installing anything', async () => {
-        const req = new Request('http://localhost/opencode-install-version', {
-          method: 'POST',
-          body: JSON.stringify({ version: '1.18.32' }),
-          headers: { 'Content-Type': 'application/json' }
-        })
-        const res = await settingsApp.fetch(req)
-        const json = await res.json() as Record<string, unknown>
-
-        expect(res.status).toBe(400)
-        expect(json.error).toBe('OpenCode 1.18.32 is not supported; OpenCode Manager requires OpenCode >=2.2.5 <3.0.0')
-        expect(mockInstallOpenCodeVersion).not.toHaveBeenCalled()
-      })
-
-      it.each(['2.2.4', '3.0.0'])('should reject %s outside the supported range before installing anything', async (version) => {
-        const res = await settingsApp.fetch(new Request('http://localhost/opencode-install-version', {
-          method: 'POST',
-          body: JSON.stringify({ version }),
-          headers: { 'Content-Type': 'application/json' }
-        }))
-        const json = await res.json() as Record<string, unknown>
-
-        expect(res.status).toBe(400)
-        expect(json.error).toBe(`OpenCode ${version} is not supported; OpenCode Manager requires OpenCode >=2.2.5 <3.0.0`)
-        expect(mockInstallOpenCodeVersion).not.toHaveBeenCalled()
-      })
-
-      it('should reject a prerelease version before installing anything', async () => {
-        const res = await settingsApp.fetch(new Request('http://localhost/opencode-install-version', {
-          method: 'POST',
-          body: JSON.stringify({ version: '2.2.5-beta.1' }),
-          headers: { 'Content-Type': 'application/json' }
-        }))
-
-        expect(res.status).toBe(400)
-        expect(mockInstallOpenCodeVersion).not.toHaveBeenCalled()
-      })
-    })
-  })
-
-  describe('OPENCODE_BIN externally managed binary', () => {
-    let originalBin: string | undefined
-
-    beforeEach(() => {
-      originalBin = process.env.OPENCODE_BIN
-      process.env.OPENCODE_BIN = '/usr/local/bin/opencode'
-    })
-
-    afterEach(() => {
-      if (originalBin === undefined) delete process.env.OPENCODE_BIN
-      else process.env.OPENCODE_BIN = originalBin
-    })
-
-    it('refuses POST /opencode-upgrade with 409 without installing or restarting', async () => {
-      const res = await settingsApp.fetch(new Request('http://localhost/opencode-upgrade', { method: 'POST' }))
-      const json = await res.json() as Record<string, unknown>
 
       expect(res.status).toBe(409)
-      expect(json.error).toContain('OPENCODE_BIN')
-      expect(mockInstallOpenCodeVersion).not.toHaveBeenCalled()
-      expect(mockRestart).not.toHaveBeenCalled()
+      await expect(readJson(res, ErrorSchema.extend({ code: z.string(), detail: z.string() }))).resolves.toMatchObject({
+        error: 'OpenCode host import was blocked to protect existing workspace state',
+        code: 'OPENCODE_IMPORT_PROTECTED',
+      })
+      expect(restart).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('OpenCode version routes', () => {
+    it('lists supported OpenCode 2 releases with the current version', async () => {
+      fetchMock.mockImplementation(async () => registryResponse(
+        ['1.18.32', '2.1.1', '2.2.5', '2.2.6', '2.2.5-beta.1', '3.0.0'],
+        { '2.2.5': '2026-01-02T00:00:00Z', '2.2.6': '2026-01-03T00:00:00Z' },
+      ))
+      clearOpenCodeVersionCache()
+      manager.getVersion = vi.fn(() => '2.2.5')
+      settingsApp = createApp()
+
+      const res = await settingsApp.request('/opencode-versions')
+
+      expect(res.status).toBe(200)
+      await expect(readJson(res, VersionsSchema)).resolves.toEqual({
+        versions: [
+          { version: '2.2.6', tag: 'v2.2.6', name: 'v2.2.6', publishedAt: '2026-01-03T00:00:00Z' },
+          { version: '2.2.5', tag: 'v2.2.5', name: 'v2.2.5', publishedAt: '2026-01-02T00:00:00Z' },
+        ],
+        currentVersion: '2.2.5',
+      })
+      expect(fetchMock).toHaveBeenCalledWith(REGISTRY_URL)
     })
 
-    it('refuses POST /opencode-install-version with 409 without installing or restarting', async () => {
-      const res = await settingsApp.fetch(new Request('http://localhost/opencode-install-version', {
+    it('serves repeated version requests from the installer cache', async () => {
+      await settingsApp.request('/opencode-versions')
+      await settingsApp.request('/opencode-versions')
+
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('returns 500 when the registry request fails', async () => {
+      fetchMock.mockImplementation(async () => new Response('unavailable', { status: 503 }))
+      clearOpenCodeVersionCache()
+
+      const res = await settingsApp.request('/opencode-versions')
+
+      expect(res.status).toBe(500)
+      const body = await readJson(res, ErrorSchema)
+      expect(body.error).toBe('Failed to fetch versions')
+      expect(String(body.details)).toContain('503')
+    })
+
+    it.each([
+      ['an older installable version', '2.1.1', 'OpenCode upgraded from v2.1.1 to v2.2.5 and restarted'],
+      ['an unsupported newer major', '3.0.0', 'OpenCode upgraded from v3.0.0 to v2.2.5 and restarted'],
+    ])('upgrades from %s', async (_label, currentVersion, expectedMessage) => {
+      manager.getVersion = vi.fn(() => currentVersion)
+      manager.fetchVersion = vi.fn(async () => '2.2.5')
+      settingsApp = createApp()
+
+      const res = await settingsApp.request('/opencode-upgrade', { method: 'POST' })
+
+      expect(res.status).toBe(200)
+      await expect(readJson(res, UpgradeResultSchema)).resolves.toMatchObject({
+        success: true,
+        upgraded: true,
+        oldVersion: currentVersion,
+        newVersion: '2.2.5',
+        message: expectedMessage,
+      })
+      expect(installer).toHaveBeenCalledWith('2.2.5')
+      expect(restart).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not install when the current version is already the latest', async () => {
+      manager.getVersion = vi.fn(() => '2.2.5')
+      settingsApp = createApp()
+
+      const res = await settingsApp.request('/opencode-upgrade', { method: 'POST' })
+
+      expect(res.status).toBe(200)
+      await expect(readJson(res, UpgradeResultSchema)).resolves.toMatchObject({
+        success: true,
+        upgraded: false,
+        message: 'OpenCode is already up to date',
+      })
+      expect(installer).not.toHaveBeenCalled()
+      expect(restart).not.toHaveBeenCalled()
+    })
+
+    it('installs when the current version is unknown', async () => {
+      manager.getVersion = vi.fn(() => null)
+      settingsApp = createApp()
+
+      const res = await settingsApp.request('/opencode-upgrade', { method: 'POST' })
+
+      expect(res.status).toBe(200)
+      await expect(readJson(res, UpgradeResultSchema)).resolves.toMatchObject({
+        success: true,
+        upgraded: true,
+        oldVersion: null,
+        newVersion: '2.2.5',
+        message: 'OpenCode v2.2.5 installed and restarted',
+      })
+      expect(restart).toHaveBeenCalledTimes(1)
+    })
+
+    it('returns 500 without restarting when the registry lookup fails during upgrade', async () => {
+      fetchMock.mockImplementation(async () => new Response('unavailable', { status: 503 }))
+      clearOpenCodeVersionCache()
+
+      const res = await settingsApp.request('/opencode-upgrade', { method: 'POST' })
+
+      expect(res.status).toBe(500)
+      await expect(readJson(res, UpgradeResultSchema)).resolves.toMatchObject({
+        error: 'Failed to upgrade OpenCode',
+        recovered: false,
+      })
+      expect(restart).not.toHaveBeenCalled()
+    })
+
+    it('installs a requested version and restarts', async () => {
+      manager.getVersion = vi.fn(() => '2.1.1')
+      manager.fetchVersion = vi.fn(async () => '2.2.5')
+      settingsApp = createApp()
+
+      const res = await settingsApp.request('/opencode-install-version', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ version: '2.2.5' }),
-      }))
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(409)
-      expect(json.error).toContain('OPENCODE_BIN')
-      expect(mockInstallOpenCodeVersion).not.toHaveBeenCalled()
-      expect(mockRestart).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('error scenarios - server stability', () => {
-    it('should not restart the server when the install fails before the binary swap', async () => {
-      mockGetVersion.mockReturnValueOnce('2.1.1')
-      mockInstallOpenCodeVersion.mockRejectedValueOnce(new OpenCodeInstallError('Unexpected error', false))
-      mockRestart.mockResolvedValue(undefined)
-
-      const req = new Request('http://localhost/opencode-upgrade', {
-        method: 'POST'
       })
-      const res = await settingsApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      await expect(readJson(res, UpgradeResultSchema)).resolves.toMatchObject({
+        success: true,
+        oldVersion: '2.1.1',
+        newVersion: '2.2.5',
+        message: 'OpenCode changed from v2.1.1 to v2.2.5',
+      })
+      expect(installer).toHaveBeenCalledWith('2.2.5')
+      expect(restart).toHaveBeenCalledTimes(1)
+    })
+
+    it('installs the bare version when the request carries a v prefix', async () => {
+      manager.getVersion = vi.fn(() => '2.1.1')
+      manager.fetchVersion = vi.fn(async () => '2.2.5')
+      settingsApp = createApp()
+
+      await settingsApp.request('/opencode-install-version', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version: 'v2.2.5' }),
+      })
+
+      expect(installer).toHaveBeenCalledWith('2.2.5')
+    })
+
+    it('reports failure when the installed version is not the requested one', async () => {
+      manager.getVersion = vi.fn(() => '2.1.1')
+      manager.fetchVersion = vi.fn(async () => '2.1.1')
+      settingsApp = createApp()
+
+      const res = await settingsApp.request('/opencode-install-version', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version: '2.2.5' }),
+      })
+
+      expect(res.status).toBe(400)
+      const body = await readJson(res, UpgradeResultSchema)
+      expect(body.success).toBe(false)
+      expect(String(body.details)).toContain('did not result in version 2.2.5')
+      expect(body.newVersion).toBe('2.1.1')
+    })
+
+    it.each([
+      ['an empty version', '', null],
+      ['a missing version', undefined, null],
+      ['a command injection attempt', '1.2.27; cat /etc/passwd; #', null],
+      ['an invalid format', 'invalid', null],
+      ['a prerelease', '2.2.5-beta.1', null],
+      ['an OpenCode 1.x version', '1.18.32', 'OpenCode 1.18.32 is not supported; OpenCode Manager requires OpenCode >=2.2.5 <3.0.0'],
+      ['a version below the supported range', '2.2.4', 'OpenCode 2.2.4 is not supported; OpenCode Manager requires OpenCode >=2.2.5 <3.0.0'],
+      ['a version above the supported range', '3.0.0', 'OpenCode 3.0.0 is not supported; OpenCode Manager requires OpenCode >=2.2.5 <3.0.0'],
+    ])('rejects %s before installing', async (_label, version, expectedError) => {
+      const res = await settingsApp.request('/opencode-install-version', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(version === undefined ? {} : { version }),
+      })
+
+      expect(res.status).toBe(400)
+      if (expectedError !== null) {
+        await expect(readJson(res, ErrorSchema)).resolves.toMatchObject({ error: expectedError })
+      }
+      expect(installer).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ['swap started', new Error('download failed after the swap'), true],
+      ['before the swap', new Error('download failed before the swap'), false],
+    ])('recovers the server when the install fails %s', async (_label, failure, swapStarted) => {
+      manager.getVersion = vi.fn(() => '2.1.1')
+      settingsApp = createApp()
+      const { OpenCodeInstallError } = await import('../../src/services/opencode-installer')
+      installer.mockRejectedValueOnce(new OpenCodeInstallError(failure.message, swapStarted))
+
+      const res = await settingsApp.request('/opencode-upgrade', { method: 'POST' })
+
+      if (swapStarted) {
+        expect(res.status).toBe(400)
+        await expect(readJson(res, UpgradeResultSchema)).resolves.toMatchObject({ recovered: true, upgraded: false })
+        expect(restart).toHaveBeenCalledTimes(1)
+      } else {
+        expect(res.status).toBe(500)
+        await expect(readJson(res, UpgradeResultSchema)).resolves.toMatchObject({ recovered: false, upgraded: false })
+        expect(restart).not.toHaveBeenCalled()
+      }
+    })
+
+    it('returns 500 when the recovery restart fails', async () => {
+      manager.getVersion = vi.fn(() => '2.1.1')
+      settingsApp = createApp()
+      const { OpenCodeInstallError } = await import('../../src/services/opencode-installer')
+      installer.mockRejectedValueOnce(new OpenCodeInstallError('download failed', true))
+      restart.mockRejectedValue(new Error('Restart failed'))
+
+      const res = await settingsApp.request('/opencode-upgrade', { method: 'POST' })
 
       expect(res.status).toBe(500)
-      expect(mockRestart).not.toHaveBeenCalled()
-      expect(json).toMatchObject({ recovered: false, upgraded: false })
+      await expect(readJson(res, UpgradeResultSchema)).resolves.toMatchObject({ recovered: false })
     })
 
-    it('should not crash when getVersion throws error during failure recovery', async () => {
-      mockGetVersion.mockImplementationOnce(() => '2.1.1')
-          .mockImplementationOnce(() => {
-            throw new Error('GetVersion failed')
-          })
-      mockInstallOpenCodeVersion.mockRejectedValueOnce(new OpenCodeInstallError('install failed', true))
-      mockRestart.mockResolvedValue(undefined)
-
-      const req = new Request('http://localhost/opencode-upgrade', {
-        method: 'POST'
-      })
-      const res = await settingsApp.fetch(req)
-
-      expect(res.status).toBe(400)
-      await expect(res.json()).resolves.toBeDefined()
-    })
-
-    it('should handle fetchVersion throwing error during normal upgrade', async () => {
-      mockGetVersion.mockReturnValueOnce('2.1.1')
+    it('does not crash when the version probe throws during recovery', async () => {
+      manager.getVersion = vi.fn()
         .mockReturnValueOnce('2.1.1')
-      mockFetchVersion.mockRejectedValueOnce(new Error('Fetch version failed'))
-      mockInstallOpenCodeVersion.mockResolvedValueOnce('/home/node/.opencode/bin/opencode')
+        .mockImplementationOnce(() => { throw new Error('GetVersion failed') })
+      settingsApp = createApp()
+      const { OpenCodeInstallError } = await import('../../src/services/opencode-installer')
+      installer.mockRejectedValueOnce(new OpenCodeInstallError('install failed', true))
 
-      const req = new Request('http://localhost/opencode-upgrade', {
-        method: 'POST'
-      })
-      const res = await settingsApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
+      const res = await settingsApp.request('/opencode-upgrade', { method: 'POST' })
 
       expect(res.status).toBe(400)
-      expect(json.recovered).toBe(true)
-      expect(mockRestart).toHaveBeenCalledTimes(1)
+      await expect(readJson(res, UpgradeResultSchema)).resolves.toMatchObject({ recovered: true, oldVersion: '2.1.1' })
+      expect(manager.clearStartupError).toHaveBeenCalled()
     })
 
-    it('should not leave server in broken state when the install fails', async () => {
-      mockGetVersion.mockReturnValueOnce('2.1.1')
-          .mockReturnValueOnce('2.1.1')
-      mockInstallOpenCodeVersion.mockRejectedValueOnce(new OpenCodeInstallError('install failed', true))
-      mockRestart.mockResolvedValue(undefined)
+    it('recovers when detecting the installed version fails after an upgrade', async () => {
+      manager.getVersion = vi.fn(() => '2.1.1')
+      manager.fetchVersion = vi.fn(async () => { throw new Error('Fetch version failed') })
+      settingsApp = createApp()
 
-      const req = new Request('http://localhost/opencode-upgrade', {
-        method: 'POST'
+      const res = await settingsApp.request('/opencode-upgrade', { method: 'POST' })
+
+      expect(res.status).toBe(400)
+      await expect(readJson(res, UpgradeResultSchema)).resolves.toMatchObject({ recovered: true })
+      expect(restart).toHaveBeenCalledTimes(1)
+    })
+
+    it('recovers from a version install failure after the swap started', async () => {
+      manager.getVersion = vi.fn(() => '2.1.1')
+      manager.fetchVersion = vi.fn(async () => '2.1.1')
+      settingsApp = createApp()
+      const { OpenCodeInstallError } = await import('../../src/services/opencode-installer')
+      installer.mockRejectedValueOnce(new OpenCodeInstallError('download failed', true))
+
+      const res = await settingsApp.request('/opencode-install-version', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version: '2.2.5' }),
       })
-      const res = await settingsApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
 
-      expect(mockClearStartupError).toHaveBeenCalled()
-      expect(mockRestart).toHaveBeenCalled()
-      expect(json.recovered).toBe(true)
+      expect(res.status).toBe(400)
+      await expect(readJson(res, UpgradeResultSchema)).resolves.toMatchObject({ recovered: true })
+      expect(restart).toHaveBeenCalledTimes(1)
+    })
+
+    it.each([
+      ['/opencode-upgrade', undefined],
+      ['/opencode-install-version', JSON.stringify({ version: '2.2.5' })],
+    ])('refuses %s while OPENCODE_BIN manages the binary', async (path, body) => {
+      process.env.OPENCODE_BIN = '/usr/local/bin/opencode'
+
+      const res = await settingsApp.request(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      })
+
+      expect(res.status).toBe(409)
+      await expect(readJson(res, ErrorSchema)).resolves.toMatchObject({ error: expect.stringContaining('OPENCODE_BIN') })
+      expect(installer).not.toHaveBeenCalled()
+      expect(restart).not.toHaveBeenCalled()
     })
   })
 
   describe('POST /opencode-restart', () => {
-    beforeEach(() => {
-      vi.clearAllMocks()
-      mockRestart.mockReset()
-      mockClearStartupError.mockReset()
-      mockGetLastStartupError.mockReset()
-      mockRestart.mockResolvedValue(undefined)
-      mockClearStartupError.mockReturnValue(undefined)
-    })
-
     it('returns 500 with the startup failure reason when a supervisor restart is unhealthy', async () => {
-      mockGetLastStartupError.mockReturnValue('OpenCode version 1.18.15 does not support sandboxed bash tool rewriting')
-      const unhealthySupervisor = {
-        restart: vi.fn().mockResolvedValue({ healthy: false }),
-      }
-      const app = createSettingsRoutes(
-        testDb,
-        { getGitEnvironment: vi.fn().mockReturnValue({}) } as any,
-        createStubOpenCodeClient(),
-        unhealthySupervisor as any,
-      )
+      const supervisor = { restart: vi.fn(async () => ({ healthy: false })) }
+      manager.getLastStartupError = vi.fn(() => 'OpenCode version 1.18.15 does not support sandboxed bash tool rewriting')
+      settingsApp = createApp({ supervisor })
 
-      const req = new Request('http://localhost/opencode-restart', { method: 'POST' })
-      const res = await app.fetch(req)
-      const json = await res.json() as Record<string, unknown>
+      const res = await settingsApp.request('/opencode-restart', { method: 'POST' })
 
       expect(res.status).toBe(500)
-      expect(json.success).toBeUndefined()
-      expect(json.error).toBe('Failed to restart OpenCode server')
-      expect(json.details).toContain('does not support sandboxed bash tool rewriting')
-      expect(unhealthySupervisor.restart).toHaveBeenCalledWith('settings_restart')
+      await expect(readJson(res, ErrorSchema)).resolves.toMatchObject({
+        error: 'Failed to restart OpenCode server',
+        details: 'OpenCode version 1.18.15 does not support sandboxed bash tool rewriting',
+      })
+      expect(supervisor.restart).toHaveBeenCalledWith('settings_restart')
     })
 
-    it('returns success when a supervisor restart is healthy', async () => {
-      const healthySupervisor = {
-        restart: vi.fn().mockResolvedValue({ healthy: true }),
-      }
-      const app = createSettingsRoutes(
-        testDb,
-        { getGitEnvironment: vi.fn().mockReturnValue({}) } as any,
-        createStubOpenCodeClient(),
-        healthySupervisor as any,
-      )
+    it('returns success when the supervisor restart is healthy', async () => {
+      const supervisor = { restart: vi.fn(async () => ({ healthy: true })) }
+      settingsApp = createApp({ supervisor })
 
-      const req = new Request('http://localhost/opencode-restart', { method: 'POST' })
-      const res = await app.fetch(req)
-      const json = await res.json() as Record<string, unknown>
+      const res = await settingsApp.request('/opencode-restart', { method: 'POST' })
 
       expect(res.status).toBe(200)
-      expect(json.success).toBe(true)
-      expect(json.message).toBe('OpenCode server restarted successfully')
-      expect(json.interruptedSessions).toBeUndefined()
+      await expect(readJson(res, z.object({ success: z.boolean(), message: z.string() }))).resolves.toEqual({
+        success: true,
+        message: 'OpenCode server restarted successfully',
+      })
     })
 
-    it('returns 500 when a manager restart fails without a supervisor', async () => {
-      mockRestart.mockRejectedValue(new Error('server failed to become healthy'))
-      mockGetLastStartupError.mockReturnValue('server failed to become healthy')
+    it('returns 500 when the manager restart fails without a supervisor', async () => {
+      manager.getLastStartupError = vi.fn(() => 'server failed to become healthy')
+      manager.restart = vi.fn(async () => undefined)
+      manager.checkHealth = vi.fn(async () => false)
+      settingsApp = createSettingsRoutes(db, new GitAuthService(), createStubOpenCodeClient(), undefined, deps)
 
-      const req = new Request('http://localhost/opencode-restart', { method: 'POST' })
-      const res = await settingsApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
+      const res = await settingsApp.request('/opencode-restart', { method: 'POST' })
 
       expect(res.status).toBe(500)
-      expect(json.error).toBe('Failed to restart OpenCode server')
-      expect(json.details).toBe('server failed to become healthy')
+      await expect(readJson(res, ErrorSchema)).resolves.toEqual({
+        error: 'Failed to restart OpenCode server',
+        details: 'server failed to become healthy',
+      })
     })
   })
 
-  describe('PATCH / - restart pending', () => {
-    it('marks the OpenCode server restart pending when sandbox.enabled changes', async () => {
-      mockGetSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: false } },
-        updatedAt: 1,
-      })
-      mockUpdateSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: true } },
-        updatedAt: 2,
-      })
+  describe('PATCH / restart requirements', () => {
+    it.each([
+      ['enabling sandboxing', { sandbox: { enabled: false } }, { sandbox: { enabled: true } }, true],
+      ['disabling sandboxing', { sandbox: { enabled: true } }, { sandbox: { enabled: false } }, true],
+      ['an unchanged sandbox setting', { sandbox: { enabled: true } }, { sandbox: { enabled: true } }, false],
+      ['sandbox git credentials', { sandbox: { enabled: true, gitCredentials: false } }, { sandbox: { enabled: true, gitCredentials: true } }, false],
+      ['sandbox defaultForNewSessions', { sandbox: { enabled: true, defaultForNewSessions: true } }, { sandbox: { enabled: true, defaultForNewSessions: false } }, false],
+      ['a patch without sandbox settings', { sandbox: { enabled: true } }, { theme: 'light' }, false],
+      ['server environment variables', { serverEnvVars: [] }, { serverEnvVars: [{ key: 'FOO', value: 'bar' }] }, true],
+    ])('reports restartRequired for %s', async (_label, current, patch, expectsRestart) => {
+      settings().updateSettings(current)
 
-      const req = new Request('http://localhost/', {
+      const res = await settingsApp.request('/', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preferences: { sandbox: { enabled: true } } }),
+        body: JSON.stringify({ preferences: patch }),
       })
-      const res = await settingsApp.fetch(req)
 
       expect(res.status).toBe(200)
-      expect(opencodeServerManager.markRestartPending).toHaveBeenCalledTimes(1)
+      const body = await readJson(res, SettingsSchema)
+      expect(body.restartRequired).toBe(expectsRestart ? true : undefined)
+      expect(manager.markRestartPending).toHaveBeenCalledTimes(expectsRestart ? 1 : 0)
     })
 
-    it('does not mark the OpenCode server restart pending when sandbox is unchanged', async () => {
-      mockGetSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: true } },
-        updatedAt: 1,
-      })
-      mockUpdateSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: true } },
-        updatedAt: 1,
-      })
+    it('requires a restart when git credentials change', async () => {
+      const credential = { id: 'cred-1', name: 'gh', host: 'github.com', type: 'pat', token: 'new-token' } satisfies GitCredential
+      settings().updateSettings({ gitCredentials: [{ ...credential, token: 'old-token' }] })
 
-      const req = new Request('http://localhost/', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preferences: { sandbox: { enabled: true } } }),
-      })
-      const res = await settingsApp.fetch(req)
-
-      expect(res.status).toBe(200)
-      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
-    })
-
-    it('does not mark the OpenCode server restart pending when only sandbox.gitCredentials changes', async () => {
-      mockGetSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: true, gitCredentials: false } },
-        updatedAt: 1,
-      })
-      mockUpdateSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: true, gitCredentials: true } },
-        updatedAt: 2,
-      })
-
-      const req = new Request('http://localhost/', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preferences: { sandbox: { enabled: true, gitCredentials: true } } }),
-      })
-      const res = await settingsApp.fetch(req)
-
-      expect(res.status).toBe(200)
-      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
-    })
-
-    it('does not mark the OpenCode server restart pending when only sandbox.defaultForNewSessions changes', async () => {
-      mockGetSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: true, defaultForNewSessions: true } },
-        updatedAt: 1,
-      })
-      mockUpdateSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: true, defaultForNewSessions: false } },
-        updatedAt: 2,
-      })
-
-      const req = new Request('http://localhost/', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preferences: { sandbox: { enabled: true, defaultForNewSessions: false } } }),
-      })
-      const res = await settingsApp.fetch(req)
-
-      expect(res.status).toBe(200)
-      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
-    })
-
-    it('does not mark the OpenCode server restart pending when sandbox is absent from the patch', async () => {
-      mockGetSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: true } },
-        updatedAt: 1,
-      })
-      mockUpdateSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: true } },
-        updatedAt: 1,
-      })
-
-      const req = new Request('http://localhost/', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preferences: { theme: 'dark' } }),
-      })
-      const res = await settingsApp.fetch(req)
-
-      expect(res.status).toBe(200)
-      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
-    })
-
-    it('requires a restart when git credentials change instead of reloading config', async () => {
-      const credential = { id: 'cred-1', name: 'gh', host: 'github.com', type: 'pat', token: 'new-token' }
-      mockGetSettings.mockReturnValue({
-        preferences: { gitCredentials: [{ ...credential, token: 'old-token' }] },
-        updatedAt: 1,
-      })
-      mockUpdateSettings.mockReturnValue({
-        preferences: { gitCredentials: [credential] },
-        updatedAt: 2,
-      })
-
-      const req = new Request('http://localhost/', {
+      const res = await settingsApp.request('/', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ preferences: { gitCredentials: [credential] } }),
       })
-      const res = await settingsApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
 
       expect(res.status).toBe(200)
-      expect(json.restartRequired).toBe(true)
-      expect(opencodeServerManager.markRestartPending).toHaveBeenCalledTimes(1)
+      await expect(readJson(res, SettingsSchema)).resolves.toMatchObject({ restartRequired: true })
     })
 
-    it('does not require a restart when only the git identity changes and syncs the identity config', async () => {
-      mockGetSettings.mockReturnValue({
-        preferences: { gitIdentity: { name: 'Old', email: 'old@example.com' } },
-        updatedAt: 1,
-      })
-      mockUpdateSettings.mockReturnValue({
-        preferences: { gitIdentity: { name: 'New', email: 'new@example.com' } },
-        updatedAt: 2,
+    it('does not require a restart when git credentials are resubmitted unchanged', async () => {
+      const credential = { id: 'cred-1', name: 'gh', host: 'github.com', type: 'pat', token: 'same-token' } satisfies GitCredential
+      settings().updateSettings({ gitCredentials: [credential] })
+
+      const res = await settingsApp.request('/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { gitCredentials: [credential] } }),
       })
 
-      const req = new Request('http://localhost/', {
+      expect(res.status).toBe(200)
+      const body = await readJson(res, SettingsSchema)
+      expect(body.restartRequired).toBeUndefined()
+      expect(manager.markRestartPending).not.toHaveBeenCalled()
+    })
+
+    it('syncs the git identity config without requiring a restart', async () => {
+      settings().updateSettings({ gitIdentity: { name: 'Old', email: 'old@example.com' } })
+
+      const res = await settingsApp.request('/', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ preferences: { gitIdentity: { name: 'New', email: 'new@example.com' } } }),
       })
-      const res = await settingsApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
 
       expect(res.status).toBe(200)
-      expect(json.restartRequired).toBeUndefined()
-      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
-      expect(mockSyncManagerGitIdentityConfig).toHaveBeenCalledTimes(1)
+      const body = await readJson(res, SettingsSchema)
+      expect(body.restartRequired).toBeUndefined()
+      expect(syncIdentity).toHaveBeenCalledTimes(1)
+      expect(manager.markRestartPending).not.toHaveBeenCalled()
     })
 
-    it('requires a restart when server environment variables change', async () => {
-      mockGetSettings.mockReturnValue({ preferences: { serverEnvVars: [] }, updatedAt: 1 })
-      mockUpdateSettings.mockReturnValue({ preferences: { serverEnvVars: [{ key: 'FOO', value: 'bar' }] }, updatedAt: 2 })
+    it('marks a restart pending when resetting disables sandboxing', async () => {
+      settings().updateSettings({ sandbox: { enabled: true } })
 
-      const res = await settingsApp.fetch(new Request('http://localhost/', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preferences: { serverEnvVars: [{ key: 'FOO', value: 'bar' }] } }),
-      }))
-      const json = await res.json() as Record<string, unknown>
+      const res = await settingsApp.request('/', { method: 'DELETE' })
 
       expect(res.status).toBe(200)
-      expect(json.restartRequired).toBe(true)
-      expect(opencodeServerManager.markRestartPending).toHaveBeenCalledTimes(1)
+      await expect(readJson(res, SettingsSchema)).resolves.toMatchObject({ restartRequired: true })
+      expect(manager.markRestartPending).toHaveBeenCalledTimes(1)
     })
 
-    it('does not require a restart when git credentials are resubmitted unchanged', async () => {
-      const credential = { id: 'cred-1', name: 'gh', host: 'github.com', type: 'pat', token: 'same-token' }
-      mockGetSettings.mockReturnValue({
-        preferences: { gitCredentials: [credential] },
-        updatedAt: 1,
-      })
-      mockUpdateSettings.mockReturnValue({
-        preferences: { gitCredentials: [credential] },
-        updatedAt: 1,
-      })
-
-      const req = new Request('http://localhost/', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preferences: { gitCredentials: [credential] } }),
-      })
-      const res = await settingsApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
+    it('does not mark a restart pending when resetting an already-default sandbox preference', async () => {
+      const res = await settingsApp.request('/', { method: 'DELETE' })
 
       expect(res.status).toBe(200)
-      expect(json.restartRequired).toBeUndefined()
-      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
+      const body = await readJson(res, SettingsSchema)
+      expect(body.restartRequired).toBeUndefined()
+      expect(manager.markRestartPending).not.toHaveBeenCalled()
     })
   })
 
-  describe('PATCH / - activity window validation', () => {
-    it.each([5, 45, 2000, 30.5])('rejects activityWindowMinutes %s with 400', async (minutes) => {
-      const res = await settingsApp.fetch(new Request('http://localhost/', {
+  describe('PATCH / validation', () => {
+    it.each([5, 45, 2000, 30.5])('rejects activityWindowMinutes %s', async (minutes) => {
+      const res = await settingsApp.request('/', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ preferences: { activityWindowMinutes: minutes } }),
-      }))
-      const json = await res.json() as { error: string }
+      })
 
       expect(res.status).toBe(400)
-      expect(json.error).toBe('Invalid settings data')
-      expect(mockUpdateSettings).not.toHaveBeenCalled()
+      await expect(readJson(res, ErrorSchema)).resolves.toMatchObject({ error: 'Invalid settings data' })
+      expect(settings().getSettings().preferences.activityWindowMinutes).toBe(30)
     })
 
     it('accepts an allowed activityWindowMinutes value', async () => {
-      mockGetSettings.mockReturnValue({
-        preferences: { activityWindowMinutes: 30 },
-        updatedAt: 1,
-      })
-      mockUpdateSettings.mockReturnValue({
-        preferences: { activityWindowMinutes: 60 },
-        updatedAt: 2,
-      })
-
-      const res = await settingsApp.fetch(new Request('http://localhost/', {
+      const res = await settingsApp.request('/', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ preferences: { activityWindowMinutes: 60 } }),
-      }))
+      })
 
       expect(res.status).toBe(200)
-      expect(mockUpdateSettings).toHaveBeenCalledWith({ activityWindowMinutes: 60 }, 'default')
+      await expect(readJson(res, SettingsSchema)).resolves.toMatchObject({
+        preferences: { activityWindowMinutes: 60 },
+      })
     })
-  })
 
-  describe('PATCH / - git identity validation', () => {
-    it.each(['not-an-email', 'two words@example.com', '<agent>@example.com'])('rejects the email %s with 400', async (email) => {
-      const res = await settingsApp.fetch(new Request('http://localhost/', {
+    it.each(['not-an-email', 'two words@example.com', '<agent>@example.com'])('rejects the git identity email %s', async (email) => {
+      const res = await settingsApp.request('/', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ preferences: { gitIdentity: { name: 'Agent', email } } }),
-      }))
-      const json = await res.json() as { error: string }
-
-      expect(res.status).toBe(400)
-      expect(json.error).toBe('Invalid settings data')
-      expect(mockUpdateSettings).not.toHaveBeenCalled()
-    })
-
-    it('reports the rejected field path for the default identity email', async () => {
-      const res = await settingsApp.fetch(new Request('http://localhost/', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preferences: { gitIdentity: { name: 'Agent', email: 'bad' } } }),
-      }))
-      const json = await res.json() as { details: Array<{ path: Array<string | number>; message: string }> }
-
-      expect(res.status).toBe(400)
-      expect(json.details).toContainEqual(expect.objectContaining({
-        path: ['preferences', 'gitIdentity', 'email'],
-        message: 'Invalid email address',
-      }))
-      expect(mockUpdateSettings).not.toHaveBeenCalled()
-    })
-
-    it.each(['', 'agent@example.com', 'root@localhost', 'root@box'])('accepts the email %s', async (email) => {
-      mockGetSettings.mockReturnValue({
-        preferences: { gitIdentity: { name: 'Agent', email: '' } },
-        updatedAt: 1,
-      })
-      mockUpdateSettings.mockReturnValue({
-        preferences: { gitIdentity: { name: 'Agent', email } },
-        updatedAt: 2,
       })
 
-      const res = await settingsApp.fetch(new Request('http://localhost/', {
+      expect(res.status).toBe(400)
+      await expect(readJson(res, ErrorWithPathsSchema)).resolves.toMatchObject({
+        error: 'Invalid settings data',
+        details: expect.arrayContaining([
+          expect.objectContaining({ path: ['preferences', 'gitIdentity', 'email'], message: 'Invalid email address' }),
+        ]),
+      })
+      expect(settings().getSettings().preferences.gitIdentity?.email).toBe('')
+    })
+
+    it.each(['', 'agent@example.com', 'root@localhost', 'root@box'])('accepts the git identity email %s', async (email) => {
+      const res = await settingsApp.request('/', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ preferences: { gitIdentity: { name: 'Agent', email } } }),
-      }))
+      })
 
       expect(res.status).toBe(200)
-      expect(mockUpdateSettings).toHaveBeenCalledWith({ gitIdentity: { name: 'Agent', email } }, 'default')
+      expect(settings().getSettings().preferences.gitIdentity).toEqual({ name: 'Agent', email })
     })
 
     it('trims identity emails before saving', async () => {
-      mockGetSettings.mockReturnValue({
-        preferences: { gitIdentity: { name: 'Agent', email: '' }, gitIdentities: [] },
-        updatedAt: 1,
-      })
-      mockUpdateSettings.mockReturnValue({
-        preferences: {
-          gitIdentity: { name: 'Root', email: 'root@box' },
-          gitIdentities: [{ id: 'work', name: 'Work', email: 'agent@example.com' }],
-        },
-        updatedAt: 2,
-      })
-
-      const res = await settingsApp.fetch(new Request('http://localhost/', {
+      const res = await settingsApp.request('/', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1782,491 +1029,159 @@ describe('Settings Routes - OpenCode Upgrade', () => {
             gitIdentities: [{ id: 'work', name: 'Work', email: ' agent@example.com ' }],
           },
         }),
-      }))
+      })
 
       expect(res.status).toBe(200)
-      expect(mockUpdateSettings).toHaveBeenCalledWith({
-        gitIdentity: { name: 'Root', email: 'root@box' },
-        gitIdentities: [{ id: 'work', name: 'Work', email: 'agent@example.com' }],
-      }, 'default')
-    })
-
-    it('passes preferences through unchanged when no identity fields are present', async () => {
-      mockGetSettings.mockReturnValue({ preferences: { theme: 'dark', mode: 'build' }, updatedAt: 1 })
-      mockUpdateSettings.mockReturnValue({ preferences: { theme: 'light', mode: 'plan' }, updatedAt: 2 })
-
-      const res = await settingsApp.fetch(new Request('http://localhost/', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preferences: { theme: 'light', mode: 'plan' } }),
-      }))
-
-      expect(res.status).toBe(200)
-      expect(mockUpdateSettings).toHaveBeenCalledWith({ theme: 'light', mode: 'plan' }, 'default')
+      const preferences = settings().getSettings().preferences
+      expect(preferences.gitIdentity).toEqual({ name: 'Root', email: 'root@box' })
+      expect(preferences.gitIdentities).toEqual([{ id: 'work', name: 'Work', email: 'agent@example.com' }])
     })
 
     it('rejects an invalid email in a saved identity profile', async () => {
-      const res = await settingsApp.fetch(new Request('http://localhost/', {
+      const res = await settingsApp.request('/', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          preferences: { gitIdentities: [{ id: 'a', name: 'Alpha', email: 'bad' }] },
-        }),
-      }))
-      const json = await res.json() as { details: Array<{ path: Array<string | number>; message: string }> }
+        body: JSON.stringify({ preferences: { gitIdentities: [{ id: 'a', name: 'Alpha', email: 'bad' }] } }),
+      })
 
       expect(res.status).toBe(400)
-      expect(json.details).toContainEqual(expect.objectContaining({
-        path: ['preferences', 'gitIdentities', 0, 'email'],
-        message: 'Invalid email address',
-      }))
-      expect(mockUpdateSettings).not.toHaveBeenCalled()
+      await expect(readJson(res, ErrorWithPathsSchema)).resolves.toMatchObject({
+        error: 'Invalid settings data',
+        details: expect.arrayContaining([
+          expect.objectContaining({ path: ['preferences', 'gitIdentities', 0, 'email'], message: 'Invalid email address' }),
+        ]),
+      })
     })
   })
 
-  describe('PATCH / - sandbox enable guard', () => {
-    afterEach(() => {
-      forceProcessAttestation(null)
-    })
-
-    it('rejects enabling sandboxing with 400 when sandbox capability is unavailable and does not persist settings', async () => {
-      mockDetectSandboxCapability.mockReturnValue({
+  describe('PATCH / sandbox guards', () => {
+    it('rejects enabling sandboxing when the capability is unavailable', async () => {
+      capability.mockReturnValue({
         available: false,
         reason: '/dev/kvm is not available or not writable; pass --device /dev/kvm and run on a KVM-capable Linux host',
       })
-      mockGetSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: false } },
-        updatedAt: 1,
-      })
 
-      const req = new Request('http://localhost/', {
+      const res = await settingsApp.request('/', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ preferences: { sandbox: { enabled: true } } }),
       })
-      const res = await settingsApp.fetch(req)
-      const json = await res.json() as { error: string }
 
       expect(res.status).toBe(400)
-      expect(json.error).toBe('Cannot enable sandboxing: /dev/kvm is not available or not writable; pass --device /dev/kvm and run on a KVM-capable Linux host')
-      expect(mockUpdateSettings).not.toHaveBeenCalled()
-      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
+      await expect(readJson(res, ErrorSchema)).resolves.toEqual({
+        error: 'Cannot enable sandboxing: /dev/kvm is not available or not writable; pass --device /dev/kvm and run on a KVM-capable Linux host',
+      })
+      expect(settings().getSettings().preferences.sandbox?.enabled).toBe(false)
+      expect(manager.markRestartPending).not.toHaveBeenCalled()
     })
 
-    it('rejects enabling sandboxing with 400 when capability is available but process identity is not attested', async () => {
+    it('rejects enabling sandboxing when process identity attestation is unavailable', async () => {
       forceProcessAttestation(false)
-      mockGetSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: false } },
-        updatedAt: 1,
-      })
 
-      const req = new Request('http://localhost/', {
+      const res = await settingsApp.request('/', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ preferences: { sandbox: { enabled: true } } }),
       })
-      const res = await settingsApp.fetch(req)
-      const json = await res.json() as { error: string }
 
       expect(res.status).toBe(400)
-      expect(json.error).toBe('Cannot enable sandboxing: process identity attestation is unavailable on this platform (Linux /proc is required)')
-      expect(mockUpdateSettings).not.toHaveBeenCalled()
-      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
+      await expect(readJson(res, ErrorSchema)).resolves.toEqual({
+        error: 'Cannot enable sandboxing: process identity attestation is unavailable on this platform (Linux /proc is required)',
+      })
+      expect(settings().getSettings().preferences.sandbox?.enabled).toBe(false)
     })
 
-    it('enables sandboxing with 200 when capability is available and process identity is attested', async () => {
-      mockGetSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: false } },
-        updatedAt: 1,
-      })
-      mockUpdateSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: true } },
-        updatedAt: 2,
-      })
-
-      const req = new Request('http://localhost/', {
+    it('enables sandboxing when capability and attestation are available', async () => {
+      const res = await settingsApp.request('/', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ preferences: { sandbox: { enabled: true } } }),
       })
-      const res = await settingsApp.fetch(req)
 
       expect(res.status).toBe(200)
-      expect(mockUpdateSettings).toHaveBeenCalledWith({ sandbox: { enabled: true } }, 'default')
-      expect(opencodeServerManager.markRestartPending).toHaveBeenCalledTimes(1)
+      expect(settings().getSettings().preferences.sandbox?.enabled).toBe(true)
+      expect(manager.markRestartPending).toHaveBeenCalledTimes(1)
     })
 
-    it('allows disabling sandboxing with 200 even when capability is unavailable and identity is not attested', async () => {
-      mockDetectSandboxCapability.mockReturnValue({
-        available: false,
-        reason: '/dev/kvm is not available or not writable; pass --device /dev/kvm and run on a KVM-capable Linux host',
-      })
+    it('allows disabling sandboxing even when capability and attestation are unavailable', async () => {
+      capability.mockReturnValue({ available: false, reason: '/dev/kvm is not available' })
       forceProcessAttestation(false)
-      mockGetSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: true } },
-        updatedAt: 1,
-      })
-      mockUpdateSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: false } },
-        updatedAt: 2,
-      })
+      settings().updateSettings({ sandbox: { enabled: true } })
 
-      const req = new Request('http://localhost/', {
+      const res = await settingsApp.request('/', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ preferences: { sandbox: { enabled: false } } }),
       })
-      const res = await settingsApp.fetch(req)
 
       expect(res.status).toBe(200)
-      expect(mockUpdateSettings).toHaveBeenCalledWith({ sandbox: { enabled: false } }, 'default')
-      expect(opencodeServerManager.markRestartPending).toHaveBeenCalledTimes(1)
+      expect(settings().getSettings().preferences.sandbox?.enabled).toBe(false)
+      expect(manager.markRestartPending).toHaveBeenCalledTimes(1)
     })
-  })
 
-  describe('PATCH / - sandbox resource host limits', () => {
-    it('rejects sandbox resources above the host limit with 400 and does not persist settings', async () => {
-      resourcesMock.sandboxResourceLimitError.mockReturnValue('Requested 8 CPUs exceeds the host limit of 4')
-      mockGetSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: true } },
-        updatedAt: 1,
-      })
+    it('rejects sandbox resources above the host limit', async () => {
+      settings().updateSettings({ sandbox: { enabled: true } })
+      resourceLimitError.mockReturnValue('Requested 8 CPUs exceeds the host limit of 4')
 
-      const req = new Request('http://localhost/', {
+      const res = await settingsApp.request('/', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ preferences: { sandbox: { enabled: true, cpus: 8, memoryMib: 4096 } } }),
       })
-      const res = await settingsApp.fetch(req)
-      const json = await res.json() as { error: string }
 
       expect(res.status).toBe(400)
-      expect(json.error).toBe('Requested 8 CPUs exceeds the host limit of 4')
-      expect(resourcesMock.sandboxResourceLimitError).toHaveBeenCalledWith(
-        expect.objectContaining({ cpus: 8, memoryMib: 4096 }),
-      )
-      expect(mockUpdateSettings).not.toHaveBeenCalled()
+      await expect(readJson(res, ErrorSchema)).resolves.toEqual({ error: 'Requested 8 CPUs exceeds the host limit of 4' })
+      expect(resourceLimitError).toHaveBeenCalledWith(expect.objectContaining({ cpus: 8, memoryMib: 4096 }))
+      expect(settings().getSettings().preferences.sandbox?.cpus).toBeUndefined()
     })
 
     it('accepts sandbox resources within the host limit', async () => {
-      mockGetSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: true } },
-        updatedAt: 1,
-      })
-      mockUpdateSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: true, cpus: 4, memoryMib: 8192 } },
-        updatedAt: 2,
-      })
+      settings().updateSettings({ sandbox: { enabled: true } })
 
-      const req = new Request('http://localhost/', {
+      const res = await settingsApp.request('/', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ preferences: { sandbox: { enabled: true, cpus: 4, memoryMib: 8192 } } }),
       })
-      const res = await settingsApp.fetch(req)
 
       expect(res.status).toBe(200)
-      expect(mockUpdateSettings).toHaveBeenCalledWith({ sandbox: { enabled: true, cpus: 4, memoryMib: 8192 } }, 'default')
-    })
-  })
-
-  describe('DELETE / - sandbox preference restart pending', () => {
-    it('marks the OpenCode server restart pending when resetting disables sandboxing', async () => {
-      mockGetSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: true } },
-        updatedAt: 1,
+      await expect(readJson(res, SettingsSchema)).resolves.toMatchObject({
+        preferences: { sandbox: { enabled: true, cpus: 4, memoryMib: 8192 } },
       })
-      mockResetSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: false } },
-        updatedAt: 2,
-      })
-
-      const req = new Request('http://localhost/', { method: 'DELETE' })
-      const res = await settingsApp.fetch(req)
-
-      expect(res.status).toBe(200)
-      expect(opencodeServerManager.markRestartPending).toHaveBeenCalledTimes(1)
-    })
-
-    it('does not mark the OpenCode server restart pending when resetting an already-default sandbox preference', async () => {
-      mockGetSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: false } },
-        updatedAt: 1,
-      })
-      mockResetSettings.mockReturnValue({
-        preferences: { sandbox: { enabled: false } },
-        updatedAt: 2,
-      })
-
-      const req = new Request('http://localhost/', { method: 'DELETE' })
-      const res = await settingsApp.fetch(req)
-
-      expect(res.status).toBe(200)
-      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('Settings Routes - manager token rotation', () => {
-    let settingsApp: ReturnType<typeof createSettingsRoutes>
-    let tokenDb: Database
-
-    beforeEach(() => {
-      vi.clearAllMocks()
-      tokenDb = new Database(':memory:')
-      migrate(tokenDb, allMigrations)
-      settingsApp = createSettingsRoutes(
-        tokenDb,
-        { getGitEnvironment: vi.fn().mockReturnValue({}) } as any,
-        createStubOpenCodeClient(),
-      )
-      mockRestart.mockResolvedValue(undefined)
-      mockClearStartupError.mockReturnValue(undefined)
-    })
-
-    afterEach(() => {
-      tokenDb.close()
-    })
-
-    it('rotates the manager token and marks the OpenCode server restart as pending', async () => {
-      const previous = getOrCreateInternalToken(tokenDb)
-
-      const res = await settingsApp.fetch(new Request('http://localhost/manager-token/rotate', { method: 'POST' }))
-      const json = await res.json() as { token: string }
-
-      expect(res.status).toBe(200)
-      expect(json.token).toBeDefined()
-      expect(json.token).not.toBe(previous)
-      expect(opencodeServerManager.markRestartPending).toHaveBeenCalledTimes(1)
-    })
-
-    it('does not mark the OpenCode server restart as pending when rotation fails', async () => {
-      const brokenDb = {
-        prepare: vi.fn(() => {
-          throw new Error('database is unavailable')
-        }),
-      } as any
-      settingsApp = createSettingsRoutes(
-        brokenDb,
-        { getGitEnvironment: vi.fn().mockReturnValue({}) } as any,
-        createStubOpenCodeClient(),
-      )
-
-      const res = await settingsApp.fetch(new Request('http://localhost/manager-token/rotate', { method: 'POST' }))
-
-      expect(res.status).toBe(500)
-      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
-    })
-  })
-})
-
-describe('Settings Routes - versions, directory files, skills, MCP and maintenance', () => {
-  let app: ReturnType<typeof createSettingsRoutes>
-  let db: Database
-  let supervisor: { restart: ReturnType<typeof vi.fn> }
-  let openCodeClient: OpenCodeClient
-  let fetchMock: ReturnType<typeof vi.fn>
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockSpawnSync.mockReset()
-    mockGetVersion.mockReset()
-    mockFetchVersion.mockReset()
-    mockRestart.mockReset()
-    mockClearStartupError.mockReset()
-    mockGetOpenCodeServerPasswordSource.mockReset()
-    mockGetStoredOpenCodeServerPasswordState.mockReset()
-    mockClearOpenCodeServerPassword.mockReset()
-    mockSetOpenCodeServerPassword.mockReset()
-    mockRestoreOpenCodeServerPasswordState.mockReset()
-    mockListManagedSkills.mockReset()
-    mockGetSkill.mockReset()
-    mockCreateSkill.mockReset()
-    mockUpdateSkill.mockReset()
-    mockDeleteSkill.mockReset()
-    mockInstallSkillFromGithubTree.mockReset()
-    mockInstallSkillFromUploadedFiles.mockReset()
-    mockInstallOpenCodeDirectoryFiles.mockReset()
-    mockListOpenCodeDirectoryFiles.mockReset()
-    mockGetOpenCodeDirectoryFile.mockReset()
-    mockUpdateOpenCodeDirectoryFile.mockReset()
-    mockDeleteOpenCodeDirectoryFile.mockReset()
-    mockDiscoverModelsCached.mockReset()
-    mockValidateSSHPrivateKey.mockReset()
-
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
-    supervisor = {
-      restart: vi.fn().mockResolvedValue({ healthy: true }),
-    }
-    openCodeClient = createStubOpenCodeClient()
-    mockReadOpenCodeConfigFile.mockReset().mockResolvedValue({ isValid: true })
-    app = createSettingsRoutes(
-      db,
-      { getGitEnvironment: vi.fn().mockReturnValue({}) } as any,
-      openCodeClient,
-      supervisor as any,
-    )
-    fetchMock = vi.fn()
-    vi.stubGlobal('fetch', fetchMock)
-    clearOpenCodeVersionCache()
-    mockGetVersion.mockReturnValue('2.2.5')
-    mockFetchVersion.mockResolvedValue('2.2.5')
-    mockInstallOpenCodeVersion.mockReset()
-    mockInstallOpenCodeVersion.mockResolvedValue('/home/node/.opencode/bin/opencode')
-    mockClearStartupError.mockReturnValue(undefined)
-    mockSpawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' })
-    mockValidateSSHPrivateKey.mockResolvedValue({ valid: true, hasPassphrase: false })
-    mockWriteTemporarySSHKey.mockReset().mockResolvedValue('/tmp/test-ssh-key')
-    mockCleanupSSHKey.mockReset().mockResolvedValue(undefined)
-    mockGetOpenCodeServerPasswordSource.mockReturnValue('managed')
-    mockGetStoredOpenCodeServerPasswordState.mockReturnValue(null)
-  })
-
-  afterEach(() => {
-    db.close()
-    vi.unstubAllGlobals()
-  })
-
-  describe('GET /opencode-versions', () => {
-    it('returns supported OpenCode 2 releases from the npm registry with the current version', async () => {
-      fetchMock.mockResolvedValue(new Response(JSON.stringify({
-        versions: {
-          '1.18.32': {},
-          '2.1.1': {},
-          '2.2.5': {},
-          '2.2.6': {},
-          '2.2.5-beta.1': {},
-          '3.0.0': {},
-        },
-        time: {
-          '2.2.5': '2026-01-02T00:00:00Z',
-          '2.2.6': '2026-01-03T00:00:00Z',
-        },
-      }), { status: 200 }))
-
-      const res = await app.request(new Request('http://localhost/opencode-versions'))
-      const json = await res.json() as { versions: Array<{ version: string; tag: string; name: string; publishedAt: string | null }>; currentVersion: string }
-
-      expect(res.status).toBe(200)
-      expect(json.currentVersion).toBe('2.2.5')
-      expect(json.versions).toEqual([
-        { version: '2.2.6', tag: 'v2.2.6', name: 'v2.2.6', publishedAt: '2026-01-03T00:00:00Z' },
-        { version: '2.2.5', tag: 'v2.2.5', name: 'v2.2.5', publishedAt: '2026-01-02T00:00:00Z' },
-      ])
-      expect(fetchMock).toHaveBeenCalledWith('https://registry.npmjs.org/@opencode/cli')
-    })
-
-    it('serves repeated requests from the installer cache', async () => {
-      fetchMock.mockImplementation(async () => new Response(JSON.stringify({ versions: { '2.2.5': {} }, time: {} }), { status: 200 }))
-
-      await app.request(new Request('http://localhost/opencode-versions'))
-      const res = await app.request(new Request('http://localhost/opencode-versions'))
-
-      expect(res.status).toBe(200)
-      expect(fetchMock).toHaveBeenCalledTimes(1)
-    })
-
-    it('returns 500 when the registry request fails', async () => {
-      fetchMock.mockResolvedValue(new Response('unavailable', { status: 503 }))
-
-      const res = await app.request(new Request('http://localhost/opencode-versions'))
-      const json = await res.json() as { error: string; details: string }
-
-      expect(res.status).toBe(500)
-      expect(json.error).toBe('Failed to fetch versions')
-      expect(json.details).toContain('503')
-    })
-  })
-
-  describe('POST /opencode-upgrade', () => {
-    it('returns 500 without restarting when the registry lookup fails', async () => {
-      fetchMock.mockResolvedValue(new Response('unavailable', { status: 503 }))
-
-      const res = await app.request(new Request('http://localhost/opencode-upgrade', { method: 'POST' }))
-      const json = await res.json() as { error: string; recovered: boolean }
-
-      expect(res.status).toBe(500)
-      expect(json.error).toBe('Failed to upgrade OpenCode')
-      expect(json.recovered).toBe(false)
-      expect(supervisor.restart).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('POST /opencode-install-version', () => {
-    it('installs the requested version and restarts the server', async () => {
-      mockGetVersion.mockReturnValue('2.1.1')
-      mockFetchVersion.mockResolvedValue('2.2.5')
-      mockInstallOpenCodeVersion.mockResolvedValueOnce('/home/node/.opencode/bin/opencode')
-
-      const res = await app.request(new Request('http://localhost/opencode-install-version', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ version: '2.2.5' }),
-      }))
-      const json = await res.json() as { success: boolean; message: string; oldVersion: string; newVersion: string }
-
-      expect(res.status).toBe(200)
-      expect(json.success).toBe(true)
-      expect(json.oldVersion).toBe('2.1.1')
-      expect(json.newVersion).toBe('2.2.5')
-      expect(json.message).toContain('changed from v2.1.1 to v2.2.5')
-      expect(supervisor.restart).toHaveBeenCalledTimes(1)
-      expect(mockInstallOpenCodeVersion).toHaveBeenCalledWith('2.2.5')
-    })
-
-    it('returns 500 without restarting when the version install fails before the binary swap', async () => {
-      mockGetVersion.mockReturnValue('2.1.1')
-      mockFetchVersion.mockResolvedValue('2.2.5')
-      mockInstallOpenCodeVersion.mockRejectedValueOnce(new Error('download failed'))
-      supervisor.restart.mockResolvedValue({ healthy: false })
-
-      const res = await app.request(new Request('http://localhost/opencode-install-version', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ version: '2.2.5' }),
-      }))
-      const json = await res.json() as { recovered: boolean; newVersion: string }
-
-      expect(res.status).toBe(500)
-      expect(json.recovered).toBe(false)
-      expect(json.newVersion).toBe('2.1.1')
-      expect(supervisor.restart).not.toHaveBeenCalled()
     })
   })
 
   describe('OpenCode directory file routes', () => {
-    it('lists directory files by kind', async () => {
-      mockListOpenCodeDirectoryFiles.mockResolvedValue([
-        { kind: 'agents', name: 'assistant', relativePath: 'assistant.md' },
-      ])
+    async function seedDirectoryFile(kind: 'agents' | 'commands', relativePath: string, content: string): Promise<void> {
+      await mkdir(configPath(kind), { recursive: true })
+      await writeFile(configPath(kind, relativePath), content)
+    }
 
-      const res = await app.request(new Request('http://localhost/opencode-directory-files?kind=agents'))
+    it('lists directory files by kind', async () => {
+      await seedDirectoryFile('agents', 'assistant.md', '# Assistant')
+
+      const res = await settingsApp.request('/opencode-directory-files?kind=agents')
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual([
+      await expect(readJson(res, DirectoryFilesSchema)).resolves.toEqual([
         { kind: 'agents', name: 'assistant', relativePath: 'assistant.md' },
       ])
-      expect(mockListOpenCodeDirectoryFiles).toHaveBeenCalledWith('agents')
     })
 
-    it('returns 400 when the directory file kind is invalid', async () => {
-      const res = await app.request(new Request('http://localhost/opencode-directory-files?kind=unknown'))
+    it('returns 400 for an invalid directory file kind', async () => {
+      const res = await settingsApp.request('/opencode-directory-files?kind=unknown')
 
       expect(res.status).toBe(400)
+      await expect(readJson(res, ErrorWithPathsSchema)).resolves.toMatchObject({ error: 'Invalid file kind' })
     })
 
     it('returns a directory file and its content', async () => {
-      mockGetOpenCodeDirectoryFile.mockResolvedValue({
-        kind: 'commands',
-        name: 'review',
-        relativePath: 'review.md',
-        content: 'Review the changes',
-      })
+      await seedDirectoryFile('commands', 'review.md', 'Review the changes')
 
-      const res = await app.request(new Request('http://localhost/opencode-directory-files/content?kind=commands&relativePath=review.md'))
+      const res = await settingsApp.request('/opencode-directory-files/content?kind=commands&relativePath=review.md')
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({
+      await expect(readJson(res, DirectoryFileSchema)).resolves.toEqual({
         kind: 'commands',
         name: 'review',
         relativePath: 'review.md',
@@ -2275,622 +1190,579 @@ describe('Settings Routes - versions, directory files, skills, MCP and maintenan
     })
 
     it('returns 404 when the directory file does not exist', async () => {
-      mockGetOpenCodeDirectoryFile.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }))
-
-      const res = await app.request(new Request('http://localhost/opencode-directory-files/content?kind=agents&relativePath=missing.md'))
+      const res = await settingsApp.request('/opencode-directory-files/content?kind=agents&relativePath=missing.md')
 
       expect(res.status).toBe(404)
-      expect(await res.json()).toEqual({ error: 'File not found' })
+      await expect(readJson(res, ErrorSchema)).resolves.toEqual({ error: 'File not found' })
     })
 
     it('returns 400 when the content query is invalid', async () => {
-      const res = await app.request(new Request('http://localhost/opencode-directory-files/content?kind=agents'))
+      const res = await settingsApp.request('/opencode-directory-files/content?kind=agents')
 
       expect(res.status).toBe(400)
-      expect(await res.json()).toEqual({ error: 'Invalid request', details: expect.any(Array) })
+      await expect(readJson(res, ErrorWithPathsSchema)).resolves.toMatchObject({ error: 'Invalid request' })
     })
 
     it('updates a directory file and reloads OpenCode', async () => {
-      mockUpdateOpenCodeDirectoryFile.mockResolvedValue({
-        kind: 'commands',
-        name: 'review',
-        relativePath: 'review.md',
-      })
+      await seedDirectoryFile('commands', 'review.md', 'Old')
 
-      const res = await app.request(new Request('http://localhost/opencode-directory-files', {
+      const res = await settingsApp.request('/opencode-directory-files', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ kind: 'commands', relativePath: 'review.md', content: 'Updated' }),
-      }))
+      })
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({
+      await expect(readJson(res, DirectoryFileSchema)).resolves.toEqual({
         kind: 'commands',
         name: 'review',
         relativePath: 'review.md',
         restartRequired: false,
       })
-      expect(mockUpdateOpenCodeDirectoryFile).toHaveBeenCalledWith('commands', 'review.md', 'Updated')
-      expect(openCodeClient.api.location.reload).toHaveBeenCalledTimes(1)
-      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
+      await expect(readFile(configPath('commands', 'review.md'), 'utf-8')).resolves.toBe('Updated')
+      expect(reload).toHaveBeenCalledTimes(1)
+      expect(restart).not.toHaveBeenCalled()
     })
 
     it('returns 400 when updating a directory file with an invalid body', async () => {
-      const res = await app.request(new Request('http://localhost/opencode-directory-files', {
+      const res = await settingsApp.request('/opencode-directory-files', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ kind: 'commands' }),
-      }))
+      })
 
       expect(res.status).toBe(400)
-      expect(await res.json()).toEqual({ error: 'Invalid request', details: expect.any(Array) })
-      expect(mockUpdateOpenCodeDirectoryFile).not.toHaveBeenCalled()
+      await expect(readJson(res, ErrorWithPathsSchema)).resolves.toMatchObject({ error: 'Invalid request' })
     })
 
     it('deletes a directory file and reloads OpenCode', async () => {
-      mockDeleteOpenCodeDirectoryFile.mockResolvedValue(undefined)
+      await seedDirectoryFile('agents', 'assistant.md', '# Assistant')
 
-      const res = await app.request(new Request('http://localhost/opencode-directory-files?kind=agents&relativePath=assistant.md', {
+      const res = await settingsApp.request('/opencode-directory-files?kind=agents&relativePath=assistant.md', {
         method: 'DELETE',
-      }))
+      })
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ kind: 'agents', relativePath: 'assistant.md', restartRequired: false })
-      expect(mockDeleteOpenCodeDirectoryFile).toHaveBeenCalledWith('agents', 'assistant.md')
-      expect(openCodeClient.api.location.reload).toHaveBeenCalledTimes(1)
-      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
+      await expect(readJson(res, z.object({
+        kind: z.string(),
+        relativePath: z.string(),
+        restartRequired: z.boolean(),
+      }))).resolves.toEqual({
+        kind: 'agents',
+        relativePath: 'assistant.md',
+        restartRequired: false,
+      })
+      await expect(readFile(configPath('agents', 'assistant.md'), 'utf-8')).rejects.toThrow()
+      expect(reload).toHaveBeenCalledTimes(1)
     })
 
-    it('returns 400 when installing directory files without multipart form data', async () => {
-      const res = await app.request(new Request('http://localhost/opencode-directory-files/install', {
+    it('rejects installing directory files without multipart form data', async () => {
+      const res = await settingsApp.request('/opencode-directory-files/install', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ kind: 'agents' }),
-      }))
+      })
 
       expect(res.status).toBe(400)
-      expect(await res.json()).toEqual({ error: 'Unsupported content type. Use multipart/form-data' })
+      await expect(readJson(res, ErrorSchema)).resolves.toEqual({
+        error: 'Unsupported content type. Use multipart/form-data',
+      })
     })
 
     it('installs uploaded directory files and reloads OpenCode', async () => {
-      mockInstallOpenCodeDirectoryFiles.mockResolvedValue({ kind: 'agents', filesInstalled: ['assistant.md'] })
-
       const formData = new FormData()
       formData.set('kind', 'agents')
       formData.set('fileManifest', JSON.stringify([{ fieldName: 'file0', relativePath: 'assistant.md' }]))
       formData.set('file0', new File(['# Assistant'], 'assistant.md', { type: 'text/markdown' }))
 
-      const res = await app.request(new Request('http://localhost/opencode-directory-files/install', {
+      const res = await settingsApp.request('/opencode-directory-files/install', {
         method: 'POST',
         body: formData,
-      }))
+      })
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({
+      await expect(readJson(res, z.object({
+        kind: z.string(),
+        filesInstalled: z.array(z.string()),
+        restartRequired: z.boolean(),
+      }))).resolves.toEqual({
         kind: 'agents',
         filesInstalled: ['assistant.md'],
         restartRequired: false,
       })
-      expect(mockInstallOpenCodeDirectoryFiles).toHaveBeenCalledWith('agents', [
-        { relativePath: 'assistant.md', content: expect.any(Buffer) },
-      ])
-      expect(openCodeClient.api.location.reload).toHaveBeenCalledTimes(1)
-      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
+      await expect(readFile(configPath('agents', 'assistant.md'), 'utf-8')).resolves.toBe('# Assistant')
+      expect(reload).toHaveBeenCalledTimes(1)
     })
-  })
 
-  describe('PUT /agents-md', () => {
     it('writes AGENTS.md and reloads OpenCode without restarting the server', async () => {
-      const res = await app.request(new Request('http://localhost/agents-md', {
+      const res = await settingsApp.request('/agents-md', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: '# Rules' }),
-      }))
+      })
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ success: true, restartRequired: false })
-      expect(openCodeClient.api.location.reload).toHaveBeenCalledTimes(1)
-      expect(supervisor.restart).not.toHaveBeenCalled()
+      await expect(readJson(res, z.object({ success: z.boolean(), restartRequired: z.boolean() }))).resolves.toEqual({
+        success: true,
+        restartRequired: false,
+      })
+      await expect(readFile(configPath('AGENTS.md'), 'utf-8')).resolves.toBe('# Rules')
+      expect(reload).toHaveBeenCalledTimes(1)
+      expect(restart).not.toHaveBeenCalled()
     })
   })
 
   describe('Skill routes', () => {
-    it('lists managed skills', async () => {
-      mockListManagedSkills.mockResolvedValue([
-        { name: 'review', description: 'Review changes', body: 'body', scope: 'global', location: '/tmp/review' },
-      ])
-
-      const res = await app.request(new Request('http://localhost/skills'))
-
-      expect(res.status).toBe(200)
-      expect(await res.json()).toEqual([
-        { name: 'review', description: 'Review changes', body: 'body', scope: 'global', location: '/tmp/review' },
-      ])
-      expect(mockListManagedSkills).toHaveBeenCalledWith(db, expect.anything(), undefined, undefined)
-    })
-
-    it('returns a skill by name and scope', async () => {
-      mockGetSkill.mockResolvedValue({
-        name: 'review',
-        description: 'Review changes',
-        body: 'body',
-        scope: 'global',
-        location: '/tmp/review',
-      })
-
-      const res = await app.request(new Request('http://localhost/skills/review?scope=global'))
-
-      expect(res.status).toBe(200)
-      expect(mockGetSkill).toHaveBeenCalledWith(db, expect.anything(), 'review', 'global', undefined)
-    })
-
-    it('returns 400 for an invalid skill scope', async () => {
-      const res = await app.request(new Request('http://localhost/skills/review?scope=invalid'))
-
-      expect(res.status).toBe(400)
-      expect(await res.json()).toEqual({ error: 'Invalid scope parameter. Must be "global" or "project"' })
-    })
-
-    it('returns 400 when a project skill is requested without a repoId', async () => {
-      const res = await app.request(new Request('http://localhost/skills/review?scope=project'))
-
-      expect(res.status).toBe(400)
-      expect(await res.json()).toEqual({ error: 'repoId is required for project scope' })
-    })
-
-    it('returns 404 when the skill does not exist', async () => {
-      mockGetSkill.mockRejectedValue(new Error('Skill not found'))
-
-      const res = await app.request(new Request('http://localhost/skills/review?scope=global'))
-
-      expect(res.status).toBe(404)
-      expect(await res.json()).toEqual({ error: 'Skill not found' })
-    })
-
-    it('creates a skill and reloads OpenCode', async () => {
-      mockCreateSkill.mockResolvedValue({
-        name: 'review',
-        description: 'Review changes',
-        body: 'body',
-        scope: 'global',
-        location: '/tmp/review',
-      })
-
-      const res = await app.request(new Request('http://localhost/skills', {
+    it('creates, lists, reads and deletes a global skill', async () => {
+      const createRes = await settingsApp.request('/skills', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'review', description: 'Review changes', body: 'body', scope: 'global' }),
-      }))
+        body: JSON.stringify({ name: 'review', description: 'Review changes', body: 'Body', scope: 'global' }),
+      })
 
-      expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({
+      expect(createRes.status).toBe(200)
+      await expect(readJson(createRes, SkillSchema)).resolves.toMatchObject({
         name: 'review',
         description: 'Review changes',
-        body: 'body',
         scope: 'global',
-        location: '/tmp/review',
         restartRequired: false,
       })
-      expect(openCodeClient.api.location.reload).toHaveBeenCalledTimes(1)
-      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
-    })
+      await expect(readFile(configPath('skills', 'review', 'SKILL.md'), 'utf-8')).resolves.toContain('name: review')
 
-    it('returns 409 when creating a skill that already exists', async () => {
-      mockCreateSkill.mockRejectedValue(new Error('Skill already exists'))
+      const listRes = await settingsApp.request('/skills')
+      await expect(readJson(listRes, SkillListSchema)).resolves.toEqual([
+        expect.objectContaining({ name: 'review', description: 'Review changes', scope: 'global' }),
+      ])
 
-      const res = await app.request(new Request('http://localhost/skills', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'review', description: 'Review changes', body: 'body', scope: 'global' }),
-      }))
+      const getRes = await settingsApp.request('/skills/review?scope=global')
+      await expect(readJson(getRes, SkillSchema)).resolves.toMatchObject({ name: 'review', body: 'Body' })
 
-      expect(res.status).toBe(409)
-      expect(await res.json()).toEqual({ error: 'Skill already exists' })
+      const deleteRes = await settingsApp.request('/skills/review?scope=global', { method: 'DELETE' })
+      expect(deleteRes.status).toBe(200)
+      await expect(readJson(deleteRes, z.object({ success: z.boolean(), restartRequired: z.boolean() }))).resolves.toEqual({
+        success: true,
+        restartRequired: false,
+      })
+      await expect(readFile(configPath('skills', 'review', 'SKILL.md'), 'utf-8')).rejects.toThrow()
+      expect(reload).toHaveBeenCalledTimes(2)
     })
 
     it('updates a skill and reloads OpenCode', async () => {
-      mockUpdateSkill.mockResolvedValue({
-        name: 'review',
-        description: 'Updated',
-        body: 'body',
-        scope: 'global',
-        location: '/tmp/review',
+      settingsApp = createApp()
+      await settingsApp.request('/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'review', description: 'Review changes', body: 'Body', scope: 'global' }),
       })
 
-      const res = await app.request(new Request('http://localhost/skills/review?scope=global', {
+      const res = await settingsApp.request('/skills/review?scope=global', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ description: 'Updated' }),
-      }))
+      })
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({
-        name: 'review',
-        description: 'Updated',
-        body: 'body',
-        scope: 'global',
-        location: '/tmp/review',
-        restartRequired: false,
-      })
-      expect(openCodeClient.api.location.reload).toHaveBeenCalledTimes(1)
-      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
+      await expect(readJson(res, SkillSchema)).resolves.toMatchObject({ description: 'Updated', restartRequired: false })
+      await expect(readFile(configPath('skills', 'review', 'SKILL.md'), 'utf-8')).resolves.toContain('description: Updated')
     })
 
-    it('deletes a skill and reloads OpenCode', async () => {
-      mockDeleteSkill.mockResolvedValue(undefined)
+    it('returns 409 when creating a skill that already exists', async () => {
+      await settingsApp.request('/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'review', description: 'Review changes', body: 'Body', scope: 'global' }),
+      })
 
-      const res = await app.request(new Request('http://localhost/skills/review?scope=global', { method: 'DELETE' }))
+      const res = await settingsApp.request('/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'review', description: 'Other', body: 'Body', scope: 'global' }),
+      })
 
-      expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ success: true, restartRequired: false })
-      expect(mockDeleteSkill).toHaveBeenCalledWith(db, 'review', 'global', undefined)
-      expect(openCodeClient.api.location.reload).toHaveBeenCalledTimes(1)
-      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
+      expect(res.status).toBe(409)
+      await expect(readJson(res, ErrorSchema)).resolves.toEqual({
+        error: 'Skill "review" already exists in global scope',
+      })
+    })
+
+    it('returns 400 for an invalid skill scope', async () => {
+      const res = await settingsApp.request('/skills/review?scope=invalid')
+
+      expect(res.status).toBe(400)
+      await expect(readJson(res, ErrorSchema)).resolves.toEqual({
+        error: 'Invalid scope parameter. Must be "global" or "project"',
+      })
+    })
+
+    it('returns 400 when a project skill is requested without a repoId', async () => {
+      const res = await settingsApp.request('/skills/review?scope=project')
+
+      expect(res.status).toBe(400)
+      await expect(readJson(res, ErrorSchema)).resolves.toEqual({ error: 'repoId is required for project scope' })
+    })
+
+    it('returns 404 when the skill does not exist', async () => {
+      const res = await settingsApp.request('/skills/missing?scope=global')
+
+      expect(res.status).toBe(404)
+      await expect(readJson(res, ErrorSchema)).resolves.toEqual({
+        error: 'Skill "missing" not found in global scope',
+      })
     })
 
     it('marks a restart pending when reloading OpenCode after a skill change fails', async () => {
-      mockDeleteSkill.mockResolvedValue(undefined)
-      vi.mocked(openCodeClient.api.location.reload).mockRejectedValueOnce(new Error('OpenCode server unavailable'))
+      await settingsApp.request('/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'review', description: 'Review changes', body: 'Body', scope: 'global' }),
+      })
+      reload.mockRejectedValue(new Error('OpenCode server unavailable'))
 
-      const res = await app.request(new Request('http://localhost/skills/review?scope=global', { method: 'DELETE' }))
+      const res = await settingsApp.request('/skills/review?scope=global', { method: 'DELETE' })
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ success: true, restartRequired: true })
-      expect(opencodeServerManager.markRestartPending).toHaveBeenCalledTimes(1)
-      expect(supervisor.restart).not.toHaveBeenCalled()
+      await expect(readJson(res, z.object({ success: z.boolean(), restartRequired: z.boolean() }))).resolves.toEqual({
+        success: true,
+        restartRequired: true,
+      })
+      expect(manager.markRestartPending).toHaveBeenCalledTimes(1)
+      expect(restart).not.toHaveBeenCalled()
+    })
+
+    it('installs a skill from a GitHub tree and reloads OpenCode', async () => {
+      fetchMock.mockImplementation(async (input) => {
+        const url = requestUrl(input)
+        if (url.startsWith('https://api.github.com/repos/example/skill/contents/')) {
+          return jsonResponse([
+            {
+              name: 'SKILL.md',
+              path: 'review/SKILL.md',
+              type: 'file',
+              download_url: 'https://raw.githubusercontent.com/example/skill/main/review/SKILL.md',
+            },
+          ])
+        }
+        if (url === 'https://raw.githubusercontent.com/example/skill/main/review/SKILL.md') {
+          return new Response('---\nname: review\ndescription: Review\n---\nBody')
+        }
+        return new Response(null, { status: 404 })
+      })
+
+      const res = await settingsApp.request('/skills/install', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceType: 'github', url: 'https://github.com/example/skill/tree/main/review', scope: 'global' }),
+      })
+
+      expect(res.status).toBe(200)
+      await expect(readJson(res, z.object({
+        skill: SkillSchema,
+        filesInstalled: z.array(z.string()),
+        overwritten: z.boolean(),
+        sourceType: z.string(),
+        restartRequired: z.boolean(),
+      }))).resolves.toMatchObject({
+        skill: { name: 'review' },
+        filesInstalled: ['SKILL.md'],
+        overwritten: false,
+        restartRequired: false,
+      })
+      expect(reload).toHaveBeenCalledTimes(1)
     })
 
     it('returns 400 when installing a project skill without a repoId', async () => {
-      const res = await app.request(new Request('http://localhost/skills/install', {
+      const res = await settingsApp.request('/skills/install', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sourceType: 'github', url: 'https://github.com/example/skill', scope: 'project' }),
-      }))
+      })
 
       expect(res.status).toBe(400)
-      expect(await res.json()).toEqual({ error: 'repoId is required for project scope' })
-    })
-
-    it('installs a global skill from a GitHub tree and reloads OpenCode', async () => {
-      mockInstallSkillFromGithubTree.mockResolvedValue({
-        skill: { name: 'review', description: 'Review', body: 'body', scope: 'global', location: '/tmp/review' },
-        overwritten: false,
-        sourceType: 'github',
-        filesInstalled: ['SKILL.md'],
-      })
-
-      const res = await app.request(new Request('http://localhost/skills/install', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourceType: 'github', url: 'https://github.com/example/skill', scope: 'global' }),
-      }))
-
-      expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({
-        skill: { name: 'review', description: 'Review', body: 'body', scope: 'global', location: '/tmp/review' },
-        overwritten: false,
-        sourceType: 'github',
-        filesInstalled: ['SKILL.md'],
-        restartRequired: false,
-      })
-      expect(openCodeClient.api.location.reload).toHaveBeenCalledTimes(1)
-      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
-    })
-
-    it('reloads OpenCode for a project skill without restarting the server', async () => {
-      const repo = createRepo(db, { localPath: 'project-repo', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
-      mockInstallSkillFromGithubTree.mockResolvedValue({
-        skill: { name: 'review', description: 'Review', body: 'body', scope: 'project', location: '/tmp/review', repoId: repo.id },
-        overwritten: false,
-        sourceType: 'github',
-        filesInstalled: ['SKILL.md'],
-      })
-
-      const res = await app.request(new Request('http://localhost/skills/install', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourceType: 'github', url: 'https://github.com/example/skill', scope: 'project', repoId: repo.id }),
-      }))
-
-      expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({
-        skill: { name: 'review', description: 'Review', body: 'body', scope: 'project', location: '/tmp/review', repoId: repo.id },
-        overwritten: false,
-        sourceType: 'github',
-        filesInstalled: ['SKILL.md'],
-        restartRequired: false,
-      })
-      expect(opencodeServerManager.markRestartPending).not.toHaveBeenCalled()
-      expect(supervisor.restart).not.toHaveBeenCalled()
-      expect(openCodeClient.api.location.reload).toHaveBeenCalledTimes(1)
-      expect(mockInstallSkillFromGithubTree).toHaveBeenCalledWith(db, expect.objectContaining({ scope: 'project', repoId: repo.id }))
-    })
-
-    it('installs an uploaded skill from multipart form data', async () => {
-      mockInstallSkillFromUploadedFiles.mockResolvedValue({
-        skill: { name: 'review', description: 'Review', body: 'body', scope: 'global', location: '/tmp/review' },
-        overwritten: false,
-        sourceType: 'upload',
-        filesInstalled: ['SKILL.md'],
-      })
-
-      const formData = new FormData()
-      formData.set('scope', 'global')
-      formData.set('fileManifest', JSON.stringify([{ fieldName: 'file0', relativePath: 'review/SKILL.md' }]))
-      formData.set('file0', new File(['---\nname: review\ndescription: Review\n---\nbody'], 'SKILL.md', { type: 'text/markdown' }))
-
-      const res = await app.request(new Request('http://localhost/skills/install', {
-        method: 'POST',
-        body: formData,
-      }))
-
-      expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({
-        skill: { name: 'review', description: 'Review', body: 'body', scope: 'global', location: '/tmp/review' },
-        overwritten: false,
-        sourceType: 'upload',
-        filesInstalled: ['SKILL.md'],
-        restartRequired: false,
-      })
-      expect(mockInstallSkillFromUploadedFiles).toHaveBeenCalledWith(
-        db,
-        expect.objectContaining({ sourceType: 'upload', scope: 'global' }),
-        [{ relativePath: 'review/SKILL.md', content: expect.any(Buffer) }],
-      )
+      await expect(readJson(res, ErrorSchema)).resolves.toEqual({ error: 'repoId is required for project scope' })
     })
 
     it('returns 400 when installing a skill with an unsupported content type', async () => {
-      const res = await app.request(new Request('http://localhost/skills/install', {
+      const res = await settingsApp.request('/skills/install', {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
         body: 'not a skill',
-      }))
+      })
 
       expect(res.status).toBe(400)
-      expect(await res.json()).toEqual({ error: 'Unsupported content type. Use application/json or multipart/form-data' })
+      await expect(readJson(res, ErrorSchema)).resolves.toEqual({
+        error: 'Unsupported content type. Use application/json or multipart/form-data',
+      })
     })
   })
 
   describe('POST /test-ssh', () => {
-    it('returns 400 when the SSH key is invalid', async () => {
-      mockValidateSSHPrivateKey.mockResolvedValue({ valid: false, hasPassphrase: false, error: 'Invalid SSH key' })
+    let binDir: string
+    let privateKey: string
+    let restorePath: () => void
 
-      const res = await app.request(new Request('http://localhost/test-ssh', {
+    function fakeCommand(name: string, script: string): Promise<void> {
+      return writeFile(join(binDir, name), script).then(() => chmod(join(binDir, name), 0o755))
+    }
+
+    beforeEach(async () => {
+      binDir = join(workspace.path, 'bin')
+      await mkdir(binDir, { recursive: true })
+      const keyPath = join(home, 'id_test')
+      const generated = spawnSync('ssh-keygen', ['-t', 'ed25519', '-N', '', '-f', keyPath, '-q'], { encoding: 'utf8' })
+      if (generated.status !== 0) throw new Error(`ssh-keygen failed: ${generated.stderr}`)
+      privateKey = await readFile(keyPath, 'utf-8')
+      restorePath = applyTestEnv({ PATH: `${binDir}:${process.env.PATH ?? ''}` })
+    })
+
+    afterEach(() => {
+      restorePath()
+    })
+
+    it('returns 400 when the SSH key is invalid', async () => {
+      const res = await settingsApp.request('/test-ssh', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ host: 'example.com', sshPrivateKey: 'not-a-key' }),
-      }))
+      })
 
       expect(res.status).toBe(400)
-      expect(await res.json()).toEqual({ success: false, message: 'Invalid SSH key' })
+      await expect(readJson(res, SshTestSchema)).resolves.toMatchObject({
+        success: false,
+        message: expect.stringContaining('Invalid SSH key'),
+      })
     })
 
     it('reports a successful SSH authentication', async () => {
-      mockSpawnSync.mockReturnValue({ status: 255, stdout: '', stderr: "debug1: Authentication succeeded\nYou've successfully authenticated" })
+      await fakeCommand('ssh', '#!/bin/sh\necho "You\'ve successfully authenticated"\nexit 255\n')
 
-      const res = await app.request(new Request('http://localhost/test-ssh', {
+      const res = await settingsApp.request('/test-ssh', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ host: 'git@example.com:2222', sshPrivateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nkey\n-----END OPENSSH PRIVATE KEY-----' }),
-      }))
+        body: JSON.stringify({ host: 'git@example.com:2222', sshPrivateKey: privateKey }),
+      })
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ success: true, message: 'Successfully connected to git@example.com:2222' })
-      expect(mockSpawnSync).toHaveBeenCalledWith(
-        'ssh',
-        expect.arrayContaining(['-p', '2222', 'git@example.com']),
-        expect.objectContaining({ timeout: 30000 }),
-      )
+      await expect(readJson(res, SshTestSchema)).resolves.toEqual({
+        success: true,
+        message: 'Successfully connected to git@example.com:2222',
+      })
     })
 
     it('reports a timeout when the SSH command is killed', async () => {
-      mockSpawnSync.mockReturnValue({ status: null, signal: 'SIGKILL', stdout: '', stderr: '' })
+      await fakeCommand('ssh', '#!/bin/sh\nkill -9 $$\n')
 
-      const res = await app.request(new Request('http://localhost/test-ssh', {
+      const res = await settingsApp.request('/test-ssh', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ host: 'example.com', sshPrivateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nkey\n-----END OPENSSH PRIVATE KEY-----' }),
-      }))
+        body: JSON.stringify({ host: 'example.com', sshPrivateKey: privateKey }),
+      })
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({
+      await expect(readJson(res, SshTestSchema)).resolves.toEqual({
         success: false,
         message: 'Connection timed out. This may indicate a network issue or an incorrect host.',
       })
     })
 
-    it('reports permission denied, unknown host, and refused connection details', async () => {
-      const cases = [
-        { output: 'Permission denied (publickey)', message: 'Permission denied. The SSH key may not be authorized on this host, or the passphrase is incorrect.' },
-        { output: 'Could not resolve hostname example.com', message: 'Could not resolve hostname. Please check that the host is correct and accessible.' },
-        { output: 'ssh: connect to host example.com port 22: Connection refused', message: 'Connection refused or timed out. The host may be down or not accepting SSH connections.' },
-      ]
+    it.each([
+      ['Permission denied (publickey)', 'Permission denied. The SSH key may not be authorized on this host, or the passphrase is incorrect.'],
+      ['Could not resolve hostname example.com', 'Could not resolve hostname. Please check that the host is correct and accessible.'],
+      ['ssh: connect to host example.com port 22: Connection refused', 'Connection refused or timed out. The host may be down or not accepting SSH connections.'],
+    ])('maps the SSH failure %s', async (output, expectedMessage) => {
+      await fakeCommand('ssh', `#!/bin/sh\necho "${output}" >&2\nexit 255\n`)
 
-      for (const testCase of cases) {
-        mockSpawnSync.mockReturnValue({ status: 255, stdout: '', stderr: testCase.output })
-
-        const res = await app.request(new Request('http://localhost/test-ssh', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ host: 'example.com', sshPrivateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nkey\n-----END OPENSSH PRIVATE KEY-----' }),
-        }))
-
-        expect(res.status).toBe(200)
-        expect(await res.json()).toEqual({ success: false, message: testCase.message })
-      }
-    })
-
-    it('reports ambiguous SSH output and uses sshpass when a passphrase is provided', async () => {
-      mockSpawnSync.mockReturnValue({ status: 255, stdout: '', stderr: 'debug1: no matching host key' })
-
-      const res = await app.request(new Request('http://localhost/test-ssh', {
+      const res = await settingsApp.request('/test-ssh', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ host: 'example.com', sshPrivateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nkey\n-----END OPENSSH PRIVATE KEY-----', passphrase: 'secret' }),
-      }))
+        body: JSON.stringify({ host: 'example.com', sshPrivateKey: privateKey }),
+      })
 
       expect(res.status).toBe(200)
-      const json = await res.json() as { success: boolean; message: string }
-      expect(json.success).toBe(false)
-      expect(json.message).toContain('Authentication failed')
-      expect(mockSpawnSync).toHaveBeenCalledWith(
-        'sshpass',
-        expect.arrayContaining(['-e', 'ssh']),
-        expect.objectContaining({ env: expect.objectContaining({ SSHPASS: 'secret' }) }),
-      )
+      await expect(readJson(res, SshTestSchema)).resolves.toEqual({ success: false, message: expectedMessage })
+    })
+
+    it('uses sshpass and reports ambiguous output when a passphrase is provided', async () => {
+      await fakeCommand('sshpass', `#!/bin/sh\nprintf '%s' "$SSHPASS" > "${join(home, 'sshpass-password')}"\necho "debug1: no matching host key" >&2\nexit 255\n`)
+
+      const res = await settingsApp.request('/test-ssh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host: 'example.com', sshPrivateKey: privateKey, passphrase: 'secret' }),
+      })
+
+      expect(res.status).toBe(200)
+      const body = await readJson(res, SshTestSchema)
+      expect(body.success).toBe(false)
+      expect(body.message).toContain('Authentication failed')
+      await expect(readFile(join(home, 'sshpass-password'), 'utf-8')).resolves.toBe('secret')
     })
 
     it('returns 400 for an invalid test-ssh body', async () => {
-      const res = await app.request(new Request('http://localhost/test-ssh', {
+      const res = await settingsApp.request('/test-ssh', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ host: 'example.com' }),
-      }))
+      })
 
       expect(res.status).toBe(400)
-      expect(await res.json()).toEqual({ error: 'Invalid request data', details: expect.any(Array) })
+      await expect(readJson(res, ErrorWithPathsSchema)).resolves.toMatchObject({ error: 'Invalid request data' })
     })
   })
 
-
   describe('OpenCode server auth routes', () => {
-    it('reports the configured source for the server password', async () => {
-      mockGetOpenCodeServerPasswordSource.mockReturnValue('managed')
-
-      const res = await app.request(new Request('http://localhost/opencode-server-auth'))
+    it('reports the configured password source', async () => {
+      const res = await settingsApp.request('/opencode-server-auth')
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ isSet: true, source: 'managed' })
+      await expect(readJson(res, AuthStatusSchema)).resolves.toEqual({ isSet: true, source: 'managed' })
     })
 
-    it('clears the server password and reconnects the SSE aggregator', async () => {
-      mockGetStoredOpenCodeServerPasswordState.mockReturnValue({ source: 'db' })
-      mockGetOpenCodeServerPasswordSource.mockReturnValue('managed')
+    it('clears the stored password and falls back to the managed source', async () => {
+      settings().setOpenCodeServerPassword('custom-password')
 
-      const res = await app.request(new Request('http://localhost/opencode-server-auth', {
+      const res = await settingsApp.request('/opencode-server-auth', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: null }),
-      }))
+      })
 
       expect(res.status).toBe(200)
-      expect(mockClearOpenCodeServerPassword).toHaveBeenCalledTimes(1)
-      expect(mockSetOpenCodeServerPassword).not.toHaveBeenCalled()
-      expect(await res.json()).toEqual({ isSet: true, source: 'managed' })
+      await expect(readJson(res, AuthStatusSchema)).resolves.toEqual({ isSet: true, source: 'managed' })
     })
 
-    it('restores the previous password state when the restart fails', async () => {
-      mockGetStoredOpenCodeServerPasswordState.mockReturnValue({ source: 'db' })
-      supervisor.restart.mockResolvedValue({ healthy: false })
-
-      const res = await app.request(new Request('http://localhost/opencode-server-auth', {
+    it('stores a new password and reports the db source', async () => {
+      const res = await settingsApp.request('/opencode-server-auth', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: 'new-password' }),
-      }))
+      })
+
+      expect(res.status).toBe(200)
+      await expect(readJson(res, AuthStatusSchema)).resolves.toEqual({ isSet: true, source: 'db' })
+    })
+
+    it('restores the previous password state when the restart fails', async () => {
+      settings().setOpenCodeServerPassword('previous-password')
+      restart.mockRejectedValueOnce(new Error('restart failed'))
+
+      const res = await settingsApp.request('/opencode-server-auth', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'new-password' }),
+      })
 
       expect(res.status).toBe(500)
-      expect(mockSetOpenCodeServerPassword).toHaveBeenCalledWith('new-password')
-      expect(mockRestoreOpenCodeServerPasswordState).toHaveBeenCalledWith({ source: 'db' })
-      expect(await res.json()).toEqual({ error: 'Failed to update OpenCode server auth' })
+      await expect(readJson(res, ErrorSchema)).resolves.toEqual({ error: 'Failed to update OpenCode server auth' })
+      expect(settings().getOpenCodeServerPasswordSource()).toBe('db')
+      expect(settings().getStoredOpenCodeServerPasswordState()?.value).toBeDefined()
+      expect(restart).toHaveBeenCalledTimes(2)
     })
   })
 
   describe('Maintenance routes', () => {
     it('returns the manager token', async () => {
-      const res = await app.request(new Request('http://localhost/manager-token'))
+      const res = await settingsApp.request('/manager-token')
 
       expect(res.status).toBe(200)
-      const json = await res.json() as { token: string }
-      expect(json.token).toBe(getOrCreateInternalToken(db))
+      await expect(readJson(res, TokenSchema)).resolves.toEqual({ token: getOrCreateInternalToken(db) })
+    })
+
+    it('rotates the manager token and marks a restart pending', async () => {
+      const previous = getOrCreateInternalToken(db)
+
+      const res = await settingsApp.request('/manager-token/rotate', { method: 'POST' })
+
+      expect(res.status).toBe(200)
+      const body = await readJson(res, TokenSchema)
+      expect(body.token).not.toBe(previous)
+      expect(manager.markRestartPending).toHaveBeenCalledTimes(1)
     })
 
     it('returns 500 when the manager token cannot be read', async () => {
-      const brokenDb = {
-        prepare: vi.fn(() => {
-          throw new Error('database is unavailable')
-        }),
-      } as any
-      const brokenApp = createSettingsRoutes(
-        brokenDb,
-        { getGitEnvironment: vi.fn().mockReturnValue({}) } as any,
-        createStubOpenCodeClient(),
-        supervisor as any,
-      )
+      const closedDb = createTestDatabase()
+      closedDb.close()
+      const brokenApp = createSettingsRoutes(closedDb, new GitAuthService(), createStubOpenCodeClient(), { restart }, deps)
 
-      const res = await brokenApp.request(new Request('http://localhost/manager-token'))
+      const res = await brokenApp.request('/manager-token')
 
       expect(res.status).toBe(500)
-      expect(await res.json()).toEqual({ error: 'Failed to get manager token' })
+      await expect(readJson(res, ErrorSchema)).resolves.toEqual({ error: 'Failed to get manager token' })
     })
 
-    it('returns active user sessions from the SSE aggregator', async () => {
-      const activeSpy = vi.spyOn(sseAggregator, 'getActiveSessions').mockReturnValue({ '/repo': ['session-1'] })
+    it('does not mark a restart pending when token rotation fails', async () => {
+      const closedDb = createTestDatabase()
+      closedDb.close()
+      const brokenApp = createSettingsRoutes(closedDb, new GitAuthService(), createStubOpenCodeClient(), { restart }, deps)
 
-      try {
-        const res = await app.request(new Request('http://localhost/opencode-active-sessions'))
+      const res = await brokenApp.request('/manager-token/rotate', { method: 'POST' })
 
-        expect(res.status).toBe(200)
-        expect(await res.json()).toEqual({ count: 1, sessions: [{ sessionID: 'session-1', directory: '/repo' }] })
-      } finally {
-        activeSpy.mockRestore()
-      }
+      expect(res.status).toBe(500)
+      expect(manager.markRestartPending).not.toHaveBeenCalled()
     })
 
-    it('returns an empty session list when no session is active', async () => {
-      const res = await app.request(new Request('http://localhost/opencode-active-sessions'))
+    it('returns the active user sessions from the SSE aggregator', async () => {
+      vi.spyOn(sseAggregator, 'getActiveSessions').mockReturnValue({ '/repo': ['session-1'] })
+
+      const res = await settingsApp.request('/opencode-active-sessions')
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ count: 0, sessions: [] })
-    })
-
-    it('validates the model discovery baseUrl', async () => {
-      const missing = await app.request(new Request('http://localhost/opencode-discover-models'))
-      expect(missing.status).toBe(400)
-      expect(await missing.json()).toEqual({ error: 'baseUrl is required' })
-
-      const invalid = await app.request(new Request('http://localhost/opencode-discover-models?baseUrl=not-a-url'))
-      expect(invalid.status).toBe(400)
-      expect(await invalid.json()).toEqual({ error: 'Invalid baseUrl' })
-
-      const nonHttp = await app.request(new Request('http://localhost/opencode-discover-models?baseUrl=ftp://example.com'))
-      expect(nonHttp.status).toBe(400)
-      expect(await nonHttp.json()).toEqual({ error: 'baseUrl must be an http or https URL' })
-    })
-
-    it('discovers and returns models with the cache flag', async () => {
-      mockDiscoverModelsCached.mockResolvedValue({ models: [{ id: 'gpt-4' }], cached: false })
-
-      const res = await app.request(new Request('http://localhost/opencode-discover-models?baseUrl=https://api.example.com&apiKey=secret&refresh=true'))
-
-      expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ models: [{ id: 'gpt-4' }], cached: false })
-      expect(mockDiscoverModelsCached).toHaveBeenCalledWith({
-        baseUrl: 'https://api.example.com',
-        apiKey: 'secret',
-        type: 'opencode-models',
-        filterPattern: /.*/,
-        defaultModels: [],
-        forceRefresh: true,
+      await expect(readJson(res, SessionsSchema)).resolves.toEqual({
+        count: 1,
+        sessions: [{ sessionID: 'session-1', directory: '/repo' }],
       })
     })
 
-    it('returns 500 when model discovery fails', async () => {
-      mockDiscoverModelsCached.mockRejectedValue(new Error('discovery failed'))
-
-      const res = await app.request(new Request('http://localhost/opencode-discover-models?baseUrl=https://api.example.com'))
-
-      expect(res.status).toBe(500)
-      expect(await res.json()).toEqual({ error: 'Failed to discover models' })
-    })
-  })
-
-  describe('Remote access header routes', () => {
-    it('serves the remote access header summary under settings', async () => {
-      const res = await app.request(new Request('http://localhost/remote-access-headers'))
+    it('returns an empty session list when no session is active', async () => {
+      const res = await settingsApp.request('/opencode-active-sessions')
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ headers: [], unreadable: false })
+      await expect(readJson(res, SessionsSchema)).resolves.toEqual({ count: 0, sessions: [] })
+    })
+
+    it('validates the model discovery baseUrl', async () => {
+      const missing = await settingsApp.request('/opencode-discover-models')
+      const invalid = await settingsApp.request('/opencode-discover-models?baseUrl=not-a-url')
+      const nonHttp = await settingsApp.request('/opencode-discover-models?baseUrl=ftp://example.com')
+
+      expect(missing.status).toBe(400)
+      await expect(readJson(missing, ErrorSchema)).resolves.toEqual({ error: 'baseUrl is required' })
+      expect(invalid.status).toBe(400)
+      await expect(readJson(invalid, ErrorSchema)).resolves.toEqual({ error: 'Invalid baseUrl' })
+      expect(nonHttp.status).toBe(400)
+      await expect(readJson(nonHttp, ErrorSchema)).resolves.toEqual({ error: 'baseUrl must be an http or https URL' })
+    })
+
+    it('discovers and caches models from an upstream provider', async () => {
+      fetchMock.mockImplementation(async (input) => {
+        const url = requestUrl(input)
+        if (url === 'https://api.example.com/v1/models' || url === 'https://api.example.com/models') {
+          return jsonResponse({ data: [{ id: 'gpt-4' }] })
+        }
+        return new Response(null, { status: 404 })
+      })
+
+      const first = await settingsApp.request('/opencode-discover-models?baseUrl=https://api.example.com&apiKey=secret&refresh=true')
+      const second = await settingsApp.request('/opencode-discover-models?baseUrl=https://api.example.com&apiKey=secret')
+
+      expect(first.status).toBe(200)
+      await expect(readJson(first, ModelsDiscoverySchema)).resolves.toEqual({ models: ['gpt-4'], cached: false })
+      await expect(readJson(second, ModelsDiscoverySchema)).resolves.toEqual({ models: ['gpt-4'], cached: true })
+    })
+
+    it('returns 500 when model discovery fails', async () => {
+      await writeFile(join(workspace.path, 'cache'), 'not a directory')
+
+      const res = await settingsApp.request('/opencode-discover-models?baseUrl=https://api.example.com')
+
+      expect(res.status).toBe(500)
+      await expect(readJson(res, ErrorSchema)).resolves.toEqual({ error: 'Failed to discover models' })
+    })
+
+    it('serves the remote access header summary', async () => {
+      const res = await settingsApp.request('/remote-access-headers')
+
+      expect(res.status).toBe(200)
+      await expect(readJson(res, RemoteHeadersSchema)).resolves.toEqual({ headers: [], unreadable: false })
     })
   })
 })

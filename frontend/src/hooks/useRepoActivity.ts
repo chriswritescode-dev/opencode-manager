@@ -12,7 +12,6 @@ export function useRepoActivity(repoId: number, isReady: boolean): void {
     hasLoggedRef.current = true
 
     touchRepoActivity(repoId).catch(() => {
-      // Silent failure - activity tracking must not block navigation
     })
   }, [repoId, isReady])
 }

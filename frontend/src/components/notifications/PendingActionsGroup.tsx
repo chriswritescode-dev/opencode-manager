@@ -1,7 +1,7 @@
 import { Bell, HelpCircle } from 'lucide-react'
 import { PendingActionBadge } from '@/components/ui/pending-action-badge'
 import { ScheduleReportsBell } from '@/components/notifications/ScheduleReportsBell'
-import { usePermissions, useForms } from '@/contexts/EventContext'
+import { usePermissions, useForms } from '@/contexts/event-context'
 
 interface PendingActionsGroupProps {
   showScheduleReports?: boolean

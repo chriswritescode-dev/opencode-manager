@@ -1,18 +1,8 @@
 import { Database } from 'bun:sqlite'
+import { z } from 'zod'
 import { logger } from '../utils/logger'
+import { selectRows } from './rows'
 
-/**
- * A schema change applied once per database. Migrations run in the order they appear in
- * `allMigrations`, and each is recorded by its `id`, which must never change once released.
- *
- * New migrations use a UTC timestamp id, `YYYYMMDDHHmm-short-name` (for example
- * `202610061345-schedule-workspace-mode`), in a file of the same name, so migrations written on
- * different branches cannot claim the same identity. Make `up` safe to run on a database that
- * already has the change, because merged branches may apply migrations in a different order.
- *
- * `legacy` only exists on the numbered migrations written before ids; it lets databases that
- * recorded them by version number in `schema_migrations` recognise them as applied.
- */
 export interface Migration {
   id: string
   legacy?: { version: number; name: string }
@@ -20,18 +10,20 @@ export interface Migration {
   down(db: Database): void
 }
 
-interface LegacyMigrationRecord {
-  version: number
-  name: string
-  applied_at: number
-}
+const AppliedMigrationIdRowSchema = z.object({ id: z.string() })
+
+const LegacyMigrationRecordSchema = z.object({
+  version: z.number(),
+  name: z.string(),
+  applied_at: z.number(),
+})
 
 export function migrate(db: Database, migrations: Migration[]): void {
   assertUniqueIds(migrations)
   db.run('CREATE TABLE IF NOT EXISTS applied_migrations (id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)')
   adoptLegacyMigrations(db, migrations)
 
-  const applied = new Set((db.prepare('SELECT id FROM applied_migrations').all() as Array<{ id: string }>).map((row) => row.id))
+  const applied = new Set(selectRows(db, AppliedMigrationIdRowSchema, 'SELECT id FROM applied_migrations').map((row) => row.id))
   const pending = migrations.filter((migration) => !applied.has(migration.id))
 
   if (pending.length === 0) {
@@ -67,19 +59,12 @@ function assertUniqueIds(migrations: Migration[]): void {
   }
 }
 
-/**
- * Records numbered migrations that a database applied under the old version-keyed table.
- * A version recorded under a different name is still treated as applied, as before, but warned
- * about because its schema change may be missing.
- */
 function adoptLegacyMigrations(db: Database, migrations: Migration[]): void {
   const hasLegacyTable = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'").get()
   if (!hasLegacyTable) return
 
-  const records = new Map(
-    (db.prepare('SELECT version, name, applied_at FROM schema_migrations').all() as LegacyMigrationRecord[])
-      .map((record) => [record.version, record] as const),
-  )
+  const legacyRecords = selectRows(db, LegacyMigrationRecordSchema, 'SELECT version, name, applied_at FROM schema_migrations')
+  const records = new Map(legacyRecords.map((record) => [record.version, record] as const))
   const adopted = migrations.flatMap((migration) => {
     const record = migration.legacy ? records.get(migration.legacy.version) : undefined
     if (!migration.legacy || !record) return []

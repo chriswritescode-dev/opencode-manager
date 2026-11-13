@@ -1,216 +1,159 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { fetchGitHubUserInfo, findGitHubCredential, findPatCredentialForHost, resolveGitIdentity, createGitIdentityEnv, getSSHCredentialsForHost, createGitEnv, createGhCliEnv, getDefaultUsername, normalizeHost } from '../../src/utils/git-auth'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GitCredential } from '@opencode-manager/shared'
+import { expectLoggedMessage } from '../helpers/log-assertions'
+import {
+  createGhCliEnv,
+  createGitEnv,
+  createGitIdentityEnv,
+  fetchGitHubUserInfo,
+  findGitHubCredential,
+  findPatCredentialForHost,
+  getDefaultUsername,
+  getSSHCredentialsForHost,
+  normalizeHost,
+  resolveGitIdentity,
+} from '../../src/utils/git-auth'
+
+const fetchSpy = vi.spyOn(globalThis, 'fetch')
+
+interface Deferred<T> {
+  promise: Promise<T>
+  resolve: (value: T) => void
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve: (value: T) => void = () => {}
+  const promise = new Promise<T>((settle) => {
+    resolve = settle
+  })
+  return { promise, resolve }
+}
+
+function respondWithUser(user: { id?: number | null; login?: string | null; name?: string | null }): void {
+  fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify(user), { status: 200 }))
+}
+
+function respondWithEmails(emails: Array<{ email: string; primary: boolean; verified: boolean }>): void {
+  fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify(emails), { status: 200 }))
+}
+
+function respondWithStatus(status: number): void {
+  fetchSpy.mockResolvedValueOnce(new Response(null, { status }))
+}
+
+const GITHUB_CREDENTIAL: GitCredential = { name: 'github', host: 'https://github.com/', type: 'pat', token: 'gh-token' }
+
+beforeEach(() => {
+  fetchSpy.mockReset()
+})
+
+afterAll(() => {
+  fetchSpy.mockRestore()
+})
 
 describe('fetchGitHubUserInfo', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  it('should use verified primary email when available', async () => {
-    const userResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        login: 'testuser',
-        name: 'Test User',
-        id: 123456
-      })
-    }
-    const emailsResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue([
-        { email: 'verified@email.com', primary: true, verified: true }
-      ])
-    }
-    global.fetch = vi.fn() as any;
-    (global.fetch as any).mockResolvedValueOnce(userResponse)
-      .mockResolvedValueOnce(emailsResponse)
+  it('uses the verified primary email when available', async () => {
+    respondWithUser({ login: 'testuser', name: 'Test User', id: 123456 })
+    respondWithEmails([{ email: 'verified@email.com', primary: true, verified: true }])
 
     const result = await fetchGitHubUserInfo('test_token')
 
-    expect(result?.email).toBe('verified@email.com')
-    expect(result?.name).toBe('Test User')
-    expect(result?.login).toBe('testuser')
+    expect(result).toEqual({ login: 'testuser', name: 'Test User', email: 'verified@email.com' })
   })
 
-  it('should fallback to noreply email when no verified primary email', async () => {
-    const userResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        login: 'testuser',
-        name: 'Test User',
-        id: 123456
-      })
+  it.each([
+    ['the emails endpoint fails', 1],
+    ['the emails list is empty', 0],
+    ['no email is verified', 0],
+  ])('falls back to the noreply email when %s', async (scenario) => {
+    respondWithUser({ login: 'testuser', name: 'Test User', id: 123456 })
+    if (scenario === 'the emails endpoint fails') {
+      respondWithStatus(500)
+    } else {
+      respondWithEmails(
+        scenario === 'no email is verified'
+          ? [{ email: 'unverified@email.com', primary: false, verified: false }]
+          : [],
+      )
     }
-    const emailsResponse = { ok: false }
-    global.fetch = vi.fn() as any;
-    (global.fetch as any).mockResolvedValueOnce(userResponse)
-      .mockResolvedValueOnce(emailsResponse)
 
     const result = await fetchGitHubUserInfo('test_token')
 
     expect(result?.email).toBe('123456+testuser@users.noreply.github.com')
   })
 
-  it('should fallback to noreply email when emails API returns empty array', async () => {
-    const userResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        login: 'testuser',
-        name: 'Test User',
-        id: 123456
-      })
-    }
-    const emailsResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue([])
-    }
-    global.fetch = vi.fn() as any;
-    (global.fetch as any).mockResolvedValueOnce(userResponse)
-      .mockResolvedValueOnce(emailsResponse)
-
-    const result = await fetchGitHubUserInfo('test_token')
-
-    expect(result?.email).toBe('123456+testuser@users.noreply.github.com')
-  })
-
-  it('should fallback to noreply email when no verified email in list', async () => {
-    const userResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        login: 'testuser',
-        name: 'Test User',
-        id: 123456
-      })
-    }
-    const emailsResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue([
-        { email: 'unverified@email.com', primary: false, verified: false }
-      ])
-    }
-    global.fetch = vi.fn() as any;
-    (global.fetch as any).mockResolvedValueOnce(userResponse)
-      .mockResolvedValueOnce(emailsResponse)
-
-    const result = await fetchGitHubUserInfo('test_token')
-
-    expect(result?.email).toBe('123456+testuser@users.noreply.github.com')
-  })
-
-  it('should return null when user API fails', async () => {
-    const userResponse = { ok: false }
-    global.fetch = vi.fn() as any;
-    (global.fetch as any).mockResolvedValueOnce(userResponse)
+  it('returns null when the user endpoint fails', async () => {
+    respondWithStatus(401)
+    respondWithStatus(500)
 
     const result = await fetchGitHubUserInfo('invalid_token')
 
     expect(result).toBeNull()
   })
 
-  it('should return null when user data is missing id', async () => {
-    const userResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        login: 'testuser',
-        name: 'Test User',
-        id: null
-      })
-    }
-    global.fetch = vi.fn() as any;
-    (global.fetch as any).mockResolvedValueOnce(userResponse)
+  it.each([
+    ['id', { login: 'testuser', name: 'Test User', id: null }],
+    ['login', { login: null, name: 'Test User', id: 123456 }],
+  ])('returns null when the user payload has no %s', async (_field, user) => {
+    respondWithUser(user)
 
     const result = await fetchGitHubUserInfo('test_token')
 
     expect(result).toBeNull()
   })
 
-  it('should return null when user data is missing login', async () => {
-    const userResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        login: null,
-        name: 'Test User',
-        id: 123456
-      })
-    }
-    global.fetch = vi.fn() as any;
-    (global.fetch as any).mockResolvedValueOnce(userResponse)
+  it('keeps a null name and reports the login', async () => {
+    respondWithUser({ login: 'testuser', name: null, id: 123456 })
+    respondWithStatus(500)
+
+    const result = await fetchGitHubUserInfo('test_token')
+
+    expect(result).toEqual({
+      login: 'testuser',
+      name: null,
+      email: '123456+testuser@users.noreply.github.com',
+    })
+  })
+
+  it('returns null and logs a warning when the network fails', async () => {
+    fetchSpy.mockRejectedValueOnce(new Error('Network error'))
+    fetchSpy.mockRejectedValueOnce(new Error('Network error'))
 
     const result = await fetchGitHubUserInfo('test_token')
 
     expect(result).toBeNull()
+    expectLoggedMessage('Failed to fetch GitHub user info', 'warn')
   })
 
-  it('should use login as name when name is null', async () => {
-    const userResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        login: 'testuser',
-        name: null,
-        id: 123456
-      })
-    }
-    const emailsResponse = { ok: false }
-    global.fetch = vi.fn() as any;
-    (global.fetch as any).mockResolvedValueOnce(userResponse)
-      .mockResolvedValueOnce(emailsResponse)
+  it('requests the user and emails endpoints in parallel with the token', async () => {
+    const user = deferred<Response>()
+    const emails = deferred<Response>()
+    fetchSpy.mockReturnValueOnce(user.promise).mockReturnValueOnce(emails.promise)
 
-    const result = await fetchGitHubUserInfo('test_token')
+    const pending = fetchGitHubUserInfo('test_token')
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2))
 
-    expect(result?.name).toBeNull()
-    expect(result?.login).toBe('testuser')
-  })
-
-  it('should handle network errors gracefully', async () => {
-    global.fetch = vi.fn() as any;
-    (global.fetch as any).mockRejectedValue(new Error('Network error'))
-
-    const result = await fetchGitHubUserInfo('test_token')
-
-    expect(result).toBeNull()
-  })
-
-  it('should make parallel API calls to user and endpoints', async () => {
-    const userResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        login: 'testuser',
-        name: 'Test User',
-        id: 123456
-      })
-    }
-    const emailsResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue([
-        { email: 'verified@email.com', primary: true, verified: true }
-      ])
-    }
-    global.fetch = vi.fn() as any;
-    (global.fetch as any).mockResolvedValueOnce(userResponse)
-      .mockResolvedValueOnce(emailsResponse)
-
-    await fetchGitHubUserInfo('test_token')
-
-    expect(fetch).toHaveBeenCalledTimes(2)
-    expect(fetch).toHaveBeenNthCalledWith(
-      1,
+    expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([
       'https://api.github.com/user',
-      expect.any(Object)
-    )
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
       'https://api.github.com/user/emails',
-      expect.any(Object)
-    )
+    ])
+    for (const [, init] of fetchSpy.mock.calls) {
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer test_token')
+    }
+
+    user.resolve(new Response(JSON.stringify({ login: 'testuser', name: 'Test User', id: 1 })))
+    emails.resolve(new Response(JSON.stringify([])))
+    await expect(pending).resolves.toEqual({
+      login: 'testuser',
+      name: 'Test User',
+      email: '1+testuser@users.noreply.github.com',
+    })
   })
 })
 
 describe('createGitEnv', () => {
   it('creates URL-scoped extraheader keys that git can match against HTTPS remotes', () => {
-    const env = createGitEnv([
-      { name: 'github', host: 'github.com', type: 'pat', token: 'github-token' },
-    ])
+    const env = createGitEnv([{ name: 'github', host: 'github.com', type: 'pat', token: 'github-token' }])
 
     expect(env.GIT_CONFIG_COUNT).toBe('1')
     expect(env.GIT_CONFIG_KEY_0).toBe('http.https://github.com/.extraheader')
@@ -272,43 +215,19 @@ describe('createGitEnv', () => {
 
 describe('createGhCliEnv', () => {
   it('returns GH_TOKEN and GITHUB_TOKEN set to the token for a github PAT', () => {
-    const credentials: GitCredential[] = [
-      { name: 'github', host: 'https://github.com/', type: 'pat', token: 'gh-cli-token' },
-    ]
-
-    const env = createGhCliEnv(credentials)
+    const env = createGhCliEnv([{ name: 'github', host: 'https://github.com/', type: 'pat', token: 'gh-cli-token' }])
 
     expect(env).toEqual({ GH_TOKEN: 'gh-cli-token', GITHUB_TOKEN: 'gh-cli-token' })
   })
 
-  it('returns {} when no github credential exists', () => {
-    const credentials: GitCredential[] = [
-      { name: 'gitlab', host: 'https://gitlab.com/', type: 'pat', token: 'gl-token' },
-    ]
+  const emptyCases: Array<[string, GitCredential[]]> = [
+    ['no github credential', [{ name: 'gitlab', host: 'https://gitlab.com/', type: 'pat', token: 'gl-token' }]],
+    ['an empty token', [{ name: 'github', host: 'https://github.com/', type: 'pat', token: '' }]],
+    ['only an ssh github credential', [{ name: 'github-ssh', host: 'git@github.com', type: 'ssh', sshPrivateKey: 'key' }]],
+  ]
 
-    const env = createGhCliEnv(credentials)
-
-    expect(env).toEqual({})
-  })
-
-  it('returns {} when github credential has an empty token', () => {
-    const credentials: GitCredential[] = [
-      { name: 'github', host: 'https://github.com/', type: 'pat', token: '' },
-    ]
-
-    const env = createGhCliEnv(credentials)
-
-    expect(env).toEqual({})
-  })
-
-  it('returns {} when only an ssh github credential exists', () => {
-    const credentials: GitCredential[] = [
-      { name: 'github-ssh', host: 'git@github.com', type: 'ssh', sshPrivateKey: 'key' },
-    ]
-
-    const env = createGhCliEnv(credentials)
-
-    expect(env).toEqual({})
+  it.each(emptyCases)('returns {} for %s', (_scenario, credentials) => {
+    expect(createGhCliEnv(credentials)).toEqual({})
   })
 })
 
@@ -336,59 +255,40 @@ describe('getDefaultUsername', () => {
 })
 
 describe('findGitHubCredential', () => {
-  it('should find GitHub credential in credentials array', () => {
+  it('finds the GitHub PAT among other credentials', () => {
     const credentials: GitCredential[] = [
       { name: 'gitlab', host: 'https://gitlab.com/', type: 'pat', token: 'gitlab-token' },
       { name: 'github', host: 'https://github.com/', type: 'pat', token: 'github-token' },
       { name: 'private', host: 'https://git.example.com/', type: 'pat', token: 'private-token' },
     ]
 
-    const result = findGitHubCredential(credentials)
-
-    expect(result).toEqual({
-      name: 'github',
-      host: 'https://github.com/',
-      type: 'pat',
-      token: 'github-token'
-    })
+    expect(findGitHubCredential(credentials)).toEqual(credentials[1])
   })
 
-  it('should not find GitHub credential with www subdomain', () => {
+  it('does not match a www subdomain', () => {
     const credentials: GitCredential[] = [
       { name: 'github', host: 'https://www.github.com/', type: 'pat', token: 'github-token' },
     ]
 
-    const result = findGitHubCredential(credentials)
-
-    expect(result).toBeNull()
+    expect(findGitHubCredential(credentials)).toBeNull()
   })
 
-  it('should return null when credentials array is empty', () => {
-    const result = findGitHubCredential([])
+  const emptyCases: Array<[string, GitCredential[]]> = [
+    ['the list is empty', []],
+    ['no credential points at GitHub', [{ name: 'gitlab', host: 'https://gitlab.com/', type: 'pat', token: 'gl-token' }]],
+  ]
 
-    expect(result).toBeNull()
+  it.each(emptyCases)('returns null when %s', (_scenario, credentials) => {
+    expect(findGitHubCredential(credentials)).toBeNull()
   })
 
-  it('should return null when no GitHub credential exists', () => {
-    const credentials: GitCredential[] = [
-      { name: 'gitlab', host: 'https://gitlab.com/', type: 'pat', token: 'gitlab-token' },
-      { name: 'private', host: 'https://git.example.com/', type: 'pat', token: 'private-token' },
-    ]
-
-    const result = findGitHubCredential(credentials)
-
-    expect(result).toBeNull()
-  })
-
-  it('should find GitHub credential when host is stored without a protocol', () => {
-    const credentials: GitCredential[] = [
-      { name: 'github', host: 'github.com', type: 'pat', token: 'github-token' },
-    ]
+  it('finds a credential whose host has no protocol', () => {
+    const credentials: GitCredential[] = [{ name: 'github', host: 'github.com', type: 'pat', token: 'github-token' }]
 
     expect(findGitHubCredential(credentials)).toEqual(credentials[0])
   })
 
-  it('should ignore SSH credentials when looking up GitHub PAT', () => {
+  it('ignores SSH credentials when looking up a GitHub PAT', () => {
     const credentials: GitCredential[] = [
       { name: 'github-ssh', host: 'git@github.com', type: 'ssh', token: 'ssh-key' },
       { name: 'github-pat', host: 'https://github.com/', type: 'pat', token: 'pat-token' },
@@ -404,39 +304,24 @@ describe('findPatCredentialForHost', () => {
       { name: 'github', host: 'https://github.com/owner/repo.git', type: 'pat', token: 'gh-token' },
     ]
 
-    const result = findPatCredentialForHost(credentials, 'github.com')
-
-    expect(result).toEqual({ username: 'x-access-token', password: 'gh-token' })
+    expect(findPatCredentialForHost(credentials, 'github.com')).toEqual({ username: 'x-access-token', password: 'gh-token' })
   })
 
-  it('uses explicit username when provided', () => {
+  it('uses the explicit username when provided', () => {
     const credentials: GitCredential[] = [
       { name: 'github', host: 'github.com', type: 'pat', token: 'gh-token', username: 'custom-user' },
     ]
 
-    const result = findPatCredentialForHost(credentials, 'github.com')
-
-    expect(result).toEqual({ username: 'custom-user', password: 'gh-token' })
+    expect(findPatCredentialForHost(credentials, 'github.com')).toEqual({ username: 'custom-user', password: 'gh-token' })
   })
 
-  it('returns x-access-token default for github hosts', () => {
-    const credentials: GitCredential[] = [
-      { name: 'github', host: 'github.com', type: 'pat', token: 'gh-token' },
-    ]
+  it.each([
+    ['github.com', 'x-access-token'],
+    ['gitlab.com', 'oauth2'],
+  ])('derives the default username for %s', (host, username) => {
+    const credentials: GitCredential[] = [{ name: 'host', host, type: 'pat', token: 'token' }]
 
-    const result = findPatCredentialForHost(credentials, 'github.com')
-
-    expect(result?.username).toBe('x-access-token')
-  })
-
-  it('returns oauth2 default for non-github hosts', () => {
-    const credentials: GitCredential[] = [
-      { name: 'gitlab', host: 'gitlab.com', type: 'pat', token: 'gl-token' },
-    ]
-
-    const result = findPatCredentialForHost(credentials, 'gitlab.com')
-
-    expect(result?.username).toBe('oauth2')
+    expect(findPatCredentialForHost(credentials, host)?.username).toBe(username)
   })
 
   it('ignores ssh credentials', () => {
@@ -445,285 +330,132 @@ describe('findPatCredentialForHost', () => {
       { name: 'github-pat', host: 'github.com', type: 'pat', token: 'pat-token' },
     ]
 
-    const result = findPatCredentialForHost(credentials, 'github.com')
-
-    expect(result).toEqual({ username: 'x-access-token', password: 'pat-token' })
+    expect(findPatCredentialForHost(credentials, 'github.com')).toEqual({ username: 'x-access-token', password: 'pat-token' })
   })
 
   it('returns null when no credential matches the host', () => {
-    const credentials: GitCredential[] = [
-      { name: 'gitlab', host: 'gitlab.com', type: 'pat', token: 'gl-token' },
-    ]
+    const credentials: GitCredential[] = [{ name: 'gitlab', host: 'gitlab.com', type: 'pat', token: 'gl-token' }]
 
-    const result = findPatCredentialForHost(credentials, 'github.com')
-
-    expect(result).toBeNull()
+    expect(findPatCredentialForHost(credentials, 'github.com')).toBeNull()
   })
 
-  it('returns empty password when matched credential has no token', () => {
-    const credentials: GitCredential[] = [
-      { name: 'github', host: 'github.com', type: 'pat' },
-    ]
+  it('returns an empty password when the matched credential has no token', () => {
+    const credentials: GitCredential[] = [{ name: 'github', host: 'github.com', type: 'pat' }]
 
-    const result = findPatCredentialForHost(credentials, 'github.com')
-
-    expect(result).toEqual({ username: 'x-access-token', password: '' })
+    expect(findPatCredentialForHost(credentials, 'github.com')).toEqual({ username: 'x-access-token', password: '' })
   })
 })
 
 describe('resolveGitIdentity', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    global.fetch = vi.fn() as any;
+  it('returns the manual identity without contacting GitHub when both fields are set', async () => {
+    const result = await resolveGitIdentity({ name: 'John Doe', email: 'john@example.com' }, [])
+
+    expect(result).toEqual({ name: 'John Doe', email: 'john@example.com' })
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('should return manual identity when both name and email provided', async () => {
-    const manual = { name: 'John Doe', email: 'john@example.com' }
-    const credentials: GitCredential[] = []
+  it('keeps the manual name and takes the GitHub email', async () => {
+    respondWithUser({ login: 'testuser', name: 'GitHub User', id: 123456 })
+    respondWithEmails([{ email: 'gh@example.com', primary: true, verified: true }])
 
-    const result = await resolveGitIdentity(manual, credentials)
+    const result = await resolveGitIdentity({ name: 'Custom Name', email: undefined }, [GITHUB_CREDENTIAL])
 
-    expect(result).toEqual({
-      name: 'John Doe',
-      email: 'john@example.com'
-    })
-    expect(fetch).not.toHaveBeenCalled()
+    expect(result).toEqual({ name: 'Custom Name', email: 'gh@example.com' })
   })
 
-  it('should prioritize manual name but use GitHub email', async () => {
-    const manual = { name: 'Custom Name', email: undefined }
-    const credentials: GitCredential[] = [
-      { name: 'github', host: 'https://github.com/', type: 'pat', token: 'gh-token' },
-    ]
+  it('uses the GitHub identity when no manual identity is set', async () => {
+    respondWithUser({ login: 'testuser', name: 'Test User', id: 123456 })
+    respondWithEmails([{ email: 'test@example.com', primary: true, verified: true }])
 
-    const userResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        login: 'testuser',
-        name: 'GitHub User',
-        id: 123456
-      })
-    }
-    const emailsResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue([
-        { email: 'gh@example.com', primary: true, verified: true }
-      ])
-    }
+    const result = await resolveGitIdentity(undefined, [GITHUB_CREDENTIAL])
 
-    global.fetch = vi.fn() as any;
-    (global.fetch as any).mockResolvedValueOnce(userResponse)
-      .mockResolvedValueOnce(emailsResponse)
-
-    const result = await resolveGitIdentity(manual, credentials)
-
-    expect(result).toEqual({
-      name: 'Custom Name',
-      email: 'gh@example.com'
-    })
+    expect(result).toEqual({ name: 'Test User', email: 'test@example.com' })
   })
 
-  it('should use GitHub identity when no manual identity', async () => {
-    const manual = undefined
-    const credentials: GitCredential[] = [
-      { name: 'github', host: 'https://github.com/', type: 'pat', token: 'gh-token' },
-    ]
+  it('falls back to the GitHub login when the name is missing', async () => {
+    respondWithUser({ login: 'testuser', name: null, id: 123456 })
+    respondWithEmails([{ email: 'test@example.com', primary: true, verified: true }])
 
-    const userResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        login: 'testuser',
-        name: 'Test User',
-        id: 123456
-      })
-    }
-    const emailsResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue([
-        { email: 'test@example.com', primary: true, verified: true }
-      ])
-    }
+    const result = await resolveGitIdentity(undefined, [GITHUB_CREDENTIAL])
 
-    global.fetch = vi.fn() as any;
-    (global.fetch as any).mockResolvedValueOnce(userResponse)
-      .mockResolvedValueOnce(emailsResponse)
-
-    const result = await resolveGitIdentity(manual, credentials)
-
-    expect(result).toEqual({
-      name: 'Test User',
-      email: 'test@example.com'
-    })
+    expect(result).toEqual({ name: 'testuser', email: 'test@example.com' })
   })
 
-  it('should use login as name when GitHub name is null', async () => {
-    const manual = undefined
-    const credentials: GitCredential[] = [
-      { name: 'github', host: 'https://github.com/', type: 'pat', token: 'gh-token' },
-    ]
+  it('returns the manual name with an empty email when GitHub fails', async () => {
+    respondWithStatus(401)
+    respondWithStatus(500)
 
-    const userResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        login: 'testuser',
-        name: null,
-        id: 123456
-      })
-    }
-    const emailsResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue([
-        { email: 'test@example.com', primary: true, verified: true }
-      ])
-    }
+    const result = await resolveGitIdentity({ name: 'Only Name', email: undefined }, [
+      { ...GITHUB_CREDENTIAL, token: 'invalid-token' },
+    ])
 
-    global.fetch = vi.fn() as any;
-    (global.fetch as any).mockResolvedValueOnce(userResponse)
-      .mockResolvedValueOnce(emailsResponse)
-
-    const result = await resolveGitIdentity(manual, credentials)
-
-    expect(result).toEqual({
-      name: 'testuser',
-      email: 'test@example.com'
-    })
+    expect(result).toEqual({ name: 'Only Name', email: '' })
   })
 
-  it('should return partial identity when GitHub fails but manual has one field', async () => {
-    const manual = { name: 'Only Name', email: undefined }
-    const credentials: GitCredential[] = [
-      { name: 'github', host: 'https://github.com/', type: 'pat', token: 'invalid-token' },
-    ]
-
-    global.fetch = vi.fn() as any;
-    (global.fetch as any).mockResolvedValueOnce({ ok: false })
-
-    const result = await resolveGitIdentity(manual, credentials)
-
-    expect(result).toEqual({
-      name: 'Only Name',
-      email: ''
-    })
-  })
-
-  it('should return null when no identity available', async () => {
-    const manual = undefined
-    const credentials: GitCredential[] = []
-
-    const result = await resolveGitIdentity(manual, credentials)
+  it('returns null when no identity source is available', async () => {
+    const result = await resolveGitIdentity(undefined, [])
 
     expect(result).toBeNull()
-    expect(fetch).not.toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('should return null when both manual fields are empty and GitHub fails', async () => {
-    const manual = { name: undefined, email: undefined }
-    const credentials: GitCredential[] = [
-      { name: 'github', host: 'https://github.com/', type: 'pat', token: 'invalid-token' },
-    ]
+  it('returns null when both manual fields are empty and GitHub fails', async () => {
+    respondWithStatus(401)
+    respondWithStatus(500)
 
-    global.fetch = vi.fn() as any;
-    (global.fetch as any).mockResolvedValueOnce({ ok: false })
-
-    const result = await resolveGitIdentity(manual, credentials)
+    const result = await resolveGitIdentity({ name: undefined, email: undefined }, [GITHUB_CREDENTIAL])
 
     expect(result).toBeNull()
   })
 })
 
 describe('createGitIdentityEnv', () => {
-  it('should create git identity environment variables', () => {
-    const identity = { name: 'John Doe', email: 'john@example.com' }
-
-    const result = createGitIdentityEnv(identity)
-
-    expect(result).toEqual({
+  it('maps the identity onto the author and committer variables', () => {
+    expect(createGitIdentityEnv({ name: 'John Doe', email: 'john@example.com' })).toEqual({
       GIT_AUTHOR_NAME: 'John Doe',
       GIT_AUTHOR_EMAIL: 'john@example.com',
       GIT_COMMITTER_NAME: 'John Doe',
-      GIT_COMMITTER_EMAIL: 'john@example.com'
+      GIT_COMMITTER_EMAIL: 'john@example.com',
     })
   })
 
-  it('should handle empty strings in identity', () => {
-    const identity = { name: '', email: 'email@example.com' }
-
-    const result = createGitIdentityEnv(identity)
-
-    expect(result).toEqual({
+  it('passes empty strings through', () => {
+    expect(createGitIdentityEnv({ name: '', email: 'email@example.com' })).toEqual({
       GIT_AUTHOR_NAME: '',
       GIT_AUTHOR_EMAIL: 'email@example.com',
       GIT_COMMITTER_NAME: '',
-      GIT_COMMITTER_EMAIL: 'email@example.com'
+      GIT_COMMITTER_EMAIL: 'email@example.com',
     })
   })
 })
 
 describe('getSSHCredentialsForHost', () => {
-  const makeSSHCred = (host: string, name = 'test'): GitCredential => ({
+  const sshCredential = (host: string, name = 'test'): GitCredential => ({
     name,
     host,
     type: 'ssh',
     sshPrivateKey: 'key',
   })
 
-  it('matches bare hostname when credential host is bare', () => {
-    const creds = [makeSSHCred('github.com')]
-    expect(getSSHCredentialsForHost(creds, 'github.com')).toHaveLength(1)
-  })
-
-  it('matches when credential host has git@ prefix', () => {
-    const creds = [makeSSHCred('git@bitbucket.org')]
-    expect(getSSHCredentialsForHost(creds, 'bitbucket.org')).toHaveLength(1)
-  })
-
-  it('matches when credential host has git@ prefix for github', () => {
-    const creds = [makeSSHCred('git@github.com')]
-    expect(getSSHCredentialsForHost(creds, 'github.com')).toHaveLength(1)
-  })
-
-  it('does not match a different hostname', () => {
-    const creds = [makeSSHCred('git@gitlab.com')]
-    expect(getSSHCredentialsForHost(creds, 'github.com')).toHaveLength(0)
+  it.each([
+    ['github.com', 'github.com', 1],
+    ['git@bitbucket.org', 'bitbucket.org', 1],
+    ['git@github.com', 'github.com', 1],
+    ['deploy@example.com', 'example.com', 1],
+    ['ssh://git@github.com:22', 'github.com', 1],
+    ['ssh://git@github.com:22', 'github.com:22', 1],
+    ['https://git@github.com', 'github.com', 1],
+    ['git@github.com:22', 'github.com', 1],
+    ['git@github.com:22', 'github.com:22', 1],
+    ['git@gitlab.com', 'github.com', 0],
+    ['git@github.com:2222', 'github.com:22', 0],
+  ])('matches credential host %s against %s', (credentialHost, targetHost, expected) => {
+    expect(getSSHCredentialsForHost([sshCredential(credentialHost)], targetHost)).toHaveLength(expected)
   })
 
   it('filters out non-ssh credentials', () => {
-    const patCred: GitCredential = { ...makeSSHCred('github.com'), type: 'pat' }
-    expect(getSSHCredentialsForHost([patCred], 'github.com')).toHaveLength(0)
-  })
+    const patCredential: GitCredential = { ...sshCredential('github.com'), type: 'pat' }
 
-  it('matches with custom user@ prefix stripped', () => {
-    const creds = [makeSSHCred('deploy@example.com')]
-    expect(getSSHCredentialsForHost(creds, 'example.com')).toHaveLength(1)
-  })
-
-  it('matches ssh://git@... URL format', () => {
-    const creds = [makeSSHCred('ssh://git@github.com:22')]
-    expect(getSSHCredentialsForHost(creds, 'github.com')).toHaveLength(1)
-  })
-
-  it('matches ssh://git@... URL format with port', () => {
-    const creds = [makeSSHCred('ssh://git@github.com:22')]
-    expect(getSSHCredentialsForHost(creds, 'github.com:22')).toHaveLength(1)
-  })
-
-  it('matches https://git@... URL format', () => {
-    const creds = [makeSSHCred('https://git@github.com')]
-    expect(getSSHCredentialsForHost(creds, 'github.com')).toHaveLength(1)
-  })
-
-  it('matches git@host:port format with default port target', () => {
-    const creds = [makeSSHCred('git@github.com:22')]
-    expect(getSSHCredentialsForHost(creds, 'github.com')).toHaveLength(1)
-  })
-
-  it('matches git@host:port format with explicit port target', () => {
-    const creds = [makeSSHCred('git@github.com:22')]
-    expect(getSSHCredentialsForHost(creds, 'github.com:22')).toHaveLength(1)
-  })
-
-  it('does not match git@host:port with different port', () => {
-    const creds = [makeSSHCred('git@github.com:2222')]
-    expect(getSSHCredentialsForHost(creds, 'github.com:22')).toHaveLength(0)
+    expect(getSSHCredentialsForHost([patCredential], 'github.com')).toHaveLength(0)
   })
 })

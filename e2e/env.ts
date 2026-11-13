@@ -30,7 +30,7 @@ function resolveOpenCodeBin(): string {
   return candidates.find((candidate) => existsSync(candidate)) ?? 'opencode'
 }
 
-export function createServerEnv(): Record<string, string> {
+export function createServerEnv() {
   return {
     NODE_ENV: 'production',
     PORT: String(SERVER_PORT),

@@ -35,10 +35,6 @@ interface ServerSchedulesContentProps {
   target: ScheduleServerTarget
 }
 
-/**
- * Schedule jobs, job detail and run history for a project directory on a linked
- * OpenCode server. Remote runs execute in place, so worktree controls are absent.
- */
 export function ServerSchedulesContent({ target }: ServerSchedulesContentProps) {
   const { serverId, directory } = target
   const [tab, setTab] = useState<ServerScheduleTab>('jobs')

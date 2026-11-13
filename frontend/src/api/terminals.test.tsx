@@ -1,113 +1,126 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook, waitFor } from '@testing-library/react'
-import type { ReactNode } from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, waitFor } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import type { TerminalInfo } from '@opencode-manager/shared/types'
+import { createFetchFake, type FetchRoute } from '@/test/fetchFake'
+import { renderHookWithProviders } from '@/test/render'
 import { resizeTerminal, useCreateTerminal, useRemoveTerminal, useTerminals } from './terminals'
 
-const fetchMock = vi.fn()
+const hookProviders = { auth: false, theme: false, toaster: false } as const
 
-function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), { status: 200 })
+const terminal: TerminalInfo = {
+  id: 'pty-1',
+  title: 'Terminal',
+  kind: 'shell',
+  cwd: '/home/me/app',
+  status: 'running',
 }
 
-function createWrapper(queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
-  return ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  )
-}
-
-function lastRequestUrl(): string {
-  return String(fetchMock.mock.calls.at(-1)?.[0])
-}
+const listCases = [
+  {
+    title: 'lists repo terminals through the repo route',
+    target: { kind: 'repo', repoId: 1 },
+    collectionPath: '/api/repos/1/terminals',
+  },
+  {
+    title: 'lists linked server terminals through the server route',
+    target: { kind: 'server', serverId: 'srv_kitchen' },
+    collectionPath: '/api/opencode-servers/srv_kitchen/terminals',
+  },
+] as const
 
 describe('terminal api targets', () => {
-  beforeEach(() => {
-    fetchMock.mockReset()
-    vi.stubGlobal('fetch', fetchMock)
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
-  it('lists repo terminals through the repo route', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ terminals: [] }))
-
-    const { result } = renderHook(
-      () => useTerminals({ kind: 'repo', repoId: 1 }, '/repo', { enabled: true }),
-      { wrapper: createWrapper() },
+  it.each(listCases)('$title', async ({ target, collectionPath }) => {
+    const { result, fetchFake } = renderHookWithProviders(
+      () => useTerminals(target, '/home/me/app', { enabled: true }),
+      {
+        ...hookProviders,
+        fetchRoutes: [
+          { method: 'GET', path: collectionPath, respond: () => ({ json: { terminals: [terminal] } }) },
+        ],
+      },
     )
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    const url = new URL(lastRequestUrl())
-    expect(url.pathname).toBe('/api/repos/1/terminals')
-    expect(url.searchParams.get('directory')).toBe('/repo')
-  })
-
-  it('lists linked server terminals through the server route', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ terminals: [] }))
-
-    const { result } = renderHook(
-      () => useTerminals({ kind: 'server', serverId: 'srv_kitchen' }, '/home/me/app', { enabled: true }),
-      { wrapper: createWrapper() },
-    )
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    const url = new URL(lastRequestUrl())
-    expect(url.pathname).toBe('/api/opencode-servers/srv_kitchen/terminals')
-    expect(url.searchParams.get('directory')).toBe('/home/me/app')
+    await waitFor(() => expect(result.current.data).toEqual([terminal]))
+    expect(fetchFake.lastRequest('GET', collectionPath)?.searchParams.get('directory')).toBe('/home/me/app')
   })
 
   it('scopes the query key to the linked server', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ terminals: [] }))
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-
-    const { result } = renderHook(
+    const { result, queryClient, fetchFake } = renderHookWithProviders(
       () => useTerminals({ kind: 'server', serverId: 'srv_kitchen' }, '/home/me/app', { enabled: true }),
-      { wrapper: createWrapper(queryClient) },
+      {
+        ...hookProviders,
+        fetchRoutes: [
+          {
+            method: 'GET',
+            path: '/api/opencode-servers/srv_kitchen/terminals',
+            respond: () => ({ json: { terminals: [] } }),
+          },
+        ],
+      },
     )
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(
-      queryClient.getQueryCache().findAll({ queryKey: ['terminals', 'srv_kitchen'] }),
-    ).toHaveLength(1)
+    expect(queryClient.getQueryCache().findAll({ queryKey: ['terminals', 'srv_kitchen'] })).toHaveLength(1)
+    expect(fetchFake.findRequests('GET', '/api/opencode-servers/srv_kitchen/terminals')).toHaveLength(1)
   })
 
   it('creates a linked server terminal through the server route', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse({ id: 'pty-1', title: 'Terminal', kind: 'shell', cwd: '/home/me/app', status: 'running' }),
-    )
-
-    const { result } = renderHook(
+    const { result, fetchFake } = renderHookWithProviders(
       () => useCreateTerminal({ kind: 'server', serverId: 'srv_kitchen' }),
-      { wrapper: createWrapper() },
+      {
+        ...hookProviders,
+        fetchRoutes: [
+          {
+            method: 'POST',
+            path: '/api/opencode-servers/srv_kitchen/terminals',
+            respond: () => ({ json: terminal }),
+          },
+        ],
+      },
     )
 
-    await act(() => result.current.mutateAsync({ directory: '/home/me/app' }))
+    await act(async () => {
+      await result.current.mutateAsync({ directory: '/home/me/app' })
+    })
 
-    const url = new URL(lastRequestUrl())
-    expect(url.pathname).toBe('/api/opencode-servers/srv_kitchen/terminals')
-    expect(fetchMock.mock.calls.at(-1)?.[1]?.method).toBe('POST')
+    expect(fetchFake.lastRequest('POST', '/api/opencode-servers/srv_kitchen/terminals')?.body).toEqual({
+      directory: '/home/me/app',
+    })
   })
 
   it('removes a linked server terminal with the directory', async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }))
-
-    const { result } = renderHook(
+    const { result, fetchFake } = renderHookWithProviders(
       () => useRemoveTerminal({ kind: 'server', serverId: 'srv_kitchen' }),
-      { wrapper: createWrapper() },
+      {
+        ...hookProviders,
+        fetchRoutes: [
+          {
+            method: 'DELETE',
+            path: '/api/opencode-servers/srv_kitchen/terminals/pty%201',
+            respond: () => ({ status: 204 }),
+          },
+        ],
+      },
     )
 
-    await act(() => result.current.mutateAsync({ ptyID: 'pty 1', directory: '/home/me/app' }))
+    await act(async () => {
+      await result.current.mutateAsync({ ptyID: 'pty 1', directory: '/home/me/app' })
+    })
 
-    const url = new URL(lastRequestUrl())
-    expect(url.pathname).toBe('/api/opencode-servers/srv_kitchen/terminals/pty%201')
-    expect(url.searchParams.get('directory')).toBe('/home/me/app')
-    expect(fetchMock.mock.calls.at(-1)?.[1]?.method).toBe('DELETE')
+    const removeRequest = fetchFake.lastRequest('DELETE', '/api/opencode-servers/srv_kitchen/terminals/pty%201')
+    expect(removeRequest?.searchParams.get('directory')).toBe('/home/me/app')
   })
 
   it('resizes a linked server terminal', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ success: true }))
+    const routes: FetchRoute[] = [
+      {
+        method: 'PATCH',
+        path: '/api/opencode-servers/srv_kitchen/terminals/pty-1',
+        respond: () => ({ json: { success: true } }),
+      },
+    ]
+    const fetchFake = createFetchFake(routes)
+    fetchFake.install()
 
     await resizeTerminal({ kind: 'server', serverId: 'srv_kitchen' }, 'pty-1', {
       directory: '/home/me/app',
@@ -115,8 +128,10 @@ describe('terminal api targets', () => {
       rows: 24,
     })
 
-    const url = new URL(lastRequestUrl())
-    expect(url.pathname).toBe('/api/opencode-servers/srv_kitchen/terminals/pty-1')
-    expect(fetchMock.mock.calls.at(-1)?.[1]?.method).toBe('PATCH')
+    expect(fetchFake.lastRequest('PATCH', '/api/opencode-servers/srv_kitchen/terminals/pty-1')?.body).toEqual({
+      directory: '/home/me/app',
+      cols: 80,
+      rows: 24,
+    })
   })
 })

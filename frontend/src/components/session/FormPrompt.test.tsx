@@ -1,17 +1,22 @@
-import { fireEvent, render as renderRaw, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactElement } from 'react'
 import type { FormInfo } from '@opencode-manager/shared/opencode'
-import { KeyboardShortcutsProvider, useShortcutActions } from '@/contexts/KeyboardShortcutsContext'
+import { KeyboardShortcutsProvider } from '@/contexts/KeyboardShortcutsContext'
+import { useShortcutActions } from '@/contexts/keyboard-shortcuts-context'
+import { makeSettingsResponse } from '@/test/fixtures/api'
+import { renderWithProviders } from '@/test/render'
 import { FormPrompt } from './FormPrompt'
 
-vi.mock('@/hooks/useSettings', () => ({
-  useSettings: () => ({ preferences: undefined }),
-}))
-
 function render(ui: ReactElement) {
-  return renderRaw(ui, { wrapper: KeyboardShortcutsProvider })
+  return renderWithProviders(<KeyboardShortcutsProvider>{ui}</KeyboardShortcutsProvider>, {
+    auth: false,
+    theme: false,
+    tts: false,
+    toaster: false,
+    fetchRoutes: [{ method: 'GET', path: '/api/settings', respond: () => ({ json: makeSettingsResponse() }) }],
+  })
 }
 
 function AbortLayer({ onAbort }: { onAbort: () => void }) {
@@ -112,8 +117,8 @@ describe('FormPrompt', () => {
       }
       render(<FormPrompt form={form} onReply={onReply} onCancel={vi.fn()} />)
 
-      const input = screen.getByLabelText(/Count/) as HTMLInputElement
-      expect(input.value).toBe('3')
+      const input = screen.getByLabelText(/Count/)
+      expect(input).toHaveValue(3)
       const submit = screen.getByRole('button', { name: 'Submit' })
       expect(submit).toBeEnabled()
 
@@ -131,11 +136,11 @@ describe('FormPrompt', () => {
       }
       render(<FormPrompt form={form} onReply={onReply} onCancel={vi.fn()} />)
 
-      const input = screen.getByLabelText(/Count/) as HTMLInputElement
+      const input = screen.getByLabelText(/Count/)
       const submit = screen.getByRole('button', { name: 'Submit' })
 
       await userEvent.clear(input)
-      expect(input.value).toBe('')
+      expect(input).toHaveValue(null)
       expect(submit).toBeDisabled()
 
       await userEvent.type(input, '5')
@@ -168,7 +173,7 @@ describe('FormPrompt', () => {
       }
       render(<FormPrompt form={form} onReply={onReply} onCancel={vi.fn()} />)
 
-      expect((screen.getByLabelText(/Name/) as HTMLTextAreaElement).value).toBe('Ada')
+      expect(screen.getByLabelText(/Name/)).toHaveValue('Ada')
       expect(screen.getByRole('button', { name: 'No' })).toHaveAttribute('aria-pressed', 'true')
       expect(screen.getByRole('button', { name: 'Alpha' })).toHaveAttribute('aria-pressed', 'true')
 
@@ -235,8 +240,8 @@ describe('FormPrompt', () => {
       expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled()
 
       await userEvent.click(screen.getByRole('button', { name: 'Other...' }))
-      const customInput = screen.getByLabelText('Other answer for Answer') as HTMLTextAreaElement
-      expect(customInput.value).toBe('Yesterday')
+      const customInput = screen.getByLabelText('Other answer for Answer')
+      expect(customInput).toHaveValue('Yesterday')
 
       await userEvent.clear(customInput)
       await userEvent.type(customInput, 'Tomorrow')
@@ -407,7 +412,7 @@ describe('FormPrompt', () => {
       const customInput = screen.getByLabelText('Other answer for Answer')
       await userEvent.type(customInput, 'Yesterday')
 
-      expect((customInput as HTMLTextAreaElement).value).toBe('Yesterday')
+      expect(customInput).toHaveValue('Yesterday')
       await userEvent.click(screen.getByRole('button', { name: 'Submit' }))
 
       await waitFor(() =>
@@ -442,7 +447,7 @@ describe('FormPrompt', () => {
       const customInput = screen.getByLabelText('Other answer for Features')
       await userEvent.type(customInput, 'Yesterday')
 
-      expect((customInput as HTMLTextAreaElement).value).toBe('Yesterday')
+      expect(customInput).toHaveValue('Yesterday')
       await userEvent.click(screen.getByRole('button', { name: 'Submit' }))
 
       await waitFor(() =>
@@ -478,8 +483,8 @@ describe('FormPrompt', () => {
       expect(screen.getByText('Yesterday')).toBeInTheDocument()
 
       await userEvent.click(screen.getByRole('button', { name: 'Other...' }))
-      const reopened = screen.getByLabelText('Other answer for Answer') as HTMLTextAreaElement
-      expect(reopened.value).toBe('Yesterday')
+      const reopened = screen.getByLabelText('Other answer for Answer')
+      expect(reopened).toHaveValue('Yesterday')
 
       await userEvent.clear(reopened)
       await userEvent.type(reopened, 'Tomorrow')

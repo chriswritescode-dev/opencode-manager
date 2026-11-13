@@ -1,53 +1,32 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen, waitFor } from '@testing-library/react'
-import type { ReactNode } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Repo } from '@/api/types'
+import { act, screen, waitFor } from '@testing-library/react'
+import { beforeEach, describe, expect, it } from 'vitest'
+import type { Repo, RepoSibling } from '@/api/repos'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
-import { RepoWorktreesProvider, useRepoWorktreeList } from './RepoWorktreesContext'
-
-const mocks = vi.hoisted(() => ({
-  getRepoSiblings: vi.fn(),
-  useNavigableRepos: vi.fn(),
-}))
-
-vi.mock('@/api/repos', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/repos')>()
-  return {
-    ...actual,
-    getRepoSiblings: mocks.getRepoSiblings,
-  }
-})
-
-vi.mock('@/hooks/useSidebarRepoGroups', () => ({
-  useNavigableRepos: mocks.useNavigableRepos,
-}))
-
-vi.mock('@/contexts/EventContext', () => ({
-  usePermissions: () => ({ pendingSessionIDs: [] }),
-  useForms: () => ({ pendingSessionIDs: [] }),
-}))
+import { makeRepo } from '@/test/fixtures/api'
+import { renderWithProviders } from '@/test/render'
+import { RepoWorktreesProvider } from './RepoWorktreesContext'
+import { useRepoWorktreeList } from './repo-worktrees-context'
 
 const REPO_PATH = '/repo'
 const WORKTREE_PATH = '/repo/.worktrees/feature'
 
-const repo: Repo = {
+const repo: Repo = makeRepo({
   id: 1,
   fullPath: REPO_PATH,
   localPath: REPO_PATH,
   defaultBranch: 'main',
   cloneStatus: 'ready',
   clonedAt: 0,
-}
+})
 
-const worktreeSibling = {
+const worktreeSibling: RepoSibling = {
   ...repo,
   id: -1,
   fullPath: WORKTREE_PATH,
   localPath: 'feature',
   sourcePath: WORKTREE_PATH,
   currentBranch: 'feature',
-  worktreeSource: 'opencode' as const,
+  worktreeSource: 'opencode',
 }
 
 function WorktreeConsumer() {
@@ -55,31 +34,35 @@ function WorktreeConsumer() {
   return <div data-testid="worktrees">{worktrees.map((worktree) => worktree.directory).join(',')}</div>
 }
 
-const renderProvider = (queryClient: QueryClient) => {
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  )
-  return render(
+function renderProvider() {
+  return renderWithProviders(
     <RepoWorktreesProvider>
       <WorktreeConsumer />
     </RepoWorktreesProvider>,
-    { wrapper },
+    {
+      events: true,
+      fetchRoutes: [
+        { method: 'GET', path: '/api/repos', respond: () => ({ json: [repo] }) },
+        { method: 'GET', path: '/api/repos/1/siblings', respond: () => ({ json: [worktreeSibling] }) },
+        { method: 'GET', path: '/api/opencode-servers', respond: () => ({ json: { servers: [] } }) },
+        { method: 'GET', path: '/api/opencode/api/session/active', respond: () => ({ json: { data: {} } }) },
+        { method: 'GET', path: '/api/opencode/api/permission/request', respond: () => ({ json: { data: [] } }) },
+        { method: 'GET', path: '/api/opencode/api/form', respond: () => ({ json: { data: [] } }) },
+        { method: 'GET', path: '/api/opencode/api/shell', respond: () => ({ json: { data: [] } }) },
+      ],
+    },
   )
 }
 
 const setActiveSession = (directory: string) => {
   useSessionStatus.setState({
-    statuses: new Map([['session', { type: 'busy' as const }]]),
+    statuses: new Map([['session', { type: 'busy' }]]),
     directories: new Map([['session', directory]]),
   })
 }
 
 describe('RepoWorktreesProvider', () => {
   beforeEach(() => {
-    mocks.getRepoSiblings.mockReset()
-    mocks.getRepoSiblings.mockResolvedValue([worktreeSibling])
-    mocks.useNavigableRepos.mockReset()
-    mocks.useNavigableRepos.mockReturnValue({ repos: [repo], isLoading: false, refetch: vi.fn() })
     useSessionStatus.setState({
       statuses: new Map(),
       statusCache: new Map(),
@@ -98,22 +81,22 @@ describe('RepoWorktreesProvider', () => {
   it('never fetches siblings when every active directory belongs to a repo', async () => {
     setActiveSession(REPO_PATH)
 
-    renderProvider(new QueryClient({ defaultOptions: { queries: { retry: false } } }))
+    const { fetchFake } = renderProvider()
 
     await act(async () => {
       await Promise.resolve()
     })
 
-    expect(mocks.getRepoSiblings).not.toHaveBeenCalled()
+    expect(fetchFake.findRequests('GET', '/api/repos/1/siblings')).toHaveLength(0)
     expect(screen.getByTestId('worktrees')).toHaveTextContent('')
   })
 
   it('fetches siblings and exposes the worktree when a busy session directory is unmatched', async () => {
     setActiveSession(WORKTREE_PATH)
 
-    renderProvider(new QueryClient({ defaultOptions: { queries: { retry: false } } }))
+    const { fetchFake } = renderProvider()
 
     await waitFor(() => expect(screen.getByTestId('worktrees')).toHaveTextContent(WORKTREE_PATH))
-    expect(mocks.getRepoSiblings).toHaveBeenCalledWith(1)
+    expect(fetchFake.findRequests('GET', '/api/repos/1/siblings')).toHaveLength(1)
   })
 })

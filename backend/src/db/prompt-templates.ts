@@ -5,19 +5,23 @@ import {
   type CreatePromptTemplateRequest,
   type UpdatePromptTemplateRequest,
 } from '@opencode-manager/shared/schemas'
+import { z } from 'zod'
+import { selectRow, selectRows } from './rows'
 
-interface PromptTemplateRow {
-  id: number
-  title: string
-  category: string
-  cadence_hint: string
-  suggested_name: string
-  suggested_description: string
-  description: string
-  prompt: string
-  created_at: number
-  updated_at: number
-}
+const PromptTemplateRowSchema = z.object({
+  id: z.number(),
+  title: z.string(),
+  category: z.string(),
+  cadence_hint: z.string(),
+  suggested_name: z.string(),
+  suggested_description: z.string(),
+  description: z.string(),
+  prompt: z.string(),
+  created_at: z.number(),
+  updated_at: z.number(),
+})
+
+type PromptTemplateRow = z.infer<typeof PromptTemplateRowSchema>
 
 function rowToPromptTemplate(row: PromptTemplateRow): PromptTemplate {
   return PromptTemplateSchema.parse({
@@ -35,12 +39,12 @@ function rowToPromptTemplate(row: PromptTemplateRow): PromptTemplate {
 }
 
 export function listPromptTemplates(db: Database): PromptTemplate[] {
-  const rows = db.prepare('SELECT * FROM prompt_templates ORDER BY id ASC').all() as PromptTemplateRow[]
+  const rows = selectRows(db, PromptTemplateRowSchema, 'SELECT * FROM prompt_templates ORDER BY id ASC')
   return rows.map(rowToPromptTemplate)
 }
 
 export function getPromptTemplateById(db: Database, id: number): PromptTemplate | null {
-  const row = db.prepare('SELECT * FROM prompt_templates WHERE id = ?').get(id) as PromptTemplateRow | null
+  const row = selectRow(db, PromptTemplateRowSchema, 'SELECT * FROM prompt_templates WHERE id = ?', id)
   return row ? rowToPromptTemplate(row) : null
 }
 
@@ -50,7 +54,7 @@ export function createPromptTemplate(db: Database, data: CreatePromptTemplateReq
     INSERT INTO prompt_templates (title, category, cadence_hint, suggested_name, suggested_description, description, prompt, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(data.title, data.category, data.cadenceHint, data.suggestedName, data.suggestedDescription, data.description, data.prompt, now, now)
-  return getPromptTemplateById(db, result.lastInsertRowid as number)!
+  return getPromptTemplateById(db, Number(result.lastInsertRowid))!
 }
 
 export function updatePromptTemplate(db: Database, id: number, data: UpdatePromptTemplateRequest): PromptTemplate | null {

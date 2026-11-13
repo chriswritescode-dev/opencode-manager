@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { z } from 'zod'
 import { terminalConnectPath, type TerminalTarget } from '@/lib/terminal-target'
 import { TerminalFrameDecoder } from '@/lib/terminal-protocol'
 import { toWebSocketUrl } from '@/lib/websocket-url'
 
 export type TerminalSocketStatus = 'connecting' | 'open' | 'reconnecting' | 'closed'
+
+const terminalFramePayloadSchema = z.union([z.string(), z.instanceof(ArrayBuffer)])
 
 export interface UseTerminalSocketOptions {
   target: TerminalTarget
@@ -82,7 +85,9 @@ export function useTerminalSocket({
 
       socket.onmessage = (event) => {
         if (disposed || socketRef.current !== socket) return
-        const frame = decoder.decode(event.data as string | ArrayBuffer)
+        const payload = terminalFramePayloadSchema.safeParse(event.data)
+        if (!payload.success) return
+        const frame = decoder.decode(payload.data)
         if (frame.type === 'cursor') {
           attempt = 0
           cursorRef.current = frame.cursor

@@ -1,8 +1,25 @@
 import type { GitCredential } from '@opencode-manager/shared'
+import { z } from 'zod'
 import { githubFetch } from './github'
 import { logger } from './logger'
 
 const GITHUB_USER_INFO_TIMEOUT_MS = 10_000
+
+export interface GitAuthEnv {
+  [key: string]: string
+}
+
+const GitHubUserSchema = z.object({
+  id: z.number(),
+  login: z.string(),
+  name: z.string().nullable(),
+})
+
+const GitHubEmailSchema = z.object({
+  email: z.string(),
+  primary: z.boolean(),
+  verified: z.boolean(),
+})
 
 export function isGitHubHttpsUrl(repoUrl: string): boolean {
   const url = normalizeGitCredentialUrl(repoUrl)
@@ -37,7 +54,7 @@ export function createExtraHeaderEnv(
   normalizedHost: string,
   username: string,
   token: string
-): Record<string, string> {
+): GitAuthEnv {
   const basicAuth = Buffer.from(`${username}:${token}`, 'utf8').toString('base64')
   return {
     [`GIT_CONFIG_KEY_${configIndex}`]: `http.${normalizedHost}.extraheader`,
@@ -48,32 +65,32 @@ export function createExtraHeaderEnv(
 export function createGitEnv(
   credentials: GitCredential[],
   preferred?: GitCredential | null
-): Record<string, string> {
-  const env: Record<string, string> = {
+): GitAuthEnv {
+  const env: GitAuthEnv = {
     GIT_TERMINAL_PROMPT: '0',
     GIT_CONFIG_COUNT: '0'
   }
 
-  const credentialByHost = new Map<string, GitCredential>()
+  const credentialByHost = new Map<string, { credential: GitCredential; token: string }>()
 
-  for (const cred of [...(preferred ? [preferred] : []), ...(credentials ?? [])]) {
-    if (!cred.host || !cred.token) {
+  for (const credential of [...(preferred ? [preferred] : []), ...(credentials ?? [])]) {
+    if (!credential.host || !credential.token) {
       continue
     }
 
-    const host = normalizeHost(cred.host)
+    const host = normalizeHost(credential.host)
     if (!host || credentialByHost.has(host)) {
       continue
     }
-    credentialByHost.set(host, cred)
+    credentialByHost.set(host, { credential, token: credential.token })
   }
 
   let configIndex = 0
 
-  for (const [host, cred] of credentialByHost) {
+  for (const [host, { credential, token }] of credentialByHost) {
     Object.assign(
       env,
-      createExtraHeaderEnv(configIndex, host, cred.username || getDefaultUsername(host), cred.token as string)
+      createExtraHeaderEnv(configIndex, host, credential.username || getDefaultUsername(host), token)
     )
     configIndex++
   }
@@ -93,7 +110,7 @@ export function findGitHubCredential(credentials: GitCredential[]): GitCredentia
   }) || null
 }
 
-export function createGhCliEnv(credentials: GitCredential[]): Record<string, string> {
+export function createGhCliEnv(credentials: GitCredential[]): GitAuthEnv {
   const githubCred = findGitHubCredential(credentials)
   if (!githubCred?.token) return {}
   return { GH_TOKEN: githubCred.token, GITHUB_TOKEN: githubCred.token }
@@ -130,7 +147,6 @@ export function getSSHCredentialsForHost(credentials: GitCredential[], host: str
     const rawCredHost = cred.host.toLowerCase()
     const targetHost = host.toLowerCase()
     
-    // First, try to parse as URL (for ssh:// or https:// formats)
     try {
       const urlToParse = rawCredHost.includes('://') ? rawCredHost : `ssh://dummy@${rawCredHost}`
       const parsedCredHost = new URL(urlToParse)
@@ -202,7 +218,7 @@ export async function resolveGitIdentity(
   return null
 }
 
-export function createGitIdentityEnv(identity: GitIdentity): Record<string, string> {
+export function createGitIdentityEnv(identity: GitIdentity): GitAuthEnv {
   return {
     GIT_AUTHOR_NAME: identity.name,
     GIT_AUTHOR_EMAIL: identity.email,
@@ -221,14 +237,17 @@ export async function fetchGitHubUserInfo(token: string): Promise<GitHubUserInfo
 
     if (!userResponse.ok) return null
 
-    const data = await userResponse.json() as { login: string; name: string | null; id: number }
+    const parsedUser = GitHubUserSchema.safeParse(await userResponse.json())
+    if (!parsedUser.success) return null
+    const data = parsedUser.data
 
     if (!data.id || !data.login) return null
 
     let email = `${data.id}+${data.login}@users.noreply.github.com`
 
     if (emailsResponse.ok) {
-      const emails = await emailsResponse.json() as Array<{ email: string; primary: boolean; verified: boolean }>
+      const parsedEmails = z.array(GitHubEmailSchema).safeParse(await emailsResponse.json())
+      const emails = parsedEmails.success ? parsedEmails.data : []
       const primaryEmail = emails.find(e => e.primary && e.verified)
       if (primaryEmail?.email) {
         email = primaryEmail.email

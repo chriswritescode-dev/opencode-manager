@@ -1,7 +1,9 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { z } from 'zod'
 import { useNavigate } from 'react-router-dom'
 import { Loader2, Play, Search } from 'lucide-react'
 import { SideDrawer, SideDrawerContent, SideDrawerHeader } from '@/components/ui/side-drawer'
+import { FetchError } from '@opencode-manager/shared'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -36,7 +38,9 @@ interface MultiRunSheetProps {
   onOpenChange: (open: boolean) => void
 }
 
-type SheetTab = 'runs' | 'new'
+const sheetTabSchema = z.enum(['runs', 'new'])
+
+type SheetTab = z.infer<typeof sheetTabSchema>
 
 interface PendingDiscard {
   runId: number
@@ -50,8 +54,8 @@ interface FusionSelection {
 
 const NO_UNAVAILABLE_REASONS: ReadonlyMap<number, string> = new Map()
 
-function unavailableReasonsFromError(error: unknown): ReadonlyMap<number, string> {
-  const parsed = FusionUnavailableDetailsSchema.safeParse((error as { details?: unknown } | null)?.details)
+function unavailableReasonsFromError(cause: unknown): ReadonlyMap<number, string> {
+  const parsed = FusionUnavailableDetailsSchema.safeParse(cause instanceof FetchError ? cause.details : undefined)
   if (!parsed.success) return NO_UNAVAILABLE_REASONS
   return new Map(parsed.data.unavailableSources.map((source) => [source.entryId, source.message]))
 }
@@ -123,9 +127,9 @@ export function MultiRunSheet({ target, directory, defaultBaseRef, open, onOpenC
       requestId: fusionRequestId,
       entryIds: selection.entryIds,
       model: submission.model,
-      ...(submission.instructions ? { instructions: submission.instructions } : {}),
-      ...(submission.baseRef ? { baseRef: submission.baseRef } : {}),
     }
+    if (submission.instructions) request.instructions = submission.instructions
+    if (submission.baseRef) request.baseRef = submission.baseRef
     fuse.mutate(
       { runId: selection.runId, request },
       {
@@ -161,7 +165,10 @@ export function MultiRunSheet({ target, directory, defaultBaseRef, open, onOpenC
       >
         <Tabs
           value={activeTab}
-          onValueChange={(value) => setActiveTab(value as SheetTab)}
+          onValueChange={(value) => {
+            const parsed = sheetTabSchema.safeParse(value)
+            if (parsed.success) setActiveTab(parsed.data)
+          }}
           className="flex min-h-0 flex-1 flex-col"
         >
           <SideDrawerHeader
@@ -326,8 +333,8 @@ function NewRunForm({ target, directory, defaultBaseRef, open, onLaunched }: New
       prompt: prompt.trim(),
       models: selectedModels,
       isolate,
-      ...(isolate && baseRef ? { baseRef } : {}),
     }
+    if (isolate && baseRef) request.baseRef = baseRef
     launch.mutate(request, { onSuccess: onLaunched })
   }
 

@@ -1,4 +1,9 @@
-import { beforeAll, afterAll } from 'vitest'
+import { beforeAll, beforeEach, afterAll } from 'vitest'
+import { resetManagerLogBuffer } from '../src/utils/log-buffer'
+
+beforeEach(() => {
+  resetManagerLogBuffer()
+})
 
 for (const key of Object.keys(process.env)) {
   if (key !== 'MSB_PATH' && /^(SANDBOX|MSB)_/.test(key)) delete process.env[key]

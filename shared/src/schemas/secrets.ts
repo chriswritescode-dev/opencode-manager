@@ -11,21 +11,18 @@ export const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 const RESERVED_ENV_PREFIXES = ['OCM_', 'OPENCODE_', 'GIT_CONFIG_', 'MSB_', 'LD_'] as const
 
-/**
- * Prefixes the sandbox owns: a plan-provided or forwarded variable using one of
- * them could replace the sandbox control variables, so they never cross into a
- * microVM from a plan.
- */
 export const SANDBOX_CONTROL_ENV_PREFIXES = ['OCM_', 'MSB_'] as const satisfies readonly (typeof RESERVED_ENV_PREFIXES)[number][]
 
 const RESERVED_ENV_NAMES = ['PATH', 'HOME', 'NODE_OPTIONS'] as const
+
+const RESERVED_ENV_NAME_SET: ReadonlySet<string> = new Set(RESERVED_ENV_NAMES)
 
 const BLOCKED_ENV_NAMES = new Set<string>(BLOCKED_SERVER_ENV_KEYS)
 
 export function isReservedEnvName(name: string): boolean {
   const normalized = name.toUpperCase()
   if (BLOCKED_ENV_NAMES.has(normalized)) return true
-  if ((RESERVED_ENV_NAMES as readonly string[]).includes(normalized)) return true
+  if (RESERVED_ENV_NAME_SET.has(normalized)) return true
   return RESERVED_ENV_PREFIXES.some((prefix) => normalized.startsWith(prefix))
 }
 

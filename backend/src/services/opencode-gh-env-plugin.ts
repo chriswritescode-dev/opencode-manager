@@ -1,19 +1,5 @@
 import { SANDBOX_SHELL_MARKER_PREFIX, SANDBOX_SHELL_STATE_KEY, SECRET_MASK_STORE_SOURCE } from './opencode-plugin-state'
 
-/**
- * Builds the generated gh-env plugin source.
- *
- * The plugin keeps secret masks per cwd and replaces them on every successful
- * `/shell-env` fetch for that cwd, so a rotated or removed secret stops being
- * masked. A tool result is masked with the masks of the cwd the shell ran in
- * when the tool event exposes one (`cwd` or `workdir` on the input); a tool
- * result that exposes no cwd is masked with the union of the current per-cwd
- * mask sets, never with values that were already replaced.
- *
- * A spawn that belongs to a sandboxed shell asks `/shell-env` to skip the
- * repository env, because the sandbox plan resolves it once for the microVM and
- * registers its mask values through the shared mask store.
- */
 export function buildGhEnvPluginSource(id: string): string {
   return `var TTL_MS = 5000
 var cache = new Map()

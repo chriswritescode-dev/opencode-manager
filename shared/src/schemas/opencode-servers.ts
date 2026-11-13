@@ -100,7 +100,6 @@ export type OpenCodeServerStatus = z.infer<typeof OpenCodeServerStatusSchema>;
 export type OpenCodeServerLink = z.infer<typeof OpenCodeServerLinkSchema>;
 export type ManagerAppLink = z.infer<typeof ManagerAppLinkSchema>;
 
-/** Builds the `ocm://link` URL encoded into a pairing QR code. */
 export function buildOpenCodeServerLink(link: OpenCodeServerLink): string {
   const params = buildLinkParams(link);
   params.set("pair", link.pairing.pairUrl);
@@ -108,14 +107,12 @@ export function buildOpenCodeServerLink(link: OpenCodeServerLink): string {
   return buildLinkUrl(params);
 }
 
-/** Parses an `ocm://link` URL from a QR code or pasted text; returns null when it is not a valid link. */
 export function parseOpenCodeServerLink(text: string): OpenCodeServerLink | null {
   return readLink(OpenCodeServerLinkSchema, text, (url) => ({
     pairing: { pairUrl: url.searchParams.get("pair"), code: url.searchParams.get("code") },
   }));
 }
 
-/** Builds the `ocm://link` URL for a manager app pairing QR code, including remote-access headers. */
 export function buildManagerAppLink(link: ManagerAppLink): string {
   const params = buildLinkParams(link);
   params.set("code", link.code);
@@ -123,7 +120,6 @@ export function buildManagerAppLink(link: ManagerAppLink): string {
   return buildLinkUrl(params);
 }
 
-/** Parses an `ocm://link` manager app link; returns null when it is not a valid manager link. */
 export function parseManagerAppLink(text: string): ManagerAppLink | null {
   return readLink(ManagerAppLinkSchema, text, (url) => {
     const headers: Array<{ name: string; value: string }> = [];
@@ -136,7 +132,6 @@ export function parseManagerAppLink(text: string): ManagerAppLink | null {
   });
 }
 
-/** Reads the `v` parameter of an `ocm://link` URL, or null when the text is not an `ocm://link` URL. */
 export function readOpenCodeServerLinkVersion(text: string): string | null {
   return parseOpenCodeServerLinkUrl(text)?.searchParams.get("v") ?? null;
 }
@@ -186,10 +181,10 @@ function readLinkQueryFields(text: string): { url: URL; fields: LinkQueryFields 
   };
 }
 
-function readLink<T>(
+function readLink<T, Details extends object>(
   schema: z.ZodType<T>,
   text: string,
-  readDetails: (url: URL) => Record<string, unknown> | null,
+  readDetails: (url: URL) => Details | null,
 ): T | null {
   const link = readLinkQueryFields(text);
   if (!link) return null;
@@ -201,12 +196,10 @@ function readLink<T>(
 
 const REMOTE_DIRECTORY_KEY_PATTERN = /^(srv_[A-Za-z0-9_-]+)\|(.+)$/s;
 
-/** Builds the event-stream subscription key for a directory; local directories stay unchanged. */
 export function buildServerDirectoryKey(serverId: string, directory: string): string {
   return serverId === LOCAL_OPENCODE_SERVER_ID ? directory : `${serverId}|${directory}`;
 }
 
-/** Splits an event-stream subscription key into its server id and directory. */
 export function parseServerDirectoryKey(key: string): { serverId: string; directory: string } {
   const match = REMOTE_DIRECTORY_KEY_PATTERN.exec(key);
   return match?.[1] && match[2] ? { serverId: match[1], directory: match[2] } : { serverId: LOCAL_OPENCODE_SERVER_ID, directory: key };

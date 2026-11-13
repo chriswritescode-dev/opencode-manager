@@ -6,9 +6,9 @@ import { getRepoById } from '../db/queries'
 import type { Repo } from '../types/repo'
 import { getErrorMessage } from '../utils/error-utils'
 import type { OpenCodeClient } from './opencode/client'
-import { resolveOpenCodeModel, type ResolvedOpenCodeModel } from './opencode-models'
+import { resolveOpenCodeModel, type ResolveOpenCodeModelOptions, type ResolvedOpenCodeModel } from './opencode-models'
 import { resolveRepoProjectId } from './repo'
-import type { RepoWorkspaceService } from './repo-workspace'
+import type { RepoWorkspaceProvider } from './repo-workspace'
 
 type SessionCreateInput = NonNullable<Parameters<OpenCodeClient['api']['session']['create']>[0]>
 
@@ -52,17 +52,20 @@ export class SessionLaunchError extends Error {
   }
 }
 
+export type OpenCodeModelLoader = (
+  client: OpenCodeClient,
+  directory: string,
+  options?: ResolveOpenCodeModelOptions,
+) => Promise<ResolvedOpenCodeModel>
+
 export interface SessionTargetDeps {
   db: Database
   openCodeClient: OpenCodeClient
-  repoWorkspaces: RepoWorkspaceService
+  repoWorkspaces: RepoWorkspaceProvider
   getServerClient?: (serverId: string) => OpenCodeClient
+  loadModel?: OpenCodeModelLoader
 }
 
-/**
- * A resolved place to run sessions: the local repository checkout or a directory on a linked
- * OpenCode server. Workspaces and models are resolved through the same client the sessions run on.
- */
 export interface ResolvedSessionTarget {
   client: OpenCodeClient
   directory: string
@@ -109,11 +112,12 @@ export function sessionTargetOfRun(run: {
 async function resolveModelIn(
   client: OpenCodeClient,
   directory: string,
-  requestedModel?: string,
+  requestedModel: string | undefined,
+  loadModel: OpenCodeModelLoader,
 ): Promise<ResolvedOpenCodeModel> {
   let resolved: ResolvedOpenCodeModel
   try {
-    resolved = await resolveOpenCodeModel(client, directory, { preferredModel: requestedModel })
+    resolved = await loadModel(client, directory, { preferredModel: requestedModel })
   } catch (error) {
     throw new SessionLaunchError(getErrorMessage(error) || 'Failed to resolve OpenCode model', 502)
   }
@@ -132,11 +136,13 @@ function repoSessionTarget(deps: SessionTargetDeps, repoId: number): ResolvedSes
   const repo = requireReadyRepo(deps.db, repoId)
   const client = deps.openCodeClient
 
+  const loadModel = deps.loadModel ?? resolveOpenCodeModel
+
   return {
     client,
     directory: repo.fullPath,
     repo,
-    resolveModel: (requestedModel) => resolveModelIn(client, repo.fullPath, requestedModel),
+    resolveModel: (requestedModel) => resolveModelIn(client, repo.fullPath, requestedModel, loadModel),
     createWorkspace: async (options) => (await deps.repoWorkspaces.create(repo, options)).directory,
     removeWorkspace: (directory) => deps.repoWorkspaces.remove(repo, directory),
   }
@@ -152,18 +158,19 @@ function serverSessionTarget(
   }
 
   const client = deps.getServerClient(serverId)
+  const loadModel = deps.loadModel ?? resolveOpenCodeModel
 
   return {
     client,
     directory,
     repo: null,
-    resolveModel: (requestedModel) => resolveModelIn(client, directory, requestedModel),
+    resolveModel: (requestedModel) => resolveModelIn(client, directory, requestedModel, loadModel),
     createWorkspace: async (options) => {
       const projectID = await resolveRepoProjectId(client, directory)
       const worktree = await client.api.worktree.create({
         projectID,
-        ...(options?.name ? { name: options.name } : {}),
-        ...(options?.ref ? { branch: options.ref } : {}),
+        name: options?.name,
+        branch: options?.ref,
       })
       return worktree.directory
     },
@@ -187,8 +194,9 @@ export class SessionLauncher {
   constructor(
     private readonly db: Database,
     private readonly openCodeClient: OpenCodeClient,
-    private readonly repoWorkspaces: RepoWorkspaceService,
+    private readonly repoWorkspaces: RepoWorkspaceProvider,
     private readonly getServerClient?: (serverId: string) => OpenCodeClient,
+    private readonly loadModel?: OpenCodeModelLoader,
   ) {}
 
   async launch(input: LaunchSessionInput): Promise<LaunchedSession> {
@@ -197,7 +205,8 @@ export class SessionLauncher {
         db: this.db,
         openCodeClient: this.openCodeClient,
         repoWorkspaces: this.repoWorkspaces,
-        ...(this.getServerClient ? { getServerClient: this.getServerClient } : {}),
+        getServerClient: this.getServerClient,
+        loadModel: this.loadModel,
       },
       'repoId' in input
         ? { kind: 'repo', repoId: input.repoId }
@@ -212,7 +221,7 @@ export class SessionLauncher {
       try {
         directory = await target.createWorkspace({
           name: sanitizeRepoDirectoryName(input.workspace.name ?? '', 'session'),
-          ...(input.workspace.ref ? { ref: input.workspace.ref } : {}),
+          ref: input.workspace.ref,
         })
         workspaceDirectory = directory
       } catch (error) {
@@ -222,17 +231,20 @@ export class SessionLauncher {
 
     let session: { id: string; title?: string | null }
     try {
-      session = await target.client.api.session.create({
-        ...(input.title ? { title: input.title } : {}),
-        ...(input.agent ? { agent: input.agent } : {}),
-        ...(input.permissions ? { permissions: input.permissions } : {}),
+      const baseSessionInput: SessionCreateInput = {
+        title: input.title,
+        agent: input.agent,
         model: {
           providerID: model.providerID,
           id: model.id,
-          ...(model.variant ? { variant: model.variant } : {}),
+          variant: model.variant,
         },
         ...openCodeLocation(directory),
-      })
+      }
+      const sessionInput: SessionCreateInput = input.permissions
+        ? { ...baseSessionInput, permissions: input.permissions }
+        : baseSessionInput
+      session = await target.client.api.session.create(sessionInput)
     } catch (error) {
       throw new SessionLaunchError(
         withWorkspace(getErrorMessage(error) || 'Failed to create OpenCode session', workspaceDirectory),

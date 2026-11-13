@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { createElement } from 'react'
-import { useCommandHandler } from '../useCommandHandler'
-import { showToast } from '@/lib/toast'
+import { describe, it, expect, vi } from 'vitest'
+import { screen } from '@testing-library/react'
+import type { SessionInfo } from '@opencode-manager/shared/opencode'
+import type { FetchFake, FetchRoute } from '@/test/fetchFake'
+import { createTestQueryClient, renderHookWithProviders } from '@/test/render'
 import { createCommandActionsMock } from '@/test/test-utils'
+import { useCommandHandler } from '../useCommandHandler'
 import { BUILTIN_COMMANDS, type CommandActions } from '@/lib/builtinCommands'
 
 const builtinCommand = (name: string) => {
@@ -13,44 +13,9 @@ const builtinCommand = (name: string) => {
   return command
 }
 
-const mocks = vi.hoisted(() => ({
-  runCommand: vi.fn(),
-  switchSessionModel: vi.fn(),
-  switchSessionAgent: vi.fn(),
-  setStatus: vi.fn(),
-}))
+const sessionPath = '/api/opencode/api/session/test-session-id'
 
-vi.mock('@/api/opencode', async () => {
-  const actual = await vi.importActual('@/api/opencode')
-  return {
-    ...actual,
-    runCommand: mocks.runCommand,
-    switchSessionModel: mocks.switchSessionModel,
-    switchSessionAgent: mocks.switchSessionAgent,
-  }
-})
-
-vi.mock('@/lib/toast', () => ({
-  showToast: {
-    error: vi.fn(),
-    success: vi.fn(),
-    info: vi.fn(),
-    loading: vi.fn(),
-  },
-}))
-
-vi.mock('@/stores/sessionStatusStore', () => ({
-  useSessionStatus: vi.fn((selector) => selector({ setStatus: mocks.setStatus })),
-}))
-
-const createTestQueryClient = () => new QueryClient({
-  defaultOptions: {
-    queries: { retry: false },
-    mutations: { retry: false },
-  },
-})
-
-const sessionInfo = (overrides: Record<string, unknown> = {}) => ({
+const sessionInfo = (overrides: Partial<SessionInfo> = {}): SessionInfo => ({
   id: 'test-session-id',
   projectID: 'proj_1',
   time: { created: 1000, updated: 1000 },
@@ -60,186 +25,172 @@ const sessionInfo = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 })
 
+interface HandlerProps {
+  actions?: CommandActions
+  model?: { providerID: string; id: string; variant?: string }
+  currentAgent?: string
+  failModelSwitch?: boolean
+}
+
+interface HandlerHarness {
+  executeCommand: ReturnType<typeof useCommandHandler>['executeCommand']
+  actions: CommandActions
+  fetchFake: FetchFake
+  setSession: (session: SessionInfo) => void
+}
+
+function renderHandler(props: HandlerProps = {}): HandlerHarness {
+  const actions = props.actions ?? createCommandActionsMock()
+  const routes: FetchRoute[] = [
+    { method: 'POST', path: `${sessionPath}/command`, respond: () => ({ status: 204 }) },
+    {
+      method: 'POST',
+      path: `${sessionPath}/model`,
+      respond: () => (props.failModelSwitch ? { status: 500, text: 'switch failed' } : { status: 204 }),
+    },
+    { method: 'POST', path: `${sessionPath}/agent`, respond: () => ({ status: 204 }) },
+  ]
+  const queryClient = createTestQueryClient()
+  const { result, fetchFake } = renderHookWithProviders(
+    () => useCommandHandler({ sessionID: 'test-session-id', directory: '/test/dir', ...props, actions }),
+    { auth: false, theme: false, queryClient, fetchRoutes: routes },
+  )
+  return {
+    executeCommand: result.current.executeCommand,
+    actions,
+    fetchFake,
+    setSession: (session) => queryClient.setQueryData(['opencode', 'session', 'test-session-id', '/test/dir'], session),
+  }
+}
+
 describe('useCommandHandler', () => {
-  let queryClient: QueryClient
-
-  const renderHandler = (props: Record<string, unknown> = {}) => {
-    const actions = (props.actions as CommandActions | undefined) ?? createCommandActionsMock()
-    const rendered = renderHook(
-      () => useCommandHandler({ sessionID: 'test-session-id', directory: '/test/dir', ...props, actions }),
-      {
-        wrapper: ({ children }) =>
-          createElement(QueryClientProvider, { client: queryClient }, children),
-      },
-    )
-    return { ...rendered, actions }
-  }
-
-  const setSession = (session: Record<string, unknown>) => {
-    queryClient.setQueryData(
-      ['opencode', 'session', 'test-session-id', '/test/dir'],
-      session,
-    )
-  }
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    queryClient = createTestQueryClient()
-    mocks.runCommand.mockResolvedValue(undefined)
-    mocks.switchSessionModel.mockResolvedValue(undefined)
-    mocks.switchSessionAgent.mockResolvedValue(undefined)
-  })
-
   it('export dispatches the built-in action without running a server command', async () => {
-    setSession(sessionInfo())
+    const actions = createCommandActionsMock()
+    const handler = renderHandler({ actions })
+    handler.setSession(sessionInfo())
 
-    const { result, actions } = renderHandler()
-
-    const cleared = await result.current.executeCommand(builtinCommand('export'), { text: '' })
+    const cleared = await handler.executeCommand(builtinCommand('export'), { text: '' })
 
     expect(actions.exportSession).toHaveBeenCalledWith('')
-    expect(mocks.runCommand).not.toHaveBeenCalled()
+    expect(handler.fetchFake.findRequests('POST', `${sessionPath}/command`)).toHaveLength(0)
     expect(cleared).toBe(true)
   })
 
   it('runs a server command that shares a built-in name through runCommand', async () => {
-    setSession(sessionInfo())
+    const handler = renderHandler()
 
-    const { result, actions } = renderHandler()
+    await handler.executeCommand({ name: 'export' }, { text: '' })
 
-    await result.current.executeCommand({ name: 'export' }, { text: '' })
-
-    expect(mocks.runCommand).toHaveBeenCalledWith({
-      sessionID: 'test-session-id',
+    expect(handler.fetchFake.lastRequest('POST', `${sessionPath}/command`)?.body).toEqual({
       name: 'export',
       text: '',
-    }, 'local')
-    expect(actions.exportSession).not.toHaveBeenCalled()
+    })
+    expect(handler.actions.exportSession).not.toHaveBeenCalled()
   })
 
   it('clear dispatches the new-session built-in action', async () => {
-    setSession(sessionInfo())
+    const handler = renderHandler()
 
-    const { result, actions } = renderHandler()
+    await handler.executeCommand(builtinCommand('clear'), { text: '' })
 
-    await result.current.executeCommand(builtinCommand('clear'), { text: '' })
-
-    expect(actions.newSession).toHaveBeenCalled()
-    expect(mocks.runCommand).not.toHaveBeenCalled()
+    expect(handler.actions.newSession).toHaveBeenCalled()
+    expect(handler.fetchFake.findRequests('POST', `${sessionPath}/command`)).toHaveLength(0)
   })
 
   it('undo dispatches the built-in action and keeps the prompt', async () => {
-    setSession(sessionInfo())
+    const handler = renderHandler()
 
-    const { result, actions } = renderHandler()
+    const cleared = await handler.executeCommand(builtinCommand('undo'), { text: '' })
 
-    const cleared = await result.current.executeCommand(builtinCommand('undo'), { text: '' })
-
-    expect(actions.undo).toHaveBeenCalled()
-    expect(mocks.runCommand).not.toHaveBeenCalled()
+    expect(handler.actions.undo).toHaveBeenCalled()
+    expect(handler.fetchFake.findRequests('POST', `${sessionPath}/command`)).toHaveLength(0)
     expect(cleared).toBe(false)
   })
 
   it('shows an error toast and keeps the prompt when a built-in action throws', async () => {
-    setSession(sessionInfo())
-
     const actions = {
       ...createCommandActionsMock(),
       exportSession: vi.fn().mockRejectedValue(new Error('boom')),
     }
-    const { result } = renderHandler({ actions })
+    const handler = renderHandler({ actions })
 
-    const cleared = await result.current.executeCommand(builtinCommand('export'), { text: '' })
+    const cleared = await handler.executeCommand(builtinCommand('export'), { text: '' })
 
     expect(cleared).toBe(false)
-    expect(showToast.error).toHaveBeenCalledWith('Command failed: boom')
+    expect(await screen.findByText('Command failed: boom')).toBeInTheDocument()
   })
 
   it('review command runs the V2 command without injecting an agent attachment', async () => {
-    setSession(sessionInfo({ agent: 'test-agent' }))
+    const handler = renderHandler({ currentAgent: 'test-agent' })
 
-    const { result } = renderHandler({ currentAgent: 'test-agent' })
+    await handler.executeCommand({ name: 'review' }, { text: '' })
 
-    await result.current.executeCommand({ name: 'review' }, { text: '' })
-
-    expect(mocks.runCommand).toHaveBeenCalledWith({
-      sessionID: 'test-session-id',
+    expect(handler.fetchFake.lastRequest('POST', `${sessionPath}/command`)?.body).toEqual({
       name: 'review',
       text: '',
-    }, 'local')
+    })
   })
 
   it('unknown command runs the V2 command with the parsed payload', async () => {
-    setSession(sessionInfo())
-
-    const { result } = renderHandler()
+    const handler = renderHandler()
     const files = [{ uri: 'file:///test/dir/src/App.tsx', name: 'App.tsx', mention: { start: 0, end: 8, text: '@App.tsx' } }]
     const agents = [{ name: 'reviewer', mention: { start: 9, end: 18, text: '@reviewer' } }]
     const skills = [{ id: 'review' }]
 
-    await result.current.executeCommand({ name: 'myskill' }, { text: '@App.tsx @reviewer', files, agents, skills })
+    await handler.executeCommand({ name: 'myskill' }, { text: '@App.tsx @reviewer', files, agents, skills })
 
-    expect(mocks.runCommand).toHaveBeenCalledWith({
-      sessionID: 'test-session-id',
+    expect(handler.fetchFake.lastRequest('POST', `${sessionPath}/command`)?.body).toEqual({
       name: 'myskill',
       text: '@App.tsx @reviewer',
       files,
       agents,
       skills,
-    }, 'local')
+    })
   })
 
   it('switches model and agent before running the command when the selection changed', async () => {
-    setSession(sessionInfo({ agent: 'build', model: { providerID: 'anthropic', id: 'claude-sonnet-4' } }))
-
-    const { result } = renderHandler({
+    const handler = renderHandler({
       model: { providerID: 'openai', id: 'gpt-4', variant: 'v1' },
       currentAgent: 'plan',
     })
+    handler.setSession(sessionInfo({ agent: 'build', model: { providerID: 'anthropic', id: 'claude-sonnet-4' } }))
 
-    await result.current.executeCommand({ name: 'myskill' }, { text: '' })
+    await handler.executeCommand({ name: 'myskill' }, { text: '' })
 
-    expect(mocks.switchSessionModel).toHaveBeenCalledWith('test-session-id', {
-      providerID: 'openai',
-      id: 'gpt-4',
-      variant: 'v1',
-    }, 'local')
-    expect(mocks.switchSessionAgent).toHaveBeenCalledWith('test-session-id', 'plan', 'local')
-    expect(mocks.switchSessionModel.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.runCommand.mock.invocationCallOrder[0],
-    )
-    expect(mocks.switchSessionAgent.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.runCommand.mock.invocationCallOrder[0],
-    )
+    expect(handler.fetchFake.lastRequest('POST', `${sessionPath}/agent`)?.body).toEqual({ agent: 'plan' })
+    expect(handler.fetchFake.lastRequest('POST', `${sessionPath}/model`)?.body).toEqual({
+      model: { providerID: 'openai', id: 'gpt-4', variant: 'v1' },
+    })
+    const paths = handler.fetchFake.requests.map((request) => request.path)
+    expect(paths.indexOf(`${sessionPath}/agent`)).toBeLessThan(paths.indexOf(`${sessionPath}/command`))
+    expect(paths.indexOf(`${sessionPath}/model`)).toBeLessThan(paths.indexOf(`${sessionPath}/command`))
   })
 
   it('does not switch when the selection matches the session', async () => {
-    setSession(sessionInfo({ agent: 'build', model: { providerID: 'anthropic', id: 'claude-sonnet-4' } }))
-
-    const { result } = renderHandler({
+    const handler = renderHandler({
       model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
       currentAgent: 'build',
     })
+    handler.setSession(sessionInfo({ agent: 'build', model: { providerID: 'anthropic', id: 'claude-sonnet-4' } }))
 
-    await result.current.executeCommand({ name: 'myskill' }, { text: '' })
+    await handler.executeCommand({ name: 'myskill' }, { text: '' })
 
-    expect(mocks.switchSessionModel).not.toHaveBeenCalled()
-    expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
-    expect(mocks.runCommand).toHaveBeenCalled()
+    expect(handler.fetchFake.findRequests('POST', `${sessionPath}/model`)).toHaveLength(0)
+    expect(handler.fetchFake.findRequests('POST', `${sessionPath}/agent`)).toHaveLength(0)
+    expect(handler.fetchFake.findRequests('POST', `${sessionPath}/command`)).toHaveLength(1)
   })
 
   it('stops before running the command when the selection switch fails', async () => {
-    setSession(sessionInfo({ agent: 'build', model: { providerID: 'anthropic', id: 'claude-sonnet-4' } }))
-    mocks.switchSessionModel.mockRejectedValueOnce(new Error('switch failed'))
-
-    const { result } = renderHandler({
+    const handler = renderHandler({
       model: { providerID: 'openai', id: 'gpt-4' },
       currentAgent: 'build',
+      failModelSwitch: true,
     })
+    handler.setSession(sessionInfo({ agent: 'build', model: { providerID: 'anthropic', id: 'claude-sonnet-4' } }))
 
-    const cleared = await result.current.executeCommand({ name: 'myskill' }, { text: '' })
+    const cleared = await handler.executeCommand({ name: 'myskill' }, { text: '' })
 
     expect(cleared).toBe(false)
-    expect(mocks.runCommand).not.toHaveBeenCalled()
+    expect(handler.fetchFake.findRequests('POST', `${sessionPath}/command`)).toHaveLength(0)
   })
 })

@@ -2,8 +2,11 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { APIRequestContext, Page } from '@playwright/test'
+import { z } from 'zod'
 import { test, expect } from './fixtures'
 import { E2E_TMP } from './env'
+import type { JsonValue } from '../shared/src/utils/json'
+import { JsonValueSchema } from '../shared/src/utils/json'
 
 const SHELL_COMMAND = 'sleep 300'
 
@@ -19,21 +22,28 @@ function backgroundStatus(page: Page) {
   return page.getByRole('status').filter({ hasText: 'Background tasks running' })
 }
 
-async function requireOk(response: Awaited<ReturnType<APIRequestContext['post']>>, label: string): Promise<unknown> {
+async function requireOk(response: Awaited<ReturnType<APIRequestContext['post']>>, label: string): Promise<JsonValue | null> {
   if (!response.ok()) {
     throw new Error(`${label} failed: ${response.status()} ${await response.text()}`)
   }
-  return response.status() === 204 ? null : response.json()
+  return response.status() === 204 ? null : JsonValueSchema.parse(await response.json())
+}
+
+const SessionBodySchema = z.object({ data: z.object({ id: z.string() }) })
+
+interface CreateSessionPayload {
+  location: { directory: string }
+  parentID?: string
 }
 
 async function createSession(request: APIRequestContext, directory: string, parentID?: string): Promise<string> {
+  const data: CreateSessionPayload = { location: { directory } }
+  if (parentID) data.parentID = parentID
   const body = await requireOk(
-    await request.post('/api/opencode/api/session', {
-      data: { location: { directory }, ...(parentID ? { parentID } : {}) },
-    }),
+    await request.post('/api/opencode/api/session', { data }),
     'create session',
   )
-  return (body as { data: { id: string } }).data.id
+  return SessionBodySchema.parse(body).data.id
 }
 
 async function startBackgroundShell(
@@ -47,7 +57,7 @@ async function startBackgroundShell(
     }),
     'start background shell',
   )
-  return (body as { data: { id: string } }).data.id
+  return SessionBodySchema.parse(body).data.id
 }
 
 async function removeShell(request: APIRequestContext, directory: string, shellID: string): Promise<void> {

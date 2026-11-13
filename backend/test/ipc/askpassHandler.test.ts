@@ -1,22 +1,22 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { Database } from 'bun:sqlite'
-import { migrate } from '../../src/db/migration-runner'
-import { allMigrations } from '../../src/db/migrations'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { Database } from 'bun:sqlite'
 import { SettingsService } from '../../src/services/settings'
 import { CredentialProvider } from '../../src/services/credential-provider'
 import { AskpassHandler } from '../../src/ipc/askpassHandler'
 import { createRepo, setRepoGitCredentialId } from '../../src/db/queries'
 import type { GitCredential } from '@opencode-manager/shared'
+import { createTestDatabase } from '../helpers/test-database'
 
 function createGitHubPatCredential(token: string = 'ghp_test_token', id?: string): GitCredential {
-  return {
-    ...(id ? { id } : {}),
+  const credential: GitCredential = {
     name: 'github-pat',
     host: 'github.com',
-    type: 'pat' as const,
+    type: 'pat',
     username: 'x-access-token',
     token,
-  } as GitCredential
+  }
+  if (id !== undefined) credential.id = id
+  return credential
 }
 
 describe('AskpassHandler', () => {
@@ -26,14 +26,17 @@ describe('AskpassHandler', () => {
   let handler: AskpassHandler
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
+    db = createTestDatabase()
     settingsService = new SettingsService(db)
     settingsService.updateSettings({
       gitCredentials: [createGitHubPatCredential()],
     })
     provider = new CredentialProvider(db)
     handler = new AskpassHandler(undefined, provider)
+  })
+
+  afterEach(() => {
+    db.close()
   })
 
   it('returns username on Username prompt for configured host', async () => {
@@ -45,13 +48,11 @@ describe('AskpassHandler', () => {
   })
 
   it('returns token on Password prompt after Username (cache path)', async () => {
-    // First call to populate cache
     await handler.handle({
       askpassType: 'https',
       argv: ['', '', "Username for 'https://github.com'", '', 'https://github.com'],
     })
 
-    // Second call should use cache
     const result = await handler.handle({
       askpassType: 'https',
       argv: ['', '', "Password for 'https://github.com'", '', 'https://github.com'],

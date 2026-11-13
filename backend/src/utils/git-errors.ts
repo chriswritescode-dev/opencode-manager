@@ -1,4 +1,6 @@
+import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { GitErrorCode } from '@opencode-manager/shared'
+import type { JsonObject } from '@opencode-manager/shared/utils'
 import { getErrorMessage } from './error-utils'
 
 export type { GitErrorCode }
@@ -16,7 +18,7 @@ export class GitOperationError extends Error {
   constructor(
     readonly code: GitErrorCode,
     message?: string,
-    readonly details?: Record<string, unknown>
+    readonly details?: JsonObject
   ) {
     super(message)
     this.name = 'GitOperationError'
@@ -27,14 +29,14 @@ export interface GitErrorInfo {
   code: GitErrorCode
   summary: string
   detail: string
-  statusCode: number
-  details?: Record<string, unknown>
+  statusCode: ContentfulStatusCode
+  details?: JsonObject
 }
 
 interface ErrorPattern {
   code: GitErrorCode
   summary: string
-  statusCode: number
+  statusCode: ContentfulStatusCode
   patterns: RegExp[]
 }
 
@@ -266,20 +268,23 @@ function cleanGitProgressLines(message: string): string {
   return cleaned.replace(/\n{3,}/g, '\n\n').trim()
 }
 
-export function parseGitError(error: unknown): GitErrorInfo {
-  const rawMessage = getErrorMessage(error)
+export function parseGitError(cause: unknown): GitErrorInfo {
+  const rawMessage = getErrorMessage(cause)
   const message = stripCommandFailedPrefix(rawMessage)
   const cleanedMessage = cleanGitProgressLines(message)
 
-  if (error instanceof GitOperationError) {
-    const entry = ERROR_PATTERNS.find((errorPattern) => errorPattern.code === error.code)
-    return {
-      code: error.code,
+  if (cause instanceof GitOperationError) {
+    const entry = ERROR_PATTERNS.find((errorPattern) => errorPattern.code === cause.code)
+    const info: GitErrorInfo = {
+      code: cause.code,
       summary: entry?.summary ?? 'A git operation failed.',
       detail: cleanedMessage || message,
       statusCode: entry?.statusCode ?? 500,
-      ...(error.details ? { details: error.details } : {}),
     }
+    if (cause.details) {
+      info.details = cause.details
+    }
+    return info
   }
 
   for (const errorPattern of ERROR_PATTERNS) {

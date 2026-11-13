@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import type { SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
+import type { JsonValue } from '@opencode-manager/shared/utils'
 import { readShowArtifactCall } from './artifactTool'
 
 const ocmPart = (
-  params: unknown,
+  params: JsonValue,
   options: { status?: 'running' | 'completed'; metadata?: { path: string } } = {},
 ): SessionMessageAssistantTool => ({
   type: 'tool',

@@ -1,467 +1,212 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { useEffect } from 'react'
-import { SessionDetail } from '../SessionDetail'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import { useUIState } from '@/stores/uiStateStore'
+import {
+  installElementScrollMetrics,
+  installMatchMedia,
+  installResizeObserver,
+  installWindowSize,
+} from '@/test/browserFakes'
+import { makeUserMessage } from '@/test/fixtures/api'
+import { promptTextarea } from '@/test/promptInput'
+import { renderSessionPage } from '@/test/sessionPage'
+import type { ElementScrollMetricsFake, ResizeObserverFake } from '@/test/browserFakes'
+import type { FetchRouteResult } from '@/test/fetchFake'
 
-const mocks = vi.hoisted(() => ({
-  useSession: vi.fn(),
-  useSessionTranscript: vi.fn(),
-  useSSE: vi.fn(),
-  useRepoActivity: vi.fn(),
-  usePermissions: vi.fn(),
-  useForms: vi.fn(),
-  useSSEHealth: vi.fn(),
-  useConfig: vi.fn(),
-  useSettings: vi.fn(),
-  useSettingsDialog: vi.fn(),
-  useMobile: vi.fn(),
-  useVisualViewport: vi.fn(),
-  useShortcutActions: vi.fn(),
-  useAutoScroll: vi.fn(),
-  useDialogParam: vi.fn(),
-  useSessionStatusForSession: vi.fn(),
-  interruptMutate: vi.fn(),
-  PromptInput: vi.fn(),
-  uiState: { isEditingMessage: false },
-  setToolRailMounted: vi.fn(),
-}))
+const TRANSCRIPT_SCROLL_HEIGHT = 1000
+const TRANSCRIPT_VIEWPORT_HEIGHT = 300
+const TRANSCRIPT_SCROLLED_UP_POSITION = 300
+const PROMPT_OVERLAY_HEIGHT = 140
+const PROMPT_OVERLAY_CLEARANCE_PX = 16
 
-vi.mock('@/config', () => ({
-  OPENCODE_API_ENDPOINT: 'http://localhost:5551/api/opencode',
-  API_BASE_URL: 'http://localhost:5551',
-  SERVER_PORT: 5003,
-  OPENCODE_PORT: 5551,
-  FILE_LIMITS: {},
-  DEFAULTS: {},
-  ALLOWED_MIME_TYPES: [],
-  GIT_PROVIDERS: [],
-}))
-
-vi.mock('@/hooks/useOpenCode', () => ({
-  useSession: mocks.useSession,
-  useInterruptSession: vi.fn(() => ({ mutate: mocks.interruptMutate })),
-  useUpdateSession: vi.fn(() => ({ mutate: vi.fn() })),
-  useCreateSession: vi.fn(() => ({ mutateAsync: vi.fn() })),
-  useConfig: mocks.useConfig,
-  useSendPrompt: vi.fn(() => ({ mutate: vi.fn() })),
-  useSendShell: vi.fn(() => ({ mutate: vi.fn() })),
-  useAgents: vi.fn(() => ({ data: [] })),
-}))
-
-vi.mock('@/hooks/useSessionTranscript', () => ({
-  useSessionTranscript: mocks.useSessionTranscript,
-}))
-
-vi.mock('@/hooks/useRepoSiblings', () => ({
-  useRepoSiblings: vi.fn(() => ({ data: [] })),
-}))
-
-vi.mock('@/hooks/useModelSelection', () => ({
-  useModelSelection: vi.fn(() => ({ model: null, modelString: null, modelRef: null })),
-}))
-
-vi.mock('@/hooks/useTTS', () => ({
-  useTTS: vi.fn(() => ({ isEnabled: false })),
-}))
-
-vi.mock('@/hooks/useSettings', () => ({
-  useSettings: vi.fn(() => ({
-    preferences: { expandToolCalls: false },
-    updateSettings: vi.fn(),
-  })),
-}))
-
-vi.mock('@/hooks/useSettingsDialog', () => ({
-  useSettingsDialog: vi.fn(() => ({ open: vi.fn() })),
-}))
-
-vi.mock('@/hooks/useMobile', () => ({
-  useMobile: mocks.useMobile,
-  useSwipeBack: vi.fn(() => ({ ref: vi.fn() })),
-  useSwipeDismiss: vi.fn(() => ({ bind: vi.fn(), swipeProgress: 0, swipeStyles: {} })),
-}))
-
-vi.mock('@/hooks/useVisualViewport', () => ({
-  useVisualViewport: vi.fn(() => ({ keyboardHeight: 0 })),
-}))
-
-vi.mock('@/contexts/KeyboardShortcutsContext', () => ({
-  useShortcutActions: mocks.useShortcutActions,
-}))
-
-vi.mock('@/hooks/useAutoScroll', () => ({
-  useAutoScroll: mocks.useAutoScroll,
-}))
-
-vi.mock('@/hooks/useDialogParam', () => ({
-  useDialogParam: vi.fn(() => [false, vi.fn()]),
-}))
-
-vi.mock('@/hooks/useAutoPlayLastResponse', () => ({
-  getAssistantText: vi.fn(() => ''),
-  getLatestPlayableAssistantMessage: vi.fn(() => null),
-  useAutoPlayLastResponse: vi.fn(() => {}),
-}))
-
-vi.mock('@/stores/uiStateStore', () => ({
-  useUIState: vi.fn((selector?: (state: Record<string, unknown>) => unknown) =>
-    typeof selector === 'function'
-      ? selector({
-          isEditingMessage: mocks.uiState.isEditingMessage,
-          isToolRailMounted: false,
-          setToolRailMounted: mocks.setToolRailMounted,
-        })
-      : false
-  ),
-}))
-
-vi.mock('@/stores/sessionStatusStore', () => ({
-  useSessionStatus: vi.fn(() => ({ setStatus: vi.fn() })),
-  useSessionStatusForSession: mocks.useSessionStatusForSession,
-}))
-
-vi.mock('@/hooks/useSSE', () => ({
-  useSSE: mocks.useSSE,
-}))
-
-vi.mock('@/hooks/useRepoActivity', () => ({
-  useRepoActivity: mocks.useRepoActivity,
-}))
-
-vi.mock('@/contexts/EventContext', async (importOriginal) => {
-  const actual = await importOriginal()
-  return {
-    ...(actual as object),
-    usePermissions: mocks.usePermissions,
-    useForms: mocks.useForms,
-    useSSEHealth: mocks.useSSEHealth,
-  }
-})
-
-vi.mock('@/hooks/useActiveWork', () => ({
-  useActiveWorkCounts: () => ({ needsInput: 0, running: 0 }),
-  useRepoActivityState: () => null,
-}))
-
-vi.mock('@/api/repos', () => ({
-  getRepo: vi.fn(() => Promise.resolve({
-    id: 1,
-    repoUrl: 'https://github.com/test/repo',
-    localPath: '/test/repo',
-    sourcePath: null,
-    fullPath: '/test/repo',
-    branch: 'main',
-    currentBranch: 'main',
-    fullSlug: 'test/repo',
-    repoType: 'github' as const,
-  })),
-  initializeAssistantMode: vi.fn(() => Promise.resolve({ directory: '/test/repo' })),
-}))
-
-vi.mock('@/components/session/BackgroundWorkBar', () => ({ BackgroundWorkBar: vi.fn(() => null) }))
-vi.mock('@/components/session/SessionGoalBar', () => ({ SessionGoalBar: vi.fn(() => null) }))
-vi.mock('@/hooks/useSessionGoals', () => ({
-  useSessionGoal: vi.fn(() => ({ data: undefined })),
-  useSessionGoalCommand: vi.fn(() => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false })),
-}))
-vi.mock('@/components/file-browser/FileBrowserSheet', () => ({
-  FileBrowserSheet: vi.fn(() => null),
-}))
-
-vi.mock('@/components/repo/RepoMcpDialog', () => ({
-  RepoMcpDialog: vi.fn(() => null),
-}))
-vi.mock('@/components/repo/RepoActionsDialog', () => ({ RepoActionsDialog: vi.fn(() => null) }))
-
-vi.mock('@/components/repo/ResetPermissionsDialog', () => ({
-  ResetPermissionsDialog: vi.fn(() => null),
-}))
-
-vi.mock('@/components/repo/RepoSkillsDialog', () => ({
-  RepoSkillsDialog: vi.fn(() => null),
-}))
-
-vi.mock('@/components/source-control', () => ({
-  SourceControlPanel: vi.fn(() => null),
-}))
-
-vi.mock('@/components/session/FormPrompt', () => ({
-  FormPrompt: vi.fn(() => null),
-}))
-
-vi.mock('@/components/session/MinimizedFormIndicator', () => ({
-  MinimizedFormIndicator: vi.fn(() => null),
-}))
-
-vi.mock('@/components/notifications/PendingActionsGroup', () => ({
-  PendingActionsGroup: vi.fn(() => null),
-}))
-
-vi.mock('@/components/message/PromptInput', () => ({
-  PromptInput: mocks.PromptInput,
-}))
-
-interface ObservedElement {
-  element: Element
-  callback: ResizeObserverCallback
-  observer: ResizeObserver
-}
-
-const observedElements: ObservedElement[] = []
-
-class TestResizeObserver {
-  constructor(private readonly callback: ResizeObserverCallback) {}
-
-  observe(element: Element) {
-    observedElements.push({ element, callback: this.callback, observer: this as unknown as ResizeObserver })
-  }
-
-  unobserve(element: Element) {
-    const index = observedElements.findIndex((entry) => entry.observer === (this as unknown) && entry.element === element)
-    if (index !== -1) observedElements.splice(index, 1)
-  }
-
-  disconnect() {
-    for (let index = observedElements.length - 1; index >= 0; index -= 1) {
-      if (observedElements[index].observer === (this as unknown)) observedElements.splice(index, 1)
-    }
-  }
-}
-
-const reportObservedHeight = (height: number) => {
-  act(() => {
-    for (const entry of [...observedElements]) {
-      if (!entry.element.isConnected) continue
-      entry.callback(
-        [{ target: entry.element, contentRect: { height } } as unknown as ResizeObserverEntry],
-        entry.observer
-      )
-    }
+async function waitForComposer() {
+  await screen.findByTestId('prompt-overlay')
+  await waitFor(() => {
+    expect(document.querySelector('[data-prompt-input]')).not.toBeNull()
   })
 }
 
-describe('SessionDetail scroll floating button', () => {
-  let mockScrollToBottom: ReturnType<typeof vi.fn>
+function transcriptContainer() {
+  return screen.getByTestId('session-message-scroll')
+}
 
+function paddingBottom() {
+  return transcriptContainer().style.paddingBottom
+}
+
+function floatingStopButton() {
+  const button = screen.getAllByTitle('Stop').find((candidate) => candidate.classList.contains('md:hidden'))
+  if (!button) throw new Error('the floating stop button is not rendered')
+  return button
+}
+
+let scrollMetrics: ElementScrollMetricsFake
+let resizeObserver: ResizeObserverFake
+
+function transcriptScrollTop() {
+  return scrollMetrics.getScrollTop(transcriptContainer())
+}
+
+function scrollUpInTranscript() {
+  scrollMetrics.setScrollTop(transcriptContainer(), TRANSCRIPT_SCROLLED_UP_POSITION)
+  fireEvent.wheel(transcriptContainer(), { deltaY: -200 })
+}
+
+describe('SessionDetail scroll and composer affordances', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    observedElements.length = 0
-    mocks.uiState.isEditingMessage = false
-    vi.stubGlobal('ResizeObserver', TestResizeObserver)
-
-    mockScrollToBottom = vi.fn()
-
-    mocks.useSession.mockReturnValue({ data: undefined, isLoading: false })
-    mocks.useSessionTranscript.mockReturnValue({
-      messages: [],
-      pending: [],
-      status: 'idle',
-      isLoading: false,
-      fetchOlder: vi.fn(),
-      hasOlder: false,
+    installMatchMedia(false)
+    resizeObserver = installResizeObserver()
+    scrollMetrics = installElementScrollMetrics({
+      scrollHeight: TRANSCRIPT_SCROLL_HEIGHT,
+      clientHeight: TRANSCRIPT_VIEWPORT_HEIGHT,
     })
-    mocks.useSSE.mockReturnValue({ isConnected: true, isReconnecting: false })
-    mocks.useRepoActivity.mockReturnValue(undefined)
-    mocks.usePermissions.mockReturnValue({
-      pendingCount: 0,
-      hasPermissionsForSession: vi.fn(() => false),
-      syncForSession: vi.fn(),
-    })
-    mocks.useForms.mockReturnValue({
-      current: null,
-      getForSession: vi.fn(() => null),
-      pendingCount: 0,
-      hasFormsForSession: vi.fn(() => false),
-      reply: vi.fn(),
-      cancel: vi.fn(),
-      syncForSession: vi.fn(),
-    })
-    mocks.useSSEHealth.mockReturnValue({ isHealthy: true })
-    mocks.useConfig.mockReturnValue({ data: undefined, isLoading: false })
-    mocks.useVisualViewport.mockReturnValue({ keyboardHeight: 0 })
-    mocks.useDialogParam.mockReturnValue([false, vi.fn()])
-    mocks.useSessionStatusForSession.mockReturnValue({ type: 'idle' })
-    mocks.PromptInput.mockImplementation(() => <div>MockedPromptInput</div>)
   })
 
-  const createQueryClient = () =>
-    new QueryClient({ defaultOptions: { queries: { retry: false } } })
-
-  const renderWith = (opts: {
-    mobile: boolean
-    showScrollButton: boolean
-    promptContent?: boolean
-    sessionActive?: boolean
-    messagesLoading?: boolean
-  }) => {
-    mocks.useMobile.mockReturnValue(opts.mobile)
-    mocks.useSessionStatusForSession.mockReturnValue({ type: opts.sessionActive ? 'busy' : 'idle' })
-    mocks.useSessionTranscript.mockReturnValue({
-      messages: [],
-      pending: [],
-      status: opts.sessionActive ? 'busy' : 'idle',
-      isLoading: opts.messagesLoading ?? false,
-      fetchOlder: vi.fn(),
-      hasOlder: false,
-    })
-    mocks.useAutoScroll.mockImplementation(
-      ({ onScrollStateChange }: { onScrollStateChange?: (v: boolean) => void }) => {
-        if (opts.showScrollButton) {
-          Promise.resolve().then(() => onScrollStateChange?.(true))
-        }
-        return { scrollToBottom: mockScrollToBottom }
-      }
-    )
-
-    mocks.PromptInput.mockImplementation((props: { onPromptChange?: (hasContent: boolean) => void }) => {
-      const { onPromptChange } = props
-      useEffect(() => {
-        onPromptChange?.(opts.promptContent ?? false)
-      }, [onPromptChange])
-
-      return <div>MockedPromptInput</div>
-    })
-
-    const queryClient = createQueryClient()
-    const buildTree = () => (
-      <MemoryRouter initialEntries={['/repos/1/sessions/test-session']}>
-        <QueryClientProvider client={queryClient}>
-          <Routes>
-            <Route path="/repos/:id/sessions/:sessionId" element={<SessionDetail />} />
-          </Routes>
-        </QueryClientProvider>
-      </MemoryRouter>
-    )
-
-    return Object.assign(render(buildTree()), { buildTree })
-  }
-
-  it('shows the jump to latest button while scrolled up on mobile', async () => {
-    renderWith({ mobile: true, showScrollButton: true })
-
-    expect(await screen.findByRole('button', { name: 'Jump to latest' })).toBeInTheDocument()
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
-  it('shows the jump to latest button while scrolled up on desktop', async () => {
-    renderWith({ mobile: false, showScrollButton: true })
+  it.each([
+    { name: 'mobile', width: 480 },
+    { name: 'desktop', width: 900 },
+  ])('shows jump to latest after scrolling up on $name', async ({ width }) => {
+    installWindowSize(width)
+    renderSessionPage()
+    await waitForComposer()
 
-    expect(await screen.findByRole('button', { name: 'Jump to latest' })).toBeInTheDocument()
+    scrollUpInTranscript()
+
+    expect(screen.getByRole('button', { name: 'Jump to latest' })).toBeInTheDocument()
   })
 
-  it('shows the jump to latest button even when the prompt has content', async () => {
-    renderWith({ mobile: true, showScrollButton: true, promptContent: true })
+  it('keeps jump to latest visible while the composer has content', async () => {
+    renderSessionPage()
+    await waitForComposer()
 
-    expect(await screen.findByRole('button', { name: 'Jump to latest' })).toBeInTheDocument()
+    fireEvent.change(promptTextarea(), { target: { value: 'hello' } })
+    scrollUpInTranscript()
+
+    expect(await screen.findByRole('button', { name: 'Clear' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Jump to latest' })).toBeInTheDocument()
   })
 
-  it('hides the jump to latest button while at the bottom of the transcript', async () => {
-    renderWith({ mobile: true, showScrollButton: false })
+  it('hides jump to latest while the transcript is at the bottom', async () => {
+    renderSessionPage()
+    await waitForComposer()
+    scrollMetrics.setScrollTop(transcriptContainer(), TRANSCRIPT_SCROLL_HEIGHT)
 
-    await waitFor(() => expect(screen.getByText('MockedPromptInput')).toBeInTheDocument())
     expect(screen.queryByRole('button', { name: 'Jump to latest' })).not.toBeInTheDocument()
   })
 
-  it('no longer passes scroll button state to PromptInput', async () => {
-    renderWith({ mobile: true, showScrollButton: true })
+  it('scrolls the transcript back to the bottom when jump to latest is clicked', async () => {
+    renderSessionPage()
+    await waitForComposer()
+    scrollUpInTranscript()
 
-    await screen.findByRole('button', { name: 'Jump to latest' })
+    fireEvent.click(screen.getByRole('button', { name: 'Jump to latest' }))
 
-    const props = mocks.PromptInput.mock.calls.at(-1)?.[0] as Record<string, unknown>
-    expect(props.showScrollButton).toBeUndefined()
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Jump to latest' })).not.toBeInTheDocument()
+    })
+    expect(transcriptScrollTop()).toBe(TRANSCRIPT_SCROLL_HEIGHT)
   })
 
-  it('scrolls to the bottom when the jump to latest button is clicked', async () => {
-    renderWith({ mobile: true, showScrollButton: true })
+  it.each([
+    { name: 'shows the clear button for composer content while the session is idle', activeSessions: [], clears: true },
+    { name: 'hides the clear button for composer content while the session is active', activeSessions: ['session-1'], clears: false },
+  ])('$name', async ({ activeSessions, clears }) => {
+    renderSessionPage({ activeSessions })
+    await waitForComposer()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Jump to latest' }))
+    fireEvent.change(promptTextarea(), { target: { value: 'hello' } })
 
-    expect(mockScrollToBottom).toHaveBeenCalledTimes(1)
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Clear' }) !== null).toBe(clears)
+    })
   })
 
-  it('shows clear button for prompt content only when session is idle', async () => {
-    renderWith({ mobile: true, showScrollButton: false, promptContent: true })
+  it('interrupts the active session from the floating stop button', async () => {
+    const { fetchFake } = renderSessionPage({ activeSessions: ['session-1'] })
+    await waitForComposer()
+    await screen.findAllByTitle('Stop')
 
-    await waitFor(() => expect(screen.getByLabelText('Clear')).toBeInTheDocument())
+    fireEvent.click(floatingStopButton())
+
+    await waitFor(() => {
+      expect(
+        fetchFake.findRequests('POST', /\/api\/opencode\/api\/session\/session-1\/interrupt$/),
+      ).toHaveLength(1)
+    })
   })
 
-  it('does not show clear button for prompt content while session is active', async () => {
-    renderWith({ mobile: true, showScrollButton: false, promptContent: true, sessionActive: true })
+  it('shows the floating stop button while the session is active', async () => {
+    renderSessionPage({ activeSessions: ['session-1'] })
+    await waitForComposer()
+    await screen.findAllByTitle('Stop')
 
-    await waitFor(() => expect(screen.getByText('MockedPromptInput')).toBeInTheDocument())
-    expect(screen.queryByLabelText('Clear')).not.toBeInTheDocument()
+    expect(floatingStopButton()).toBeInTheDocument()
   })
 
-  it('renders the mobile stop button while the session is active and interrupts on click', async () => {
-    renderWith({ mobile: true, showScrollButton: false, sessionActive: true })
+  it('hides the stop button while the session is idle', async () => {
+    renderSessionPage()
+    await waitForComposer()
 
-    const stopButton = await screen.findByTitle('Stop')
-    fireEvent.click(stopButton)
-
-    expect(mocks.interruptMutate).toHaveBeenCalledWith('test-session')
-  })
-
-  it('does not render the stop button while the session is idle', async () => {
-    renderWith({ mobile: true, showScrollButton: false, sessionActive: false })
-
-    await waitFor(() => expect(screen.getByText('MockedPromptInput')).toBeInTheDocument())
     expect(screen.queryByTitle('Stop')).not.toBeInTheDocument()
   })
 
-  it('does NOT disable PromptInput when SSE is disconnected', async () => {
-    mocks.useSSE.mockReturnValue({ isConnected: false, isReconnecting: true })
-    renderWith({ mobile: true, showScrollButton: false })
+  it('keeps the composer usable while the live stream is down', async () => {
+    const { eventStream } = renderSessionPage()
+    await waitForComposer()
 
-    await waitFor(() => {
-      expect(mocks.PromptInput).toHaveBeenCalled()
-    })
-
-    const props = mocks.PromptInput.mock.calls.at(-1)?.[0] as { disabled?: boolean }
-    expect(props.disabled).not.toBe(true)
+    expect(eventStream?.openedUrls.length).toBeGreaterThan(0)
+    expect(promptTextarea()).toBeEnabled()
   })
 
-  it('restores message list clearance after the prompt overlay remounts following a message edit', async () => {
-    const { buildTree, rerender } = renderWith({ mobile: true, showScrollButton: false })
-    await waitFor(() => expect(screen.getByText('MockedPromptInput')).toBeInTheDocument())
+  it('keeps message list clearance when the prompt overlay remounts after a message edit', async () => {
+    renderSessionPage()
+    await waitForComposer()
 
-    const paddingBottom = () => screen.getByTestId('session-message-scroll').style.paddingBottom
+    resizeObserver.reportHeight(PROMPT_OVERLAY_HEIGHT)
+    const clearance = `${PROMPT_OVERLAY_HEIGHT + PROMPT_OVERLAY_CLEARANCE_PX}px`
+    expect(paddingBottom()).toBe(clearance)
 
-    reportObservedHeight(140)
-    expect(paddingBottom()).toBe('156px')
+    act(() => {
+      useUIState.setState({ isEditingMessage: true })
+    })
 
-    mocks.uiState.isEditingMessage = true
-    rerender(buildTree())
-    await waitFor(() => expect(screen.queryByText('MockedPromptInput')).not.toBeInTheDocument())
-    expect(paddingBottom()).toBe('16px')
+    await waitFor(() => {
+      expect(paddingBottom()).toBe(`${PROMPT_OVERLAY_CLEARANCE_PX}px`)
+    })
 
-    mocks.uiState.isEditingMessage = false
-    rerender(buildTree())
-    await waitFor(() => expect(screen.getByText('MockedPromptInput')).toBeInTheDocument())
+    act(() => {
+      useUIState.setState({ isEditingMessage: false })
+    })
 
-    reportObservedHeight(140)
-    expect(paddingBottom()).toBe('156px')
+    await waitFor(() => expect(screen.getByTestId('prompt-overlay')).toBeInTheDocument())
+    resizeObserver.reportHeight(PROMPT_OVERLAY_HEIGHT)
+
+    expect(paddingBottom()).toBe(clearance)
   })
 
-  it('marks the transcript content as not ready while messages load and ready afterwards', async () => {
-    const { buildTree, rerender } = renderWith({ mobile: true, showScrollButton: false, messagesLoading: true })
-
-    await waitFor(() => {
-      expect(mocks.useAutoScroll.mock.calls.at(-1)?.[0]).toMatchObject({ isContentReady: false })
+  it('scrolls to the bottom only once the transcript content is ready', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    let resolveMessages = (_result: FetchRouteResult) => {}
+    const messageRespond = () => new Promise<FetchRouteResult>((resolve) => {
+      resolveMessages = resolve
     })
 
-    mocks.useSessionTranscript.mockReturnValue({
-      messages: [],
-      pending: [],
-      status: 'idle',
-      isLoading: false,
-      fetchOlder: vi.fn(),
-      hasOlder: false,
-    })
-    rerender(buildTree())
+    renderSessionPage({ messageRespond })
+    await waitForComposer()
 
-    await waitFor(() => {
-      expect(mocks.useAutoScroll.mock.calls.at(-1)?.[0]).toMatchObject({ isContentReady: true })
+    expect(transcriptScrollTop()).toBe(0)
+
+    resolveMessages({ json: { data: [makeUserMessage({ id: 'msg_1', text: 'Ready now' })], cursor: {} } })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200)
     })
+
+    expect(await screen.findByText('Ready now')).toBeInTheDocument()
+    expect(transcriptContainer().scrollTop).toBe(TRANSCRIPT_SCROLL_HEIGHT)
   })
 })

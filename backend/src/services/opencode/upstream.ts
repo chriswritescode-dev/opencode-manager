@@ -8,7 +8,7 @@ function formatOpenCodeHostForUrl(host: string): string {
 }
 
 export function getOpenCodeUpstreamBaseUrl(hostOverride?: string | (() => string)): string {
-  const configuredHost = typeof hostOverride === 'function' ? hostOverride() : (hostOverride ?? ENV.OPENCODE.HOST)
+  const configuredHost = hostOverride instanceof Function ? hostOverride() : (hostOverride ?? ENV.OPENCODE.HOST)
   const normalizedHost = configuredHost === '0.0.0.0' ? '127.0.0.1' : configuredHost
   return `http://${formatOpenCodeHostForUrl(normalizedHost)}:${ENV.OPENCODE.PORT}`
 }
@@ -18,7 +18,6 @@ export function withDefaultOpenCodeDirectory(headers: Record<string, string>): R
   return hasDirectory ? headers : { ...headers, [OPENCODE_DIRECTORY_HEADER]: encodeURIComponent(getWorkspacePath()) }
 }
 
-/** Maps an http(s) URL to its ws(s) equivalent, leaving ws/wss URLs unchanged. */
 export function toWebSocketUrl(httpUrl: string): string {
   const url = new URL(httpUrl)
   if (url.protocol === 'https:') url.protocol = 'wss:'

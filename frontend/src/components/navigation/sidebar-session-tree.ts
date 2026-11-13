@@ -8,11 +8,9 @@ import type { ActiveWorktree } from '@/lib/activeWork'
 
 export const SIDEBAR_SESSIONS_PER_REPO = 10
 
-/** Collects the loaded session from each query result, dropping unresolved queries. */
 export const combineQuerySessions = (results: Array<{ data?: Session }>): Session[] =>
   results.flatMap((result) => (result.data ? [result.data] : []))
 
-/** Appends extra sessions after the base list, deduplicating by id within both lists. */
 export function mergeExtraSessions(sessions: Session[], extraSessions: Session[]): Session[] {
   if (extraSessions.length === 0) return sessions
   const seen = new Set(sessions.map((session) => session.id))
@@ -29,11 +27,9 @@ export interface SidebarSessionItem {
   key: string
   session: Session
   repoId: number
-  /** The linked server owning the session; absent for local repo sessions. */
   serverId?: string
   repoLabel: string
   branchLabel: string | null
-  /** Branch of the worktree the session runs in, when it runs in a worktree of the group's repo. */
   worktreeBranch?: string | null
   isWorktree: boolean
   isPinned: boolean

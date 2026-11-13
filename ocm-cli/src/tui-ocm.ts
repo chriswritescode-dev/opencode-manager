@@ -1,17 +1,40 @@
-import type { Context } from '@opencode/plugin/tui/context'
 import { resolveOpenCodeProjectId } from '@opencode-manager/shared/project-id'
 import { resolveManagerAuth } from './manager-auth.js'
+import type { ManagerAuth } from './manager-auth.js'
 import { fetchRepos } from './manager-repos.js'
 import type { ManagerRepo } from './manager-repos.js'
 import { warmRepoProxy } from './repo-proxy.js'
-import { readState, writeState } from './state.js'
+import { readState, writeState, type OcmState } from './state.js'
 import { confirmDialog, selectDialog } from './tui-dialogs.js'
 import { setPendingWarp } from './warp.js'
+import type { PendingWarp } from './warp.js'
 import type { RemoteContext } from './remote-context.js'
+import type { OcmTuiContext } from './tui-context.js'
+
+export interface OcmSwitchRuntime {
+  resolveManagerAuth: (managerUrl?: string) => Promise<ManagerAuth>
+  fetchRepos: (managerUrl: string, token: string) => Promise<ManagerRepo[]>
+  resolveProjectId: (directory: string) => Promise<string | null>
+  warmRepoProxy: (managerUrl: string, token: string, repoId: number) => Promise<void>
+  readState: () => OcmState | null
+  writeState: (state: OcmState) => void
+  setPendingWarp: (warp: PendingWarp) => void
+}
+
+export const ocmSwitchRuntime: OcmSwitchRuntime = {
+  resolveManagerAuth,
+  fetchRepos,
+  resolveProjectId: resolveOpenCodeProjectId,
+  warmRepoProxy,
+  readState,
+  writeState,
+  setPendingWarp,
+}
 
 export type OcmSwitchDeps = {
   remote: RemoteContext | undefined
   cwd?: string
+  runtime?: OcmSwitchRuntime
 }
 
 type SwitchChoice = { kind: 'repo'; repo: ManagerRepo } | { kind: 'local' }
@@ -20,10 +43,10 @@ const MATCH_CATEGORY = 'Matches this directory'
 const REPO_CATEGORY = 'Manager repos'
 const LOCAL_CATEGORY = 'Local'
 
-/** Switches this TUI to another server: a Manager repo, or back to local opencode when attached. */
-export async function runOcmSwitch(context: Context, deps: OcmSwitchDeps): Promise<void> {
+export async function runOcmSwitch(context: OcmTuiContext, deps: OcmSwitchDeps): Promise<void> {
+  const runtime = deps.runtime ?? ocmSwitchRuntime
   try {
-    const auth = await resolveManagerAuth(deps.remote?.managerUrl)
+    const auth = await runtime.resolveManagerAuth(deps.remote?.managerUrl)
     if (!auth.ok && !deps.remote) {
       context.ui.toast.show({ variant: 'error', message: auth.message })
       return
@@ -32,7 +55,7 @@ export async function runOcmSwitch(context: Context, deps: OcmSwitchDeps): Promi
     let repos: ManagerRepo[] = []
     if (auth.ok) {
       try {
-        repos = (await fetchRepos(auth.managerUrl, auth.token)).filter((repo) => repo.cloneStatus === 'ready')
+        repos = (await runtime.fetchRepos(auth.managerUrl, auth.token)).filter((repo) => repo.cloneStatus === 'ready')
       } catch (error) {
         if (!deps.remote) throw error
       }
@@ -40,21 +63,21 @@ export async function runOcmSwitch(context: Context, deps: OcmSwitchDeps): Promi
     const choice = deps.remote
       ? await chooseFromRemote(context, repos, deps.remote)
       : auth.ok
-        ? await chooseFromLocal(context, repos, auth.managerUrl, deps.cwd ?? localDirectory(context))
+        ? await chooseFromLocal(context, repos, auth.managerUrl, deps.cwd ?? localDirectory(context), runtime)
         : undefined
     if (!choice) return
 
     if (choice.kind === 'local') {
-      setPendingWarp({ kind: 'local' })
+      runtime.setPendingWarp({ kind: 'local' })
       context.keymap.dispatch('app.exit')
       return
     }
 
     if (!auth.ok) return
 
-    await warmRepoProxy(auth.managerUrl, auth.token, choice.repo.repoId)
-    rememberLastRepo(choice.repo)
-    setPendingWarp({
+    await runtime.warmRepoProxy(auth.managerUrl, auth.token, choice.repo.repoId)
+    rememberLastRepo(choice.repo, runtime)
+    runtime.setPendingWarp({
       kind: 'attach',
       target: { managerUrl: auth.managerUrl, token: auth.token, repoId: choice.repo.repoId, repoName: choice.repo.name },
     })
@@ -65,12 +88,13 @@ export async function runOcmSwitch(context: Context, deps: OcmSwitchDeps): Promi
 }
 
 async function chooseFromLocal(
-  context: Context,
+  context: OcmTuiContext,
   repos: ManagerRepo[],
   managerUrl: string,
   directory: string,
+  runtime: OcmSwitchRuntime,
 ): Promise<SwitchChoice | undefined> {
-  const projectId = await resolveOpenCodeProjectId(directory)
+  const projectId = await runtime.resolveProjectId(directory)
   const matches = projectId ? repos.filter((repo) => repo.projectId === projectId) : []
 
   if (matches.length === 1) {
@@ -94,13 +118,14 @@ async function chooseFromLocal(
   ])
 }
 
-async function chooseFromRemote(context: Context, repos: ManagerRepo[], remote: RemoteContext): Promise<SwitchChoice | undefined> {
+async function chooseFromRemote(context: OcmTuiContext, repos: ManagerRepo[], remote: RemoteContext): Promise<SwitchChoice | undefined> {
   return selectDialog<SwitchChoice>(context, 'Switch server', [
     { title: 'Local opencode', description: 'Leave the Manager and run opencode on this machine', value: { kind: 'local' }, category: LOCAL_CATEGORY },
-    ...repos.map((repo) => ({
-      ...repoOption(repo, REPO_CATEGORY),
-      ...(repo.repoId === remote.repoId ? { description: 'Current', disabled: true } : {}),
-    })),
+    ...repos.map((repo) => {
+      const option = repoOption(repo, REPO_CATEGORY)
+      if (repo.repoId === remote.repoId) return { ...option, description: 'Current', disabled: true }
+      return option
+    }),
   ])
 }
 
@@ -113,14 +138,14 @@ function repoOption(repo: ManagerRepo, category: string) {
   }
 }
 
-function localDirectory(context: Context): string {
+function localDirectory(context: OcmTuiContext): string {
   const route = context.ui.router.current()
   const sessionDirectory = route.type === 'session' ? context.data.session.get(route.sessionID)?.location.directory : undefined
   return sessionDirectory ?? process.cwd()
 }
 
-function rememberLastRepo(repo: ManagerRepo): void {
-  const state = readState()
+function rememberLastRepo(repo: ManagerRepo, runtime: OcmSwitchRuntime): void {
+  const state = runtime.readState()
   if (!state) return
-  writeState({ ...state, lastRepoId: repo.repoId, lastRepoName: repo.name, lastRepoDir: repo.directory, lastRepoBranch: repo.branch })
+  runtime.writeState({ ...state, lastRepoId: repo.repoId, lastRepoName: repo.name, lastRepoDir: repo.directory, lastRepoBranch: repo.branch })
 }

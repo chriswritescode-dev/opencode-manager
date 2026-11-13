@@ -1,30 +1,14 @@
-import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { beforeAll, describe, it, expect } from 'vitest'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { GeneralSettings } from './GeneralSettings'
-import { useSettings } from '@/hooks/useSettings'
-import { useVersionCheck } from '@/hooks/useVersionCheck'
-import type { UserPreferences } from '@/api/types/settings'
+import { renderWithProviders } from '@/test/render'
+import { createSettingsServer } from '@/test/fixtures/settingsServer'
+import { installPointerCapture } from '@/test/browserFakes'
+import type { FetchRoute, FetchRouteResult } from '@/test/fetchFake'
 import type { VersionInfo } from '@/api/settings'
-import { createUseSettingsMock } from '@/test/test-utils'
 
-vi.mock('@/hooks/useSettings')
-vi.mock('@/hooks/useVersionCheck')
-vi.mock('@/components/model/ModelCombobox', () => ({ ModelCombobox: () => null }))
-
-const basePreferences: UserPreferences = {
-  theme: 'dark',
-  mode: 'build',
-  autoScroll: true,
-  expandDiffs: true,
-  expandToolCalls: false,
-  showReasoning: false,
-  simpleChatMode: false,
-  keyboardShortcuts: {},
-  customCommands: [],
-}
-
-const baseVersionInfo: VersionInfo = {
+const VERSION: VersionInfo = {
   currentVersion: 'v1.2.3',
   latestVersion: null,
   updateAvailable: false,
@@ -32,36 +16,61 @@ const baseVersionInfo: VersionInfo = {
   releaseName: null,
 }
 
-function mockUseSettings(overrides: Partial<ReturnType<typeof useSettings>> = {}) {
-  vi.mocked(useSettings).mockReturnValue(createUseSettingsMock({ preferences: basePreferences, ...overrides }))
+const modelRoutes: FetchRoute[] = [
+  { method: 'GET', path: '/api/providers/model-state', respond: () => ({ json: { recent: [], favorite: [], variant: {} } }) },
+  { method: 'GET', path: '/api/opencode/api/provider', respond: () => ({ json: { data: [] } }) },
+  { method: 'GET', path: '/api/opencode/api/model', respond: () => ({ json: { data: [] } }) },
+  { method: 'GET', path: '/api/opencode/api/config', respond: () => ({ json: {} }) },
+  { method: 'GET', path: '/api/opencode/api/model/default', respond: () => ({ json: { data: null } }) },
+]
+
+interface RenderOptions {
+  version?: Partial<VersionInfo>
+  patch?: () => FetchRouteResult | Promise<FetchRouteResult>
 }
 
-function mockVersionInfo(overrides: Partial<VersionInfo> = {}) {
-  vi.mocked(useVersionCheck).mockReturnValue({
-    data: { ...baseVersionInfo, ...overrides },
-    isLoading: false,
-  } as ReturnType<typeof useVersionCheck>)
+async function renderGeneral(options: RenderOptions = {}) {
+  const settings = createSettingsServer(
+    {
+      theme: 'dark',
+      simpleChatMode: false,
+      autoScroll: true,
+      showReasoning: false,
+      expandToolCalls: false,
+      expandDiffs: true,
+    },
+    { patch: options.patch },
+  )
+  const result = renderWithProviders(<GeneralSettings />, {
+    auth: false,
+    theme: false,
+    tts: false,
+    fetchRoutes: [
+      ...settings.routes,
+      { method: 'GET', path: '/api/health/version', respond: () => ({ json: { ...VERSION, ...options.version } }) },
+      ...modelRoutes,
+    ],
+  })
+  await screen.findByRole('heading', { name: 'General Preferences' })
+  return { ...result, settings }
+}
+
+function patchBodies(fetchFake: ReturnType<typeof renderWithProviders>['fetchFake']) {
+  return fetchFake.findRequests('PATCH', '/api/settings').map((request) => request.body)
 }
 
 describe('GeneralSettings', () => {
   beforeAll(() => {
-    Element.prototype.hasPointerCapture ??= () => false
-    Element.prototype.setPointerCapture ??= () => {}
-    Element.prototype.releasePointerCapture ??= () => {}
+    installPointerCapture()
   })
 
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  it('renders the compact heading row with version info and associated preference rows', () => {
-    mockUseSettings()
-    mockVersionInfo({ latestVersion: '1.3.0', updateAvailable: true, releaseUrl: 'https://example.com/release' })
-    render(<GeneralSettings />)
+  it('renders the compact heading row with version info and associated preference rows', async () => {
+    await renderGeneral({
+      version: { latestVersion: '1.3.0', updateAvailable: true, releaseUrl: 'https://example.com/release' },
+    })
 
     expect(screen.getByRole('heading', { name: 'General Preferences' })).toBeInTheDocument()
-    expect(screen.getByText('OpenCode Manager')).toBeInTheDocument()
-    expect(screen.getByText('v1.2.3')).toBeInTheDocument()
+    expect(await screen.findByText('v1.2.3')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'v1.3.0 available' })).toHaveAttribute('href', 'https://example.com/release')
 
     expect(screen.getByLabelText('Appearance')).toBeInTheDocument()
@@ -77,26 +86,22 @@ describe('GeneralSettings', () => {
 
   it('writes the theme and toggle preferences', async () => {
     const user = userEvent.setup()
-    const updateSettings = vi.fn()
-    mockUseSettings({ updateSettings })
-    mockVersionInfo()
-    render(<GeneralSettings />)
+    const { fetchFake } = await renderGeneral()
 
     await user.click(screen.getByRole('combobox', { name: 'Appearance' }))
     await user.click(screen.getByRole('option', { name: 'Light' }))
 
-    expect(updateSettings).toHaveBeenCalledWith({ theme: 'light' })
-
     await user.click(screen.getByRole('switch', { name: 'Auto-scroll' }))
-    expect(updateSettings).toHaveBeenCalledWith({ autoScroll: false })
+
+    expect(patchBodies(fetchFake)).toEqual([
+      { preferences: { theme: 'light' } },
+      { preferences: { autoScroll: false } },
+    ])
   })
 
   it('defaults the color theme to Manager and persists a chosen OpenCode theme', async () => {
     const user = userEvent.setup()
-    const updateSettings = vi.fn()
-    mockUseSettings({ updateSettings })
-    mockVersionInfo()
-    render(<GeneralSettings />)
+    const { fetchFake } = await renderGeneral()
 
     expect(screen.getByRole('combobox', { name: 'Theme' })).toHaveTextContent('Manager')
 
@@ -105,24 +110,36 @@ describe('GeneralSettings', () => {
     expect(screen.getByRole('option', { name: 'OpenCode' })).toBeInTheDocument()
     await user.click(screen.getByRole('option', { name: 'Dracula' }))
 
-    expect(updateSettings).toHaveBeenCalledWith({ colorTheme: 'dracula' })
+    expect(patchBodies(fetchFake)).toEqual([{ preferences: { colorTheme: 'dracula' } }])
   })
 
   it('hides the reasoning, tool call, and diff rows while simple chat mode is on', () => {
-    mockUseSettings({ preferences: { ...basePreferences, simpleChatMode: true } })
-    mockVersionInfo()
-    render(<GeneralSettings />)
+    const settings = createSettingsServer({ simpleChatMode: true })
+    renderWithProviders(<GeneralSettings />, {
+      auth: false,
+      theme: false,
+      tts: false,
+      fetchRoutes: [
+        ...settings.routes,
+        { method: 'GET', path: '/api/health/version', respond: () => ({ json: VERSION }) },
+        ...modelRoutes,
+      ],
+    })
 
-    expect(screen.queryByRole('switch', { name: 'Show reasoning' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('switch', { name: 'Expand tool calls' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('switch', { name: 'Expand diffs' })).not.toBeInTheDocument()
+    return waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Simple chat mode' })).toBeChecked()
+      expect(screen.queryByRole('switch', { name: 'Show reasoning' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('switch', { name: 'Expand tool calls' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('switch', { name: 'Expand diffs' })).not.toBeInTheDocument()
+    })
   })
 
-  it('shows the saving state while preferences are updating', () => {
-    mockUseSettings({ isUpdating: true })
-    mockVersionInfo()
-    render(<GeneralSettings />)
+  it('shows the saving state while preferences are updating', async () => {
+    const user = userEvent.setup()
+    await renderGeneral({ patch: () => new Promise<FetchRouteResult>(() => undefined) })
 
-    expect(screen.getByText('Saving...')).toBeInTheDocument()
+    await user.click(screen.getByRole('switch', { name: 'Auto-scroll' }))
+
+    expect(await screen.findByText('Saving...')).toBeInTheDocument()
   })
 })

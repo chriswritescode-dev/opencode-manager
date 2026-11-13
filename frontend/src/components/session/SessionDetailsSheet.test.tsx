@@ -1,18 +1,9 @@
 import { useState } from 'react'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+import { installWindowSize } from '@/test/browserFakes'
 import { SessionDetailsSheet, type SessionDetailsSheetProps } from './SessionDetailsSheet'
-
-const mocks = vi.hoisted(() => ({
-  useMobile: vi.fn(),
-}))
-
-vi.mock('@/hooks/useMobile', () => ({
-  useMobile: mocks.useMobile,
-  useSwipeBack: vi.fn(() => ({ bind: vi.fn(), swipeProgress: 0, swipeStyles: {} })),
-  useSwipeDismiss: vi.fn(() => ({ bind: vi.fn(), swipeProgress: 0, swipeStyles: {} })),
-}))
 
 const baseProps: SessionDetailsSheetProps = {
   open: true,
@@ -38,15 +29,11 @@ function failingRename(error = new Error('nope')) {
 }
 
 function renderSheet(overrides: Partial<SessionDetailsSheetProps> = {}) {
+  installWindowSize(1024)
   return render(<SessionDetailsSheet {...baseProps} {...overrides} />)
 }
 
 describe('SessionDetailsSheet', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.useMobile.mockReturnValue(false)
-  })
-
   it('lists the local session details', () => {
     renderSheet({ branch: 'feat/header', directory: '/abs/repos/oc-manager' })
 
@@ -244,8 +231,8 @@ describe('SessionDetailsSheet', () => {
   })
 
   it('renders as a bottom sheet on mobile', () => {
-    mocks.useMobile.mockReturnValue(true)
-    renderSheet({ branch: 'feat/header' })
+    installWindowSize(500, 800)
+    render(<SessionDetailsSheet {...baseProps} branch="feat/header" />)
 
     expect(screen.getByRole('dialog')).toHaveAccessibleName('Session details')
     expect(screen.getByText('feat/header')).toBeInTheDocument()

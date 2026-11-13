@@ -1,100 +1,50 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { existsSync } from 'node:fs'
+import path from 'node:path'
+import type { Database } from 'bun:sqlite'
 import { getReposPath } from '@opencode-manager/shared/config/env'
-import type { GitAuthService } from '../../src/services/git-auth'
-
-const executeCommand = vi.fn()
-const ensureDirectoryExists = vi.fn()
-const existsSync = vi.fn()
-
-const getRepoByUrlAndBranch = vi.fn()
-const createRepo = vi.fn()
-const updateRepoStatus = vi.fn()
-const deleteRepo = vi.fn()
-
-vi.mock('../../src/utils/process', () => ({
-  executeCommand,
-}))
-
-vi.mock('../../src/services/file-operations', () => ({
-  ensureDirectoryExists,
-}))
-
-vi.mock('node:fs', () => ({
-  existsSync,
-  rmSync: vi.fn(),
-}))
-
-vi.mock('../../src/db/queries', () => ({
-  getRepoByUrlAndBranch,
-  createRepo,
-  updateRepoStatus,
-  deleteRepo,
-}))
-
-vi.mock('../../src/services/settings', () => ({
-  SettingsService: vi.fn().mockImplementation(() => ({
-    getSettings: vi.fn().mockReturnValue({ preferences: { gitCredentials: [] } }),
-  })),
-}))
-
-vi.mock('../../src/utils/ssh-key-manager', () => ({
-  parseSSHHost: vi.fn((url: string) => ({ user: 'git', host: url, port: null })),
-  writeTemporarySSHKey: vi.fn(),
-  buildSSHCommand: vi.fn(),
-  buildSSHCommandWithKnownHosts: vi.fn(),
-  cleanupSSHKey: vi.fn(),
-}))
-
-const mockEnv = {
-  GIT_TERMINAL_PROMPT: '0',
-  LANG: 'en_US.UTF-8',
-  LC_ALL: 'en_US.UTF-8',
-}
-
-const mockGitAuthService = {
-  getGitEnvironment: vi.fn().mockReturnValue(mockEnv),
-  getSSHEnvironment: vi.fn().mockReturnValue({}),
-  setupSSHKey: vi.fn(),
-  cleanupSSHKey: vi.fn(),
-  verifyHostKeyBeforeOperation: vi.fn().mockResolvedValue(true),
-  setupSSHForRepoUrl: vi.fn().mockResolvedValue(false),
-  setSSHPort: vi.fn(),
-} as unknown as GitAuthService
+import { cloneRepo } from '../../src/services/repo'
+import { getRepoById } from '../../src/db/queries'
+import { createTestDatabase } from '../helpers/test-database'
+import { createTempWorkspace, type TempWorkspace } from '../helpers/test-env'
+import { createGitAuthService, createOrigin, git, uniqueName } from '../helpers/git-fixtures'
 
 describe('repoService.cloneRepo auth env', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
+  let workspace: TempWorkspace
+  let db: Database
+  let originPath: string
+  let originHead: string
+
+  beforeAll(() => {
+    workspace = createTempWorkspace('ocm-repo-auth-env-')
+    db = createTestDatabase()
+    originPath = path.join(workspace.path, uniqueName('forge-origin.git'))
+    const workPath = path.join(workspace.path, uniqueName('forge-work'))
+    createOrigin(originPath, workPath)
+    originHead = git(['rev-parse', 'HEAD'], workPath)
   })
 
-  it('passes github extraheader env to git clone', async () => {
-    const { cloneRepo } = await import('../../src/services/repo')
+  afterAll(() => {
+    db.close()
+    workspace.restore()
+  })
 
-    const database = {} as any
-    const repoUrl = 'https://github.com/acme/forge.git'
-
-    getRepoByUrlAndBranch.mockReturnValue(null)
-    createRepo.mockReturnValue({
-      id: 1,
-      repoUrl,
-      localPath: 'forge',
-      defaultBranch: 'main',
-      cloneStatus: 'cloning',
-      clonedAt: Date.now(),
+  it('clones through the github extraheader environment git receives', async () => {
+    const gitAuthService = createGitAuthService({
+      GIT_TERMINAL_PROMPT: '0',
+      LANG: 'en_US.UTF-8',
+      LC_ALL: 'en_US.UTF-8',
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: `url.file://${originPath}.insteadOf`,
+      GIT_CONFIG_VALUE_0: 'https://github.com/acme/forge',
     })
 
-    existsSync.mockReturnValue(false)
-    executeCommand
-      .mockResolvedValueOnce('')
+    const repo = await cloneRepo(db, gitAuthService, 'https://github.com/acme/forge.git', { directoryName: 'forge' })
+    const clonePath = path.join(getReposPath(), 'forge')
 
-    await cloneRepo(database, mockGitAuthService, repoUrl)
-
-    expect(executeCommand).toHaveBeenLastCalledWith(
-      ['git', 'clone', 'https://github.com/acme/forge', 'forge'],
-      expect.objectContaining({ cwd: getReposPath(), env: mockEnv })
-    )
-
-    expect(ensureDirectoryExists).toHaveBeenCalledWith(getReposPath())
-    expect(updateRepoStatus).toHaveBeenCalledWith(database, 1, 'ready')
-    expect(deleteRepo).not.toHaveBeenCalled()
+    expect(repo.cloneStatus).toBe('ready')
+    expect(getRepoById(db, repo.id)?.cloneStatus).toBe('ready')
+    expect(existsSync(path.join(clonePath, '.git'))).toBe(true)
+    expect(git(['rev-parse', 'HEAD'], clonePath)).toBe(originHead)
   })
 })

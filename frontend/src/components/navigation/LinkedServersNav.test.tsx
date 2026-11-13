@@ -1,50 +1,32 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, useLocation } from 'react-router-dom'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
+import type { OpenCodeServer, OpenCodeServerStatus } from '@opencode-manager/shared/schemas'
 import { LinkedServersNav } from './LinkedServersNav'
 import { useSidebarServerRouteSync } from '@/hooks/useSidebarServerSelection'
 import { useSidebarServerStore } from '@/stores/sidebarServerStore'
+import { connectTestEventStream, renderWithProviders } from '@/test/render'
+import { LocationCatcher } from '@/test/test-components'
+import { appRoutes } from '@/test/fixtures/appRoutes'
+import { permissionAsked, sessionStatusUpdated } from '@/test/fixtures/events'
+import { makeOpenCodeServer } from '@/test/fixtures/api'
+import type { JsonObject } from '@opencode-manager/shared/utils'
 
-const mocks = vi.hoisted(() => ({
-  useOpenCodeServers: vi.fn(),
-  useOpenCodeServerStatuses: vi.fn(),
-  useServerActivityState: vi.fn(),
-  useLocalActivityState: vi.fn(),
-  useAuth: vi.fn(),
-}))
+const kitchen = makeOpenCodeServer({ id: 'srv_kitchen', name: 'Kitchen' })
+const office = makeOpenCodeServer({ id: 'srv_office', name: 'Office' })
 
-vi.mock('@/hooks/useOpenCodeServers', () => ({
-  useOpenCodeServers: mocks.useOpenCodeServers,
-  useOpenCodeServerStatuses: mocks.useOpenCodeServerStatuses,
-}))
-
-vi.mock('@/hooks/useAuth', () => ({
-  useAuth: mocks.useAuth,
-}))
-
-vi.mock('@/hooks/useActiveWork', () => ({
-  useServerActivityState: mocks.useServerActivityState,
-  useLocalActivityState: mocks.useLocalActivityState,
-}))
-
-const kitchen = {
-  id: 'srv_kitchen',
-  name: 'Kitchen',
-  baseUrl: 'https://kitchen.example.com',
-  username: 'opencode',
-  enabled: true,
-  hasPassword: true,
-  createdAt: 1,
-  updatedAt: 2,
+function status(serverId: string, connected: boolean): OpenCodeServerStatus {
+  return { serverId, connected, version: null, error: null }
 }
 
-const office = { ...kitchen, id: 'srv_office', name: 'Office' }
-
-function LocationDisplay() {
-  const location = useLocation()
-  return <div data-testid="location">{`${location.pathname}${location.search}`}</div>
+interface RenderOptions {
+  pathname?: string
+  variant?: 'sidebar' | 'rail'
+  servers?: OpenCodeServer[]
+  statuses?: OpenCodeServerStatus[]
+  serverId?: string
+  events?: JsonObject[]
 }
 
 function SidebarServerRouteSync() {
@@ -52,71 +34,67 @@ function SidebarServerRouteSync() {
   return null
 }
 
-function renderNav(pathname = '/', variant?: 'sidebar' | 'rail') {
-  return render(
-    <MemoryRouter initialEntries={[pathname]}>
+async function renderNav(options: RenderOptions = {}) {
+  useSidebarServerStore.setState({ serverId: options.serverId ?? LOCAL_OPENCODE_SERVER_ID })
+  const capturedPathname = { current: '' }
+  const capturedSearch = { current: '' }
+  const result = renderWithProviders(
+    <>
       <SidebarServerRouteSync />
-      <LinkedServersNav variant={variant} />
-      <LocationDisplay />
-    </MemoryRouter>,
+      <LinkedServersNav variant={options.variant} />
+      <LocationCatcher capturedPathname={capturedPathname} capturedSearch={capturedSearch} />
+    </>,
+    {
+      route: options.pathname ?? '/',
+      events: true,
+      theme: false,
+      toaster: false,
+      fetchRoutes: appRoutes({
+        servers: options.servers ?? [],
+        statuses: options.statuses ?? [],
+      }),
+    },
   )
+  if (options.events && options.events.length > 0) {
+    await connectTestEventStream(result.eventStream)
+    act(() => {
+      for (const event of options.events ?? []) result.eventStream?.message(event)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+  }
+  return { ...result, capturedPathname, capturedSearch }
 }
 
-function setServers(servers: Array<typeof kitchen>) {
-  mocks.useOpenCodeServers.mockReturnValue({ servers, isLoading: false, isSuccess: true })
-}
-
-function triggerName(name: string) {
-  return `Switch server, current: ${name}`
-}
+const triggerName = (name: string) => `Switch server, current: ${name}`
 
 describe('LinkedServersNav', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    localStorage.clear()
-    useSidebarServerStore.setState({ serverId: LOCAL_OPENCODE_SERVER_ID })
-    setServers([])
-    mocks.useAuth.mockReturnValue({ isAuthenticated: true })
-    mocks.useServerActivityState.mockReturnValue(null)
-    mocks.useLocalActivityState.mockReturnValue(null)
-    mocks.useOpenCodeServerStatuses.mockReturnValue({
-      statuses: [],
-      statusById: {
-        srv_kitchen: { serverId: 'srv_kitchen', connected: true, version: null, error: null },
-        srv_office: { serverId: 'srv_office', connected: false, version: null, error: null },
-      },
-      isLoading: false,
-    })
+  it('renders nothing when no linked servers exist', async () => {
+    await renderNav()
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Switch server/ })).not.toBeInTheDocument())
   })
 
-  it('renders nothing when no linked servers exist', () => {
-    renderNav()
+  it('renders nothing for disabled linked servers', async () => {
+    await renderNav({ servers: [{ ...kitchen, enabled: false }], statuses: [status('srv_kitchen', true)] })
 
-    expect(screen.queryByRole('button', { name: /Switch server/ })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Switch server/ })).not.toBeInTheDocument())
   })
 
-  it('renders nothing for disabled linked servers', () => {
-    setServers([{ ...kitchen, enabled: false }])
+  it('shows the local machine on the trigger by default', async () => {
+    await renderNav({ servers: [kitchen], statuses: [status('srv_kitchen', true)] })
 
-    renderNav()
-
-    expect(screen.queryByRole('button', { name: /Switch server/ })).not.toBeInTheDocument()
-  })
-
-  it('shows the local machine on the trigger by default', () => {
-    setServers([kitchen])
-
-    renderNav()
-
-    expect(screen.getByRole('button', { name: triggerName('OC Manager') })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: triggerName('OC Manager') })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Servers' })).not.toBeInTheDocument()
   })
 
   it('shows the selected server name and connection dot on the trigger', async () => {
-    setServers([kitchen])
-    useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
-
-    renderNav()
+    await renderNav({
+      servers: [kitchen],
+      statuses: [status('srv_kitchen', true)],
+      serverId: 'srv_kitchen',
+    })
 
     expect(await screen.findByRole('button', { name: triggerName('Kitchen') })).toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'Connected' })).toBeInTheDocument()
@@ -124,10 +102,12 @@ describe('LinkedServersNav', () => {
 
   it('lists the local machine and enabled servers in the menu', async () => {
     const user = userEvent.setup()
-    setServers([kitchen, { ...office, enabled: false }])
+    await renderNav({
+      servers: [kitchen, { ...office, enabled: false }],
+      statuses: [status('srv_kitchen', true)],
+    })
 
-    renderNav()
-    await user.click(screen.getByRole('button', { name: triggerName('OC Manager') }))
+    await user.click(await screen.findByRole('button', { name: triggerName('OC Manager') }))
 
     expect(await screen.findByRole('menuitem', { name: /OC Manager/ })).toHaveAttribute('aria-current', 'true')
     expect(screen.getByRole('menuitem', { name: /Kitchen/ })).toBeInTheDocument()
@@ -137,120 +117,152 @@ describe('LinkedServersNav', () => {
 
   it('selects a server without navigating', async () => {
     const user = userEvent.setup()
-    setServers([kitchen, office])
+    const { capturedPathname } = await renderNav({
+      servers: [kitchen, office],
+      statuses: [status('srv_kitchen', true), status('srv_office', false)],
+    })
 
-    renderNav()
-    await user.click(screen.getByRole('button', { name: triggerName('OC Manager') }))
+    await user.click(await screen.findByRole('button', { name: triggerName('OC Manager') }))
     await user.click(await screen.findByRole('menuitem', { name: /Office/ }))
 
     expect(await screen.findByRole('button', { name: triggerName('Office') })).toBeInTheDocument()
     expect(useSidebarServerStore.getState().serverId).toBe('srv_office')
-    expect(screen.getByTestId('location')).toHaveTextContent('/')
+    expect(capturedPathname.current).toBe('/')
   })
 
   it('selects the local machine without navigating', async () => {
     const user = userEvent.setup()
-    setServers([kitchen])
-    useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
+    const { capturedPathname } = await renderNav({
+      servers: [kitchen],
+      statuses: [status('srv_kitchen', true)],
+      serverId: 'srv_kitchen',
+    })
 
-    renderNav()
-    await user.click(screen.getByRole('button', { name: triggerName('Kitchen') }))
+    await user.click(await screen.findByRole('button', { name: triggerName('Kitchen') }))
     await user.click(await screen.findByRole('menuitem', { name: /OC Manager/ }))
 
     expect(await screen.findByRole('button', { name: triggerName('OC Manager') })).toBeInTheDocument()
-    expect(screen.getByTestId('location')).toHaveTextContent('/')
+    expect(capturedPathname.current).toBe('/')
   })
 
   it('follows a linked server route', async () => {
-    setServers([kitchen])
-
-    renderNav('/servers/srv_kitchen/sessions/abc')
+    await renderNav({
+      pathname: '/servers/srv_kitchen/sessions/abc',
+      servers: [kitchen],
+      statuses: [status('srv_kitchen', true)],
+    })
 
     expect(await screen.findByRole('button', { name: triggerName('Kitchen') })).toBeInTheDocument()
   })
 
   it('falls back to local when the persisted server is disabled', async () => {
-    useSidebarServerStore.setState({ serverId: 'srv_office' })
-    setServers([kitchen, { ...office, enabled: false }])
-
-    renderNav()
+    await renderNav({
+      servers: [kitchen, { ...office, enabled: false }],
+      statuses: [status('srv_kitchen', true)],
+      serverId: 'srv_office',
+    })
 
     expect(await screen.findByRole('button', { name: triggerName('OC Manager') })).toBeInTheDocument()
   })
 
   it('shows an attention dot for another server that needs input', async () => {
-    setServers([kitchen, office])
-    mocks.useServerActivityState.mockImplementation((serverId: string) =>
-      serverId === 'srv_office' ? 'needs-input' : null,
-    )
+    await renderNav({
+      servers: [kitchen, office],
+      statuses: [status('srv_kitchen', true), status('srv_office', true)],
+      events: [
+        permissionAsked(
+          { id: 'perm-1', sessionID: 'ses_office', action: 'shell', resources: ['ls'], metadata: {} },
+          { directory: '/srv/office', serverId: 'srv_office' },
+        ),
+      ],
+    })
 
-    renderNav()
-
-    expect(screen.getByRole('img', { name: 'Office needs input' })).toBeInTheDocument()
+    expect(await screen.findByRole('img', { name: 'Office needs input' })).toBeInTheDocument()
     expect(screen.queryByRole('img', { name: 'Office is running' })).not.toBeInTheDocument()
   })
 
-  it('shows a running attention dot for another running server', () => {
-    setServers([kitchen])
-    mocks.useServerActivityState.mockReturnValue('running')
+  it('shows a running attention dot for another running server', async () => {
+    await renderNav({
+      servers: [kitchen],
+      statuses: [status('srv_kitchen', true)],
+      events: [
+        sessionStatusUpdated(
+          'ses_kitchen',
+          { type: 'busy' },
+          { directory: '/srv/kitchen', serverId: 'srv_kitchen' },
+        ),
+      ],
+    })
 
-    renderNav()
-
-    expect(screen.getByRole('img', { name: 'Kitchen is running' })).toBeInTheDocument()
+    expect(await screen.findByRole('img', { name: 'Kitchen is running' })).toBeInTheDocument()
   })
 
-  it('shows local attention while a remote server is selected', () => {
-    setServers([kitchen])
-    useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
-    mocks.useLocalActivityState.mockReturnValue('needs-input')
+  it('shows local attention while a remote server is selected', async () => {
+    await renderNav({
+      servers: [kitchen],
+      statuses: [status('srv_kitchen', true)],
+      serverId: 'srv_kitchen',
+      events: [
+        permissionAsked(
+          { id: 'perm-local', sessionID: 'ses_local', action: 'shell', resources: ['ls'], metadata: {} },
+          { directory: '/repo' },
+        ),
+      ],
+    })
 
-    renderNav()
-
-    expect(screen.getByRole('img', { name: 'OC Manager needs input' })).toBeInTheDocument()
+    expect(await screen.findByRole('img', { name: 'OC Manager needs input' })).toBeInTheDocument()
   })
 
   it('does not show an attention dot for the selected server', async () => {
-    setServers([kitchen])
-    useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
-    mocks.useServerActivityState.mockReturnValue('needs-input')
+    await renderNav({
+      servers: [kitchen],
+      statuses: [status('srv_kitchen', true)],
+      serverId: 'srv_kitchen',
+      events: [
+        permissionAsked(
+          { id: 'perm-kitchen', sessionID: 'ses_kitchen', action: 'shell', resources: ['ls'], metadata: {} },
+          { directory: '/srv/kitchen', serverId: 'srv_kitchen' },
+        ),
+      ],
+    })
 
-    renderNav()
-
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: triggerName('Kitchen') })).toBeInTheDocument(),
-    )
+    await waitFor(() => expect(screen.getByRole('button', { name: triggerName('Kitchen') })).toBeInTheDocument())
+    expect(await screen.findByRole('img', { name: 'Session needs input' })).toBeInTheDocument()
     expect(screen.queryByRole('img', { name: 'Kitchen needs input' })).not.toBeInTheDocument()
-    expect(screen.getByRole('img', { name: 'Session needs input' })).toBeInTheDocument()
   })
 
   it('opens settings on the servers tab from the menu', async () => {
     const user = userEvent.setup()
-    setServers([kitchen])
+    const { capturedSearch } = await renderNav({
+      servers: [kitchen],
+      statuses: [status('srv_kitchen', true)],
+    })
 
-    renderNav()
-    await user.click(screen.getByRole('button', { name: triggerName('OC Manager') }))
+    await user.click(await screen.findByRole('button', { name: triggerName('OC Manager') }))
     await user.click(await screen.findByRole('menuitem', { name: /Manage servers/ }))
 
-    expect(screen.getByTestId('location')).toHaveTextContent('/?settings=open&settingsTab=servers')
+    await waitFor(() => expect(new URLSearchParams(capturedSearch.current).get('settings')).toBe('open'))
+    expect(new URLSearchParams(capturedSearch.current).get('settingsTab')).toBe('servers')
   })
 
   it('renders a single icon trigger in the collapsed rail', async () => {
     const user = userEvent.setup()
-    setServers([kitchen])
+    await renderNav({
+      variant: 'rail',
+      servers: [kitchen],
+      statuses: [status('srv_kitchen', true)],
+    })
 
-    renderNav('/', 'rail')
-
-    const trigger = screen.getByRole('button', { name: triggerName('OC Manager') })
-    expect(trigger).toBeInTheDocument()
+    const trigger = await screen.findByRole('button', { name: triggerName('OC Manager') })
     expect(screen.queryByText('OC Manager')).not.toBeInTheDocument()
 
     await user.click(trigger)
     expect(await screen.findByRole('menuitem', { name: /Kitchen/ })).toBeInTheDocument()
   })
 
-  it('renders nothing in the collapsed rail when no linked servers exist', () => {
-    renderNav('/', 'rail')
+  it('renders nothing in the collapsed rail when no linked servers exist', async () => {
+    await renderNav({ variant: 'rail' })
 
-    expect(screen.queryByRole('button', { name: /Switch server/ })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Switch server/ })).not.toBeInTheDocument())
   })
 })

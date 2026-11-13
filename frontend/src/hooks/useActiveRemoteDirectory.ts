@@ -13,10 +13,6 @@ export interface ActiveRemoteDirectory {
   isPending: boolean
 }
 
-/**
- * Reads the session cached on any directory variant of the shared session key for one server, so a
- * page that already loaded the session does not make the picker wait for it again.
- */
 function findCachedSession(
   queryClient: QueryClient,
   sessionID: string,
@@ -29,16 +25,6 @@ function findCachedSession(
   return entries.find(([key]) => key[4] === scopedServerId)?.[1]
 }
 
-/**
- * Resolves the linked server directory currently in view: the project route's directory when one
- * matches the server, otherwise the canonical project directory that owns the session route's
- * directory, falling back to that directory when no project owns it.
- *
- * @param serverId Linked server whose active directory is resolved.
- * @param options.enabled Whether the lookups may run; omit for routes that always resolve them.
- * @returns The active directory and whether a session route's directory is still resolving; the
- * local server resolves neither.
- */
 export function useActiveRemoteDirectory(
   serverId: string,
   { enabled = true }: { enabled?: boolean } = {},

@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import { getOpenCodeTheme, MANAGER_COLOR_THEME_ID } from '@opencode-manager/shared/themes'
 import type { ColorThemeId, HexColor } from '@opencode-manager/shared/themes'
 
@@ -53,11 +54,13 @@ export type ThemeMode = 'light' | 'dark'
 
 export const APPEARANCE_STORAGE_KEY = 'ocm-appearance'
 
-interface AppearanceSnapshot {
-  dark: boolean
-  tokens: Record<string, string> | null
-  themeColor: string
-}
+export const AppearanceSnapshotSchema = z.object({
+  dark: z.boolean(),
+  tokens: z.record(z.string(), z.string()).nullable(),
+  themeColor: z.string(),
+})
+
+export type AppearanceSnapshot = z.infer<typeof AppearanceSnapshotSchema>
 
 const MANAGER_BROWSER_THEME_COLOR = {
   dark: '#0a0a0a',

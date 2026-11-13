@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs'
 import { cp, mkdtemp, readdir, rename, rm } from 'fs/promises'
 import { Database as SQLiteDatabase } from 'bun:sqlite'
 import { getConfigPath, getWorkspacePath } from '@opencode-manager/shared/config/env'
+import { z } from 'zod'
 import {
   DEFAULT_OPENCODE_CONFIG_SOURCE_NAME,
   LEGACY_OPENCODE_CONFIG_SOURCE_NAME,
@@ -20,6 +21,8 @@ import {
 import { captureLastKnownGoodOpenCodeConfig } from './opencode-config-apply'
 import { ensureDirectoryExists, fileExists, readFileContent } from './file-operations'
 import type { SettingsService } from './settings'
+
+const sessionDirectoryRowSchema = z.object({ directory: z.string() })
 
 const OPENCODE_STATE_DB_FILENAMES = new Set(['opencode.db', 'opencode.db-shm', 'opencode.db-wal'])
 
@@ -50,7 +53,7 @@ export interface SyncOpenCodeImportOptions {
   protectExistingState?: boolean
   importConfig?: boolean
   status?: OpenCodeImportStatus
-  settingsService?: SettingsService
+  settingsService?: Pick<SettingsService, 'saveLastKnownGoodConfig'>
 }
 
 export interface SyncOpenCodeImportResult extends OpenCodeImportStatus {
@@ -221,7 +224,10 @@ export async function getOpenCodeImportStatus(): Promise<OpenCodeImportStatus> {
   }
 }
 
-async function importOpenCodeConfigFromSources(sourcePaths: string[], settingsService?: SettingsService): Promise<boolean> {
+async function importOpenCodeConfigFromSources(
+  sourcePaths: string[],
+  settingsService?: Pick<SettingsService, 'saveLastKnownGoodConfig'>,
+): Promise<boolean> {
   const configDir = getConfigPath()
   const sources = await Promise.all(sourcePaths.map(async sourcePath => {
     const basename = path.basename(sourcePath)
@@ -288,14 +294,14 @@ export async function getImportedSessionDirectories(workspaceStatePath?: string)
   const database = new SQLiteDatabase(stateDbPath, { readonly: true })
 
   try {
-    const rows = database
-      .query("SELECT DISTINCT directory FROM session WHERE directory IS NOT NULL AND TRIM(directory) != '' ORDER BY directory")
-      .all() as Array<{ directory: string }>
+    const rows = sessionDirectoryRowSchema.array().parse(
+      database
+        .query("SELECT DISTINCT directory FROM session WHERE directory IS NOT NULL AND TRIM(directory) != '' ORDER BY directory")
+        .all(),
+    )
 
     return {
-      directories: rows
-        .map((row) => row.directory.trim())
-        .filter(Boolean),
+      directories: rows.map((row) => row.directory.trim()).filter(Boolean),
     }
   } finally {
     database.close()

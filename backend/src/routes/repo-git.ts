@@ -6,6 +6,7 @@ import { logger } from '../utils/logger'
 import { parseJsonBody, respondWithGitError } from '../utils/route-helpers'
 import { buildCommitMessagePrompt, normalizeGeneratedCommitMessage } from '../services/git/commit-message-prompt'
 import type { CommitMessageContext } from '../services/git/commit-message-prompt'
+import { z } from 'zod'
 import { RenameBranchRequestSchema, DeleteBranchRequestSchema, StashPushRequestSchema, StashApplyRequestSchema, StashDropRequestSchema, IntegrateBranchRequestSchema } from '@opencode-manager/shared'
 import type { GitService } from '../services/git/GitService'
 import type { OpenCodeClient } from '../services/opencode/client'
@@ -15,6 +16,10 @@ import type { Repo } from '../types/repo'
 import { getErrorMessage } from '../utils/error-utils'
 
 const DEFAULT_COMMIT_MESSAGE_TIMEOUT_MS = 30_000
+
+const RepoIdsBodySchema = z.object({
+  repoIds: z.array(z.number()),
+})
 
 export interface RepoGitRouteOptions {
   commitMessageTimeoutMs?: number
@@ -64,11 +69,12 @@ export function createRepoGitRoutes(
   app.post('/git-status-batch', async (c) => {
     try {
       const body = await c.req.json()
-      const { repoIds } = body
+      const parsedBody = RepoIdsBodySchema.safeParse(body)
 
-      if (!Array.isArray(repoIds) || repoIds.some((id: unknown) => typeof id !== 'number')) {
+      if (!parsedBody.success) {
         return c.json({ error: 'repoIds must be an array of numbers' }, 400)
       }
+      const repoIds = parsedBody.data.repoIds
 
       const BATCH_CONCURRENCY = 3
       const results: Array<[number, GitStatusResponse] | null> = []
@@ -78,7 +84,8 @@ export function createRepoGitRoutes(
           batch.map(async (id) => {
             try {
               const status = await git.getStatus(id, database)
-              return [id, status] as [number, GitStatusResponse]
+              const result: [number, GitStatusResponse] = [id, status]
+              return result
             } catch (error: unknown) {
               logger.error(`Failed to get git status for repo ${id}:`, error)
               return null

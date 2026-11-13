@@ -24,13 +24,6 @@ const ACTIVITY_PRESENTATION = {
   },
 } as const satisfies Record<string, { label: string; tone: ScannerTone }>
 
-/**
- * Session activity scanner shown by the composer. It overlays the gap above the bottom controls row
- * without taking layout height, so the composer never resizes or jumps when activity starts or stops.
- * A fading lit window of 4x8px segments sweeps across the strip. Renders nothing while the session is
- * idle and has no background activity; otherwise announces the current activity through an
- * indeterminate progressbar.
- */
 export function ComposerActivityBar({ sessionID }: ComposerActivityBarProps) {
   const status = useSessionStatusForSession(sessionID)
   const hasBackgroundActivity = useHasBackgroundActivity(sessionID)

@@ -1,17 +1,12 @@
+import { selectTableColumns } from '../rows'
 import type { Migration } from '../migration-runner'
-
-interface ColumnInfo {
-  name: string
-  notnull: number
-  dflt_value: string | null
-}
 
 const migration: Migration = {
   id: '016-schedule-permission-config',
   legacy: { version: 16, name: 'schedule-permission-config' },
 
   up(db) {
-    const cols = db.prepare('PRAGMA table_info(schedule_jobs)').all() as ColumnInfo[]
+    const cols = selectTableColumns(db, 'schedule_jobs')
     if (!cols.some((c) => c.name === 'permission_config')) {
       db.run('ALTER TABLE schedule_jobs ADD COLUMN permission_config TEXT')
     }
@@ -19,8 +14,6 @@ const migration: Migration = {
 
   down(_db) {
     void _db
-    // no-op: SQLite drop-column requires table rebuild; column is nullable so
-    // leaving it in place is safe for rollback scenarios.
   },
 }
 

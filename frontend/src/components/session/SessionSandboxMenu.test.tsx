@@ -1,11 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import {
+  SetSessionSandboxRequestSchema,
+  type SessionSandboxState,
+} from '@opencode-manager/shared/schemas'
+import type { FetchRoute, FetchRouteResult } from '@/test/fetchFake'
+import { renderWithProviders } from '@/test/render'
 import { SessionSandboxMenu } from './SessionSandboxMenu'
-import { useSessionSandbox, useSetSessionSandbox } from '@/hooks/useSessionSandbox'
-import type { SessionSandboxState } from '@opencode-manager/shared/schemas'
-
-vi.mock('@/hooks/useSessionSandbox')
 
 const baseSandboxState: SessionSandboxState = {
   sessionId: 'ses_1',
@@ -18,87 +20,79 @@ const baseSandboxState: SessionSandboxState = {
   available: true,
 }
 
-function mockSandbox(
-  state: Partial<SessionSandboxState> = {},
-  mutateAsync = vi.fn().mockResolvedValue(undefined),
-) {
-  const mutate = vi.fn()
-  vi.mocked(useSessionSandbox).mockReturnValue({
-    data: { ...baseSandboxState, ...state },
-    isError: false,
-  } as ReturnType<typeof useSessionSandbox>)
-  vi.mocked(useSetSessionSandbox).mockReturnValue({
-    mutate,
-    mutateAsync,
-    isPending: false,
-  } as unknown as ReturnType<typeof useSetSessionSandbox>)
-  return { mutate, mutateAsync }
-}
+function renderMenu(overrides: Partial<SessionSandboxState> = {}, putRespond?: FetchRoute['respond']) {
+  let state: SessionSandboxState = { ...baseSandboxState, ...overrides }
+  const sandboxUrl = '/api/session-sandbox/ses_1'
 
-function renderMenu() {
-  render(<SessionSandboxMenu sessionID="ses_1" />)
+  const routes: FetchRoute[] = [
+    { method: 'GET', path: sandboxUrl, respond: () => ({ json: state }) },
+    {
+      method: 'PUT',
+      path: sandboxUrl,
+      respond: (request) => {
+        if (putRespond) return putRespond(request)
+        const parsed = SetSessionSandboxRequestSchema.safeParse(request.body)
+        if (parsed.success) state = { ...state, ...parsed.data }
+        return { json: state }
+      },
+    },
+  ]
+
+  return renderWithProviders(<SessionSandboxMenu sessionID="ses_1" />, {
+    auth: false,
+    theme: false,
+    tts: false,
+    toaster: false,
+    fetchRoutes: routes,
+  })
 }
 
 describe('SessionSandboxMenu', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockSandbox()
+  it('renders nothing when sandboxing is unavailable', async () => {
+    renderMenu({ available: false })
+
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /Sandbox:/ })).not.toBeInTheDocument(),
+    )
   })
 
-  it('renders nothing when sandboxing is unavailable', () => {
-    mockSandbox({ available: false })
-    renderMenu()
+  it.each([
+    [false, 'Sandbox: off'],
+    [true, 'Sandbox: on'],
+  ] as const)('reflects the sandboxed=%s state in the trigger', async (sandboxed, label) => {
+    renderMenu({ sandboxed })
 
-    expect(screen.queryByRole('button', { name: /Sandbox:/ })).not.toBeInTheDocument()
+    const trigger = await screen.findByRole('button', { name: label })
+    if (sandboxed) expect(trigger).toHaveClass('bg-highlight')
+    else expect(trigger).not.toHaveClass('bg-highlight')
   })
 
-  it('reflects the off state in the trigger label', () => {
-    mockSandbox({ sandboxed: false })
-    renderMenu()
+  it.each([
+    [false, 'Sandbox: off', 'false', { sandboxed: true }, 'Sandbox: on'],
+    [true, 'Sandbox: on', 'true', { sandboxed: false }, 'Sandbox: off'],
+  ] as const)(
+    'toggles sandboxing from the %s state through the checkbox item',
+    async (sandboxed, label, checked, expectedBody, nextLabel) => {
+      const user = userEvent.setup()
+      const { fetchFake } = renderMenu({ sandboxed })
 
-    const trigger = screen.getByRole('button', { name: 'Sandbox: off' })
-    expect(trigger).not.toHaveClass('bg-highlight')
-  })
+      await user.click(await screen.findByRole('button', { name: label }))
+      const item = await screen.findByRole('menuitemcheckbox', { name: /Sandbox commands/ })
+      expect(item).toHaveAttribute('aria-checked', checked)
+      await user.click(item)
 
-  it('reflects the on state in the trigger label', () => {
-    mockSandbox({ sandboxed: true })
-    renderMenu()
-
-    expect(screen.getByRole('button', { name: 'Sandbox: on' })).toHaveClass('bg-highlight')
-  })
-
-  it('enables sandboxing through the checkbox item', async () => {
-    const user = userEvent.setup()
-    const { mutate } = mockSandbox({ sandboxed: false })
-    renderMenu()
-
-    await user.click(screen.getByRole('button', { name: 'Sandbox: off' }))
-    const item = await screen.findByRole('menuitemcheckbox', { name: /Sandbox commands/ })
-    expect(item).toHaveAttribute('aria-checked', 'false')
-    await user.click(item)
-
-    expect(mutate).toHaveBeenCalledWith({ sandboxed: true })
-  })
-
-  it('disables sandboxing through the checkbox item', async () => {
-    const user = userEvent.setup()
-    const { mutate } = mockSandbox({ sandboxed: true })
-    renderMenu()
-
-    await user.click(screen.getByRole('button', { name: 'Sandbox: on' }))
-    const item = await screen.findByRole('menuitemcheckbox', { name: /Sandbox commands/ })
-    expect(item).toHaveAttribute('aria-checked', 'true')
-    await user.click(item)
-
-    expect(mutate).toHaveBeenCalledWith({ sandboxed: false })
-  })
+      await waitFor(() =>
+        expect(fetchFake.lastRequest('PUT', '/api/session-sandbox/ses_1')?.body).toEqual(expectedBody),
+      )
+      expect(await screen.findByRole('button', { name: nextLabel })).toBeInTheDocument()
+    },
+  )
 
   it('hides the resources item when the session is not sandboxed', async () => {
     const user = userEvent.setup()
-    mockSandbox({ sandboxed: false })
-    renderMenu()
+    renderMenu({ sandboxed: false })
 
-    await user.click(screen.getByRole('button', { name: 'Sandbox: off' }))
+    await user.click(await screen.findByRole('button', { name: 'Sandbox: off' }))
     await screen.findByRole('menuitemcheckbox', { name: /Sandbox commands/ })
 
     expect(screen.queryByRole('menuitem', { name: /Sandbox resources/ })).not.toBeInTheDocument()
@@ -106,10 +100,9 @@ describe('SessionSandboxMenu', () => {
 
   it('opens the resources dialog from the menu item', async () => {
     const user = userEvent.setup()
-    mockSandbox({ sandboxed: true, effectiveResources: { cpus: 2, memoryMib: 4096 } })
-    renderMenu()
+    renderMenu({ sandboxed: true, effectiveResources: { cpus: 2, memoryMib: 4096 } })
 
-    await user.click(screen.getByRole('button', { name: 'Sandbox: on' }))
+    await user.click(await screen.findByRole('button', { name: 'Sandbox: on' }))
     const item = await screen.findByRole('menuitem', { name: /Sandbox resources/ })
     await user.click(item)
 
@@ -119,14 +112,24 @@ describe('SessionSandboxMenu', () => {
 
   it('disables the checkbox and explains inheritance for a child session', async () => {
     const user = userEvent.setup()
-    mockSandbox({ sandboxed: true, lockedReason: 'child' })
-    renderMenu()
+    const { fetchFake } = renderMenu({ sandboxed: true, lockedReason: 'child' })
 
-    await user.click(screen.getByRole('button', { name: /Inherited from parent session/ }))
+    await user.click(await screen.findByRole('button', { name: /Inherited from parent session/ }))
     const item = await screen.findByRole('menuitemcheckbox', { name: /Sandbox commands/ })
 
     expect(item).toHaveAttribute('aria-disabled', 'true')
     expect(item).toHaveTextContent('Inherited from parent session')
     expect(screen.queryByRole('menuitem', { name: /Sandbox resources/ })).not.toBeInTheDocument()
+    expect(fetchFake.findRequests('PUT', '/api/session-sandbox/ses_1')).toHaveLength(0)
+  })
+
+  it('keeps the trigger label when the toggle write fails', async () => {
+    const user = userEvent.setup()
+    renderMenu({ sandboxed: false }, () => new Promise<FetchRouteResult>(() => undefined))
+
+    await user.click(await screen.findByRole('button', { name: 'Sandbox: off' }))
+    await user.click(await screen.findByRole('menuitemcheckbox', { name: /Sandbox commands/ }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Sandbox: off' })).toBeInTheDocument())
   })
 })

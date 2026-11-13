@@ -1,26 +1,35 @@
-import { isRecord } from '@opencode-manager/shared/utils'
+import { JsonValueSchema, type JsonValue } from '@opencode-manager/shared/utils'
+import { z } from 'zod'
 import type { KeyboardShortcutAction } from '@/api/types/settings'
 import { parseJsonc } from '@/lib/jsonc'
 import { normalizeShortcut } from '@/lib/keyboardShortcuts'
 
 export interface TuiKeybindImport {
   leaderKey?: string
-  shortcuts: Partial<Record<KeyboardShortcutAction, string>>
-  leaderActions: KeyboardShortcutAction[]
-  directActions: KeyboardShortcutAction[]
+  shortcuts: Record<string, string>
+  leaderActions: string[]
+  directActions: string[]
   skipped: Array<{ name: string; reason: string }>
 }
 
-interface KeyStroke {
-  name: string
-  ctrl?: boolean
-  shift?: boolean
-  meta?: boolean
-  super?: boolean
-  hyper?: boolean
-}
+const KeyStrokeSchema = z.looseObject({
+  name: z.string(),
+  ctrl: z.boolean().optional(),
+  shift: z.boolean().optional(),
+  meta: z.boolean().optional(),
+  super: z.boolean().optional(),
+  hyper: z.boolean().optional(),
+})
 
-type Alternative = string | KeyStroke
+type KeyStroke = z.infer<typeof KeyStrokeSchema>
+
+type Alternative = { text: string } | { stroke: KeyStroke }
+
+const KeybindFileSchema = z.looseObject({
+  keybinds: z.record(z.string(), JsonValueSchema),
+})
+
+const KeyedAlternativeSchema = z.looseObject({ key: JsonValueSchema })
 
 type ResolvedBinding =
   | { kind: 'disabled' }
@@ -107,10 +116,6 @@ const KEY_LABELS = new Map<string, string>([
   ['insert', 'Insert'],
 ])
 
-function isKeyStroke(value: unknown): value is KeyStroke {
-  return isRecord(value) && typeof value.name === 'string'
-}
-
 function convertKey(name: string): string | null {
   const lower = name.toLowerCase()
   const mapped = KEY_LABELS.get(lower)
@@ -148,38 +153,47 @@ function convertToken(token: string): ConvertedAlternative {
 }
 
 function convertAlternative(alternative: Alternative): ConvertedAlternative {
-  if (typeof alternative === 'string') return convertToken(alternative)
-  const leader = alternative.name.startsWith('<leader>')
-  const name = leader ? alternative.name.slice('<leader>'.length) : alternative.name
+  if ('text' in alternative) return convertToken(alternative.text)
+  const { stroke } = alternative
+  const leader = stroke.name.startsWith('<leader>')
+  const name = leader ? stroke.name.slice('<leader>'.length) : stroke.name
   if (!name) return { reason: 'missing key after <leader>' }
-  if (alternative.hyper) return { reason: 'unsupported modifier "hyper"' }
+  if (stroke.hyper) return { reason: 'unsupported modifier "hyper"' }
   const key = convertKey(name)
   if (!key) return { reason: `unsupported key "${name}"` }
   const modifiers: string[] = []
-  if (alternative.ctrl) modifiers.push('Ctrl')
-  if (alternative.shift) modifiers.push('Shift')
-  if (alternative.meta) modifiers.push('Alt')
-  if (alternative.super) modifiers.push('Cmd')
+  if (stroke.ctrl) modifiers.push('Ctrl')
+  if (stroke.shift) modifiers.push('Shift')
+  if (stroke.meta) modifiers.push('Alt')
+  if (stroke.super) modifiers.push('Cmd')
   return { shortcut: normalizeShortcut([...modifiers, key].join('+')), leader }
 }
 
-function collectAlternatives(value: unknown): Alternative[] {
-  if (typeof value === 'string') {
-    return value.split(',').map((part) => part.trim()).filter((part) => part.length > 0)
+function collectAlternatives(value: JsonValue): Alternative[] {
+  const text = z.string().safeParse(value)
+  if (text.success) {
+    return text.data
+      .split(',')
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0)
+      .map((part) => ({ text: part }))
   }
   if (Array.isArray(value)) return value.flatMap(collectAlternatives)
-  if (isKeyStroke(value)) return [value]
-  if (isRecord(value) && 'key' in value) return collectAlternatives(value.key)
+  const stroke = KeyStrokeSchema.safeParse(value)
+  if (stroke.success) return [{ stroke: stroke.data }]
+  const keyed = KeyedAlternativeSchema.safeParse(value)
+  if (keyed.success) return collectAlternatives(keyed.data.key)
   return []
 }
 
 function isMeaningfulAlternative(alternative: Alternative): boolean {
-  return typeof alternative !== 'string' || alternative.toLowerCase() !== 'none'
+  return 'stroke' in alternative || alternative.text.toLowerCase() !== 'none'
 }
 
-function resolveBinding(value: unknown, preferLeader: boolean): ResolvedBinding {
+function resolveBinding(value: JsonValue, preferLeader: boolean): ResolvedBinding {
   if (value === false) return { kind: 'disabled' }
-  if (typeof value === 'string' && (value.trim() === '' || value.trim().toLowerCase() === 'none')) {
+  const text = z.string().safeParse(value)
+  if (text.success && (text.data.trim() === '' || text.data.trim().toLowerCase() === 'none')) {
     return { kind: 'disabled' }
   }
   const alternatives = collectAlternatives(value).filter(isMeaningfulAlternative)
@@ -203,22 +217,19 @@ function resolveBinding(value: unknown, preferLeader: boolean): ResolvedBinding 
   return { kind: 'unconvertible', reason: reason ?? 'unsupported value' }
 }
 
-/**
- * Converts an OpenCode TUI keybind config (cli.json, JSONC, or legacy tui.json) into this app's shortcut preferences.
- */
 export function parseTuiKeybindConfig(content: string): TuiKeybindImport {
-  const root = parseJsonc<unknown>(content)
-  if (!isRecord(root) || !isRecord(root.keybinds)) {
+  const root = KeybindFileSchema.safeParse(parseJsonc(content))
+  if (!root.success) {
     throw new Error('No keybinds found in this file')
   }
-  const keybinds = root.keybinds
-  const shortcuts: Partial<Record<KeyboardShortcutAction, string>> = {}
-  const leaderActions: KeyboardShortcutAction[] = []
-  const directActions: KeyboardShortcutAction[] = []
+  const { keybinds } = root.data
+  const shortcuts: Record<string, string> = {}
+  const leaderActions: string[] = []
+  const directActions: string[] = []
   const skipped: Array<{ name: string; reason: string }> = []
   let leaderKey: string | undefined
 
-  if ('leader' in keybinds) {
+  if (keybinds.leader !== undefined) {
     const resolved = resolveBinding(keybinds.leader, false)
     if (resolved.kind === 'disabled') {
       skipped.push({ name: 'leader', reason: 'leader key is disabled' })
@@ -229,7 +240,7 @@ export function parseTuiKeybindConfig(content: string): TuiKeybindImport {
     }
   }
 
-  const byAction = new Map<KeyboardShortcutAction, { name: string; value: unknown; dotted: boolean }>()
+  const byAction = new Map<KeyboardShortcutAction, { name: string; value: JsonValue; dotted: boolean }>()
   for (const [name, value] of Object.entries(keybinds)) {
     if (name === 'leader') continue
     const action = ACTION_BY_TUI_NAME.get(name) ?? ACTION_BY_LEGACY_NAME.get(name)
@@ -257,10 +268,6 @@ export function parseTuiKeybindConfig(content: string): TuiKeybindImport {
   return { leaderKey, shortcuts, leaderActions, directActions, skipped }
 }
 
-/**
- * Merges an imported TUI keybind result into the current shortcut preferences. The imported bindings win: an action the
- * file does not set is unbound (and listed in `cleared`) when it has the same key and leader/direct kind as an imported one.
- */
 export function applyTuiKeybindImport(
   imported: TuiKeybindImport,
   current: { keyboardShortcuts: Record<string, string>; directShortcuts: string[] },
@@ -287,22 +294,17 @@ export function applyTuiKeybindImport(
     : { keyboardShortcuts, directShortcuts, cleared }
 }
 
-/**
- * Applies one recorded binding to the current shortcut preferences, unbinding any other action that used the same
- * key in the same leader/direct mode. Conflict resolution is the same as the TUI import.
- */
 export function applyRecordedShortcut(
   action: string,
   shortcut: string,
   leader: boolean,
   current: { keyboardShortcuts: Record<string, string>; directShortcuts: string[] },
 ): { keyboardShortcuts: Record<string, string>; directShortcuts: string[]; cleared: string[] } {
-  const typedAction = action as KeyboardShortcutAction
   return applyTuiKeybindImport(
     {
-      shortcuts: { [typedAction]: shortcut },
-      leaderActions: leader ? [typedAction] : [],
-      directActions: leader ? [] : [typedAction],
+      shortcuts: { [action]: shortcut },
+      leaderActions: leader ? [action] : [],
+      directActions: leader ? [] : [action],
       skipped: [],
     },
     current,

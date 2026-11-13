@@ -10,9 +10,6 @@ interface RemoteMultiRunProps {
   onOpenChange: (open: boolean) => void
 }
 
-/**
- * The multi-run sheet for one project on a linked OpenCode server, controlled by its caller.
- */
 export function RemoteMultiRun({ serverId, directory, open, onOpenChange }: RemoteMultiRunProps) {
   return (
     <MultiRunSheet

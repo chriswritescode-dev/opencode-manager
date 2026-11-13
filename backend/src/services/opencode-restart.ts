@@ -4,6 +4,8 @@ import { sseAggregator } from './sse-aggregator'
 import type { OpenCodeClient } from './opencode/client'
 import type { OpenCodeOperationReason, OpenCodeSupervisor } from './opencode-supervisor'
 
+export type OpenCodeRestartTarget = Pick<OpenCodeSupervisor, 'restart'>
+
 export interface ActiveSessionsSource {
   getActiveSessions(): Record<string, string[]>
   isSubagentSession(sessionId: string): boolean
@@ -24,27 +26,39 @@ export function listActiveUserSessions(source: ActiveSessionsSource = sseAggrega
   )
 }
 
-function restartFailureError(): Error {
-  const startupError = opencodeServerManager.getLastStartupError()
+export interface OpenCodeManagerProcess {
+  clearStartupError: () => void
+  restart: () => Promise<void>
+  checkHealth: () => Promise<boolean>
+  getLastStartupError: () => string | null
+}
+
+function restartFailureError(manager: OpenCodeManagerProcess): Error {
+  const startupError = manager.getLastStartupError()
   return new Error(startupError ?? 'OpenCode server restart did not complete successfully')
 }
 
-async function restartServer(supervisor: OpenCodeSupervisor | undefined, reason: OpenCodeOperationReason): Promise<boolean> {
+async function restartServer(
+  supervisor: OpenCodeRestartTarget | undefined,
+  reason: OpenCodeOperationReason,
+  manager: OpenCodeManagerProcess,
+): Promise<boolean> {
   if (supervisor) {
     return (await supervisor.restart(reason)).healthy
   }
-  opencodeServerManager.clearStartupError()
-  await opencodeServerManager.restart()
-  return opencodeServerManager.checkHealth()
+  manager.clearStartupError()
+  await manager.restart()
+  return manager.checkHealth()
 }
 
 export async function restartOpenCode(
-  supervisor?: OpenCodeSupervisor,
+  supervisor?: OpenCodeRestartTarget,
   reason: OpenCodeOperationReason = 'settings_restart',
+  manager: OpenCodeManagerProcess = opencodeServerManager,
 ): Promise<void> {
-  const healthy = await restartServer(supervisor, reason)
+  const healthy = await restartServer(supervisor, reason, manager)
   if (!healthy) {
-    throw restartFailureError()
+    throw restartFailureError(manager)
   }
 }
 

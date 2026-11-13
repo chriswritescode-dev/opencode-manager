@@ -1,5 +1,9 @@
 import type { Database } from 'bun:sqlite'
-import { LOCAL_OPENCODE_SERVER_ID, type SessionPermissionMode } from '@opencode-manager/shared/schemas'
+import { LOCAL_OPENCODE_SERVER_ID, SessionPermissionModeSchema, type SessionPermissionMode } from '@opencode-manager/shared/schemas'
+import { z } from 'zod'
+import { selectRow } from './rows'
+
+const SessionPermissionModeRowSchema = z.object({ mode: SessionPermissionModeSchema })
 
 export function ensureSessionPermissionModesTable(db: Database): void {
   db.run(`
@@ -18,9 +22,13 @@ export function getSessionPermissionMode(
   sessionId: string,
   serverId: string = LOCAL_OPENCODE_SERVER_ID,
 ): SessionPermissionMode | null {
-  const row = db
-    .prepare('SELECT mode FROM session_permission_modes WHERE server_id = ? AND session_id = ?')
-    .get(serverId, sessionId) as { mode: SessionPermissionMode } | undefined
+  const row = selectRow(
+    db,
+    SessionPermissionModeRowSchema,
+    'SELECT mode FROM session_permission_modes WHERE server_id = ? AND session_id = ?',
+    serverId,
+    sessionId,
+  )
   return row ? row.mode : null
 }
 

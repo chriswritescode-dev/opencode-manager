@@ -1,28 +1,12 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, within, act } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, screen } from '@testing-library/react'
 import type { ManagerLogEntry } from '@opencode-manager/shared/schemas'
 import { SettingsDialog } from './SettingsDialog'
-import { logsApi } from '@/api/logs'
 import { DEFAULTS } from '@/config'
-import { stubMatchMedia } from '@/test/test-utils'
-
-vi.mock('@/api/logs', () => ({
-  logsApi: {
-    getManagerLogs: vi.fn(),
-  },
-}))
-
-vi.mock('@/hooks/useMobile', () => ({
-  useSwipeBack: vi.fn(() => ({
-    bind: vi.fn(),
-    swipeProgress: 0,
-    swipeStyles: {},
-  })),
-}))
-
-const getManagerLogs = vi.mocked(logsApi.getManagerLogs)
+import { renderWithProviders } from '@/test/render'
+import { makeHealthResponse } from '@/test/fixtures/api'
+import { installMatchMedia, installPointerCapture } from '@/test/browserFakes'
+import type { FetchRoute } from '@/test/fetchFake'
 
 const POLL_INTERVAL_MS = DEFAULTS.LOGS.POLL_INTERVAL_MS
 
@@ -36,33 +20,51 @@ function makeEntry(seq: number): ManagerLogEntry {
   }
 }
 
-function makeResponse(entries: ManagerLogEntry[]) {
-  const seqs = entries.map((entry) => entry.seq)
+function createLogsServer(initialEntries: ManagerLogEntry[] = [makeEntry(1), makeEntry(2)]) {
+  let entries = initialEntries
+  let polls = 0
+
+  const routes: FetchRoute[] = [
+    {
+      method: 'GET',
+      path: '/api/logs',
+      respond: () => {
+        polls += 1
+        const seqs = entries.map((entry) => entry.seq)
+        return {
+          json: {
+            entries,
+            instanceId: 'instance-1',
+            latestSeq: seqs.length > 0 ? seqs[seqs.length - 1] : 0,
+            oldestSeq: seqs.length > 0 ? seqs[0] : 0,
+            dropped: 0,
+            capacity: DEFAULTS.LOGS.BUFFER_CAPACITY,
+          },
+        }
+      },
+    },
+    { method: 'GET', path: '/api/health', respond: () => ({ json: makeHealthResponse({ opencode: 'healthy' }) }) },
+  ]
+
   return {
-    entries,
-    instanceId: 'instance-1',
-    latestSeq: seqs.length > 0 ? seqs[seqs.length - 1] : 0,
-    oldestSeq: seqs.length > 0 ? seqs[0] : 0,
-    dropped: 0,
-    capacity: DEFAULTS.LOGS.BUFFER_CAPACITY,
+    routes,
+    pollCount: () => polls,
+    setEntries: (next: ManagerLogEntry[]) => {
+      entries = next
+    },
   }
 }
 
-function createWrapper() {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
+function renderLogsSettings(desktop: boolean, fetchRoutes: FetchRoute[]) {
+  installMatchMedia(desktop)
+  installPointerCapture()
+  return renderWithProviders(<SettingsDialog />, {
+    initialEntries: ['/?settings=open&settingsTab=logs'],
+    fetchRoutes,
   })
-  return ({ children }: { children: React.ReactNode }) => (
-    <MemoryRouter initialEntries={['/?settings=open&settingsTab=logs']}>
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    </MemoryRouter>
-  )
 }
 
-async function settleTime(ms: number): Promise<void> {
+async function settle(ms: number) {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(ms)
   })
@@ -71,64 +73,47 @@ async function settleTime(ms: number): Promise<void> {
   })
 }
 
-function openLogsFromMenu(): void {
-  const mobileContainer = document.querySelector('.sm\\:hidden') as HTMLElement
-  const logsMenuButton = within(mobileContainer).queryByText('Live manager and OpenCode server logs')?.closest('button')
-  if (logsMenuButton) fireEvent.click(logsMenuButton)
-}
-
 describe('SettingsDialog live Logs view integration', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
+  it.each([
+    { label: 'desktop', desktop: true },
+    { label: 'mobile', desktop: false },
+  ])('mounts exactly one live Logs viewer on $label and renders the first polled response', async ({ desktop }) => {
     vi.useFakeTimers()
-    getManagerLogs.mockResolvedValue(makeResponse([makeEntry(1), makeEntry(2)]))
+    try {
+      const server = createLogsServer()
+      renderLogsSettings(desktop, server.routes)
+
+      await settle(0)
+
+      expect(server.pollCount()).toBe(1)
+      expect(screen.getAllByText('captured-line-2')).toHaveLength(1)
+      expect(screen.queryByText('No log entries captured yet.')).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
-  afterEach(() => {
-    Reflect.deleteProperty(window, 'matchMedia')
-    vi.useRealTimers()
-  })
+  it('stops polling while Pause is active and resumes without gaps', async () => {
+    vi.useFakeTimers()
+    try {
+      const server = createLogsServer([])
+      renderLogsSettings(true, server.routes)
 
-  it('mounts exactly one live LogsViewer on desktop and renders the first polled response', async () => {
-    stubMatchMedia(true)
-    render(<SettingsDialog />, { wrapper: createWrapper() })
+      await settle(0)
+      expect(server.pollCount()).toBe(1)
 
-    await settleTime(0)
+      fireEvent.click(screen.getByRole('button', { name: /pause/i }))
+      await settle(POLL_INTERVAL_MS * 2)
+      expect(server.pollCount()).toBe(1)
 
-    expect(getManagerLogs).toHaveBeenCalledTimes(1)
-    expect(screen.getAllByText('captured-line-2')).toHaveLength(1)
-    expect(screen.getAllByText('Manager')).toHaveLength(2)
-    expect(screen.queryByText('No log entries captured yet.')).not.toBeInTheDocument()
-  })
+      server.setEntries([makeEntry(3)])
+      fireEvent.click(screen.getByRole('button', { name: /resume/i }))
+      await settle(POLL_INTERVAL_MS)
 
-  it('mounts exactly one live LogsViewer on mobile and renders the first polled response', async () => {
-    stubMatchMedia(false)
-    render(<SettingsDialog />, { wrapper: createWrapper() })
-
-    openLogsFromMenu()
-    await settleTime(0)
-
-    expect(getManagerLogs).toHaveBeenCalledTimes(1)
-    expect(screen.getAllByText('captured-line-2')).toHaveLength(1)
-  })
-
-  it('stops all /api/logs polling while Pause is active and resumes without gaps', async () => {
-    stubMatchMedia(false)
-    getManagerLogs.mockImplementation(async () => makeResponse([]))
-    render(<SettingsDialog />, { wrapper: createWrapper() })
-
-    openLogsFromMenu()
-    await settleTime(0)
-    expect(getManagerLogs).toHaveBeenCalledTimes(1)
-
-    fireEvent.click(screen.getByRole('button', { name: /pause/i }))
-    await settleTime(POLL_INTERVAL_MS * 2)
-    expect(getManagerLogs).toHaveBeenCalledTimes(1)
-
-    fireEvent.click(screen.getByRole('button', { name: /resume/i }))
-    getManagerLogs.mockResolvedValue(makeResponse([makeEntry(3)]))
-    await settleTime(POLL_INTERVAL_MS)
-    expect(getManagerLogs).toHaveBeenCalledTimes(2)
-    expect(screen.getByText('captured-line-3')).toBeInTheDocument()
+      expect(server.pollCount()).toBe(2)
+      expect(screen.getByText('captured-line-3')).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

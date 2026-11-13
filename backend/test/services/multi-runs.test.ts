@@ -1,8 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { Database } from 'bun:sqlite'
 import { buildSchedulePermissionRuleset, LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
+import type { FileDiffInfo, OpenCodeApi } from '@opencode-manager/shared/opencode'
+import { z } from 'zod'
 import { createRepo, deleteRepo } from '../../src/db/queries'
+import { selectRow } from '../../src/db/rows'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import { createMultiRunWithEntries, getMultiRun } from '../../src/db/multi-runs'
@@ -10,48 +16,53 @@ import { getSessionPermissionMode } from '../../src/db/session-permission-modes'
 import { FusionContextLimitError } from '../../src/services/multi-run-fusion'
 import { MultiRunError, MultiRunService } from '../../src/services/multi-runs'
 import { RepoWorkspaceError } from '../../src/services/repo'
-import type { RepoWorkspaceService } from '../../src/services/repo-workspace'
+import type { RepoWorkspaceProvider } from '../../src/services/repo-workspace'
+import type { OpenCodeModelLoader } from '../../src/services/session-launcher'
 import { SessionPermissionModeService } from '../../src/services/session-permission-modes'
 import { SessionAncestry } from '../../src/services/session-ancestry'
 import { SettingsService } from '../../src/services/settings'
 import type { Repo } from '../../src/types/repo'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
+import { createStubOpenCodeClient, sessionInfo } from '../helpers/stub-opencode-client'
 import { assistantMessage } from '../helpers/stub-schedule-api'
+import { expectLoggedMessage } from '../helpers/log-assertions'
 
 const FUSE_REQUEST_ID = '11111111-1111-4111-8111-111111111111'
 
 const REPO_DIR = '/repos/repo-a'
 
-const mocks = vi.hoisted(() => ({
-  resolveOpenCodeModel: vi.fn(),
-  resolveProjectId: vi.fn(),
-  isGitMainCheckout: vi.fn(),
-  executeCommand: vi.fn(),
-  existsSync: vi.fn(),
-  loggerError: vi.fn(),
-}))
+type SessionCreateInput = NonNullable<Parameters<OpenCodeApi['session']['create']>[0]>
 
-vi.mock('../../src/utils/logger', () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: mocks.loggerError, debug: vi.fn() },
-}))
+const worktreesRoot = mkdtempSync(path.join(tmpdir(), 'multi-runs-worktrees-'))
 
-vi.mock('../../src/services/opencode-models', () => ({
-  resolveOpenCodeModel: mocks.resolveOpenCodeModel,
-}))
+async function rejectionOf(operation: Promise<unknown>): Promise<Error> {
+  try {
+    await operation
+  } catch (error) {
+    if (error instanceof Error) return error
+    throw error
+  }
+  throw new Error('Expected the operation to reject')
+}
 
-vi.mock('node:fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:fs')>()
-  return { ...actual, existsSync: mocks.existsSync }
-})
+function workspaceDir(name: string): string {
+  return path.join(worktreesRoot, name)
+}
 
-vi.mock('../../src/services/project-id-resolver', () => ({
-  resolveProjectId: mocks.resolveProjectId,
-  isGitMainCheckout: mocks.isGitMainCheckout,
-}))
-
-vi.mock('../../src/utils/process', () => ({
-  executeCommand: mocks.executeCommand,
-}))
+function stubModelLoader(): OpenCodeModelLoader {
+  return async (_client, _directory, options) => {
+    const preferred = options?.preferredModel
+    if (!preferred) {
+      return { providerID: 'openai', id: 'gpt-5', model: 'openai/gpt-5' }
+    }
+    if (preferred === 'openai/retired') {
+      return { providerID: 'openai', id: 'retired-x', model: 'openai/retired-x' }
+    }
+    const [providerID = 'openai', ...rest] = preferred.split('/')
+    const id = rest.join('/')
+    return { providerID, id, model: preferred }
+  }
+}
 
 interface FakeSessionConfig {
   busy?: boolean
@@ -61,39 +72,32 @@ interface FakeSessionConfig {
   hasUserMessage?: boolean
 }
 
-interface FakeMultiRunClient {
-  client: OpenCodeClient
-  sessionCreate: ReturnType<typeof vi.fn>
-  sessionPrompt: ReturnType<typeof vi.fn>
-  sessionGet: ReturnType<typeof vi.fn>
-  sessionActive: ReturnType<typeof vi.fn>
-  messageList: ReturnType<typeof vi.fn>
-  sessionDiff: ReturnType<typeof vi.fn>
-}
-
-function notFoundError(): Error {
-  return Object.assign(new Error('Session not found'), { _tag: 'SessionNotFoundError' })
-}
-
-function createClient(sessions: Record<string, FakeSessionConfig> = {}): FakeMultiRunClient {
+function createClient(sessions: Record<string, FakeSessionConfig> = {}) {
   let sessionCounter = 0
 
-  const sessionCreate = vi.fn(async (input: { title?: string }) => {
+  const sessionCreate = vi.fn(async (input?: SessionCreateInput) => {
     sessionCounter += 1
-    return { id: `ses_${sessionCounter}`, title: input?.title }
+    return sessionInfo({ id: `ses_${sessionCounter}`, title: input?.title ?? undefined })
   })
-  const sessionPrompt = vi.fn(async () => ({}))
+  const sessionPrompt = vi.fn(async (input: NonNullable<Parameters<OpenCodeApi['session']['prompt']>[0]>) => ({
+    id: `msg_${input.sessionID}`,
+    sessionID: input.sessionID,
+    time: { created: 0 },
+    type: 'user' as const,
+    payload: { text: input.text },
+    delivery: 'steer' as const,
+  }))
 
   const sessionGet = vi.fn(async ({ sessionID }: { sessionID: string }) => {
     const config = sessions[sessionID]
     if (config?.missing) {
-      throw notFoundError()
+      throw Object.assign(new Error('Session not found'), { _tag: 'SessionNotFoundError' })
     }
-    return { id: sessionID, outcome: config?.outcome ?? 'succeeded' }
+    return sessionInfo({ id: sessionID, outcome: config?.outcome ?? 'succeeded' })
   })
 
   const sessionActive = vi.fn(async () => {
-    const active: Record<string, unknown> = {}
+    const active: Record<string, { type: 'running' }> = {}
     for (const [id, config] of Object.entries(sessions)) {
       if (config.busy) {
         active[id] = { type: 'running' }
@@ -102,13 +106,13 @@ function createClient(sessions: Record<string, FakeSessionConfig> = {}): FakeMul
     return active
   })
 
-  const messageList = vi.fn(async (input: { sessionID: string; type?: string; order?: 'asc' | 'desc' }) => {
+  const messageList = vi.fn(async (input: Parameters<OpenCodeApi['message']['list']>[0]) => {
     if (input.type === 'user') {
       if (sessions[input.sessionID]?.hasUserMessage === false) {
         return { data: [], cursor: {} }
       }
       return {
-        data: [{ id: `${input.sessionID}-user-${input.order}`, type: 'user', time: { created: 0 }, text: 'hi' }],
+        data: [{ id: `${input.sessionID}-user-${input.order ?? 'asc'}`, type: 'user' as const, time: { created: 0 }, text: 'hi' }],
         cursor: {},
       }
     }
@@ -118,12 +122,9 @@ function createClient(sessions: Record<string, FakeSessionConfig> = {}): FakeMul
     }
   })
 
-  const sessionDiff = vi.fn(async () => [])
+  const sessionDiff = vi.fn(async (): Promise<FileDiffInfo[]> => [])
 
-  const permissionRequestList = vi.fn(async () => ({ data: [] }))
-  const permissionReply = vi.fn(async () => ({}))
-
-  const client = {
+  const client = createStubOpenCodeClient({
     api: {
       session: {
         create: sessionCreate,
@@ -134,26 +135,26 @@ function createClient(sessions: Record<string, FakeSessionConfig> = {}): FakeMul
       },
       message: { list: messageList },
       permission: {
-        request: { list: permissionRequestList },
-        reply: permissionReply,
+        request: { list: vi.fn(async () => ({ location: { directory: REPO_DIR }, data: [] })) },
+        reply: vi.fn(async () => undefined),
       },
     },
-  } as unknown as OpenCodeClient
+  })
 
   return { client, sessionCreate, sessionPrompt, sessionGet, sessionActive, messageList, sessionDiff }
 }
 
 interface FakeRepoWorkspaces {
-  service: RepoWorkspaceService
+  service: RepoWorkspaceProvider
   create: ReturnType<typeof vi.fn>
   remove: ReturnType<typeof vi.fn>
-  removeRepoTerminals: ReturnType<typeof vi.fn>
 }
 
 function createRepoWorkspaces(): FakeRepoWorkspaces {
   const known = new Set<string>()
   const create = vi.fn(async (_repo: Repo, options: { name?: string } = {}) => {
-    const directory = `/worktrees/${options.name ?? 'workspace'}`
+    const directory = workspaceDir(options.name ?? 'workspace')
+    mkdirSync(directory, { recursive: true })
     known.add(directory)
     return { directory, worktreeSetup: { status: 'none' as const } }
   })
@@ -163,14 +164,8 @@ function createRepoWorkspaces(): FakeRepoWorkspaces {
     }
     known.delete(directory)
   })
-  const removeRepoTerminals = vi.fn(async () => undefined)
 
-  return {
-    service: { create, remove, removeRepoTerminals } as unknown as RepoWorkspaceService,
-    create,
-    remove,
-    removeRepoTerminals,
-  }
+  return { service: { create, remove }, create, remove }
 }
 
 describe('MultiRunService', () => {
@@ -180,28 +175,16 @@ describe('MultiRunService', () => {
     vi.clearAllMocks()
     db = new Database(':memory:')
     migrate(db, allMigrations)
-    mocks.existsSync.mockReturnValue(true)
-
-    mocks.resolveOpenCodeModel.mockImplementation(
-      async (_client: unknown, _directory: string, options: { preferredModel?: string }) => {
-        const preferred = options?.preferredModel
-        if (!preferred) {
-          return { providerID: 'openai', id: 'gpt-5', model: 'openai/gpt-5' }
-        }
-        if (preferred === 'openai/retired') {
-          return { providerID: 'openai', id: 'retired-x', model: 'openai/retired-x' }
-        }
-        const [providerID, ...rest] = preferred.split('/')
-        return { providerID, id: rest.join('/'), model: preferred }
-      },
-    )
-    mocks.resolveProjectId.mockResolvedValue('commit-A')
-    mocks.isGitMainCheckout.mockResolvedValue(false)
-    mocks.executeCommand.mockResolvedValue('')
+    rmSync(worktreesRoot, { recursive: true, force: true })
+    mkdirSync(worktreesRoot, { recursive: true })
   })
 
   afterEach(() => {
     db.close()
+  })
+
+  afterAll(() => {
+    rmSync(worktreesRoot, { recursive: true, force: true })
   })
 
   function readyRepo(): number {
@@ -218,7 +201,7 @@ describe('MultiRunService', () => {
 
   function createService(
     client: OpenCodeClient,
-    repoWorkspaces: RepoWorkspaceService,
+    repoWorkspaces: RepoWorkspaceProvider,
     permissionModes: SessionPermissionModeService = new SessionPermissionModeService(
       db,
       client,
@@ -226,7 +209,7 @@ describe('MultiRunService', () => {
       new SessionAncestry(client),
     ),
   ): MultiRunService {
-    return new MultiRunService(db, client, repoWorkspaces, permissionModes)
+    return new MultiRunService(db, client, repoWorkspaces, permissionModes, undefined, stubModelLoader())
   }
 
   it('launches one session per model, each in its own workspace named from the group', async () => {
@@ -255,9 +238,9 @@ describe('MultiRunService', () => {
     expect(run.entries.map((entry) => entry.status)).toEqual(['started', 'started', 'started'])
     expect(run.entries.map((entry) => entry.isolated)).toEqual([true, true, true])
     expect(run.entries.map((entry) => entry.directory)).toEqual([
-      '/worktrees/Feature-Sweep-1',
-      '/worktrees/Feature-Sweep-2',
-      '/worktrees/Feature-Sweep-3',
+      workspaceDir('Feature-Sweep-1'),
+      workspaceDir('Feature-Sweep-2'),
+      workspaceDir('Feature-Sweep-3'),
     ])
     expect(new Set(run.entries.map((entry) => entry.sessionId)).size).toBe(3)
 
@@ -265,7 +248,7 @@ describe('MultiRunService', () => {
     expect(sessionPrompt).toHaveBeenCalledTimes(3)
     expect(sessionPrompt.mock.calls.every((call) => call[0].text === 'do the thing')).toBe(true)
     expect(
-      sessionCreate.mock.calls.map((call) => `${call[0].model.providerID}/${call[0].model.id}`).sort(),
+      sessionCreate.mock.calls.map((call) => `${call[0]?.model?.providerID}/${call[0]?.model?.id}`).sort(),
     ).toEqual(['openai/a', 'openai/b', 'openai/c'])
 
     const workspaceCalls = repoWorkspaces.create.mock.calls.map((call) => call[1])
@@ -324,9 +307,7 @@ describe('MultiRunService', () => {
     const repoWorkspaces = createRepoWorkspaces()
     const service = createService(client, repoWorkspaces.service)
 
-    const error = await service
-      .launch({ repoId: 999, name: 'Sweep', prompt: 'go', models: ['openai/a'], isolate: false })
-      .catch((caught: unknown) => caught)
+    const error = await rejectionOf(service.launch({ repoId: 999, name: 'Sweep', prompt: 'go', models: ['openai/a'], isolate: false }))
 
     expect(error).toBeInstanceOf(MultiRunError)
     expect(error).toMatchObject({ status: 404 })
@@ -338,16 +319,7 @@ describe('MultiRunService', () => {
     const repoWorkspaces = createRepoWorkspaces()
     const service = createService(client, repoWorkspaces.service)
 
-    const error = await service
-      .launch({
-        serverId: LOCAL_OPENCODE_SERVER_ID,
-        directory: REPO_DIR,
-        name: 'Sweep',
-        prompt: 'go',
-        models: ['openai/a'],
-        isolate: false,
-      })
-      .catch((caught: unknown) => caught)
+    const error = await rejectionOf(service.launch({ serverId: LOCAL_OPENCODE_SERVER_ID, directory: REPO_DIR, name: 'Sweep', prompt: 'go', models: ['openai/a'], isolate: false, }))
 
     expect(error).toBeInstanceOf(MultiRunError)
     expect(error).toMatchObject({ status: 400 })
@@ -370,14 +342,14 @@ describe('MultiRunService', () => {
       isolate: true,
     })
     const entry = run.entries[0]!
-    expect(entry.directory).toBe('/worktrees/Sweep-1')
+    expect(entry.directory).toBe(workspaceDir('Sweep-1'))
 
     const discarded = await service.discard(run.id, entry.id)
 
     expect(discarded.entries[0]!.status).toBe('discarded')
     expect(repoWorkspaces.remove).toHaveBeenCalledWith(
       expect.objectContaining({ id: repoId }),
-      '/worktrees/Sweep-1',
+      workspaceDir('Sweep-1'),
     )
   })
 
@@ -397,7 +369,7 @@ describe('MultiRunService', () => {
     const entry = run.entries[0]!
     await service.discard(run.id, entry.id)
 
-    const error = await service.discard(run.id, entry.id).catch((caught: unknown) => caught)
+    const error = await rejectionOf(service.discard(run.id, entry.id))
 
     expect(error).toBeInstanceOf(MultiRunError)
     expect(error).toMatchObject({ status: 409 })
@@ -442,8 +414,8 @@ describe('MultiRunService', () => {
     expect(run.entries[1]!.directory).toBeNull()
     expect(run.entries[1]!.sessionId).toBeNull()
     expect(run.entries[1]!.error).toBe('Model openai/retired is not available')
-    expect(run.entries[0]!.directory).toBe('/worktrees/Sweep-1')
-    expect(run.entries[2]!.directory).toBe('/worktrees/Sweep-3')
+    expect(run.entries[0]!.directory).toBe(workspaceDir('Sweep-1'))
+    expect(run.entries[2]!.directory).toBe(workspaceDir('Sweep-3'))
 
     expect(repoWorkspaces.create).toHaveBeenCalledTimes(2)
     expect(repoWorkspaces.create.mock.calls.map((call) => call[1].name).sort()).toEqual(['Sweep-1', 'Sweep-3'])
@@ -464,9 +436,9 @@ describe('MultiRunService', () => {
       isolate: true,
     })
     const entry = run.entries[0]!
-    expect(entry.directory).toBe('/worktrees/Sweep-1')
+    expect(entry.directory).toBe(workspaceDir('Sweep-1'))
 
-    mocks.existsSync.mockReturnValue(false)
+    rmSync(workspaceDir('Sweep-1'), { recursive: true, force: true })
     const discarded = await service.discard(run.id, entry.id)
 
     expect(discarded.entries[0]!.status).toBe('discarded')
@@ -492,7 +464,7 @@ describe('MultiRunService', () => {
       new RepoWorkspaceError('Not a deletable worktree of this repo', 400),
     )
 
-    const error = await service.discard(run.id, entry.id).catch((caught: unknown) => caught)
+    const error = await rejectionOf(service.discard(run.id, entry.id))
 
     expect(error).toBeInstanceOf(MultiRunError)
     expect(error).toMatchObject({ status: 400 })
@@ -517,7 +489,7 @@ describe('MultiRunService', () => {
     const entry = run.entries[0]!
 
     expect(entry.status).toBe('failed')
-    expect(entry.directory).toBe('/worktrees/Sweep-1')
+    expect(entry.directory).toBe(workspaceDir('Sweep-1'))
     expect(entry.error).toContain('prompt boom')
     expect(entry.sessionId).toBe('ses_1')
 
@@ -575,7 +547,7 @@ describe('MultiRunService', () => {
     )
 
     const first = service.discard(run.id, entry.id)
-    const second = service.discard(run.id, entry.id).catch((caught: unknown) => caught)
+    const second = rejectionOf(service.discard(run.id, entry.id))
 
     const error = await second
     expect(error).toBeInstanceOf(MultiRunError)
@@ -605,7 +577,7 @@ describe('MultiRunService', () => {
 
     repoWorkspaces.remove.mockRejectedValueOnce(new Error('removal failed'))
 
-    const error = await service.discard(run.id, entry.id).catch((caught: unknown) => caught)
+    const error = await rejectionOf(service.discard(run.id, entry.id))
     expect(error).toBeInstanceOf(MultiRunError)
     expect(error).toMatchObject({ status: 502 })
 
@@ -666,7 +638,7 @@ describe('MultiRunService', () => {
     expect(fusion.status).toBe('started')
     expect(fusion.model).toBe('openai/c')
     expect(fusion.sessionId).toBeTruthy()
-    expect(fusion.directory).toBe('/worktrees/Sweep-fusion-1')
+    expect(fusion.directory).toBe(workspaceDir('Sweep-fusion-1'))
     expect(fusion.sources.map((source) => source.entryId)).toEqual(entryIds)
     expect(fusion.sources.map((source) => source.sessionId)).toEqual(sessionIds)
     expect(fusion.baseRef).toBe('develop')
@@ -714,14 +686,14 @@ describe('MultiRunService', () => {
     })
 
     expect(sessionCreate).toHaveBeenCalledTimes(1)
-    expect(sessionCreate.mock.calls[0]![0].permissions).toEqual([
+    expect(sessionCreate.mock.calls[0]?.[0]?.permissions).toEqual([
       ...buildSchedulePermissionRuleset(null),
-      { action: 'external_directory', resource: '/worktrees/Sweep-1/*', effect: 'allow' },
-      { action: 'edit', resource: '/worktrees/Sweep-1/*', effect: 'deny' },
-      { action: 'external_directory', resource: '/worktrees/Sweep-3/*', effect: 'allow' },
-      { action: 'edit', resource: '/worktrees/Sweep-3/*', effect: 'deny' },
+      { action: 'external_directory', resource: `${workspaceDir('Sweep-1')}/*`, effect: 'allow' },
+      { action: 'edit', resource: `${workspaceDir('Sweep-1')}/*`, effect: 'deny' },
+      { action: 'external_directory', resource: `${workspaceDir('Sweep-3')}/*`, effect: 'allow' },
+      { action: 'edit', resource: `${workspaceDir('Sweep-3')}/*`, effect: 'deny' },
     ])
-    const serializedPermissions = JSON.stringify(sessionCreate.mock.calls[0]![0].permissions)
+    const serializedPermissions = JSON.stringify(sessionCreate.mock.calls[0]?.[0]?.permissions)
     expect(serializedPermissions).not.toContain('Sweep-2')
     expect(serializedPermissions).not.toContain('Sweep-fusion-1')
   })
@@ -785,11 +757,8 @@ describe('MultiRunService', () => {
     const repoId = readyRepo()
     const { client } = createClient()
     const repoWorkspaces = createRepoWorkspaces()
-    const permissionModes = {
-      applyDefaultMode: vi.fn(async () => {
-        throw new Error('permission store unavailable')
-      }),
-    } as unknown as SessionPermissionModeService
+    const permissionModes = new SessionPermissionModeService(db, client, new SettingsService(db), new SessionAncestry(client))
+    vi.spyOn(permissionModes, 'applyDefaultMode').mockRejectedValueOnce(new Error('permission store unavailable'))
     const service = createService(client, repoWorkspaces.service, permissionModes)
 
     const run = await service.launch({
@@ -810,10 +779,7 @@ describe('MultiRunService', () => {
     const fusion = fused.fusions[0]!
     expect(fusion.status).toBe('started')
     expect(fusion.sessionId).not.toBeNull()
-    expect(mocks.loggerError).toHaveBeenCalledWith(
-      expect.stringContaining(fusion.sessionId!),
-      expect.any(Error),
-    )
+    expectLoggedMessage(fusion.sessionId!, 'error')
   })
 
   it('returns the same fusion for a repeated requestId and launches once', async () => {
@@ -860,13 +826,12 @@ describe('MultiRunService', () => {
     const entryIds = run.entries.map((entry) => entry.id)
     sessionCreate.mockClear()
 
-    const error = await service
-      .fuse(run.id, { requestId: FUSE_REQUEST_ID, entryIds, model: 'openai/c' })
-      .catch((caught: unknown) => caught)
+    const error = await rejectionOf(service.fuse(run.id, { requestId: FUSE_REQUEST_ID, entryIds, model: 'openai/c' }))
 
     expect(error).toBeInstanceOf(MultiRunError)
     expect(error).toMatchObject({ status: 409, code: 'FUSION_SOURCES_UNAVAILABLE' })
-    expect((error as MultiRunError).details).toEqual({
+    if (!(error instanceof MultiRunError)) throw error
+    expect(error.details).toEqual({
       unavailableSources: [expect.objectContaining({ reason: 'running' })],
     })
     expect(sessionCreate).not.toHaveBeenCalled()
@@ -889,9 +854,7 @@ describe('MultiRunService', () => {
     const entryIds = run.entries.map((entry) => entry.id)
     sessionCreate.mockClear()
 
-    const error = await service
-      .fuse(run.id, { requestId: FUSE_REQUEST_ID, entryIds, model: 'openai/c' })
-      .catch((caught: unknown) => caught)
+    const error = await rejectionOf(service.fuse(run.id, { requestId: FUSE_REQUEST_ID, entryIds, model: 'openai/c' }))
 
     expect(error).toBeInstanceOf(FusionContextLimitError)
     expect(error).toMatchObject({ status: 413, code: 'FUSION_CONTEXT_LIMIT' })
@@ -915,13 +878,11 @@ describe('MultiRunService', () => {
     const entryIds = run.entries.map((entry) => entry.id)
     sessionCreate.mockClear()
 
-    const error = await service
-      .fuse(run.id, { requestId: FUSE_REQUEST_ID, entryIds, model: 'openai/retired' })
-      .catch((caught: unknown) => caught)
+    const error = await rejectionOf(service.fuse(run.id, { requestId: FUSE_REQUEST_ID, entryIds, model: 'openai/retired' }))
 
     expect(error).toBeInstanceOf(MultiRunError)
     expect(error).toMatchObject({ status: 400 })
-    expect((error as Error).message).toContain('not available')
+    expect(error.message).toContain('not available')
     expect(sessionCreate).not.toHaveBeenCalled()
     expect(service.list({ kind: 'repo', repoId })[0]!.fusions).toEqual([])
   })
@@ -953,7 +914,7 @@ describe('MultiRunService', () => {
     const fusion = fused.fusions[0]!
     expect(fusion.status).toBe('failed')
     expect(fusion.error).toContain('fusion boom')
-    expect(fusion.directory).toBe('/worktrees/Sweep-fusion-1')
+    expect(fusion.directory).toBe(workspaceDir('Sweep-fusion-1'))
     expect(fusion.isolated).toBe(true)
   })
 
@@ -1015,17 +976,12 @@ describe('MultiRunService', () => {
 
     sessionCreate.mockClear()
 
-    const error = await service
-      .fuse(run.id, {
-        requestId: '22222222-2222-4222-8222-222222222222',
-        entryIds,
-        model: 'openai/c',
-      })
-      .catch((caught: unknown) => caught)
+    const error = await rejectionOf(service.fuse(run.id, { requestId: '22222222-2222-4222-8222-222222222222', entryIds, model: 'openai/c', }))
 
     expect(error).toBeInstanceOf(MultiRunError)
     expect(error).toMatchObject({ status: 409, code: 'FUSION_ATTEMPT_RECOVERED' })
-    expect((error as MultiRunError).details).toEqual({
+    if (!(error instanceof MultiRunError)) throw error
+    expect(error.details).toEqual({
       fusions: [{ fusionId: failedFusion.id, sessionId: 'ses_3' }],
     })
     expect(sessionCreate).not.toHaveBeenCalled()
@@ -1081,9 +1037,7 @@ describe('MultiRunService', () => {
       ['openai/a', 'openai/b'],
     )
 
-    const error = await service
-      .fuse(record.id, { requestId: FUSE_REQUEST_ID, entryIds: record.entries.map((entry) => entry.id), model: 'openai/c' })
-      .catch((caught: unknown) => caught)
+    const error = await rejectionOf(service.fuse(record.id, { requestId: FUSE_REQUEST_ID, entryIds: record.entries.map((entry) => entry.id), model: 'openai/c' }))
 
     expect(error).toBeInstanceOf(MultiRunError)
     expect(error).toMatchObject({ status: 409, code: 'FUSION_REQUIRES_GIT_REPOSITORY' })
@@ -1108,17 +1062,11 @@ describe('MultiRunService', () => {
     const entryIds = run.entries.map((entry) => entry.id)
     sessionCreate.mockClear()
 
-    const error = await service
-      .fuse(run.id, {
-        requestId: FUSE_REQUEST_ID,
-        entryIds: [entryIds[0]!, 9999],
-        model: 'openai/c',
-      })
-      .catch((caught: unknown) => caught)
+    const error = await rejectionOf(service.fuse(run.id, { requestId: FUSE_REQUEST_ID, entryIds: [entryIds[0]!, 9999], model: 'openai/c', }))
 
     expect(error).toBeInstanceOf(MultiRunError)
     expect(error).toMatchObject({ status: 400 })
-    expect((error as Error).message).toBe('Unknown multi-run entry 9999')
+    expect(error.message).toBe('Unknown multi-run entry 9999')
     expect(sessionCreate).not.toHaveBeenCalled()
     expect(service.list({ kind: 'repo', repoId })[0]!.fusions).toEqual([])
   })
@@ -1135,8 +1083,8 @@ describe('MultiRunService', () => {
       ),
     ).toThrow()
 
-    const count = db.prepare('SELECT COUNT(*) AS count FROM multi_runs').get() as { count: number }
-    expect(count.count).toBe(0)
+    const count = selectRow(db, z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM multi_runs')
+    expect(count?.count).toBe(0)
   })
 
   it('deletes the repository multi-run rows when the repository is deleted', async () => {

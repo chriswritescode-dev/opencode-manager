@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Database } from 'bun:sqlite'
+import { z } from 'zod'
 import { FuseMultiRunRequestSchema } from '@opencode-manager/shared/schemas'
 import {
   createMultiRunWithEntries,
@@ -13,8 +14,13 @@ import {
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import { deleteRepo } from '../../src/db/queries'
+import { selectRow } from '../../src/db/rows'
+import { createTestDatabase } from '../helpers/test-database'
 
 const REPO_ID = 7
+
+const TableNameRowSchema = z.object({ name: z.string() })
+const RowCountSchema = z.object({ count: z.number() })
 
 function fusionInput(overrides: Partial<CreateMultiRunFusionInput> = {}): CreateMultiRunFusionInput {
   return {
@@ -33,17 +39,22 @@ function fusionInput(overrides: Partial<CreateMultiRunFusionInput> = {}): Create
 }
 
 function fusionTableExists(db: Database): boolean {
-  return Boolean(
-    db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'multi_run_fusions'").get(),
-  )
+  return selectRow(
+    db,
+    TableNameRowSchema,
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'multi_run_fusions'",
+  ) !== null
+}
+
+function fusionCount(db: Database, multiRunId: number): number {
+  return selectRow(db, RowCountSchema, 'SELECT COUNT(*) AS count FROM multi_run_fusions WHERE multi_run_id = ?', multiRunId)?.count ?? 0
 }
 
 describe('multi-run fusions', () => {
   let db: Database
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
+    db = createTestDatabase()
   })
 
   afterEach(() => {
@@ -69,12 +80,10 @@ describe('multi-run fusions', () => {
       existing,
       allMigrations.filter((migration) => migration.id !== '202610061700-multi-run-fusions'),
     )
-    existing
+    const created = existing
       .prepare('INSERT INTO multi_runs(repo_id, name, prompt, isolated, base_ref, created_at) VALUES(?,?,?,?,?,?)')
       .run(REPO_ID, 'Sweep', 'go', 1, null, 1)
-    const multiRunId = Number(
-      (existing.prepare('SELECT last_insert_rowid() AS id').get() as { id: number }).id,
-    )
+    const multiRunId = Number(created.lastInsertRowid)
     const insertEntry = existing.prepare(
       'INSERT INTO multi_run_entries(multi_run_id, model, status, session_id, directory, error, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?)',
     )
@@ -99,11 +108,7 @@ describe('multi-run fusions', () => {
     expect(second.created).toBe(false)
     expect(second.fusion.id).toBe(first.fusion.id)
     expect(second.fusion.model).toBe('openai/gpt-5')
-
-    const count = db
-      .prepare('SELECT COUNT(*) AS count FROM multi_run_fusions WHERE multi_run_id = ?')
-      .get(multiRunId) as { count: number }
-    expect(count.count).toBe(1)
+    expect(fusionCount(db, multiRunId)).toBe(1)
   })
 
   it('rolls back the insert when the stored sources fail readback validation', () => {
@@ -119,10 +124,7 @@ describe('multi-run fusions', () => {
       ),
     ).toThrow()
 
-    const count = db
-      .prepare('SELECT COUNT(*) AS count FROM multi_run_fusions WHERE multi_run_id = ?')
-      .get(multiRunId) as { count: number }
-    expect(count.count).toBe(0)
+    expect(fusionCount(db, multiRunId)).toBe(0)
     expect(getMultiRun(db, multiRunId)?.fusions).toEqual([])
   })
 
@@ -193,9 +195,9 @@ describe('multi-run fusions', () => {
 
     deleteRepo(db, REPO_ID)
 
-    expect(db.prepare('SELECT COUNT(*) AS count FROM multi_run_fusions').get()).toEqual({ count: 0 })
-    expect(db.prepare('SELECT COUNT(*) AS count FROM multi_run_entries').get()).toEqual({ count: 0 })
-    expect(db.prepare('SELECT COUNT(*) AS count FROM multi_runs').get()).toEqual({ count: 0 })
+    expect(selectRow(db, RowCountSchema, 'SELECT COUNT(*) AS count FROM multi_run_fusions')).toEqual({ count: 0 })
+    expect(selectRow(db, RowCountSchema, 'SELECT COUNT(*) AS count FROM multi_run_entries')).toEqual({ count: 0 })
+    expect(selectRow(db, RowCountSchema, 'SELECT COUNT(*) AS count FROM multi_runs')).toEqual({ count: 0 })
   })
 })
 

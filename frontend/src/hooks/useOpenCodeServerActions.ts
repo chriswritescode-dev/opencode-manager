@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { z } from 'zod'
 import { settingsApi } from '@/api/settings'
 import { showToast } from '@/lib/toast'
 import { refreshOpenCodeServerCaches } from '@/lib/queryInvalidation'
@@ -8,12 +9,20 @@ import { getOpenCodeApiErrorMessage } from '@/lib/opencode-errors'
 const RESTART_TOAST_ID = 'opencode-restart'
 const UPGRADE_TOAST_ID = 'upgrade-opencode'
 
-/**
- * Centralizes OpenCode server restart/upgrade actions shared by the settings
- * surfaces. A restart always routes through `POST /opencode-restart`, which
- * aborts and resumes in-flight sessions; `requestRestart` first checks for
- * active sessions and opens a confirmation dialog when any would be interrupted.
- */
+const upgradeErrorSchema = z.object({
+  response: z
+    .object({
+      data: z
+        .object({
+          recovered: z.boolean().optional(),
+          recoveryMessage: z.string().optional(),
+          newVersion: z.string().optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+})
+
 export function useOpenCodeServerActions() {
   const queryClient = useQueryClient()
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -39,20 +48,15 @@ export function useOpenCodeServerActions() {
     onError: (error) => {
       const defaultMessage = 'Failed to upgrade OpenCode'
 
-      if (error && typeof error === 'object' && 'response' in error) {
-        const response = (error as { response?: { data?: { recovered?: boolean; recoveryMessage?: string; newVersion?: string } } }).response
-        const data = response?.data
+      const parsed = upgradeErrorSchema.safeParse(error)
+      const data = parsed.success ? parsed.data.response?.data : undefined
 
-        if (data?.recovered && data.newVersion) {
-          refreshOpenCodeServerCaches(queryClient, data.newVersion)
-          showToast.success(`Upgrade failed but server recovered at v${data.newVersion}`, { id: UPGRADE_TOAST_ID })
-        } else {
-          refreshOpenCodeServerCaches(queryClient)
-          showToast.error(data?.recoveryMessage || defaultMessage, { id: UPGRADE_TOAST_ID })
-        }
+      if (data?.recovered && data.newVersion) {
+        refreshOpenCodeServerCaches(queryClient, data.newVersion)
+        showToast.success(`Upgrade failed but server recovered at v${data.newVersion}`, { id: UPGRADE_TOAST_ID })
       } else {
         refreshOpenCodeServerCaches(queryClient)
-        showToast.error(defaultMessage, { id: UPGRADE_TOAST_ID })
+        showToast.error(data?.recoveryMessage || defaultMessage, { id: UPGRADE_TOAST_ID })
       }
     },
   })
@@ -76,7 +80,6 @@ export function useOpenCodeServerActions() {
         return
       }
     } catch {
-      // Fall through to an immediate restart when the active-session probe fails.
     }
     await performRestart()
   }

@@ -1,16 +1,15 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest'
 import { promises as fs } from 'fs'
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'fs'
 import { randomUUID } from 'crypto'
 import http from 'http'
-import type { AddressInfo } from 'net'
 import path from 'path'
 import os from 'os'
+import { z } from 'zod'
 import {
   SANDBOX_CLAIM_TIMEOUT_MS,
   SANDBOX_PLAN_TIMEOUT_MS,
 } from '../../src/services/opencode-sandbox-plugin'
-import { SANDBOX_SHELL_STATE_KEY } from '../../src/services/opencode-plugin-state'
 import { installManagedPlugins, getOpenCodePluginDir } from '../../src/services/opencode/plugin-registry'
 import {
   SANDBOX_SHELL_ENV_FORWARD,
@@ -20,17 +19,27 @@ import {
 } from '../../src/services/sandbox/shell-shim'
 import {
   loadGeneratedPlugin,
+  readSandboxArbiterRegistry,
+  readSandboxShellState,
+  readSecretMaskState,
+  resetPluginGlobalState,
   type GeneratedPlugin,
   type GeneratedTool,
   type GeneratedToolExecuteContext,
   type LoadGeneratedPluginOptions,
   type PermissionEvaluateEvent,
+  type SandboxArbiterDecision,
+  type SandboxArbiterProvider,
+  type SandboxArbiterRegistry,
+  type SandboxClaimRequest,
   type SessionContextEvent,
   type ShellCreateBeforeEvent,
   type ToolExecuteAfterEvent,
 } from '../helpers/opencode-plugin-context'
+import { createFetchStub, type FetchStub } from '../helpers/fetch-stub'
 import { resolveOpenCode2Binary, runOpenCodeStandalone } from '../helpers/opencode-binary'
 import { getConfigPath } from '@opencode-manager/shared/config/env'
+import { JsonObjectSchema, JsonValueSchema, type JsonObject, type JsonValue } from '@opencode-manager/shared/utils'
 
 const UNAVAILABLE_PREFIX = 'Sandbox enforcement is on but the sandbox is unavailable: '
 const WORKDIR = '/workspace/repos/ai-test'
@@ -38,11 +47,35 @@ const SESSION_ID = 'ses_test'
 const CALL_ID = 'call_test'
 const LOCATION_DIRECTORY = '/workspace'
 const PLAN_NAME = 'ocm-session-0123456789ab'
-const ARBITER_KEY = Symbol.for('opencode.sandbox-arbiter.v1')
 const PLUGIN_OPTIONS: LoadGeneratedPluginOptions = { location: { directory: LOCATION_DIRECTORY } }
+
+const ShellToolInputSchema = z.object({ command: z.string() })
+const BoundPortSchema = z.object({ port: z.number() })
+const ClaimTierSchema = z.enum(['workload', 'explicit', 'default'])
+type ClaimTier = z.infer<typeof ClaimTierSchema>
+
+type ShellExecute = (input: JsonValue, context: GeneratedToolExecuteContext) => Promise<JsonValue>
+
+type RankedClaim = { id: string; tier: ClaimTier; since: number }
+
+const TIER_RANK = { workload: 3, explicit: 2, default: 1 } satisfies Record<ClaimTier, number>
 
 function claimFailure(providerId: string, reason: string): string {
   return `${UNAVAILABLE_PREFIX}sandbox provider ${providerId} could not decide: ${reason}`
+}
+
+function shellBase(execute: ShellExecute): Mock<ShellExecute> {
+  return vi.fn<ShellExecute>(execute)
+}
+
+function jsonResponse(body: JsonObject, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+}
+
+class BadJsonResponse extends Response {
+  override json = async (): Promise<JsonValue> => {
+    throw new SyntaxError('Unexpected token')
+  }
 }
 
 async function loadPlugin(configHome: string, options: LoadGeneratedPluginOptions = PLUGIN_OPTIONS): Promise<GeneratedPlugin> {
@@ -52,7 +85,7 @@ async function loadPlugin(configHome: string, options: LoadGeneratedPluginOption
 type PlanStub = {
   ok?: boolean
   status?: number
-  body?: unknown
+  body?: JsonObject
   throwJson?: Error
   reject?: Error
 }
@@ -63,48 +96,24 @@ type SessionLookupStub = {
   since?: number
 }
 
-function managerFetch(options: { session?: SessionLookupStub; plan?: PlanStub } = {}) {
+function managerFetch(options: { session?: SessionLookupStub; plan?: PlanStub } = {}): FetchStub {
   const session = options.session ?? {}
-  return vi.fn().mockImplementation((...args: unknown[]) => {
-    const url = String(args[0])
+  return createFetchStub(async (input) => {
+    const url = String(input)
     if (url.includes('/sandbox/sessions/')) {
-      if (session.sandboxed === 'non-ok') {
-        return Promise.resolve({ ok: false, status: 503, json: async () => ({}) })
-      }
-      if (session.sandboxed === 'bad-json') {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: async () => {
-            throw new SyntaxError('Unexpected token')
-          },
-        })
-      }
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          sandboxed: session.sandboxed ?? true,
-          source: session.source ?? 'default',
-          since: session.since ?? 1,
-        }),
+      if (session.sandboxed === 'non-ok') return new Response('{}', { status: 503 })
+      if (session.sandboxed === 'bad-json') return new BadJsonResponse('{}', { status: 200 })
+      return jsonResponse({
+        sandboxed: session.sandboxed ?? true,
+        source: session.source ?? 'default',
+        since: session.since ?? 1,
       })
     }
     const plan = options.plan ?? {}
-    if (plan.reject) return Promise.reject(plan.reject)
-    if (plan.ok === false) {
-      return Promise.resolve({ ok: false, status: plan.status ?? 503, json: async () => plan.body ?? {} })
-    }
-    if (plan.throwJson) {
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json: async () => {
-          throw plan.throwJson
-        },
-      })
-    }
-    return Promise.resolve({ ok: true, status: 200, json: async () => plan.body ?? { mode: 'sandbox', workdir: WORKDIR, name: PLAN_NAME } })
+    if (plan.reject) throw plan.reject
+    if (plan.ok === false) return jsonResponse(plan.body ?? {}, plan.status ?? 503)
+    if (plan.throwJson) return new BadJsonResponse('{}', { status: 200 })
+    return jsonResponse(plan.body ?? { mode: 'sandbox', workdir: WORKDIR, name: PLAN_NAME })
   })
 }
 
@@ -118,7 +127,7 @@ function toolContext(overrides: Partial<GeneratedToolExecuteContext> = {}): Gene
 
 function shellTool(
   plugin: GeneratedPlugin,
-  execute: (input: unknown, context: GeneratedToolExecuteContext) => Promise<unknown>,
+  execute: (input: JsonValue, context: GeneratedToolExecuteContext) => Promise<JsonValue>,
 ): GeneratedTool {
   const tool = plugin.applyToolTransforms([{ name: 'shell', execute }]).find((candidate) => candidate.name === 'shell')
   if (!tool) throw new Error('the shell tool was not found after transforms')
@@ -134,75 +143,30 @@ function toolExecuteAfterEvent(overrides: Partial<ToolExecuteAfterEvent> = {}): 
   }
 }
 
-type ShellSandboxState = {
-  pendingMarkers: Map<string, { callID: string; sessionID?: string }>
-  sandboxedCallIDs: Set<string>
-  foreignOwners: Map<string, string>
-  inFlightSandboxedCommands: Map<string, number>
-}
-
-function shellSandboxState(): ShellSandboxState | undefined {
-  return (globalThis as Record<symbol, unknown>)[Symbol.for(SANDBOX_SHELL_STATE_KEY)] as ShellSandboxState | undefined
-}
-
-function clearShellSandboxState(): void {
-  delete (globalThis as Record<symbol, unknown>)[Symbol.for(SANDBOX_SHELL_STATE_KEY)]
-}
-
-type MaskState = { byCwd: Map<string, string[]>; version: number; unionVersion: number; union: string[] }
-
-const MASK_STATE_KEY = Symbol.for('ocm-secret-masks.v1')
-
-function maskStateForTests(): MaskState | undefined {
-  return (globalThis as Record<symbol, unknown>)[MASK_STATE_KEY] as MaskState | undefined
-}
-
-function clearMaskState(): void {
-  delete (globalThis as Record<symbol, unknown>)[MASK_STATE_KEY]
-}
-
-type TestClaim = { tier: 'workload' | 'explicit' | 'default'; since: number }
-type TestProvider = { id: string; claim: (request: { sessionID?: string; directory?: string }) => Promise<TestClaim | null> }
-type TestDecision = { owner: string | null }
-type TestRegistry = {
-  version: number
-  providers: Map<string, TestProvider>
-  decisions: Map<string, Promise<TestDecision>>
-}
-
-const TIER_RANK: Record<TestClaim['tier'], number> = { workload: 3, explicit: 2, default: 1 }
-
-function arbiterRegistry(): TestRegistry | undefined {
-  return (globalThis as Record<symbol, unknown>)[ARBITER_KEY] as TestRegistry | undefined
-}
-
-function clearArbiterRegistry(): void {
-  delete (globalThis as Record<symbol, unknown>)[ARBITER_KEY]
-}
-
-function registerProvider(provider: TestProvider): void {
-  const registry = arbiterRegistry()
+function registerProvider(provider: SandboxArbiterProvider): void {
+  const registry = readSandboxArbiterRegistry()
   if (!registry) throw new Error('the sandbox arbiter registry was not created by the plugin setup')
   registry.providers.set(provider.id, provider)
 }
 
-function testResolveOwner(registry: TestRegistry, request: { sessionID?: string; directory?: string }): Promise<TestDecision> {
+function testResolveOwner(registry: SandboxArbiterRegistry, request: SandboxClaimRequest): Promise<SandboxArbiterDecision> {
   const providers = [...registry.providers.values()]
   return Promise.all(
-    providers.map(async (provider) => {
+    providers.map(async (provider): Promise<RankedClaim | null> => {
       try {
         const claim = await provider.claim(request)
         if (claim === null) return null
-        if (!claim.tier || !(claim.tier in TIER_RANK) || typeof claim.since !== 'number' || !Number.isFinite(claim.since)) {
+        const tier = ClaimTierSchema.safeParse(claim.tier)
+        if (!tier.success || !Number.isFinite(claim.since)) {
           throw new Error('returned an invalid claim')
         }
-        return { id: provider.id, tier: claim.tier, since: claim.since }
+        return { id: provider.id, tier: tier.data, since: claim.since }
       } catch (error) {
         throw new Error(`sandbox provider ${provider.id} could not decide: ${error instanceof Error ? error.message : String(error)}`)
       }
     }),
   ).then((claims) => {
-    const ranked = claims.filter((claim): claim is NonNullable<typeof claim> => claim !== null)
+    const ranked = claims.filter((claim): claim is RankedClaim => claim !== null)
     ranked.sort((a, b) => {
       if (TIER_RANK[a.tier] !== TIER_RANK[b.tier]) return TIER_RANK[b.tier] - TIER_RANK[a.tier]
       if (a.since !== b.since) return b.since - a.since
@@ -212,11 +176,9 @@ function testResolveOwner(registry: TestRegistry, request: { sessionID?: string;
   })
 }
 
-function wrapWithForeignProvider(
-  base: (input: unknown, context: GeneratedToolExecuteContext) => Promise<unknown>,
-): (input: unknown, context: GeneratedToolExecuteContext) => Promise<unknown> {
+function wrapWithForeignProvider(base: ShellExecute): ShellExecute {
   return async function (input, context) {
-    const registry = arbiterRegistry()
+    const registry = readSandboxArbiterRegistry()
     if (!registry) throw new Error('the sandbox arbiter registry was not created by the plugin setup')
     const callID = context.id
     let decision = callID ? registry.decisions.get(callID) : undefined
@@ -239,19 +201,14 @@ function wrapWithForeignProvider(
   }
 }
 
-function forgeOuterTool(
-  plugin: GeneratedPlugin,
-  base: (input: unknown, context: GeneratedToolExecuteContext) => Promise<unknown>,
-): GeneratedTool {
+function forgeOuterTool(plugin: GeneratedPlugin, base: ShellExecute): GeneratedTool {
   const tool = shellTool(plugin, base)
-  tool.execute = wrapWithForeignProvider(tool.execute!)
+  if (!tool.execute) throw new Error('the shell tool has no execute function')
+  tool.execute = wrapWithForeignProvider(tool.execute)
   return tool
 }
 
-function forgeInnerTool(
-  plugin: GeneratedPlugin,
-  base: (input: unknown, context: GeneratedToolExecuteContext) => Promise<unknown>,
-): GeneratedTool {
+function forgeInnerTool(plugin: GeneratedPlugin, base: ShellExecute): GeneratedTool {
   const tool = plugin
     .applyToolTransforms([{ name: 'shell', execute: wrapWithForeignProvider(base) }])
     .find((candidate) => candidate.name === 'shell')
@@ -259,7 +216,7 @@ function forgeInnerTool(
   return tool
 }
 
-function sessionLookupCalls(fetchMock: { mock: { calls: unknown[][] } }): number {
+function sessionLookupCalls(fetchMock: FetchStub): number {
   return fetchMock.mock.calls.filter(([url]) => String(url).includes('/sandbox/sessions/')).length
 }
 
@@ -276,9 +233,7 @@ describe('ocm-sandbox plugin', () => {
 
   afterEach(async () => {
     vi.unstubAllGlobals()
-    clearShellSandboxState()
-    clearMaskState()
-    clearArbiterRegistry()
+    resetPluginGlobalState()
     delete process.env.OCM_INTERNAL_API_URL
     delete process.env.OCM_INTERNAL_TOKEN
     delete process.env.OCM_SANDBOX_ENFORCED
@@ -364,13 +319,13 @@ describe('ocm-sandbox plugin', () => {
   describe('create.before hook', () => {
     async function runSandboxedShellCall(
       plugin: GeneratedPlugin,
-      fetchMock: unknown,
+      fetchMock: FetchStub,
       prepareEvent?: (marked: string) => ShellCreateBeforeEvent,
     ) {
       vi.stubGlobal('fetch', fetchMock)
       const createEvent = shellCreateEvent()
-      const original = vi.fn().mockImplementation(async (input: unknown) => {
-        createEvent.command = (input as { command: string }).command
+      const original = shellBase(async (input) => {
+        createEvent.command = ShellToolInputSchema.parse(input).command
         const event = prepareEvent ? prepareEvent(createEvent.command) : createEvent
         await plugin.triggerShellCreateBefore(event)
         return { output: 'ok' }
@@ -392,16 +347,16 @@ describe('ocm-sandbox plugin', () => {
       expect(createEvent.env[SANDBOX_SHELL_ENV_NAME]).toBe(PLAN_NAME)
       expect(createEvent.env[SANDBOX_SHELL_ENV_FORWARD]).toBe('')
       const planCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/sandbox/shell'))
-      expect(planCall).toBeDefined()
-      const [url, init] = planCall as [string, { body: string; headers: Record<string, string> }]
-      expect(url).toBe('http://localhost:5003/api/internal/sandbox/shell')
-      expect(JSON.parse(init.body)).toEqual({
+      if (!planCall) throw new Error('the sandbox plan request was not sent')
+      const [url, init] = planCall
+      expect(String(url)).toBe('http://localhost:5003/api/internal/sandbox/shell')
+      expect(JsonObjectSchema.parse(JSON.parse(z.string().parse(init?.body)))).toEqual({
         directory: WORKDIR,
         sessionId: SESSION_ID,
         locationDirectory: LOCATION_DIRECTORY,
         enforced: true,
       })
-      expect(init.headers.Authorization).toBe('Bearer secret-token')
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer secret-token')
     })
 
     it('aborts when a later hook tries to replace a pinned shell setting', async () => {
@@ -481,7 +436,7 @@ describe('ocm-sandbox plugin', () => {
 
       await shell.execute!({ command: 'echo sentinel' }, toolContext())
 
-      expect(maskStateForTests()?.byCwd.get(WORKDIR)).toEqual(['s3cret-value', 'other-value'])
+      expect(readSecretMaskState()?.byCwd.get(WORKDIR)).toEqual(['s3cret-value', 'other-value'])
     })
 
     it('clears the registered masks for the cwd when the plan carries none', async () => {
@@ -494,7 +449,7 @@ describe('ocm-sandbox plugin', () => {
         }),
       )
       await masked.shell.execute!({ command: 'echo sentinel' }, toolContext())
-      expect(maskStateForTests()?.byCwd.get(WORKDIR)).toEqual(['s3cret-value'])
+      expect(readSecretMaskState()?.byCwd.get(WORKDIR)).toEqual(['s3cret-value'])
 
       const unmasked = await runSandboxedShellCall(
         plugin,
@@ -502,7 +457,7 @@ describe('ocm-sandbox plugin', () => {
       )
       await unmasked.shell.execute!({ command: 'echo other' }, toolContext())
 
-      expect(maskStateForTests()?.byCwd.get(WORKDIR)).toBeUndefined()
+      expect(readSecretMaskState()?.byCwd.get(WORKDIR)).toBeUndefined()
     })
 
     it('pins the forward list only from the plan instead of a static env list', async () => {
@@ -672,8 +627,8 @@ describe('ocm-sandbox plugin', () => {
           init.signal.addEventListener('abort', () => reject(new Error('The operation was aborted')))
         })
       }))
-      const shell = shellTool(plugin, vi.fn().mockImplementation(async (input: unknown) => {
-        await plugin.triggerShellCreateBefore(shellCreateEvent({ command: (input as { command: string }).command }))
+      const shell = shellTool(plugin, shellBase(async (input) => {
+        await plugin.triggerShellCreateBefore(shellCreateEvent({ command: ShellToolInputSchema.parse(input).command }))
         return { output: 'ok' }
       }))
       vi.useFakeTimers()
@@ -690,8 +645,8 @@ describe('ocm-sandbox plugin', () => {
     it('clears the lookup timers when the responses arrive normally', async () => {
       const plugin = await loadPlugin(configHome)
       vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true } }))
-      const shell = shellTool(plugin, vi.fn().mockImplementation(async (input: unknown) => {
-        await plugin.triggerShellCreateBefore(shellCreateEvent({ command: (input as { command: string }).command }))
+      const shell = shellTool(plugin, shellBase(async (input) => {
+        await plugin.triggerShellCreateBefore(shellCreateEvent({ command: ShellToolInputSchema.parse(input).command }))
         return { output: 'ok' }
       }))
       vi.useFakeTimers()
@@ -747,7 +702,7 @@ describe('ocm-sandbox plugin', () => {
   describe('tool transform wrapper', () => {
     it('runs the original shell call unchanged when the session is not sandboxed', async () => {
       const plugin = await loadPlugin(configHome)
-      const original = vi.fn().mockResolvedValue({ output: 'ok' })
+      const original = shellBase(async () => ({ output: 'ok' }))
       const fetchMock = managerFetch({ session: { sandboxed: false } })
       vi.stubGlobal('fetch', fetchMock)
       const shell = shellTool(plugin, original)
@@ -758,17 +713,17 @@ describe('ocm-sandbox plugin', () => {
       expect(original).toHaveBeenCalledTimes(1)
       expect(original.mock.calls[0]![0]).toBe(input)
       expect(fetchMock).toHaveBeenCalledTimes(1)
-      const [url, init] = fetchMock.mock.calls[0] as [string, { method: string; headers: Record<string, string> }]
-      expect(url).toBe('http://localhost:5003/api/internal/sandbox/sessions/ses_test')
-      expect(init.method).toBe('GET')
-      expect(init.headers.Authorization).toBe('Bearer secret-token')
+      const [url, init] = fetchMock.mock.calls[0]!
+      expect(String(url)).toBe('http://localhost:5003/api/internal/sandbox/sessions/ses_test')
+      expect(init?.method).toBe('GET')
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer secret-token')
     })
 
     it('runs the marked command for a sandboxed session without mutating the caller input', async () => {
       const plugin = await loadPlugin(configHome)
       let marked = ''
-      const original = vi.fn().mockImplementation(async (input: unknown) => {
-        marked = (input as { command: string }).command
+      const original = shellBase(async (input) => {
+        marked = ShellToolInputSchema.parse(input).command
         await plugin.triggerShellCreateBefore(shellCreateEvent({ command: marked }))
         return { output: 'ok' }
       })
@@ -787,7 +742,7 @@ describe('ocm-sandbox plugin', () => {
       const inFlightDuringSpawn: string[][] = []
       vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true } }))
       const shell = shellTool(plugin, vi.fn().mockImplementation(async () => {
-        inFlightDuringSpawn.push([...(shellSandboxState()?.inFlightSandboxedCommands.keys() ?? [])])
+        inFlightDuringSpawn.push([...(readSandboxShellState()?.inFlightSandboxedCommands.keys() ?? [])])
         return { output: 'ok' }
       }))
 
@@ -795,7 +750,7 @@ describe('ocm-sandbox plugin', () => {
 
       expect(inFlightDuringSpawn[0]).toContain('echo sentinel')
       expect(inFlightDuringSpawn[0]?.some((command) => command.endsWith(' && echo sentinel'))).toBe(true)
-      expect(shellSandboxState()?.inFlightSandboxedCommands.size).toBe(0)
+      expect(readSandboxShellState()?.inFlightSandboxedCommands.size).toBe(0)
     })
 
     it('refuses to run a sandboxed shell call without a command', async () => {
@@ -893,10 +848,15 @@ describe('ocm-sandbox plugin', () => {
   })
 
   describe('arbiter', () => {
-    function recordingBase(): { base: (input: unknown, context: GeneratedToolExecuteContext) => Promise<unknown>; command: () => string } {
+    interface RecordingBase {
+      base: Mock<ShellExecute>
+      command: () => string
+    }
+
+    function recordingBase(): RecordingBase {
       let received = ''
-      const base = vi.fn().mockImplementation(async (input: unknown) => {
-        received = (input as { command: string }).command
+      const base = shellBase(async (input) => {
+        received = ShellToolInputSchema.parse(input).command
         return { output: 'ok' }
       })
       return { base, command: () => received }
@@ -909,7 +869,7 @@ describe('ocm-sandbox plugin', () => {
     for (const order of ['forge outer', 'ocm outer'] as const) {
       it(`lets a workload forge claim win and pass the call through (${order})`, async () => {
         const plugin = await loadPlugin(configHome)
-        const forgeClaim = vi.fn().mockResolvedValue({ tier: 'workload', since: 1 })
+        const forgeClaim = vi.fn<SandboxArbiterProvider['claim']>(async () => ({ tier: 'workload', since: 1 }))
         registerProvider({ id: 'forge', claim: forgeClaim })
         const fetchMock = managerFetch({ session: { sandboxed: true } })
         vi.stubGlobal('fetch', fetchMock)
@@ -927,13 +887,13 @@ describe('ocm-sandbox plugin', () => {
         await plugin.triggerToolExecuteAfter(afterEvent)
         expect(afterEvent.result?.metadata?.sandbox).toBe(true)
         expect(afterEvent.result?.metadata?.sandboxProvider).toBe('forge')
-        expect(shellSandboxState()?.foreignOwners.size).toBe(0)
+        expect(readSandboxShellState()?.foreignOwners.size).toBe(0)
       })
     }
 
     it('prefers the later explicit claim when OCM is later', async () => {
       const plugin = await loadPlugin(configHome)
-      registerProvider({ id: 'forge', claim: vi.fn().mockResolvedValue({ tier: 'explicit', since: 1 }) })
+      registerProvider({ id: 'forge', claim: vi.fn<SandboxArbiterProvider['claim']>(async () => ({ tier: 'explicit', since: 1 })) })
       vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true, source: 'user', since: 2 } }))
       const { base, command } = recordingBase()
       const shell = forgeInnerTool(plugin, base)
@@ -946,7 +906,7 @@ describe('ocm-sandbox plugin', () => {
 
     it('prefers the later explicit claim when forge is later', async () => {
       const plugin = await loadPlugin(configHome)
-      registerProvider({ id: 'forge', claim: vi.fn().mockResolvedValue({ tier: 'explicit', since: 2 }) })
+      registerProvider({ id: 'forge', claim: vi.fn<SandboxArbiterProvider['claim']>(async () => ({ tier: 'explicit', since: 2 })) })
       vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true, source: 'user', since: 1 } }))
       const { base, command } = recordingBase()
       const shell = forgeOuterTool(plugin, base)
@@ -959,7 +919,7 @@ describe('ocm-sandbox plugin', () => {
 
     it('breaks a tier and since tie by provider id, preferring forge', async () => {
       const plugin = await loadPlugin(configHome)
-      registerProvider({ id: 'forge', claim: vi.fn().mockResolvedValue({ tier: 'explicit', since: 5 }) })
+      registerProvider({ id: 'forge', claim: vi.fn<SandboxArbiterProvider['claim']>(async () => ({ tier: 'explicit', since: 5 })) })
       vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true, source: 'user', since: 5 } }))
       const { base, command } = recordingBase()
       const shell = forgeInnerTool(plugin, base)
@@ -972,7 +932,7 @@ describe('ocm-sandbox plugin', () => {
 
     it('rejects the call and names the provider when a claim throws', async () => {
       const plugin = await loadPlugin(configHome)
-      registerProvider({ id: 'forge', claim: vi.fn().mockRejectedValue(new Error('forge exploded')) })
+      registerProvider({ id: 'forge', claim: vi.fn<SandboxArbiterProvider['claim']>(async () => { throw new Error('forge exploded') }) })
       vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true } }))
       const { base } = recordingBase()
       const shell = forgeInnerTool(plugin, base)
@@ -985,7 +945,7 @@ describe('ocm-sandbox plugin', () => {
 
     it('rejects the call and names the provider when a claim returns an invalid shape', async () => {
       const plugin = await loadPlugin(configHome)
-      registerProvider({ id: 'forge', claim: vi.fn().mockResolvedValue({ tier: 'bogus', since: 1 } as unknown as TestClaim) })
+      registerProvider({ id: 'forge', claim: vi.fn<SandboxArbiterProvider['claim']>(async () => ({ tier: 'bogus', since: 1 })) })
       vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true } }))
       const { base } = recordingBase()
       const shell = forgeInnerTool(plugin, base)
@@ -998,21 +958,21 @@ describe('ocm-sandbox plugin', () => {
 
     it('unregisters the ocm provider on dispose', async () => {
       const plugin = await loadPlugin(configHome)
-      expect(arbiterRegistry()?.providers.has('ocm')).toBe(true)
+      expect(readSandboxArbiterRegistry()?.providers.has('ocm')).toBe(true)
 
       await plugin.dispose()
 
-      expect(arbiterRegistry()?.providers.has('ocm')).toBe(false)
+      expect(readSandboxArbiterRegistry()?.providers.has('ocm')).toBe(false)
     })
 
     it('does not unregister a replacement ocm provider on dispose', async () => {
       const plugin = await loadPlugin(configHome)
-      const replacement: TestProvider = { id: 'ocm', claim: vi.fn().mockResolvedValue(null) }
-      arbiterRegistry()!.providers.set('ocm', replacement)
+      const replacement: SandboxArbiterProvider = { id: 'ocm', claim: vi.fn<SandboxArbiterProvider['claim']>(async () => null) }
+      readSandboxArbiterRegistry()!.providers.set('ocm', replacement)
 
       await plugin.dispose()
 
-      expect(arbiterRegistry()?.providers.get('ocm')).toBe(replacement)
+      expect(readSandboxArbiterRegistry()?.providers.get('ocm')).toBe(replacement)
     })
   })
 
@@ -1024,8 +984,8 @@ describe('ocm-sandbox plugin', () => {
       vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true } }))
 
       let createEvent: ShellCreateBeforeEvent | undefined
-      const shellA = shellTool(instanceA, vi.fn().mockImplementation(async (input: unknown) => {
-        createEvent = shellCreateEvent({ command: (input as { command: string }).command })
+      const shellA = shellTool(instanceA, shellBase(async (input) => {
+        createEvent = shellCreateEvent({ command: ShellToolInputSchema.parse(input).command })
         await instanceB.triggerShellCreateBefore(createEvent)
         return { output: 'ok' }
       }))
@@ -1036,14 +996,14 @@ describe('ocm-sandbox plugin', () => {
       expect(createEvent?.shell).toBe(sandboxShellShimPath(configHome))
       expect(createEvent?.env[SANDBOX_SHELL_ENV_WORKDIR]).toBe(WORKDIR)
       expect(createEvent?.env[SANDBOX_SHELL_ENV_NAME]).toBe(PLAN_NAME)
-      expect(shellSandboxState()?.pendingMarkers.size).toBe(0)
+      expect(readSandboxShellState()?.pendingMarkers.size).toBe(0)
 
       const afterEvent = toolExecuteAfterEvent({ id: CALL_ID })
       await instanceB.triggerToolExecuteAfter(afterEvent)
 
       expect(afterEvent.result?.metadata?.sandbox).toBe(true)
       expect(afterEvent.result?.metadata?.sandboxProvider).toBe('ocm')
-      expect(shellSandboxState()?.sandboxedCallIDs.size).toBe(0)
+      expect(readSandboxShellState()?.sandboxedCallIDs.size).toBe(0)
     })
 
     it('does not throw when both instances observe the same marked spawn', async () => {
@@ -1052,8 +1012,8 @@ describe('ocm-sandbox plugin', () => {
       vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true } }))
 
       let createEvent: ShellCreateBeforeEvent | undefined
-      const shellA = shellTool(instanceA, vi.fn().mockImplementation(async (input: unknown) => {
-        createEvent = shellCreateEvent({ command: (input as { command: string }).command })
+      const shellA = shellTool(instanceA, shellBase(async (input) => {
+        createEvent = shellCreateEvent({ command: ShellToolInputSchema.parse(input).command })
         await instanceA.triggerShellCreateBefore(createEvent)
         await instanceB.triggerShellCreateBefore(createEvent)
         return { output: 'ok' }
@@ -1063,15 +1023,15 @@ describe('ocm-sandbox plugin', () => {
 
       expect(createEvent?.command).toBe('echo sentinel')
       expect(createEvent?.shell).toBe(sandboxShellShimPath(configHome))
-      expect(shellSandboxState()?.pendingMarkers.size).toBe(0)
+      expect(readSandboxShellState()?.pendingMarkers.size).toBe(0)
     })
   })
 
   describe('execute.after hook', () => {
     async function runSandboxedCall(plugin: GeneratedPlugin): Promise<void> {
       vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true } }))
-      const shell = shellTool(plugin, vi.fn().mockImplementation(async (input: unknown) => {
-        await plugin.triggerShellCreateBefore(shellCreateEvent({ command: (input as { command: string }).command }))
+      const shell = shellTool(plugin, shellBase(async (input) => {
+        await plugin.triggerShellCreateBefore(shellCreateEvent({ command: ShellToolInputSchema.parse(input).command }))
         return { output: 'ok' }
       }))
       await shell.execute!({ command: 'echo sentinel' }, toolContext())
@@ -1152,7 +1112,7 @@ describe('ocm-sandbox plugin', () => {
       await plugin.triggerToolExecuteAfter(event)
 
       expect(event.result).toBeUndefined()
-      expect(shellSandboxState()?.sandboxedCallIDs.size).toBe(0)
+      expect(readSandboxShellState()?.sandboxedCallIDs.size).toBe(0)
     })
   })
 
@@ -1209,7 +1169,7 @@ describe('ocm-sandbox plugin', () => {
 
     it('does not append the docker hint when a foreign provider wins', async () => {
       const plugin = await loadPlugin(configHome)
-      registerProvider({ id: 'forge', claim: vi.fn().mockResolvedValue({ tier: 'workload', since: 1 }) })
+      registerProvider({ id: 'forge', claim: vi.fn<SandboxArbiterProvider['claim']>(async () => ({ tier: 'workload', since: 1 })) })
       vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true } }))
       const event = sessionContextEvent()
 
@@ -1220,7 +1180,7 @@ describe('ocm-sandbox plugin', () => {
 
     it('leaves the description unchanged and does not throw when a claim fails', async () => {
       const plugin = await loadPlugin(configHome)
-      registerProvider({ id: 'forge', claim: vi.fn().mockRejectedValue(new Error('forge exploded')) })
+      registerProvider({ id: 'forge', claim: vi.fn<SandboxArbiterProvider['claim']>(async () => { throw new Error('forge exploded') }) })
       vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true } }))
       const event = sessionContextEvent()
 
@@ -1318,7 +1278,7 @@ describe('ocm-sandbox plugin', () => {
 
     it('ignores resources that are not strings', async () => {
       const plugin = await loadPlugin(configHome)
-      const event = permissionEvaluateEvent({ resources: [undefined as unknown as string, serviceSettingsPath] })
+      const event = permissionEvaluateEvent({ resources: [undefined, serviceSettingsPath] })
 
       await plugin.triggerPermissionEvaluate(event)
 
@@ -1331,7 +1291,21 @@ const SHIPPED_OPENCODE_BIN = resolveOpenCode2Binary()
 const ORIGINAL_SENTINEL = 'ORIGINAL_SENTINEL_OCM'
 const VIA_SANDBOX_SENTINEL = 'VIA_SANDBOX_SENTINEL_OCM'
 
-type ChatRequest = { messages?: unknown[]; tools?: { function?: { name?: string } }[] }
+const ChatToolSchema = z.object({ function: z.object({ name: z.string().optional() }).optional() })
+const ChatMessageSchema = z.object({
+  role: z.string().optional(),
+  content: JsonValueSchema.optional(),
+  tool_calls: z.array(JsonValueSchema).optional(),
+})
+const ChatRequestSchema = z.object({
+  tools: z.array(ChatToolSchema).optional(),
+  messages: z.array(ChatMessageSchema).optional(),
+})
+const SandboxPlanRequestSchema = z.object({ directory: z.string().optional(), enforced: z.boolean().optional() })
+
+function boundPort(server: http.Server): number {
+  return BoundPortSchema.parse(server.address()).port
+}
 
 describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-sandbox plugin against the shipped OpenCode 2 binary', () => {
   let root: string
@@ -1384,7 +1358,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-sandbox plugin against the s
       })
     })
     return new Promise<{ server: http.Server; port: number }>((resolve) => {
-      server.listen(0, '127.0.0.1', () => resolve({ server, port: (server.address() as AddressInfo).port }))
+      server.listen(0, '127.0.0.1', () => resolve({ server, port: boundPort(server) }))
     })
   }
 
@@ -1405,21 +1379,20 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-sandbox plugin against the s
         body += chunk.toString()
       })
       req.on('end', () => {
-        const parsed = JSON.parse(body || '{}') as ChatRequest
+        const parsed = ChatRequestSchema.parse(JSON.parse(body || '{}'))
         const messages = parsed.messages ?? []
-        const toolMessages = messages.filter((message) => (message as { role?: string }).role === 'tool')
+        const toolMessages = messages.filter((message) => message.role === 'tool')
         for (const message of toolMessages) {
-          toolResults.push(String((message as { content?: unknown }).content ?? ''))
+          toolResults.push(String(message.content ?? ''))
         }
         for (const message of messages) {
-          const calls = message as { role?: string; tool_calls?: unknown[] }
-          if (calls.role === 'assistant' && Array.isArray(calls.tool_calls)) {
-            assistantToolCalls.push(JSON.stringify(calls.tool_calls))
+          if (message.role === 'assistant' && message.tool_calls !== undefined) {
+            assistantToolCalls.push(JSON.stringify(message.tool_calls))
           }
         }
 
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
-        const writeChunk = (obj: unknown) => res.write(`data: ${JSON.stringify(obj)}\n\n`)
+        const writeChunk = (obj: JsonObject) => res.write(`data: ${JSON.stringify(obj)}\n\n`)
         const base = { id: 'chatcmpl-e2e', object: 'chat.completion.chunk', created: 1, model: 'mock-model' }
         const hasTools = Array.isArray(parsed.tools) && parsed.tools.length > 0
 
@@ -1454,7 +1427,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-sandbox plugin against the s
       })
     })
     return new Promise<{ server: http.Server; port: number }>((resolve) => {
-      server.listen(0, '127.0.0.1', () => resolve({ server, port: (server.address() as AddressInfo).port }))
+      server.listen(0, '127.0.0.1', () => resolve({ server, port: boundPort(server) }))
     })
   }
 
@@ -1537,7 +1510,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-sandbox plugin against the s
       expect(result.status).toBe(0)
       expect(sessionLookups.some((url) => url.startsWith('/api/internal/sandbox/sessions/'))).toBe(true)
       expect(planRequests.length).toBeGreaterThan(0)
-      const planBody = JSON.parse(planRequests[0] as string) as { directory?: string; enforced?: boolean }
+      const planBody = SandboxPlanRequestSchema.parse(JSON.parse(z.string().parse(planRequests[0])))
       expect(planBody.enforced).toBe(true)
       expect(planBody.directory).toBe(realpathSync(workDir))
 

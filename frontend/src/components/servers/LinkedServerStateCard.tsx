@@ -10,10 +10,6 @@ interface LinkedServerStateCardProps {
   onAction: () => void
 }
 
-/**
- * Centered notice for a linked-server page that cannot render its content, such as a missing or
- * disabled server or a route without its project directory.
- */
 export function LinkedServerStateCard({
   icon: Icon,
   title,

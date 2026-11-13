@@ -1,49 +1,71 @@
-import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi } from 'vitest'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { ReactElement } from 'react'
+import type { FetchRoute } from '@/test/fetchFake'
+import { installPointerCapture } from '@/test/browserFakes'
+import { renderWithProviders } from '@/test/render'
 import { AgentDialog } from './AgentDialog'
-import type { Provider } from '@/api/providers'
 
-const mocks = vi.hoisted(() => ({
-  useProviders: vi.fn(),
-  useOpenCodeModelState: vi.fn(),
-  useOpenCodeDefaultModel: vi.fn(),
-}))
-
-vi.mock('@/hooks/useProviders', () => ({
-  useProviders: mocks.useProviders,
-}))
-
-vi.mock('@/hooks/useModelSelection', () => ({
-  useOpenCodeModelState: mocks.useOpenCodeModelState,
-  useOpenCodeDefaultModel: mocks.useOpenCodeDefaultModel,
-}))
-
-const providers: Provider[] = [
+const providerRoutes = [
   {
-    id: 'anthropic',
-    name: 'Anthropic',
-    models: [
-      { id: 'claude-opus-5-5-fast', modelID: 'claude-opus-5-5', name: 'Claude Opus 5.5', released: 0, free: false },
-    ],
+    method: 'GET',
+    path: '/api/opencode/api/provider',
+    respond: () => ({ json: { data: [{ id: 'anthropic', name: 'Anthropic', activation: 'enabled' }] } }),
   },
-]
+  {
+    method: 'GET',
+    path: '/api/opencode/api/model',
+    respond: () => ({
+      json: {
+        data: [
+          {
+            id: 'claude-haiku-4',
+            modelID: 'claude-haiku-4',
+            providerID: 'anthropic',
+            name: 'Claude Haiku 4',
+            capabilities: {},
+            enabled: true,
+            status: 'active',
+            limit: { context: 200000, output: 64000 },
+            time: { released: 10 },
+            cost: [{ input: 1, output: 5 }],
+            variants: [],
+          },
+          {
+            id: 'claude-opus-5-5-fast',
+            modelID: 'claude-opus-5-5',
+            providerID: 'anthropic',
+            name: 'Claude Opus 5.5',
+            capabilities: {},
+            enabled: true,
+            status: 'active',
+            limit: { context: 200000, output: 64000 },
+            time: { released: 0 },
+            cost: [{ input: 3, output: 15 }],
+            variants: [],
+          },
+        ],
+      },
+    }),
+  },
+  { method: 'GET', path: '/api/opencode/api/model/default', respond: () => ({ json: { data: null } }) },
+  { method: 'GET', path: '/api/opencode/api/config', respond: () => ({ json: {} }) },
+  { method: 'GET', path: '/api/providers/model-state', respond: () => ({ json: {} }) },
+] satisfies FetchRoute[]
+
+function render(ui: ReactElement) {
+  installPointerCapture()
+  return renderWithProviders(ui, {
+    auth: false,
+    theme: false,
+    tts: false,
+    toaster: false,
+    fetchRoutes: providerRoutes,
+  })
+}
 
 describe('AgentDialog', () => {
-  beforeAll(() => {
-    Element.prototype.hasPointerCapture ??= () => false
-    Element.prototype.setPointerCapture ??= () => {}
-    Element.prototype.releasePointerCapture ??= () => {}
-    Element.prototype.scrollIntoView ??= () => {}
-  })
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.useProviders.mockReturnValue({ data: { providers, models: [] } })
-    mocks.useOpenCodeModelState.mockReturnValue({ data: { favorite: [], recent: [], variant: {} } })
-    mocks.useOpenCodeDefaultModel.mockReturnValue({ data: null })
-  })
-
   it('loads the stored model reference', async () => {
     render(
       <AgentDialog

@@ -14,7 +14,7 @@ export class SessionAncestry {
   private readonly resolveClient: SessionClientResolver
 
   constructor(clientOrResolver: OpenCodeClient | SessionClientResolver) {
-    this.resolveClient = typeof clientOrResolver === 'function' ? clientOrResolver : () => clientOrResolver
+    this.resolveClient = clientOrResolver instanceof Function ? clientOrResolver : () => clientOrResolver
   }
 
   rememberParent(

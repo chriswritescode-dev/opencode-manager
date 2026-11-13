@@ -1,264 +1,184 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { Hono } from 'hono'
-import type { GitAuthService } from '../../src/services/git-auth'
-
-vi.mock('bun:sqlite', () => ({
-  Database: vi.fn(),
-}))
-
-vi.mock('@opencode-manager/shared/config/env', () => ({
-  ENV: {
-    AUTH: {
-      SECRET: 'test-secret-for-encryption'
-    },
-    OPENCODE: {
-      PORT: 5551
-    },
-    SERVER: {
-      PORT: 5003
-    }
-  },
-  getReposPath: vi.fn(() => '/tmp/test-repos'),
-  getWorkspacePath: vi.fn(() => '/tmp/test-workspace')
-}))
-
-vi.mock('@opencode-manager/shared/config', () => ({
-  DEFAULTS: {
-    SSE: {
-      RECONNECT_DELAY_MS: 1000,
-      MAX_RECONNECT_DELAY_MS: 30000,
-      IDLE_GRACE_PERIOD_MS: 120000,
-    },
-  },
-}))
-
-vi.mock('../../src/utils/logger', () => ({
-  logger: {
-    info: vi.fn(),
-    error: vi.fn(),
-    warn: vi.fn()
-  }
-}))
-
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { chmod, mkdir, readFile, writeFile } from 'fs/promises'
+import { join } from 'path'
+import { z } from 'zod'
+import type { Database } from 'bun:sqlite'
 import { createSSHRoutes } from '../../src/routes/ssh'
+import { GitAuthService } from '../../src/services/git-auth'
+import { sseAggregator } from '../../src/services/sse-aggregator'
+import { SSHHostKeyHandler } from '../../src/ipc/sshHostKeyHandler'
+import { createTestDatabase } from '../helpers/test-database'
+import { applyTestEnv, createTempWorkspace, type TempWorkspace } from '../helpers/test-env'
+import { readJson } from '../helpers/read-json'
 
-interface MockSSHHostKeyHandler {
-  respond: ReturnType<typeof vi.fn>
-  getPendingCount?: ReturnType<typeof vi.fn>
-}
+const RespondResponseSchema = z.object({ success: z.boolean(), error: z.string().optional() })
+const StatusResponseSchema = z.object({
+  success: z.boolean(),
+  pendingCount: z.number().optional(),
+  error: z.string().optional(),
+})
+const HostKeyRequestEventSchema = z.object({
+  payload: z.object({
+    properties: z.object({ requestId: z.string() }),
+  }),
+})
 
-interface MockGitAuthService {
-  sshHostKeyHandler: MockSSHHostKeyHandler | null
-}
+const PUBLIC_KEY = 'example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITESTKEY'
+const REPO_URL = 'git@example.com:repo.git'
 
-describe('SSH Routes', () => {
-  let app: Hono
-  let mockGitAuthService: MockGitAuthService
+describe('SSH routes', () => {
+  let workspace: TempWorkspace
+  let restorePath: () => void
+  let db: Database
+  let handler: SSHHostKeyHandler
+  let gitAuthService: GitAuthService
+  let app: ReturnType<typeof createSSHRoutes>
 
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockGitAuthService = {
-      sshHostKeyHandler: {
-        respond: vi.fn().mockReturnValue({ success: true }),
-        getPendingCount: vi.fn().mockReturnValue(0)
-      }
+  function captureHostKeyRequests() {
+    let captured: string | undefined
+    const stop = sseAggregator.addClient('ssh-routes-test-capture', (_event, data) => {
+      const parsed = HostKeyRequestEventSchema.safeParse(JSON.parse(data))
+      if (parsed.success) captured = parsed.data.payload.properties.requestId
+    }, () => {}, [])
+    return { requestId: () => captured, stop }
+  }
+
+  async function createPendingRequest(): Promise<{ requestId: string; decision: Promise<boolean> }> {
+    const capture = captureHostKeyRequests()
+    const decision = handler.verifyHostKeyBeforeOperation(REPO_URL)
+    try {
+      await vi.waitFor(() => expect(capture.requestId()).toBeDefined())
+    } finally {
+      capture.stop()
     }
-    app = createSSHRoutes(mockGitAuthService as unknown as GitAuthService)
+    const requestId = capture.requestId()
+    if (requestId === undefined) throw new Error('expected a broadcast host key request')
+    await vi.waitFor(() => expect(handler.getPendingCount()).toBe(1))
+    return { requestId, decision }
+  }
+
+  function respond(body: Record<string, string>): Promise<Response> {
+    return Promise.resolve(app.request('/host-key/respond', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }))
+  }
+
+  async function readKnownHosts(): Promise<string> {
+    return readFile(join(workspace.path, 'config', 'known_hosts'), 'utf-8')
+  }
+
+  beforeEach(async () => {
+    workspace = createTempWorkspace('ssh-routes-test-')
+    const binDir = join(workspace.path, 'bin')
+    await mkdir(binDir, { recursive: true })
+    const keyscanPath = join(binDir, 'ssh-keyscan')
+    await writeFile(keyscanPath, `#!/bin/sh\nprintf '${PUBLIC_KEY}\\n'\n`)
+    await chmod(keyscanPath, 0o755)
+    restorePath = applyTestEnv({ PATH: `${binDir}:${process.env.PATH ?? ''}` })
+
+    db = createTestDatabase()
+    handler = new SSHHostKeyHandler(db, 1_000)
+    await handler.initialize()
+    gitAuthService = new GitAuthService()
+    gitAuthService.sshHostKeyHandler = handler
+    app = createSSHRoutes(gitAuthService)
+  })
+
+  afterEach(() => {
+    restorePath()
+    db.close()
+    workspace.restore()
+    vi.restoreAllMocks()
   })
 
   describe('POST /host-key/respond', () => {
-    it('should accept valid response with accept', async () => {
-      const response = await app.request('/host-key/respond', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId: 'test-123', response: 'accept' })
-      })
-      const body = await response.json()
+    it.each([
+      ['accept', true],
+      ['reject', false],
+    ] as const)('records a pending request answered with %s', async (response, expectedDecision) => {
+      const { requestId, decision } = await createPendingRequest()
 
-      expect(response.status).toBe(200)
-      expect(body).toHaveProperty('success', true)
-      expect(mockGitAuthService.sshHostKeyHandler?.respond).toHaveBeenCalledWith({
-        requestId: 'test-123',
-        response: 'accept'
+      const res = await respond({ requestId, response })
+
+      expect(res.status).toBe(200)
+      await expect(readJson(res, RespondResponseSchema)).resolves.toEqual({ success: true })
+      await expect(decision).resolves.toBe(expectedDecision)
+      expect(handler.getPendingCount()).toBe(0)
+
+      const knownHosts = await readKnownHosts()
+      expect(knownHosts.includes(PUBLIC_KEY)).toBe(expectedDecision)
+    })
+
+    it('reports an unknown or expired request id', async () => {
+      const res = await respond({ requestId: 'expired-123', response: 'accept' })
+
+      expect(res.status).toBe(200)
+      await expect(readJson(res, RespondResponseSchema)).resolves.toEqual({
+        success: false,
+        error: 'Request not found or expired',
       })
     })
 
-    it('should accept valid response with reject', async () => {
-      const response = await app.request('/host-key/respond', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId: 'test-456', response: 'reject' })
+    it.each([
+      ['a missing requestId', { response: 'accept' }],
+      ['a missing response', { requestId: 'test-123' }],
+      ['an unknown response value', { requestId: 'test-123', response: 'maybe' }],
+    ])('returns 400 for %s', async (_label, body) => {
+      const res = await respond(body)
+
+      expect(res.status).toBe(400)
+      await expect(readJson(res, RespondResponseSchema)).resolves.toEqual({
+        success: false,
+        error: 'Invalid request body',
       })
-      const body = await response.json()
-
-      expect(response.status).toBe(200)
-      expect(body).toHaveProperty('success', true)
-      expect(mockGitAuthService.sshHostKeyHandler?.respond).toHaveBeenCalledWith({
-        requestId: 'test-456',
-        response: 'reject'
-      })
-    })
-
-    it('should return 400 for invalid request body missing requestId', async () => {
-      const response = await app.request('/host-key/respond', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ response: 'accept' })
-      })
-      const body = await response.json()
-
-      expect(response.status).toBe(400)
-      expect(body).toHaveProperty('success', false)
-      expect(body).toHaveProperty('error', 'Invalid request body')
-    })
-
-    it('should return 400 for invalid request body missing response', async () => {
-      const response = await app.request('/host-key/respond', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId: 'test-123' })
-      })
-      const body = await response.json()
-
-      expect(response.status).toBe(400)
-      expect(body).toHaveProperty('success', false)
-      expect(body).toHaveProperty('error', 'Invalid request body')
-    })
-
-    it('should return 400 for invalid response value', async () => {
-      const response = await app.request('/host-key/respond', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId: 'test-123', response: 'invalid' })
-      })
-      const body = await response.json()
-
-      expect(response.status).toBe(400)
-      expect(body).toHaveProperty('success', false)
-      expect(body).toHaveProperty('error', 'Invalid request body')
-    })
-
-    it('should return 404 when handler not found', async () => {
-      mockGitAuthService.sshHostKeyHandler = null
-      app = createSSHRoutes(mockGitAuthService as unknown as GitAuthService)
-
-      const response = await app.request('/host-key/respond', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId: 'test-123', response: 'accept' })
-      })
-      const body = await response.json()
-
-      expect(response.status).toBe(404)
-      expect(body).toHaveProperty('success', false)
-      expect(body).toHaveProperty('error', 'SSH host key handler not found')
-    })
-
-    it('should handle request ID matching correctly', async () => {
-      const requestId = 'unique-request-id-12345'
-      
-      await app.request('/host-key/respond', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId, response: 'accept' })
-      })
-
-      expect(mockGitAuthService.sshHostKeyHandler?.respond).toHaveBeenCalledWith({
-        requestId: 'unique-request-id-12345',
-        response: 'accept'
-      })
-    })
-
-    it('should return handler result on success', async () => {
-      mockGitAuthService.sshHostKeyHandler = {
-        respond: vi.fn().mockReturnValue({ success: true }),
-        getPendingCount: vi.fn()
-      }
-      app = createSSHRoutes(mockGitAuthService as unknown as GitAuthService)
-
-      const response = await app.request('/host-key/respond', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId: 'test-123', response: 'accept' })
-      })
-      const body = await response.json()
-
-      expect(body).toEqual({ success: true })
-    })
-
-    it('should return handler error when request not found', async () => {
-      mockGitAuthService.sshHostKeyHandler = {
-        respond: vi.fn().mockReturnValue({ success: false, error: 'Request not found or expired' }),
-        getPendingCount: vi.fn()
-      }
-      app = createSSHRoutes(mockGitAuthService as unknown as GitAuthService)
-
-      const response = await app.request('/host-key/respond', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId: 'expired-123', response: 'accept' })
-      })
-      const body = await response.json()
-
-      expect(body).toEqual({ success: false, error: 'Request not found or expired' })
+      expect(handler.getPendingCount()).toBe(0)
     })
   })
 
   describe('GET /host-key/status', () => {
-    it('should return pending count correctly when zero', async () => {
-      mockGitAuthService.sshHostKeyHandler = {
-        respond: vi.fn(),
-        getPendingCount: vi.fn().mockReturnValue(0)
-      }
-      app = createSSHRoutes(mockGitAuthService as unknown as GitAuthService)
+    it('reports zero pending requests', async () => {
+      const res = await app.request('/host-key/status')
 
-      const response = await app.request('/host-key/status')
-      const body = await response.json()
-
-      expect(response.status).toBe(200)
-      expect(body).toHaveProperty('success', true)
-      expect(body).toHaveProperty('pendingCount', 0)
+      expect(res.status).toBe(200)
+      await expect(readJson(res, StatusResponseSchema)).resolves.toEqual({ success: true, pendingCount: 0 })
     })
 
-    it('should return pending count correctly when non-zero', async () => {
-      mockGitAuthService.sshHostKeyHandler = {
-        respond: vi.fn(),
-        getPendingCount: vi.fn().mockReturnValue(5)
-      }
-      app = createSSHRoutes(mockGitAuthService as unknown as GitAuthService)
+    it('counts host key requests that are waiting for an answer', async () => {
+      const { requestId, decision } = await createPendingRequest()
 
-      const response = await app.request('/host-key/status')
-      const body = await response.json()
+      const res = await app.request('/host-key/status')
 
-      expect(response.status).toBe(200)
-      expect(body).toHaveProperty('success', true)
-      expect(body).toHaveProperty('pendingCount', 5)
+      expect(res.status).toBe(200)
+      await expect(readJson(res, StatusResponseSchema)).resolves.toEqual({ success: true, pendingCount: 1 })
+
+      await respond({ requestId, response: 'reject' })
+      await expect(decision).resolves.toBe(false)
     })
+  })
 
-    it('should return 404 when handler not found', async () => {
-      mockGitAuthService.sshHostKeyHandler = null
-      app = createSSHRoutes(mockGitAuthService as unknown as GitAuthService)
+  describe('missing host key handler', () => {
+    it('reports 404 for both host key routes', async () => {
+      const unconfiguredApp = createSSHRoutes(new GitAuthService())
 
-      const response = await app.request('/host-key/status')
-      const body = await response.json()
+      const respondRes = await unconfiguredApp.request('/host-key/respond', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId: 'test-123', response: 'accept' }),
+      })
+      const statusRes = await unconfiguredApp.request('/host-key/status')
 
-      expect(response.status).toBe(404)
-      expect(body).toHaveProperty('success', false)
-      expect(body).toHaveProperty('error', 'SSH host key handler not found')
-    })
-
-    it('should return 500 when getPendingCount is undefined', async () => {
-      mockGitAuthService.sshHostKeyHandler = {
-        respond: vi.fn(),
-        getPendingCount: undefined as unknown as ReturnType<typeof vi.fn>
-      }
-      app = createSSHRoutes(mockGitAuthService as unknown as GitAuthService)
-
-      const response = await app.request('/host-key/status')
-      const body = await response.json()
-
-      expect(response.status).toBe(500)
-      expect(body).toHaveProperty('success', false)
+      expect(respondRes.status).toBe(404)
+      await expect(readJson(respondRes, RespondResponseSchema)).resolves.toEqual({
+        success: false,
+        error: 'SSH host key handler not found',
+      })
+      expect(statusRes.status).toBe(404)
+      await expect(readJson(statusRes, StatusResponseSchema)).resolves.toEqual({
+        success: false,
+        error: 'SSH host key handler not found',
+      })
     })
   })
 })

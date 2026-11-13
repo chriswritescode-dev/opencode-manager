@@ -116,7 +116,8 @@ describe('FilePreview header buttons', () => {
   it('keeps the success and destructive tints on the edit actions in dark mode', () => {
     render(<FilePreview file={textFile('Dockerfile', 'text/plain')} />)
 
-    const editButton = screen.getByTitle('Disable line wrap').nextElementSibling as HTMLElement
+    const editButton = screen.getByTitle('Disable line wrap').nextElementSibling
+    if (!(editButton instanceof HTMLElement)) throw new Error('expected the edit button beside the wrap toggle')
     fireEvent.click(editButton)
 
     const headerButtons = Array.from(screen.getByTitle('Disable line wrap').parentElement?.querySelectorAll('button') ?? [])

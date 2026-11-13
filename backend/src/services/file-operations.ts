@@ -3,6 +3,7 @@ import path from 'path'
 import { logger } from '../utils/logger'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 import { mkdirSafe } from '../utils/fs-safe'
+import { getErrorCode } from './error-code'
 
 export async function readFileContent(filePath: string): Promise<string> {
   try {
@@ -139,7 +140,7 @@ export async function listDirectory(dirPath: string): Promise<Array<{
       try {
         stats = await fs.stat(entryPath)
       } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code
+        const code = getErrorCode(error)
         if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'ELOOP') {
           logger.warn(`Skipping unresolvable directory entry ${entryPath}:`, error)
           continue

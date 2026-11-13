@@ -4,7 +4,7 @@ import { listShells, removeShell } from '@/api/opencode'
 import { applyShellExit, recordShellExit, reconcileShellList, type ShellRecord } from '@/lib/backgroundWork'
 import { shellsQueryKey } from '@/lib/queryInvalidation'
 import { serverScopedKey } from '@/lib/serverScope'
-import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { useOpenCodeServerId } from '@/contexts/opencode-server-context'
 import { showToast } from '@/lib/toast'
 
 function useShellListQuery<TData = ShellRecord[]>(

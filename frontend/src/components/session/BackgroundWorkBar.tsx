@@ -3,7 +3,7 @@ import { Bot, Check, ChevronDown, ChevronUp, ExternalLink, Loader2, MoveDownRigh
 import { useShallow } from 'zustand/react/shallow'
 import type { SessionMessageInfo } from '@opencode-manager/shared/opencode'
 import { readShellOutput } from '@/api/opencode'
-import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { useOpenCodeServerId } from '@/contexts/opencode-server-context'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useBackgroundSession, useChildSessionReconciliation } from '@/hooks/useOpenCode'

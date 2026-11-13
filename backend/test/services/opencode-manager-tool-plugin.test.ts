@@ -1,16 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest'
 import { promises as fs } from 'fs'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import http from 'http'
-import type { AddressInfo } from 'net'
 import path from 'path'
 import os from 'os'
+import { z } from 'zod'
 import {
   ASSISTANT_NOTIFICATION_LIMITS,
   AssistantNotificationRequestSchema,
   MANAGER_PROMPT_CLIENT_METADATA_KEY,
   MANAGER_TOOL_NAME,
 } from '@opencode-manager/shared/schemas'
+import { JsonObjectSchema, JsonValueSchema, type JsonObject, type JsonValue } from '@opencode-manager/shared/utils'
 import {
   MANAGER_MOBILE_OUTPUT_INSTRUCTIONS,
   MANAGER_TOOL_ALLOWED_ROUTES,
@@ -33,7 +34,35 @@ type JsonSchema = {
   minLength?: number
 }
 
-/** Loads the installed manager plugin from the supplied configuration home for hook tests. */
+const JsonSchemaSchema: z.ZodType<JsonSchema> = z.lazy(() => z.object({
+  type: z.string().optional(),
+  properties: z.record(z.string(), JsonSchemaSchema).optional(),
+  required: z.array(z.string()).optional(),
+  additionalProperties: z.boolean().optional(),
+  anyOf: z.array(JsonSchemaSchema).optional(),
+  oneOf: z.array(JsonSchemaSchema).optional(),
+  enum: z.array(z.string()).optional(),
+  const: z.string().optional(),
+  maxLength: z.number().optional(),
+  minLength: z.number().optional(),
+}))
+
+interface RecordedRequestInit {
+  method?: string
+  headers: Record<string, string>
+  body?: string
+}
+
+type RecordedFetchResponse = { ok: boolean; status: number; text: () => Promise<string> }
+type RequestRecordingFetch = Mock<(input: Parameters<typeof fetch>[0], init: RecordedRequestInit) => Promise<RecordedFetchResponse>>
+
+const ManagerToolResultSchema = z.object({
+  content: z.string(),
+  metadata: JsonObjectSchema.optional(),
+})
+
+type ManagerToolResult = z.infer<typeof ManagerToolResultSchema>
+
 async function loadManagerPlugin(configHome: string): Promise<GeneratedPlugin> {
   return loadGeneratedPlugin(path.join(getOpenCodePluginDir(configHome), 'ocm-manager.js'))
 }
@@ -46,7 +75,7 @@ async function loadTool(configHome: string): Promise<GeneratedTool> {
 }
 
 function toolInputSchema(tool: GeneratedTool): JsonSchema {
-  return tool.input as JsonSchema
+  return JsonSchemaSchema.parse(tool.input)
 }
 
 function notificationParamsSchema(tool: GeneratedTool): JsonSchema {
@@ -75,25 +104,23 @@ function publishParamsSchema(tool: GeneratedTool): JsonSchema {
 
 async function runToolResult(
   tool: GeneratedTool,
-  input: unknown,
+  input: JsonValue,
   context: { sessionID?: string; signal?: AbortSignal } = {},
-): Promise<{ content: string; metadata?: Record<string, unknown> }> {
-  return (await tool.execute!(input, { signal: context.signal ?? new AbortController().signal, sessionID: context.sessionID })) as {
-    content: string
-    metadata?: Record<string, unknown>
-  }
+): Promise<ManagerToolResult> {
+  if (!tool.execute) throw new Error('the generated tool has no execute function')
+  return ManagerToolResultSchema.parse(
+    await tool.execute(input, { signal: context.signal ?? new AbortController().signal, sessionID: context.sessionID }),
+  )
 }
 
-async function runTool(tool: GeneratedTool, input: unknown, context: { sessionID?: string; signal?: AbortSignal } = {}): Promise<string> {
+async function runTool(tool: GeneratedTool, input: JsonValue, context: { sessionID?: string; signal?: AbortSignal } = {}): Promise<string> {
   return (await runToolResult(tool, input, context)).content
 }
 
-function jsonResponse(body: unknown, { ok = true, status = 200 } = {}) {
-  return vi.fn().mockResolvedValue({
-    ok,
-    status,
-    text: async () => JSON.stringify(body),
-  })
+function jsonResponse(body: JsonValue, { ok = true, status = 200 } = {}): RequestRecordingFetch {
+  return vi.fn<(input: Parameters<typeof fetch>[0], init: RecordedRequestInit) => Promise<RecordedFetchResponse>>(
+    async () => ({ ok, status, text: async () => JSON.stringify(body) }),
+  )
 }
 
 describe('ocm-manager plugin', () => {
@@ -262,11 +289,11 @@ describe('ocm-manager plugin', () => {
     })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchMock.mock.calls[0] ?? []
+    const [url, init] = fetchMock.mock.calls[0]!
     expect(url).toBe('http://localhost:5003/api/internal/notifications/send')
     expect(init.method).toBe('POST')
     expect(init.headers.Authorization).toBe('Bearer secret-token')
-    expect(JSON.parse(init.body)).toEqual({ title: 'Storm watch', body: 'Formation odds crossed 40%', priority: 'high' })
+    expect(JSON.parse(z.string().parse(init.body))).toEqual({ title: 'Storm watch', body: 'Formation odds crossed 40%', priority: 'high' })
     expect(result).toBe('Notification sent: 2 delivered, 0 failed.')
   })
 
@@ -332,12 +359,12 @@ describe('ocm-manager plugin', () => {
     )
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchMock.mock.calls[0] ?? []
+    const [url, init] = fetchMock.mock.calls[0]!
     expect(url).toBe('http://localhost:5003/api/internal/change-walkthroughs/ses_abc')
     expect(init.method).toBe('POST')
     expect(init.headers.Authorization).toBe('Bearer secret-token')
     expect(init.headers['content-type']).toBe('application/json')
-    expect(JSON.parse(init.body)).toEqual({ source: { kind: 'staged' } })
+    expect(JSON.parse(z.string().parse(init.body))).toEqual({ source: { kind: 'staged' } })
     expect(result.content).toBe(
       'The walkthrough is ready. It opens in the Manager walkthrough panel when this session is open on desktop; otherwise the user can open it from this tool call.',
     )
@@ -367,7 +394,7 @@ describe('ocm-manager plugin', () => {
       const result = await pending
 
       expect(fetchMock).toHaveBeenCalledTimes(2)
-      const [pollUrl, pollInit] = fetchMock.mock.calls[1] ?? []
+      const [pollUrl, pollInit] = fetchMock.mock.calls[1]!
       expect(pollUrl).toBe('http://localhost:5003/api/internal/change-walkthroughs/ses_abc?source=staged')
       expect(pollInit.method).toBe('GET')
       expect(result.content).toBe(
@@ -466,7 +493,7 @@ describe('ocm-manager plugin', () => {
     await runTool(tool, { action: 'open_walkthrough', params: {} }, { sessionID: 'ses_abc' })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchMock.mock.calls[0] ?? []
+    const [url, init] = fetchMock.mock.calls[0]!
     expect(url).toBe('http://localhost:5003/api/internal/change-walkthroughs/ses_abc')
     expect(init.headers['content-type']).toBeUndefined()
     expect(init.body).toBeUndefined()
@@ -480,7 +507,7 @@ describe('ocm-manager plugin', () => {
     await expect(runTool(tool, { action: 'walkthrough_changes', params: {} }, { sessionID: 'ses_abc' })).resolves.toBe('## Outline')
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchMock.mock.calls[0] ?? []
+    const [url, init] = fetchMock.mock.calls[0]!
     expect(url).toBe('http://localhost:5003/api/internal/walkthrough-sessions/ses_abc/changes')
     expect(init.method).toBe('POST')
     expect(init.headers.Authorization).toBe('Bearer secret-token')
@@ -496,10 +523,10 @@ describe('ocm-manager plugin', () => {
     await runTool(tool, { action: 'walkthrough_changes', params: { file: 'src/a.ts' } }, { sessionID: 'ses_abc' })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchMock.mock.calls[0] ?? []
+    const [url, init] = fetchMock.mock.calls[0]!
     expect(url).toBe('http://localhost:5003/api/internal/walkthrough-sessions/ses_abc/changes')
     expect(init.headers['content-type']).toBe('application/json')
-    expect(JSON.parse(init.body)).toEqual({ file: 'src/a.ts' })
+    expect(JSON.parse(z.string().parse(init.body))).toEqual({ file: 'src/a.ts' })
   })
 
   it('publishes the walkthrough through the internal API and reports the path', async () => {
@@ -510,7 +537,7 @@ describe('ocm-manager plugin', () => {
     const result = await runToolResult(tool, { action: 'publish_walkthrough', params: {} }, { sessionID: 'ses_abc' })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchMock.mock.calls[0] ?? []
+    const [url, init] = fetchMock.mock.calls[0]!
     expect(url).toBe('http://localhost:5003/api/internal/walkthrough-sessions/ses_abc/publish')
     expect(init.method).toBe('POST')
     expect(result.content).toBe(
@@ -531,12 +558,12 @@ describe('ocm-manager plugin', () => {
     )
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchMock.mock.calls[0] ?? []
+    const [url, init] = fetchMock.mock.calls[0]!
     expect(url).toBe('http://localhost:5003/api/internal/session-artifacts/ses_abc/resolve')
     expect(init.method).toBe('POST')
     expect(init.headers.Authorization).toBe('Bearer secret-token')
     expect(init.headers['content-type']).toBe('application/json')
-    expect(JSON.parse(init.body)).toEqual({ path: 'reports/report.html' })
+    expect(JSON.parse(z.string().parse(init.body))).toEqual({ path: 'reports/report.html' })
     expect(result.content).toBe(
       'Showing the artifact "Formation odds" from /workspace/repos/app/report.html in the Manager chat. It renders the current file contents, so after editing the file the user can reload the view; call show_artifact again only to show a different file.',
     )
@@ -570,7 +597,7 @@ describe('ocm-manager plugin', () => {
     const result = await runTool(tool, { action: 'request', params: { method: 'GET', path: '/settings?userId=default' } })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchMock.mock.calls[0] ?? []
+    const [url, init] = fetchMock.mock.calls[0]!
     expect(url).toBe('http://localhost:5003/api/internal/settings?userId=default')
     expect(init.method).toBe('GET')
     expect(init.headers.Authorization).toBe('Bearer secret-token')
@@ -587,12 +614,12 @@ describe('ocm-manager plugin', () => {
     await runTool(tool, { action: 'request', params: { method: 'PATCH', path: '/settings', body: { theme: 'dark' } } })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchMock.mock.calls[0] ?? []
+    const [url, init] = fetchMock.mock.calls[0]!
     expect(url).toBe('http://localhost:5003/api/internal/settings')
     expect(init.method).toBe('PATCH')
     expect(init.headers.Authorization).toBe('Bearer secret-token')
     expect(init.headers['content-type']).toBe('application/json')
-    expect(JSON.parse(init.body)).toEqual({ theme: 'dark' })
+    expect(JSON.parse(z.string().parse(init.body))).toEqual({ theme: 'dark' })
   })
 
   it('sends a PATCH request to the config route with a JSON body', async () => {
@@ -603,12 +630,12 @@ describe('ocm-manager plugin', () => {
     await runTool(tool, { action: 'request', params: { method: 'PATCH', path: '/opencode-config', body: { patch: { theme: 'dark' } } } })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchMock.mock.calls[0] ?? []
+    const [url, init] = fetchMock.mock.calls[0]!
     expect(url).toBe('http://localhost:5003/api/internal/opencode-config')
     expect(init.method).toBe('PATCH')
     expect(init.headers.Authorization).toBe('Bearer secret-token')
     expect(init.headers['content-type']).toBe('application/json')
-    expect(JSON.parse(init.body)).toEqual({ patch: { theme: 'dark' } })
+    expect(JSON.parse(z.string().parse(init.body))).toEqual({ patch: { theme: 'dark' } })
   })
 
   it('allows every route in the exported allow list', async () => {
@@ -738,7 +765,25 @@ describe('ocm-manager plugin', () => {
 
 const SHIPPED_OPENCODE_BIN = resolveOpenCode2Binary()
 
-type ChatRequest = { messages?: unknown[]; tools?: { function?: { name?: string; parameters?: unknown } }[] }
+const ChatToolSchema = z.object({
+  function: z.object({ name: z.string().optional(), parameters: JsonValueSchema.optional() }).optional(),
+})
+const ChatMessageSchema = z.object({
+  role: z.string().optional(),
+  content: JsonValueSchema.optional(),
+})
+const ChatRequestSchema = z.object({
+  tools: z.array(ChatToolSchema).optional(),
+  messages: z.array(ChatMessageSchema).optional(),
+})
+const InternalApiRequestSchema = z.object({ auth: z.string().optional(), body: z.string() })
+const BoundPortSchema = z.object({ port: z.number() })
+
+type ChatTool = z.infer<typeof ChatToolSchema>
+
+function boundPort(server: http.Server): number {
+  return BoundPortSchema.parse(server.address()).port
+}
 
 describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-manager plugin against the shipped OpenCode 2 binary', () => {
   let root: string
@@ -758,11 +803,11 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-manager plugin against the s
       })
     })
     return new Promise<{ server: http.Server; port: number }>((resolve) => {
-      server.listen(0, '127.0.0.1', () => resolve({ server, port: (server.address() as AddressInfo).port }))
+      server.listen(0, '127.0.0.1', () => resolve({ server, port: boundPort(server) }))
     })
   }
 
-  function startLlmServer(offeredTools: ChatRequest['tools'][], toolResults: string[]) {
+  function startLlmServer(offeredTools: ChatTool[][], toolResults: string[]) {
     const server = http.createServer((req, res) => {
       if (req.method === 'GET' && req.url?.endsWith('/models')) {
         res.writeHead(200, { 'content-type': 'application/json' })
@@ -779,16 +824,16 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-manager plugin against the s
         body += chunk.toString()
       })
       req.on('end', () => {
-        const parsed = JSON.parse(body || '{}') as ChatRequest
+        const parsed = ChatRequestSchema.parse(JSON.parse(body || '{}'))
         offeredTools.push(parsed.tools ?? [])
         const messages = parsed.messages ?? []
-        const toolMessages = messages.filter((m) => (m as { role?: string }).role === 'tool')
+        const toolMessages = messages.filter((message) => message.role === 'tool')
         for (const message of toolMessages) {
-          toolResults.push(String((message as { content?: unknown }).content ?? ''))
+          toolResults.push(String(message.content ?? ''))
         }
 
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
-        const writeChunk = (obj: unknown) => res.write(`data: ${JSON.stringify(obj)}\n\n`)
+        const writeChunk = (obj: JsonObject) => res.write(`data: ${JSON.stringify(obj)}\n\n`)
         const base = { id: 'chatcmpl-e2e', object: 'chat.completion.chunk', created: 1, model: 'mock-model' }
         const hasTools = Array.isArray(parsed.tools) && parsed.tools.length > 0
 
@@ -826,7 +871,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-manager plugin against the s
       })
     })
     return new Promise<{ server: http.Server; port: number }>((resolve) => {
-      server.listen(0, '127.0.0.1', () => resolve({ server, port: (server.address() as AddressInfo).port }))
+      server.listen(0, '127.0.0.1', () => resolve({ server, port: boundPort(server) }))
     })
   }
 
@@ -863,7 +908,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-manager plugin against the s
     mkdirSync(workDir, { recursive: true })
 
     const apiRequests: string[] = []
-    const offeredTools: ChatRequest['tools'][] = []
+    const offeredTools: ChatTool[][] = []
     const toolResults: string[] = []
     const api = await startInternalApiServer(apiRequests)
     const llm = await startLlmServer(offeredTools, toolResults)
@@ -915,7 +960,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-manager plugin against the s
                 properties: {
                   method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] },
                   path: { type: 'string', minLength: 1, maxLength: 500 },
-                  body: { type: 'object' },
+                  body: { $ref: '#/$defs/__schema0' },
                 },
               },
               {
@@ -951,7 +996,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('ocm-manager plugin against the s
       })
 
       expect(apiRequests).toHaveLength(1)
-      const request = JSON.parse(apiRequests[0] as string) as { auth: string; body: string }
+      const request = InternalApiRequestSchema.parse(JSON.parse(z.string().parse(apiRequests[0])))
       expect(request.auth).toBe('Bearer test-token')
       expect(JSON.parse(request.body)).toEqual({
         title: 'Storm watch',

@@ -1,4 +1,3 @@
-/* eslint-disable no-empty */
 import fs from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
@@ -6,10 +5,12 @@ import { join } from 'node:path'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import { mkdirSafe } from './fs-safe'
 
-const SSH_KEYS_DIR = join(getWorkspacePath(), '.ssh-keys')
+function sshKeysDir(): string {
+  return join(getWorkspacePath(), '.ssh-keys')
+}
 
 async function ensureSSHKeysDir(): Promise<void> {
-  await mkdirSafe(SSH_KEYS_DIR, { mode: 0o700 })
+  await mkdirSafe(sshKeysDir(), { mode: 0o700 })
 }
 
 async function validateSSHKey(keyPath: string): Promise<boolean> {
@@ -54,9 +55,9 @@ export async function writeTemporarySSHKey(keyContent: string, identifier: strin
   
   const randomSuffix = randomBytes(8).toString('hex')
   const fileName = `key-${identifier}-${randomSuffix}`
-  const keyPath = join(SSH_KEYS_DIR, fileName)
+  const keyPath = join(sshKeysDir(), fileName)
 
-  if (!keyPath.startsWith(SSH_KEYS_DIR)) {
+  if (!keyPath.startsWith(sshKeysDir())) {
     throw new Error('Invalid key path')
   }
 
@@ -107,9 +108,9 @@ export async function writePersistentSSHKey(keyContent: string, identifier: stri
   await ensureSSHKeysDir()
 
   const fileName = `persistent-${identifier}`
-  const keyPath = join(SSH_KEYS_DIR, fileName)
+  const keyPath = join(sshKeysDir(), fileName)
 
-  if (!keyPath.startsWith(SSH_KEYS_DIR)) {
+  if (!keyPath.startsWith(sshKeysDir())) {
     throw new Error('Invalid key path')
   }
 
@@ -170,7 +171,7 @@ export async function writeSSHConfig(configPath: string, configContent: string):
 
 export async function cleanupAllSSHKeys(): Promise<void> {
   try {
-    await fs.rm(SSH_KEYS_DIR, { recursive: true, force: true })
+    await fs.rm(sshKeysDir(), { recursive: true, force: true })
   } catch {
   }
 }
@@ -179,11 +180,11 @@ export async function cleanupPersistentSSHKeys(): Promise<void> {
   await ensureSSHKeysDir()
 
   try {
-    const files = await fs.readdir(SSH_KEYS_DIR)
+    const files = await fs.readdir(sshKeysDir())
     const persistentFiles = files.filter(f => f.startsWith('persistent-'))
 
     await Promise.all(
-      persistentFiles.map(f => fs.unlink(join(SSH_KEYS_DIR, f)).catch(() => {}))
+      persistentFiles.map(f => fs.unlink(join(sshKeysDir(), f)).catch(() => {}))
     )
   } catch {
   }
@@ -265,7 +266,12 @@ export function normalizeHostPort(host: string, port?: string): string {
   return host
 }
 
-export function parseHostPort(hostPort: string): { host: string; port: string } {
+export interface HostPort {
+  host: string
+  port: string
+}
+
+export function parseHostPort(hostPort: string): HostPort {
   if (hostPort.includes(':')) {
     const colonIndex = hostPort.lastIndexOf(':')
     const host = hostPort.substring(0, colonIndex)

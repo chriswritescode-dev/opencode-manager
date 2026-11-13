@@ -3,19 +3,23 @@ import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
 import { request as playwrightRequest, type APIRequestContext } from '@playwright/test'
+import { z } from 'zod'
+import type { JsonValue } from '../shared/src/utils/json'
 import { BASE_URL, E2E_TMP, STORAGE_STATE } from './env'
 
 const MOCK_MODEL_ID = 'mock-model'
 
 export type MockTurn =
   | { content: string }
-  | { toolCall: { name: string; arguments: Record<string, unknown> } }
+  | { toolCall: { name: string; arguments: Record<string, JsonValue> } }
 
 export interface MockChatRequest {
   stream?: boolean
   tools?: unknown[]
   messages?: Array<{ role?: string }>
 }
+
+const MockChatRequestSchema = z.looseObject({ stream: z.boolean().optional() })
 
 export interface MockProvider {
   readonly port: number
@@ -34,7 +38,7 @@ export interface CreateMockRepoOptions {
   beforeCommit?: (directory: string) => void
 }
 
-function toolCallPayload(toolCall: { name: string; arguments: Record<string, unknown> }): object {
+function toolCallPayload(toolCall: { name: string; arguments: Record<string, JsonValue> }) {
   return {
     index: 0,
     id: 'call_mock',
@@ -66,7 +70,7 @@ function handleMockRequest(
     if (request.method === 'POST' && url.startsWith('/v1/chat/completions')) {
       let body: MockChatRequest = {}
       try {
-        body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as MockChatRequest
+        body = MockChatRequestSchema.parse(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'))
       } catch {
         body = {}
       }
@@ -138,11 +142,12 @@ export async function startMockProvider(port = 0): Promise<MockProvider> {
     server.listen(port, '127.0.0.1', () => resolve())
   })
   const address = server.address()
-  if (address === null || typeof address === 'string') {
+  const bound = z.object({ port: z.number() }).safeParse(address)
+  if (!bound.success) {
     throw new Error('mock provider failed to bind a TCP port')
   }
   return {
-    port: address.port,
+    port: bound.data.port,
     setReply: (text) => {
       responder = () => ({ content: text })
     },
@@ -166,7 +171,7 @@ export async function createSession(api: APIRequestContext, directory: string): 
   if (!response.ok()) {
     throw new Error(`create session failed: ${response.status()} ${await response.text()}`)
   }
-  const body = (await response.json()) as { data: { id: string } }
+  const body = z.object({ data: z.object({ id: z.string() }) }).parse(await response.json())
   return body.data.id
 }
 
@@ -210,7 +215,7 @@ export async function createMockRepo(
     if (!repoResponse.ok()) {
       throw new Error(`register mock repo failed: ${repoResponse.status()} ${await repoResponse.text()}`)
     }
-    const repo = (await repoResponse.json()) as { id: number; fullPath: string }
+    const repo = z.object({ id: z.number(), fullPath: z.string() }).parse(await repoResponse.json())
     const sessionId = await createSession(api, repo.fullPath)
     return { id: repo.id, fullPath: repo.fullPath, sessionId }
   } finally {

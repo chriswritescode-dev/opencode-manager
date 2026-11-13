@@ -1,743 +1,352 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook, waitFor } from '@testing-library/react'
-import type { ReactNode } from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
+import type { JsonObject, JsonValue } from '@opencode-manager/shared/utils'
+import type { SessionInfo, SessionStatus } from '@opencode-manager/shared/opencode'
 import { useSSE } from './useSSE'
 import { useKillShell } from './useSessionShells'
-import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
-import { clearShellExitRecord } from '@/lib/backgroundWork'
-import { useSessionStatus } from '../stores/sessionStatusStore'
-import { useSendErrorStore } from '../stores/sendErrorStore'
-import { showToast } from '@/lib/toast'
+import { openCodeEventStream, TestEventStreamTransport } from '@/lib/opencode-event-stream'
+import { clearShellExitRecord, type ShellRecord } from '@/lib/backgroundWork'
+import { useSessionStatus } from '@/stores/sessionStatusStore'
+import { useSendErrorStore } from '@/stores/sendErrorStore'
+import { connectTestEventStream, createTestQueryClient, renderHookWithProviders, type TestProviderOptions } from '@/test/render'
+import {
+  sessionAgentSelected,
+  sessionCreated,
+  sessionDeleted,
+  sessionExecutionStarted,
+  sessionIdle,
+  sessionModelSelected,
+  sessionMoved,
+  sessionRenamed,
+  shellCreated,
+  shellDeleted,
+  shellExited,
+} from '@/test/fixtures/events'
 
-vi.mock('@/lib/toast', () => ({
-  showToast: {
-    dismiss: vi.fn(),
-    error: vi.fn(),
-    info: vi.fn(),
-    loading: vi.fn(),
-    success: vi.fn(),
-  },
-}))
+interface RenderSseOptions {
+  directory?: string
+  sessionId?: string
+  serverId?: string
+}
 
-const shellApi = vi.hoisted(() => ({
-  listShells: vi.fn(),
-  removeShell: vi.fn(),
-}))
+interface SseHarness {
+  transport: TestEventStreamTransport
+  fetchFake: ReturnType<typeof renderHookWithProviders>['fetchFake']
+  queryClient: ReturnType<typeof createTestQueryClient>
+  result: ReturnType<typeof renderHookWithProviders>['result']
+  push: (event: JsonObject) => void
+}
 
-vi.mock('@/api/opencode', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/api/opencode')>()),
-  ...shellApi,
-}))
+const invalidationKeys = {
+  session: ['opencode', 'session', 'session-1', '/repo'],
+  pendingActions: ['opencode', 'pending-actions', 'session-1', '/repo'],
+  shells: ['opencode', 'shells', '/repo'],
+  reconciliation: ['opencode', 'session-reconcile', 'session-1'],
+  sessionList: ['opencode', 'sessions', '/repo'],
+} as const
 
-class MockEventSource {
-  static instances: MockEventSource[] = []
+function isInvalidated(harness: SseHarness, key: readonly unknown[]): boolean {
+  return harness.queryClient.getQueryState(key)?.isInvalidated === true
+}
 
-  onopen: (() => void) | null = null
-  onerror: (() => void) | null = null
-  onmessage: ((event: MessageEvent) => void) | null = null
-  private listeners = new Map<string, Array<(event: MessageEvent) => void>>()
+function seed(harness: SseHarness, key: readonly unknown[], data: JsonValue): void {
+  harness.queryClient.setQueryData(key, data)
+}
 
-  constructor() {
-    MockEventSource.instances.push(this)
+function useSseHook(directory: string, sessionId: string) {
+  return useSSE(directory, sessionId)
+}
+
+async function renderSse(options: RenderSseOptions = {}): Promise<SseHarness> {
+  const transport = new TestEventStreamTransport()
+  openCodeEventStream.setTransport(transport)
+  const queryClient = createTestQueryClient()
+  const directory = options.directory ?? '/repo'
+  const sessionId = options.sessionId ?? 'session-1'
+  const providerOptions: TestProviderOptions = {
+    auth: false,
+    theme: false,
+    tts: false,
+    queryClient,
+    fetchRoutes: [
+      { method: 'DELETE', path: '/api/opencode/api/shell/:shellId', respond: () => ({ status: 204 }) },
+    ],
   }
+  if (options.serverId !== undefined) providerOptions.serverId = options.serverId
+  const rendered = renderHookWithProviders(() => useSseHook(directory, sessionId), providerOptions)
 
-  addEventListener(type: string, listener: (event: MessageEvent) => void) {
-    const listeners = this.listeners.get(type) ?? []
-    listeners.push(listener)
-    this.listeners.set(type, listeners)
-  }
+  await connectTestEventStream(transport)
 
-  close() {}
-
-  emit(type: string, data: unknown) {
-    const message = type === 'message' ? { payload: data } : data
-    const event = { data: JSON.stringify(message) } as MessageEvent
-    this.listeners.get(type)?.forEach((listener) => listener(event))
-    if (type === 'message' && this.onmessage) {
-      this.onmessage(event)
-    }
+  return {
+    transport,
+    fetchFake: rendered.fetchFake,
+    queryClient,
+    result: rendered.result,
+    push: (event) => {
+      act(() => {
+        transport.message(event)
+      })
+    },
   }
 }
 
+function subscribedDirectories(transport: TestEventStreamTransport): string[] {
+  return transport.posts.flatMap((post) => ('directories' in post.body ? post.body.directories : []))
+}
+
+const runningShell = {
+  id: 'shell-1',
+  status: 'running' as const,
+  command: 'sleep 1',
+  cwd: '/repo',
+  shell: 'zsh',
+  file: '/tmp/shell-1.log',
+  metadata: { sessionID: 'session-1' },
+  time: { started: 1 },
+}
+
+afterEach(() => {
+  clearShellExitRecord('/repo', 'shell-1')
+})
+
 describe('useSSE', () => {
-  const originalEventSource = globalThis.EventSource
-  const originalFetch = globalThis.fetch
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    MockEventSource.instances = []
-    shellApi.listShells.mockResolvedValue([])
-    shellApi.removeShell.mockResolvedValue(undefined)
-    useSessionStatus.setState({ statuses: new Map(), statusCache: new Map(), statusRevisions: new Map(), knownSessions: new Set(), outcomes: new Map(), directories: new Map(), revision: 0 })
-    useSendErrorStore.setState({ errors: {} })
-    globalThis.EventSource = MockEventSource as unknown as typeof EventSource
-    globalThis.fetch = vi.fn(() => Promise.resolve({ ok: true } as Response))
-  })
-
-  afterEach(() => {
-    useSessionStatus.setState({ statuses: new Map(), statusCache: new Map(), statusRevisions: new Map(), knownSessions: new Set(), outcomes: new Map(), directories: new Map(), revision: 0 })
-    useSendErrorStore.setState({ errors: {} })
-    globalThis.EventSource = originalEventSource
-    globalThis.fetch = originalFetch
-  })
-
-  const createWrapper = (queryClient: QueryClient) => {
-    return ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
-  }
-
-  const connect = async (index: number, clientId: string) => {
-    act(() => {
-      MockEventSource.instances[index].emit('connected', { clientId })
-    })
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(index + 1))
-  }
-
   it('invalidates active session data after reconnecting', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+    const harness = await renderSse()
 
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
+    seed(harness, invalidationKeys.session, { id: 'session-1' })
+    seed(harness, invalidationKeys.pendingActions, {})
+    seed(harness, invalidationKeys.shells, [])
+    seed(harness, invalidationKeys.reconciliation, {})
 
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-    invalidateQueries.mockClear()
-
-    act(() => {
-      MockEventSource.instances[0].onerror?.()
-    })
-
-    await waitFor(() => expect(result.current.isConnected).toBe(false))
+    act(() => harness.transport.fail())
+    await waitFor(() => expect(harness.result.current.isConnected).toBe(false))
 
     act(() => {
       window.dispatchEvent(new Event('focus'))
     })
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(2))
-
-    await connect(1, 'client-2')
-
-    await waitFor(() => {
-      expect(invalidateQueries).toHaveBeenCalledWith({
-        queryKey: ['opencode', 'session', 'session-1', '/repo'],
-      })
-      expect(invalidateQueries).toHaveBeenCalledWith({
-        queryKey: ['opencode', 'pending-actions', 'session-1', '/repo'],
-      })
-      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'shells'] })
-      expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['opencode', 'session-reconcile'] })
+    await waitFor(() => expect(harness.transport.openedUrls).toHaveLength(2))
+    await act(async () => {
+      harness.transport.connected('client-2')
     })
 
-    unmount()
+    await waitFor(() => expect(isInvalidated(harness, invalidationKeys.session)).toBe(true))
+    expect(isInvalidated(harness, invalidationKeys.pendingActions)).toBe(true)
+    expect(isInvalidated(harness, invalidationKeys.shells)).toBe(true)
+    expect(isInvalidated(harness, invalidationKeys.reconciliation)).toBe(false)
   })
 
   it('invalidates the cached session query on session.created', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
-    queryClient.setQueryData(['opencode', 'session', 'session-2', '/repo'], { id: 'session-2' })
+    const harness = await renderSse()
+    const sessionKey = ['opencode', 'session', 'session-2', '/repo'] as const
+    seed(harness, sessionKey, { id: 'session-2' })
 
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
+    harness.push(sessionCreated('session-2', { directory: '/repo' }))
 
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-    invalidateQueries.mockClear()
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.created',
-        directory: '/repo',
-        data: { sessionID: 'session-2', projectID: 'proj-1', slug: 'slug', location: { directory: '/repo' } },
-      })
-    })
-
-    await waitFor(() => {
-      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'session', 'session-2'] })
-    })
-
-    unmount()
+    await waitFor(() => expect(isInvalidated(harness, sessionKey)).toBe(true))
   })
 
   it('invalidates the cached session query on session.moved so the page follows the new directory', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
-    queryClient.setQueryData(['opencode', 'session', 'session-1', '/repo'], { id: 'session-1' })
+    const harness = await renderSse()
+    seed(harness, invalidationKeys.session, { id: 'session-1' })
 
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
+    harness.push(sessionMoved('session-1', '/elsewhere', { directory: '/repo' }))
 
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-    invalidateQueries.mockClear()
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.moved',
-        directory: '/repo',
-        data: { sessionID: 'session-1', projectID: 'proj-1', subpath: '', location: { directory: '/elsewhere' } },
-      })
-    })
-
-    await waitFor(() => {
-      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'session', 'session-1'] })
-    })
-
-    unmount()
+    await waitFor(() => expect(isInvalidated(harness, invalidationKeys.session)).toBe(true))
   })
 
   it('invalidates the cached session query on session.renamed', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
-    queryClient.setQueryData(['opencode', 'session', 'session-2', '/repo'], { id: 'session-2' })
+    const harness = await renderSse()
+    const sessionKey = ['opencode', 'session', 'session-2', '/repo'] as const
+    seed(harness, sessionKey, { id: 'session-2' })
 
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
+    harness.push(sessionRenamed('session-2', 'Renamed', { directory: '/repo' }))
 
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-    invalidateQueries.mockClear()
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.renamed',
-        directory: '/repo',
-        data: { sessionID: 'session-2', title: 'Renamed' },
-      })
-    })
-
-    await waitFor(() => {
-      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'session', 'session-2'] })
-    })
-
-    unmount()
+    await waitFor(() => expect(isInvalidated(harness, sessionKey)).toBe(true))
   })
 
   it('removes the session query on session.deleted', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
-    const removeQueries = vi.spyOn(queryClient, 'removeQueries')
-    queryClient.setQueryData(['opencode', 'session', 'session-2', '/repo'], { id: 'session-2' })
+    const harness = await renderSse()
+    const sessionKey = ['opencode', 'session', 'session-2', '/repo'] as const
+    seed(harness, sessionKey, { id: 'session-2' })
 
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
+    harness.push(sessionDeleted('session-2', { directory: '/repo' }))
 
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-    invalidateQueries.mockClear()
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.deleted',
-        directory: '/repo',
-        data: { sessionID: 'session-2' },
-      })
-    })
-
-    await waitFor(() => {
-      expect(removeQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'session', 'session-2'] })
-    })
-
-    unmount()
+    await waitFor(() => expect(harness.queryClient.getQueryData(sessionKey)).toBeUndefined())
   })
 
   it('reconciles model and agent selection events into the cached session', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-    queryClient.setQueryData(['opencode', 'session', 'session-2', '/repo'], {
-      id: 'session-2',
+    const harness = await renderSse()
+    seed(harness, invalidationKeys.session, {
+      id: 'session-1',
       agent: 'build',
       model: { providerID: 'anthropic', id: 'claude' },
     })
 
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
+    harness.push(sessionModelSelected('session-1', { providerID: 'openai', id: 'gpt-4' }, { directory: '/repo' }))
+    harness.push(sessionAgentSelected('session-1', 'plan', { directory: '/repo' }))
 
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.model.selected',
-        directory: '/repo',
-        data: { sessionID: 'session-2', model: { providerID: 'openai', id: 'gpt-4' } },
-      })
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.agent.selected',
-        directory: '/repo',
-        data: { sessionID: 'session-2', agent: 'plan' },
-      })
-    })
-
-    expect(queryClient.getQueryData(['opencode', 'session', 'session-2', '/repo'])).toMatchObject({
+    expect(harness.queryClient.getQueryData(invalidationKeys.session)).toMatchObject({
       model: { providerID: 'openai', id: 'gpt-4' },
       agent: 'plan',
     })
-
-    unmount()
   })
 
   it('patches the cached session revert from revert lifecycle events', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-    const sessionKey = ['opencode', 'session', 'session-1', '/repo']
-    queryClient.setQueryData(sessionKey, { id: 'session-1' })
+    const harness = await renderSse()
+    seed(harness, invalidationKeys.session, { id: 'session-1' })
 
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.revert.staged',
-        directory: '/repo',
-        data: { sessionID: 'session-1', revert: { messageID: 'message-3' } },
-      })
+    harness.push(sessionRevertStaged('session-1', 'message-3'))
+    expect(harness.queryClient.getQueryData(invalidationKeys.session)).toMatchObject({
+      revert: { messageID: 'message-3' },
     })
 
-    expect(queryClient.getQueryData(sessionKey)).toMatchObject({ revert: { messageID: 'message-3' } })
+    harness.push(sessionRevertCleared('session-1'))
+    expect(readRevert(harness)).toBeUndefined()
 
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.revert.cleared',
-        directory: '/repo',
-        data: { sessionID: 'session-1' },
-      })
-    })
-
-    expect(queryClient.getQueryData<{ revert?: unknown }>(sessionKey)?.revert).toBeUndefined()
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.revert.staged',
-        directory: '/repo',
-        data: { sessionID: 'session-1', revert: { messageID: 'message-4' } },
-      })
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.revert.committed',
-        directory: '/repo',
-        data: { sessionID: 'session-1' },
-      })
-    })
-
-    expect(queryClient.getQueryData<{ revert?: unknown }>(sessionKey)?.revert).toBeUndefined()
-
-    unmount()
+    harness.push(sessionRevertStaged('session-1', 'message-4'))
+    harness.push(sessionRevertCommitted('session-1'))
+    expect(readRevert(harness)).toBeUndefined()
   })
 
   it('refreshes session lists and the current session on an upstream resync without re-reading pending actions', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+    const harness = await renderSse()
+    seed(harness, invalidationKeys.session, { id: 'session-1' })
+    seed(harness, invalidationKeys.pendingActions, {})
+    seed(harness, invalidationKeys.shells, [])
+    seed(harness, invalidationKeys.reconciliation, {})
+    seed(harness, invalidationKeys.sessionList, [])
 
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-    invalidateQueries.mockClear()
-
-    act(() => {
-      MockEventSource.instances[0].emit('resync', { timestamp: Date.now() })
+    await act(async () => {
+      harness.transport.resync({ timestamp: Date.now() })
     })
 
-    expect(invalidateQueries).toHaveBeenCalledWith({
-      queryKey: ['opencode', 'session', 'session-1', '/repo'],
-    })
-    expect(invalidateQueries).toHaveBeenCalledWith(
-      expect.objectContaining({ predicate: expect.any(Function) }),
-    )
-    expect(invalidateQueries).not.toHaveBeenCalledWith({
-      queryKey: ['opencode', 'pending-actions', 'session-1', '/repo'],
-    })
-    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'shells'] })
-    expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['opencode', 'session-reconcile'] })
-
-    unmount()
+    await waitFor(() => expect(isInvalidated(harness, invalidationKeys.session)).toBe(true))
+    expect(isInvalidated(harness, invalidationKeys.sessionList)).toBe(true)
+    expect(isInvalidated(harness, invalidationKeys.shells)).toBe(true)
+    expect(isInvalidated(harness, invalidationKeys.pendingActions)).toBe(false)
+    expect(isInvalidated(harness, invalidationKeys.reconciliation)).toBe(false)
   })
 
   it('ignores a remote resync while the browser stream stays connected', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+    const harness = await renderSse()
+    seed(harness, invalidationKeys.session, { id: 'session-1' })
+    seed(harness, invalidationKeys.sessionList, [])
 
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-    invalidateQueries.mockClear()
-
-    act(() => {
-      MockEventSource.instances[0].emit('resync', { timestamp: Date.now(), serverId: 'srv_remote' })
+    await act(async () => {
+      harness.transport.resync({ timestamp: Date.now(), serverId: 'srv_remote' })
     })
 
-    expect(invalidateQueries).not.toHaveBeenCalled()
-
-    unmount()
+    expect(isInvalidated(harness, invalidationKeys.session)).toBe(false)
+    expect(isInvalidated(harness, invalidationKeys.sessionList)).toBe(false)
   })
 
   it('ignores a local resync on a remote server', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>
-        <OpenCodeServerProvider serverId="srv_remote">{children}</OpenCodeServerProvider>
-      </QueryClientProvider>
-    )
-    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+    const harness = await renderSse({ serverId: 'srv_remote' })
+    seed(harness, invalidationKeys.session, { id: 'session-1' })
+    seed(harness, invalidationKeys.sessionList, [])
 
-    const { result, unmount } = renderHook(() => useSSE('/repo', 'session-1'), { wrapper })
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-    invalidateQueries.mockClear()
-
-    act(() => {
-      MockEventSource.instances[0].emit('resync', { timestamp: Date.now() })
+    await act(async () => {
+      harness.transport.resync({ timestamp: Date.now() })
     })
 
-    expect(invalidateQueries).not.toHaveBeenCalled()
-
-    unmount()
+    expect(isInvalidated(harness, invalidationKeys.session)).toBe(false)
+    expect(isInvalidated(harness, invalidationKeys.sessionList)).toBe(false)
   })
 
   it('tracks background shells from shell lifecycle events without dropping completed shells', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-    const running = (id: string) => ({
-      id,
-      status: 'running',
-      command: `sleep ${id}`,
-      cwd: '/repo',
-      shell: 'zsh',
-      file: `/tmp/${id}.log`,
-      metadata: { sessionID: 'session-1' },
-      time: { started: 1 },
-    })
-    queryClient.setQueryData(['opencode', 'shells', '/repo'], [running('shell-1')])
+    const harness = await renderSse()
+    seed(harness, invalidationKeys.shells, [runningShell])
 
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
+    harness.push(shellCreated({ id: 'shell-2', status: 'running', sessionID: 'session-1' }, { directory: '/repo' }))
+    harness.push(shellExited('shell-1', 'exited', { directory: '/repo' }))
 
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
+    const shells = readShells(harness)
+    expect(shells.map((shell) => shell.id)).toEqual(['shell-1', 'shell-2'])
+    expect(shells[0]?.status).toBe('exited')
+    expect(shells[0]?.time.completed).toBeDefined()
 
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'shell.created',
-        directory: '/repo',
-        data: { info: running('shell-2') },
-      })
-      MockEventSource.instances[0].emit('message', {
-        type: 'shell.exited',
-        directory: '/repo',
-        data: { id: 'shell-1', exit: 0, status: 'exited' },
-      })
-    })
+    harness.push(shellDeleted('shell-1', { directory: '/repo' }))
 
-    const shells = queryClient.getQueryData<Array<{ id: string; status: string; time: { completed?: number } }>>(
-      ['opencode', 'shells', '/repo'],
-    )
-    expect(shells?.map((shell) => shell.id)).toEqual(['shell-1', 'shell-2'])
-    expect(shells?.[0]?.status).toBe('exited')
-    expect(shells?.[0]?.time.completed).toBeDefined()
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'shell.deleted',
-        directory: '/repo',
-        data: { id: 'shell-1' },
-      })
-    })
-
-    const afterDelete = queryClient.getQueryData<Array<{ id: string; status: string }>>(['opencode', 'shells', '/repo'])
-    expect(afterDelete?.map((shell) => shell.id)).toEqual(['shell-1', 'shell-2'])
-    expect(afterDelete?.[0]?.status).toBe('exited')
-
-    unmount()
+    const afterDelete = readShells(harness)
+    expect(afterDelete.map((shell) => shell.id)).toEqual(['shell-1', 'shell-2'])
+    expect(afterDelete[0]?.status).toBe('exited')
   })
 
   it('keeps a deleted running shell visible as unavailable', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-    queryClient.setQueryData(['opencode', 'shells', '/repo'], [
-      {
-        id: 'shell-1',
-        status: 'running',
-        command: 'sleep 1',
-        cwd: '/repo',
-        shell: 'zsh',
-        file: '/tmp/shell-1.log',
-        metadata: { sessionID: 'session-1' },
-        time: { started: 1 },
-      },
-    ])
+    const harness = await renderSse()
+    seed(harness, invalidationKeys.shells, [runningShell])
 
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
+    harness.push(shellDeleted('shell-1', { directory: '/repo' }))
 
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'shell.deleted',
-        directory: '/repo',
-        data: { id: 'shell-1' },
-      })
-    })
-
-    expect(
-      queryClient.getQueryData<Array<{ id: string; status: string }>>(['opencode', 'shells', '/repo'])?.[0],
-    ).toMatchObject({ id: 'shell-1', status: 'unavailable' })
-
-    unmount()
+    expect(readShells(harness)[0]).toMatchObject({ id: 'shell-1', status: 'unavailable' })
   })
 
   it('does not discard a shell exit that arrives before the cache is seeded', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+    const harness = await renderSse()
+    seed(harness, invalidationKeys.shells, [])
 
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
+    harness.push(shellExited('shell-1', 'exited', { directory: '/repo' }))
 
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-    invalidateQueries.mockClear()
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'shell.exited',
-        directory: '/repo',
-        data: { id: 'shell-1', exit: 0, status: 'exited' },
-      })
-    })
-
-    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'shells', '/repo'] })
-
-    unmount()
+    await waitFor(() => expect(isInvalidated(harness, invalidationKeys.shells)).toBe(true))
   })
 
   it('does not resurrect a completed shell from a stale created event', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-    const shell = (status: string) => ({
-      id: 'shell-1',
-      status,
-      command: 'sleep 1',
-      cwd: '/repo',
-      shell: 'zsh',
-      file: '/tmp/shell-1.log',
-      metadata: { sessionID: 'session-1' },
-      time: { started: 1 },
-    })
-    queryClient.setQueryData(['opencode', 'shells', '/repo'], [
-      { ...shell('exited'), exit: 0, time: { started: 1, completed: 2 } },
+    const harness = await renderSse()
+    seed(harness, invalidationKeys.shells, [
+      { ...runningShell, status: 'exited', exit: 0, time: { started: 1, completed: 2 } },
     ])
 
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
+    harness.push(shellCreated({ id: 'shell-1', status: 'running', sessionID: 'session-1' }, { directory: '/repo' }))
 
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'shell.created',
-        directory: '/repo',
-        data: { info: shell('running') },
-      })
-    })
-
-    expect(
-      queryClient.getQueryData<Array<{ id: string; status: string }>>(['opencode', 'shells', '/repo'])?.[0]?.status,
-    ).toBe('exited')
-
-    unmount()
+    expect(readShells(harness)[0]?.status).toBe('exited')
   })
 
   it('keeps a killed shell killed after a later shell.exited event', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-    const key = ['opencode', 'shells', '/repo']
-    queryClient.setQueryData(key, [
-      {
-        id: 'shell-1',
-        status: 'running',
-        command: 'sleep 1',
-        cwd: '/repo',
-        shell: 'zsh',
-        file: '/tmp/shell-1.log',
-        metadata: { sessionID: 'session-1' },
-        time: { started: 1 },
-      },
-    ])
+    const transport = new TestEventStreamTransport()
+    openCodeEventStream.setTransport(transport)
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData(invalidationKeys.shells, [runningShell])
 
-    const { result, unmount } = renderHook(
+    const { result } = renderHookWithProviders(
       () => ({ sse: useSSE('/repo', 'session-1'), kill: useKillShell('/repo') }),
-      { wrapper: createWrapper(queryClient) },
+      {
+        auth: false,
+        theme: false,
+        tts: false,
+        queryClient,
+        fetchRoutes: [
+          { method: 'DELETE', path: '/api/opencode/api/shell/shell-1', respond: () => ({ status: 204 }) },
+        ],
+      },
     )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
+    await connectTestEventStream(transport)
     await waitFor(() => expect(result.current.sse.isConnected).toBe(true))
 
     await act(async () => {
       await result.current.kill.mutateAsync('shell-1')
     })
 
-    expect(queryClient.getQueryData<Array<{ status: string }>>(key)?.[0]?.status).toBe('killed')
+    expect(queryClient.getQueryData<Array<{ status: string }>>(invalidationKeys.shells)?.[0]?.status).toBe('killed')
 
     act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'shell.exited',
-        directory: '/repo',
-        data: { id: 'shell-1', status: 'exited' },
-      })
+      transport.message(shellExited('shell-1', 'exited', { directory: '/repo' }))
     })
 
-    expect(queryClient.getQueryData<Array<{ status: string }>>(key)?.[0]?.status).toBe('killed')
-
-    unmount()
-    clearShellExitRecord('/repo', 'shell-1')
+    expect(queryClient.getQueryData<Array<{ status: string }>>(invalidationKeys.shells)?.[0]?.status).toBe('killed')
   })
 
   it('does not write session status from stream events', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
+    const harness = await renderSse()
 
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-
-    act(() => {
-      const events = [
-        { type: 'session.status', directory: '/repo', data: { sessionID: 'session-1', status: { type: 'busy' } } },
-        { type: 'session.execution.started', directory: '/repo', data: { sessionID: 'session-1' } },
-        { type: 'session.idle', directory: '/repo', data: { sessionID: 'session-1' } },
-      ]
-      for (const event of events) {
-        MockEventSource.instances[0].emit('message', event)
-      }
-    })
+    harness.push(sessionStatusEvent('session-1', { type: 'busy' }))
+    harness.push(sessionExecutionStarted('session-1', { directory: '/repo' }))
+    harness.push(sessionIdle('session-1', { directory: '/repo' }))
 
     expect(useSessionStatus.getState().getStatus('session-1')).toEqual({ type: 'idle' })
-
-    unmount()
   })
 
   it('clears the network send error on session.idle', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-
+    const harness = await renderSse()
     useSendErrorStore.getState().setError({
       sessionID: 'session-1',
       title: 'Failed to send',
@@ -745,232 +354,176 @@ describe('useSSE', () => {
       kind: 'network',
     })
 
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.idle',
-        directory: '/repo',
-        data: { sessionID: 'session-1' },
-      })
-    })
+    harness.push(sessionIdle('session-1', { directory: '/repo' }))
 
     expect(useSendErrorStore.getState().getError('session-1')).toBeNull()
-
-    unmount()
   })
 
   it('ignores message, todo, and form events', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
+    const harness = await renderSse()
+    seed(harness, invalidationKeys.session, { id: 'session-1' })
+    seed(harness, invalidationKeys.sessionList, [])
+
+    const events: JsonObject[] = [
+      {
+        id: 'evt_message_updated',
+        created: 1,
+        type: 'message.updated',
+        directory: '/repo',
+        data: { info: { id: 'message-1', sessionID: 'session-1' } },
       },
-    })
-    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
-    const setQueryData = vi.spyOn(queryClient, 'setQueryData')
+      {
+        id: 'evt_message_removed',
+        created: 2,
+        type: 'message.removed',
+        directory: '/repo',
+        data: { sessionID: 'session-1', messageID: 'message-1' },
+      },
+      {
+        id: 'evt_todo_updated',
+        created: 3,
+        type: 'todo.updated',
+        directory: '/repo',
+        data: { sessionID: 'session-1', todos: [] },
+      },
+      {
+        id: 'evt_form_replied',
+        created: 4,
+        type: 'form.replied',
+        directory: '/repo',
+        data: { id: 'form-1', sessionID: 'session-1', answer: {} },
+      },
+      {
+        id: 'evt_form_cancelled',
+        created: 5,
+        type: 'form.cancelled',
+        directory: '/repo',
+        data: { id: 'form-1', sessionID: 'session-1' },
+      },
+    ]
+    for (const event of events) harness.push(event)
 
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-    invalidateQueries.mockClear()
-    setQueryData.mockClear()
-
-    act(() => {
-      const events = [
-        { type: 'message.updated', data: { info: { id: 'message-1', sessionID: 'session-1' } } },
-        { type: 'message.removed', data: { sessionID: 'session-1', messageID: 'message-1' } },
-        { type: 'todo.updated', data: { sessionID: 'session-1', todos: [] } },
-        { type: 'form.replied', data: { id: 'form-1', sessionID: 'session-1', answer: {} } },
-        { type: 'form.cancelled', data: { id: 'form-1', sessionID: 'session-1' } },
-      ]
-      for (const event of events) {
-        MockEventSource.instances[0].emit('message', { ...event, directory: '/repo' })
-      }
-    })
-
-    expect(invalidateQueries).not.toHaveBeenCalled()
-    expect(setQueryData).not.toHaveBeenCalled()
-
-    unmount()
+    expect(isInvalidated(harness, invalidationKeys.session)).toBe(false)
+    expect(isInvalidated(harness, invalidationKeys.sessionList)).toBe(false)
+    expect(harness.queryClient.getQueryData(invalidationKeys.session)).toEqual({ id: 'session-1' })
   })
 
   it('does not invalidate the session list on per-token delta events', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+    const harness = await renderSse()
+    seed(harness, invalidationKeys.sessionList, [])
 
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-    invalidateQueries.mockClear()
-
-    act(() => {
-      for (const type of ['session.text.delta', 'session.reasoning.delta', 'session.tool.input.delta']) {
-        MockEventSource.instances[0].emit('message', {
-          type,
-          directory: '/repo',
-          data: { sessionID: 'session-2' },
-        })
-      }
-    })
+    for (const type of ['session.text.delta', 'session.reasoning.delta', 'session.tool.input.delta']) {
+      harness.push({
+        id: `evt_${type}`,
+        created: 1,
+        type,
+        directory: '/repo',
+        data: { sessionID: 'session-2' },
+      })
+    }
 
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 300))
     })
 
-    expect(invalidateQueries).not.toHaveBeenCalled()
-
-    unmount()
+    expect(isInvalidated(harness, invalidationKeys.sessionList)).toBe(false)
   })
 
   it('does not show an update toast on installation.update-available', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
+    const harness = await renderSse()
+
+    harness.push({
+      id: 'evt_update_available',
+      created: 1,
+      type: 'installation.update-available',
+      directory: '/repo',
+      data: { version: '2.0.0' },
     })
 
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'installation.update-available',
-        directory: '/repo',
-        data: { version: '2.0.0' },
-      })
-    })
-
-    expect(showToast.info).not.toHaveBeenCalled()
-    expect(showToast.loading).not.toHaveBeenCalled()
-
-    unmount()
+    expect(screen.queryByText('OpenCode updated to v2.0.0')).toBeNull()
   })
 
   it('shows an updated toast on installation.updated', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
+    const harness = await renderSse()
+
+    harness.push({
+      id: 'evt_updated',
+      created: 1,
+      type: 'installation.updated',
+      directory: '/repo',
+      data: { version: '2.0.0' },
     })
 
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'installation.updated',
-        directory: '/repo',
-        data: { version: '2.0.0' },
-      })
-    })
-
-    expect(showToast.success).toHaveBeenCalled()
-
-    unmount()
+    expect(await screen.findByText('OpenCode updated to v2.0.0')).toBeInTheDocument()
   })
 
   it('ignores events belonging to another OpenCode server', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
-    queryClient.setQueryData(['opencode', 'session', 'session-2', '/repo'], { id: 'session-2' })
+    const harness = await renderSse()
+    const sessionKey = ['opencode', 'session', 'session-2', '/repo'] as const
+    seed(harness, sessionKey, { id: 'session-2' })
 
-    const { result, unmount } = renderHook(
-      () => useSSE('/repo', 'session-1'),
-      { wrapper: createWrapper(queryClient) }
-    )
+    harness.push(sessionCreated('session-2', { directory: '/repo', serverId: 'srv_remote' }))
+    expect(isInvalidated(harness, sessionKey)).toBe(false)
 
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-    await waitFor(() => expect(result.current.isConnected).toBe(true))
-    invalidateQueries.mockClear()
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.created',
-        serverId: 'srv_remote',
-        directory: '/repo',
-        data: { sessionID: 'session-2', projectID: 'proj-1', slug: 'slug', location: { directory: '/repo' } },
-      })
-    })
-
-    expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['opencode', 'session', 'session-2'] })
-
-    act(() => {
-      MockEventSource.instances[0].emit('message', {
-        type: 'session.created',
-        directory: '/repo',
-        data: { sessionID: 'session-2', projectID: 'proj-1', slug: 'slug', location: { directory: '/repo' } },
-      })
-    })
-
-    await waitFor(() => {
-      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['opencode', 'session', 'session-2'] })
-    })
-
-    unmount()
+    harness.push(sessionCreated('session-2', { directory: '/repo' }))
+    await waitFor(() => expect(isInvalidated(harness, sessionKey)).toBe(true))
   })
 
   it('subscribes with the server-scoped directory key for a remote server', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
+    const harness = await renderSse({ serverId: 'srv_remote' })
 
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>
-        <OpenCodeServerProvider serverId="srv_remote">{children}</OpenCodeServerProvider>
-      </QueryClientProvider>
-    )
-
-    const { unmount } = renderHook(() => useSSE('/repo', 'session-1'), { wrapper })
-
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
-    await connect(0, 'client-1')
-
-    await waitFor(() => {
-      expect(globalThis.fetch).toHaveBeenCalledWith('/api/sse/subscribe', expect.objectContaining({
-        body: JSON.stringify({ clientId: 'client-1', directories: ['srv_remote|/repo'] }),
-      }))
-    })
-
-    unmount()
+    expect(harness.transport.openedUrls).toHaveLength(1)
+    expect(subscribedDirectories(harness.transport)).toEqual(['srv_remote|/repo'])
   })
 })
+
+function readShells(harness: SseHarness): ShellRecord[] {
+  return harness.queryClient.getQueryData<ShellRecord[]>(invalidationKeys.shells) ?? []
+}
+
+function readRevert(harness: SseHarness): SessionInfo['revert'] {
+  return harness.queryClient.getQueryData<SessionInfo>(invalidationKeys.session)?.revert
+}
+
+function sessionRevertStaged(sessionID: string, messageID: string): JsonObject {
+  return {
+    id: `evt_revert_staged_${messageID}`,
+    created: 1,
+    type: 'session.revert.staged',
+    directory: '/repo',
+    durable: { aggregateID: sessionID, seq: 1, version: 1 },
+    data: { sessionID, revert: { messageID } },
+  }
+}
+
+function sessionRevertCleared(sessionID: string): JsonObject {
+  return {
+    id: `evt_revert_cleared_${sessionID}`,
+    created: 2,
+    type: 'session.revert.cleared',
+    directory: '/repo',
+    durable: { aggregateID: sessionID, seq: 2, version: 1 },
+    data: { sessionID },
+  }
+}
+
+function sessionRevertCommitted(sessionID: string): JsonObject {
+  return {
+    id: `evt_revert_committed_${sessionID}`,
+    created: 3,
+    type: 'session.revert.committed',
+    directory: '/repo',
+    durable: { aggregateID: sessionID, seq: 3, version: 1 },
+    data: { sessionID, to: 'message-4' },
+  }
+}
+
+function sessionStatusEvent(sessionID: string, status: SessionStatus): JsonObject {
+  return {
+    id: `evt_status_${sessionID}`,
+    created: 1,
+    type: 'session.status',
+    directory: '/repo',
+    data: { sessionID, status },
+  }
+}

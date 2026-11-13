@@ -1,323 +1,96 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { SessionDetail } from '../SessionDetail'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { screen, waitFor, within } from '@testing-library/react'
+import { makeRepo, makeSession } from '@/test/fixtures/api'
+import { connectTestEventStream } from '@/test/render'
+import { renderSessionPage } from '@/test/sessionPage'
+import { installMatchMedia } from '@/test/browserFakes'
 
-const mocks = vi.hoisted(() => ({
-  useSession: vi.fn(),
-  useSessionTranscript: vi.fn(),
-  useSSE: vi.fn(),
-  useRepoActivity: vi.fn(),
-  usePermissions: vi.fn(),
-  useForms: vi.fn(),
-  useSSEHealth: vi.fn(),
-  useConfig: vi.fn(),
-  useSettings: vi.fn(),
-  useSettingsDialog: vi.fn(),
-  useMobile: vi.fn(),
-  useVisualViewport: vi.fn(),
-  useShortcutActions: vi.fn(),
-  useAutoScroll: vi.fn(),
-  useDialogParam: vi.fn(),
-  RepoSkillsDialog: vi.fn(() => null),
-}))
-
-vi.mock('@/hooks/useOpenCode', () => ({
-  useSession: mocks.useSession,
-  useInterruptSession: vi.fn(() => ({ mutate: vi.fn() })),
-  useUpdateSession: vi.fn(() => ({ mutate: vi.fn() })),
-  useCreateSession: vi.fn(() => ({ mutateAsync: vi.fn() })),
-  useConfig: mocks.useConfig,
-}))
-
-vi.mock('@/hooks/useSessionTranscript', () => ({
-  useSessionTranscript: mocks.useSessionTranscript,
-}))
-
-vi.mock('@/hooks/useRepoSiblings', () => ({
-  useRepoSiblings: vi.fn(() => ({ data: [] })),
-}))
-
-vi.mock('@/hooks/useModelSelection', () => ({
-  useModelSelection: vi.fn(() => ({ model: null, modelString: null, modelRef: null })),
-}))
-
-vi.mock('@/hooks/useTTS', () => ({
-  useTTS: vi.fn(() => ({ isEnabled: false })),
-}))
-
-vi.mock('@/hooks/useSettings', () => ({
-  useSettings: vi.fn(() => ({
-    preferences: { expandToolCalls: false },
-    updateSettings: vi.fn(),
-  })),
-}))
-
-vi.mock('@/hooks/useSettingsDialog', () => ({
-  useSettingsDialog: vi.fn(() => ({ open: vi.fn() })),
-}))
-
-vi.mock('@/hooks/useMobile', () => ({
-  useMobile: vi.fn(() => false),
-  useSwipeBack: vi.fn(() => ({ ref: vi.fn() })),
-}))
-
-vi.mock('@/hooks/useVisualViewport', () => ({
-  useVisualViewport: vi.fn(() => ({ keyboardHeight: 0 })),
-}))
-
-vi.mock('@/contexts/KeyboardShortcutsContext', () => ({
-  useShortcutActions: mocks.useShortcutActions,
-}))
-
-vi.mock('@/hooks/useAutoScroll', () => ({
-  useAutoScroll: vi.fn(() => ({ scrollToBottom: vi.fn() })),
-}))
-
-vi.mock('@/hooks/useDialogParam', () => ({
-  useDialogParam: vi.fn(() => [false, vi.fn()]),
-}))
-
-vi.mock('@/hooks/useAutoPlayLastResponse', () => ({
-  getAssistantText: vi.fn(() => ''),
-  getLatestPlayableAssistantMessage: vi.fn(() => null),
-  useAutoPlayLastResponse: vi.fn(() => {}),
-}))
-
-vi.mock('@/stores/uiStateStore', () => ({
-  useUIState: vi.fn(() => vi.fn()),
-}))
-
-vi.mock('@/stores/sessionStatusStore', () => ({
-  useSessionStatus: vi.fn(() => ({ setStatus: vi.fn() })),
-  useSessionStatusForSession: vi.fn(() => ({ type: 'idle' })),
-}))
-
-vi.mock('@/hooks/useSSE', () => ({
-  useSSE: mocks.useSSE,
-}))
-
-vi.mock('@/hooks/useRepoActivity', () => ({
-  useRepoActivity: mocks.useRepoActivity,
-}))
-
-vi.mock('@/contexts/EventContext', async (importOriginal) => {
-  const actual = await importOriginal()
-  return {
-    ...(actual as object),
-    usePermissions: mocks.usePermissions,
-    useForms: mocks.useForms,
-    useSSEHealth: mocks.useSSEHealth,
-  }
+const assistantRepo = makeRepo({
+  id: 0,
+  name: 'assistant',
+  localPath: 'repos/assistant',
+  fullPath: '/abs/assistant',
 })
 
-vi.mock('@/hooks/useActiveWork', () => ({
-  useActiveWorkCounts: () => ({ needsInput: 0, running: 0 }),
-  useRepoActivityState: () => null,
-}))
-
-vi.mock('@/api/repos', () => ({
-  getRepo: vi.fn((repoId: number) => Promise.resolve(repoId === 0 ? {
-    id: 0,
-    localPath: 'assistant',
-    fullPath: '/abs/assistant',
-    defaultBranch: 'main',
-    cloneStatus: 'ready',
-    clonedAt: 1,
-  } : null)),
-}))
-
-vi.mock('@/components/session/BackgroundWorkBar', () => ({ BackgroundWorkBar: vi.fn(() => null) }))
-vi.mock('@/components/session/SessionGoalBar', () => ({ SessionGoalBar: vi.fn(() => null) }))
-vi.mock('@/hooks/useSessionGoals', () => ({
-  useSessionGoal: vi.fn(() => ({ data: undefined })),
-  useSessionGoalCommand: vi.fn(() => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false })),
-}))
-vi.mock('@/hooks/useSessionPermissionMode', () => ({
-  useSessionPermissionMode: vi.fn(() => ({ data: undefined })),
-}))
-vi.mock('@/components/session/PermissionModeToggle', () => ({
-  PermissionModeToggle: vi.fn(() => null),
-}))
-
-vi.mock('@/components/file-browser/FileBrowserSheet', () => ({
-  FileBrowserSheet: vi.fn(() => null),
-}))
-
-vi.mock('@/components/repo/RepoMcpDialog', () => ({
-  RepoMcpDialog: vi.fn(() => null),
-}))
-vi.mock('@/components/repo/RepoActionsDialog', () => ({ RepoActionsDialog: vi.fn(() => null) }))
-
-vi.mock('@/components/repo/ResetPermissionsDialog', () => ({
-  ResetPermissionsDialog: vi.fn(() => null),
-}))
-
-vi.mock('@/components/repo/RepoSkillsDialog', () => ({
-  RepoSkillsDialog: mocks.RepoSkillsDialog,
-}))
-
-vi.mock('@/components/source-control', () => ({
-  SourceControlPanel: vi.fn(() => null),
-}))
-
-vi.mock('@/components/session/FormPrompt', () => ({
-  FormPrompt: vi.fn(() => null),
-}))
-
-vi.mock('@/components/session/MinimizedFormIndicator', () => ({
-  MinimizedFormIndicator: vi.fn(() => null),
-}))
-
-vi.mock('@/components/notifications/PendingActionsGroup', () => ({
-  PendingActionsGroup: vi.fn(() => null),
-}))
+function subscribedDirectories(eventStream: ReturnType<typeof renderSessionPage>['eventStream']): string[] {
+  const subscribePosts = (eventStream?.posts ?? []).filter((post) => post.path === '/api/sse/subscribe')
+  return subscribePosts.flatMap((post) => ('directories' in post.body ? post.body.directories ?? [] : []))
+}
 
 describe('SessionDetail assistant loading at repoId=0', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-
-    mocks.useSession.mockReturnValue({ data: undefined, isLoading: false })
-    mocks.useSessionTranscript.mockReturnValue({
-      messages: [],
-      pending: [],
-      status: 'idle',
-      isLoading: false,
-      fetchOlder: vi.fn(),
-      hasOlder: false,
-    })
-    mocks.useSSE.mockReturnValue({ isConnected: true, isReconnecting: false })
-    mocks.useRepoActivity.mockReturnValue(undefined)
-    mocks.usePermissions.mockReturnValue({
-      pendingCount: 0,
-      hasPermissionsForSession: vi.fn(() => false),
-      syncForSession: vi.fn(),
-    })
-    mocks.useForms.mockReturnValue({
-      current: null,
-      getForSession: vi.fn(() => null),
-      pendingCount: 0,
-      hasFormsForSession: vi.fn(() => false),
-      reply: vi.fn(),
-      cancel: vi.fn(),
-      syncForSession: vi.fn(),
-    })
-    mocks.useSSEHealth.mockReturnValue({ isHealthy: true })
-    mocks.useConfig.mockReturnValue({ data: undefined, isLoading: false })
-    mocks.useSettings.mockReturnValue({
-      preferences: { expandToolCalls: false },
-      updateSettings: vi.fn(),
-    })
-    mocks.useSettingsDialog.mockReturnValue({ open: vi.fn() })
-    mocks.useMobile.mockReturnValue(false)
-    mocks.useVisualViewport.mockReturnValue({ keyboardHeight: 0 })
-    mocks.useAutoScroll.mockReturnValue({ scrollToBottom: vi.fn() })
-    mocks.useDialogParam.mockReturnValue([false, vi.fn()])
+    installMatchMedia(false)
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 780 })
   })
 
-  const createQueryClient = () =>
-    new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
+  it('does not show the repository loading state for assistant sessions', async () => {
+    renderSessionPage({ route: '/repos/0/sessions/sess-asst-1?assistant=1', repo: assistantRepo })
+
+    expect(await screen.findByTestId('session-header-region')).toBeInTheDocument()
+    expect(screen.queryByText('Loading repository...')).not.toBeInTheDocument()
+  })
+
+  it('names the assistant workspace in the header', async () => {
+    renderSessionPage({ route: '/repos/0/sessions/sess-asst-1?assistant=1', repo: assistantRepo })
+
+    const header = await screen.findByTestId('session-header-region')
+    expect(within(header).getByText('Assistant')).toBeInTheDocument()
+  })
+
+  it('loads skills for the assistant directory instead of an empty directory', async () => {
+    const { fetchFake } = renderSessionPage({
+      route: '/repos/0/sessions/sess-asst-1?assistant=1&dialog=skills',
+      repo: assistantRepo,
+      session: makeSession({ id: 'sess-asst-1', location: { directory: '/abs/assistant' } }),
     })
 
-  const renderAssistantSession = (sessionId: string) => {
-    return render(
-      <MemoryRouter initialEntries={[`/repos/0/sessions/${sessionId}?assistant=1`]}>
-        <QueryClientProvider client={createQueryClient()}>
-          <Routes>
-            <Route path="/repos/:id/sessions/:sessionId" element={<SessionDetail />} />
-          </Routes>
-        </QueryClientProvider>
-      </MemoryRouter>
+    await waitFor(() => {
+      expect(fetchFake.findRequests('GET', '/api/opencode/api/skill')).not.toHaveLength(0)
+    })
+    const skillDirectories = fetchFake.findRequests('GET', '/api/opencode/api/skill').map(
+      (request) => request.searchParams.get('location[directory]'),
     )
-  }
-
-  it('does not show "Loading repository..." for assistant sessions at repoId=0', async () => {
-    renderAssistantSession('sess-asst-1')
-
-    await waitFor(() => {
-      expect(screen.queryByText('Loading repository...')).not.toBeInTheDocument()
-    })
+    expect(skillDirectories).toContain('/abs/assistant')
+    expect(skillDirectories).not.toContain('')
+    expect(skillDirectories).not.toContain(null)
   })
 
-  it('renders "Assistant" as the workspace display name', async () => {
-    renderAssistantSession('sess-asst-1')
-
-    await waitFor(() => {
-      expect(screen.getByText('Assistant')).toBeInTheDocument()
+  it('subscribes to the session directory when it differs from the repo path', async () => {
+    const { eventStream } = renderSessionPage({
+      route: '/repos/0/sessions/sess-wt-1?assistant=1',
+      repo: assistantRepo,
+      session: makeSession({
+        id: 'sess-wt-1',
+        title: 'Scheduled run',
+        location: { directory: '/abs/worktrees/job-1-run-1' },
+      }),
     })
+
+    await connectTestEventStream(eventStream)
+    await waitFor(() => expect(subscribedDirectories(eventStream)).toContain('/abs/worktrees/job-1-run-1'))
   })
 
-  it('passes directory from assistant repo to RepoSkillsDialog once loaded', async () => {
-    renderAssistantSession('sess-asst-1')
-
-    await waitFor(() => {
-      const lastCall = mocks.RepoSkillsDialog.mock.calls.at(-1)
-      expect(lastCall).toBeDefined()
-      expect(lastCall![0].directory).toBe('/abs/assistant')
+  it('subscribes to the repo path when the session lives in the repo directory', async () => {
+    const { eventStream } = renderSessionPage({
+      route: '/repos/0/sessions/sess-asst-1?assistant=1',
+      repo: assistantRepo,
+      session: makeSession({
+        id: 'sess-asst-1',
+        title: 'Assistant chat',
+        location: { directory: '/abs/assistant' },
+      }),
     })
+
+    await connectTestEventStream(eventStream)
+    await waitFor(() => expect(subscribedDirectories(eventStream)).toEqual(['/abs/assistant']))
   })
 
-  it('does not pass empty string for directory when repoDirectory is undefined', async () => {
-    renderAssistantSession('sess-asst-1')
-
-    await waitFor(() => {
-      expect(mocks.RepoSkillsDialog).toHaveBeenCalled()
+  it('shows the repository loading state for a non-assistant session whose repo has not loaded', async () => {
+    renderSessionPage({
+      route: '/repos/1/sessions/sess-1',
+      repoRespond: () => new Promise<never>(() => undefined),
     })
 
-    mocks.RepoSkillsDialog.mock.calls.forEach(([props]) => {
-      expect(props.directory).not.toBe('')
-    })
-  })
-
-  it('subscribes and caches using the session directory when it differs from the repo path', async () => {
-    mocks.useSession.mockReturnValue({
-      data: { id: 'sess-wt-1', location: { directory: '/abs/worktrees/job-1-run-1' }, title: 'Scheduled run', time: {} },
-      isLoading: false,
-    })
-
-    renderAssistantSession('sess-wt-1')
-
-    await waitFor(() => {
-      expect(mocks.useSSE.mock.calls.at(-1)?.[0]).toBe('/abs/worktrees/job-1-run-1')
-    })
-
-    expect(mocks.useSessionTranscript.mock.calls.at(-1)?.[1]).toBe('/abs/worktrees/job-1-run-1')
-  })
-
-  it('keeps using the repo path when the session lives in the repo directory', async () => {
-    mocks.useSession.mockReturnValue({
-      data: { id: 'sess-asst-1', location: { directory: '/abs/assistant' }, title: 'Assistant chat', time: {} },
-      isLoading: false,
-    })
-
-    renderAssistantSession('sess-asst-1')
-
-    await waitFor(() => {
-      expect(mocks.useSSE.mock.calls.at(-1)?.[0]).toBe('/abs/assistant')
-    })
-
-    expect(mocks.useSessionTranscript.mock.calls.at(-1)?.[1]).toBe('/abs/assistant')
-  })
-
-  it('shows the loading state for a non-assistant session whose repo has not loaded', async () => {
-    mocks.useSession.mockReturnValue({ data: undefined, isLoading: false })
-
-    render(
-      <MemoryRouter initialEntries={['/repos/1/sessions/sess-1']}>
-        <QueryClientProvider client={createQueryClient()}>
-          <Routes>
-            <Route path="/repos/:id/sessions/:sessionId" element={<SessionDetail />} />
-          </Routes>
-        </QueryClientProvider>
-      </MemoryRouter>
-    )
-
-    await waitFor(() => {
-      expect(screen.getByText('Loading repository...')).toBeInTheDocument()
-    })
+    expect(await screen.findByText('Loading repository...')).toBeInTheDocument()
   })
 })

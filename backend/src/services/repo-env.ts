@@ -49,6 +49,8 @@ function repoFileSignature(filePath: string): string {
   return `${entrySignature(path.dirname(filePath))}|${entrySignature(filePath)}`
 }
 
+export type RepoEnvResolver = Pick<RepoEnvService, 'resolveForDirectory'>
+
 export class RepoEnvService {
   private readonly directoryCache = new Map<string, DirectoryResolution>()
   private readonly repoFileCache = new Map<string, RepoFileResolution>()
@@ -60,12 +62,6 @@ export class RepoEnvService {
     private readonly secretsService: SecretsService,
   ) {}
 
-  /**
-   * Resolves the repository environment for a directory.
-   *
-   * Never rejects: any internal failure is logged as a warning naming the directory
-   * and resolves to an empty result.
-   */
   async resolveForDirectory(cwd: string): Promise<ResolvedRepoEnv> {
     try {
       this.syncCacheEpoch()

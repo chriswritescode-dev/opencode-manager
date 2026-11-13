@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { CopyButton } from '@/components/ui/copy-button'
 import { TextPart } from '@/components/message/TextPart'
 import { askSideQuestion } from '@/api/opencode'
-import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { useOpenCodeServerId } from '@/contexts/opencode-server-context'
 
 interface SideQuestionDialogProps {
   open: boolean

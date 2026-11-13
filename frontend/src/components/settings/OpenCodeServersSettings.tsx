@@ -10,12 +10,13 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
+import { readFailureMessage } from '@/components/jsonValue'
 import { showToast } from '@/lib/toast'
 import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
 import { OpenCodeServerDialog, OpenCodeVersionBadge, type OpenCodeServerFormValues } from './OpenCodeServerDialog'
 
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback
+function errorMessage(cause: unknown, fallback: string): string {
+  return readFailureMessage(cause) || fallback
 }
 
 function ServerTestResult({ result }: { result: OpenCodeServerTestResult }) {

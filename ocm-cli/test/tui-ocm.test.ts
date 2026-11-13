@@ -1,25 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { z } from 'zod'
 import type { Context } from '@opencode/plugin/tui/context'
 import { runOcmSwitch } from '../src/tui-ocm.js'
+import type { OcmSwitchDeps, OcmSwitchRuntime } from '../src/tui-ocm.js'
 import type { ManagerRepo } from '../src/manager-repos.js'
 import type { RemoteContext } from '../src/remote-context.js'
-
-const mocks = vi.hoisted(() => ({
-  resolveManagerAuth: vi.fn(),
-  fetchRepos: vi.fn(),
-  resolveOpenCodeProjectId: vi.fn(),
-  warmRepoProxy: vi.fn(),
-  readState: vi.fn(),
-  writeState: vi.fn(),
-  setPendingWarp: vi.fn(),
-}))
-
-vi.mock('../src/manager-auth.js', () => ({ resolveManagerAuth: mocks.resolveManagerAuth }))
-vi.mock('../src/manager-repos.js', () => ({ fetchRepos: mocks.fetchRepos }))
-vi.mock('@opencode-manager/shared/project-id', () => ({ resolveOpenCodeProjectId: mocks.resolveOpenCodeProjectId }))
-vi.mock('../src/repo-proxy.js', () => ({ warmRepoProxy: mocks.warmRepoProxy }))
-vi.mock('../src/state.js', () => ({ readState: mocks.readState, writeState: mocks.writeState }))
-vi.mock('../src/warp.js', () => ({ setPendingWarp: mocks.setPendingWarp }))
+import type { OcmTuiContext } from '../src/tui-context.js'
 
 const MANAGER_URL = 'https://manager.example'
 
@@ -37,78 +23,117 @@ function repo(overrides: Partial<ManagerRepo> = {}): ManagerRepo {
   }
 }
 
+const SelectRequestSchema = z.object({
+  title: z.string(),
+  options: z.array(z.object({
+    title: z.string(),
+    description: z.string().optional(),
+    category: z.string().optional(),
+    disabled: z.boolean().optional(),
+  }).loose()),
+})
+
 function createFakeContext(route: { type: string; sessionID?: string } = { type: 'home' }) {
-  const toast = vi.fn()
-  const confirm = vi.fn()
+  const toast = vi.fn<Context['ui']['toast']['show']>()
+  const confirm = vi.fn<Context['ui']['dialog']['confirm']>()
   const select = vi.fn()
-  const dispatch = vi.fn()
-  const context = {
+  const dispatch = vi.fn<Context['keymap']['dispatch']>()
+  const context: OcmTuiContext = {
     ui: {
       toast: { show: toast },
-      dialog: { confirm, select },
-      router: { current: () => route },
+      dialog: { confirm, select, prompt: vi.fn() },
+      router: { current: () => (route.type === 'session' ? { type: 'session', sessionID: route.sessionID ?? 'ses_a' } : { type: 'home' }), navigate: vi.fn() },
+      tabs: { enabled: () => false, open: () => true, focus: () => true },
+      slot: vi.fn(() => () => undefined),
     },
-    data: { session: { get: () => ({ location: { directory: '/work/session-dir' } }) } },
-    keymap: { dispatch },
-  } as unknown as Context
+    data: { session: { get: () => undefined }, location: { model: { list: () => [], sync: async () => undefined }, provider: { list: () => [], sync: async () => undefined } } },
+    keymap: { layer: vi.fn(), dispatch },
+    client: { session: { export: vi.fn() } },
+  }
   return { context, toast, confirm, select, dispatch }
 }
 
-beforeEach(() => {
-  vi.resetAllMocks()
-  mocks.resolveManagerAuth.mockResolvedValue({ ok: true, managerUrl: MANAGER_URL, token: 'tok' })
-  mocks.readState.mockReturnValue({ managerUrl: MANAGER_URL })
-  mocks.resolveOpenCodeProjectId.mockResolvedValue('proj_a')
-})
+function offeredOptions(fake: ReturnType<typeof createFakeContext>) {
+  return SelectRequestSchema.parse(fake.select.mock.calls[0]?.[0]).options
+}
+
+function createRuntime(): OcmSwitchRuntime {
+  return {
+    resolveManagerAuth: vi.fn<OcmSwitchRuntime['resolveManagerAuth']>(async () => ({ ok: true, managerUrl: MANAGER_URL, token: 'tok' })),
+    fetchRepos: vi.fn<OcmSwitchRuntime['fetchRepos']>(async () => [repo()]),
+    resolveProjectId: vi.fn<OcmSwitchRuntime['resolveProjectId']>(async () => 'proj_a'),
+    warmRepoProxy: vi.fn<OcmSwitchRuntime['warmRepoProxy']>(async () => undefined),
+    readState: vi.fn<OcmSwitchRuntime['readState']>(() => ({ managerUrl: MANAGER_URL })),
+    writeState: vi.fn<OcmSwitchRuntime['writeState']>(),
+    setPendingWarp: vi.fn<OcmSwitchRuntime['setPendingWarp']>(),
+  }
+}
+
+function switchDeps(runtime: OcmSwitchRuntime, overrides: Omit<OcmSwitchDeps, 'runtime'> = { remote: undefined }): OcmSwitchDeps {
+  return { ...overrides, runtime }
+}
 
 describe('runOcmSwitch from a local TUI', () => {
+  let runtime: OcmSwitchRuntime
+
+  beforeEach(() => {
+    runtime = createRuntime()
+  })
+
   it('confirms and attaches to the single Manager repo matching this directory', async () => {
     const fake = createFakeContext()
     const match = repo()
-    mocks.fetchRepos.mockResolvedValue([match, repo({ repoId: 2, name: 'other', projectId: 'proj_b' })])
+    vi.mocked(runtime.fetchRepos).mockResolvedValue([match, repo({ repoId: 2, name: 'other', projectId: 'proj_b' })])
     fake.confirm.mockResolvedValue(true)
 
-    await runOcmSwitch(fake.context, { remote: undefined, cwd: '/work/oc-manager' })
+    await runOcmSwitch(fake.context, switchDeps(runtime, { remote: undefined, cwd: '/work/oc-manager' }))
 
-    expect(mocks.resolveManagerAuth).toHaveBeenCalledWith(undefined)
-    expect(mocks.resolveOpenCodeProjectId).toHaveBeenCalledWith('/work/oc-manager')
+    expect(runtime.resolveManagerAuth).toHaveBeenCalledWith(undefined)
+    expect(runtime.resolveProjectId).toHaveBeenCalledWith('/work/oc-manager')
     expect(fake.confirm).toHaveBeenCalledWith(
       expect.objectContaining({ title: 'Switch to OpenCode Manager', message: expect.stringContaining('attach to oc-manager on manager.example') }),
     )
-    expect(mocks.warmRepoProxy).toHaveBeenCalledWith(MANAGER_URL, 'tok', 1)
-    expect(mocks.writeState).toHaveBeenCalledWith({
+    expect(runtime.warmRepoProxy).toHaveBeenCalledWith(MANAGER_URL, 'tok', 1)
+    expect(runtime.writeState).toHaveBeenCalledWith({
       managerUrl: MANAGER_URL,
       lastRepoId: 1,
       lastRepoName: 'oc-manager',
       lastRepoDir: '/srv/repos/oc-manager',
       lastRepoBranch: 'main',
     })
-    expect(mocks.setPendingWarp).toHaveBeenCalledWith({
+    expect(runtime.setPendingWarp).toHaveBeenCalledWith({
       kind: 'attach',
       target: { managerUrl: MANAGER_URL, token: 'tok', repoId: 1, repoName: 'oc-manager' },
     })
     expect(fake.dispatch).toHaveBeenCalledWith('app.exit')
-    expect(mocks.warmRepoProxy.mock.invocationCallOrder[0]).toBeLessThan(fake.dispatch.mock.invocationCallOrder[0]!)
+    expect(vi.mocked(runtime.warmRepoProxy).mock.invocationCallOrder[0]).toBeLessThan(fake.dispatch.mock.invocationCallOrder[0]!)
   })
 
   it('stays put when the switch is declined', async () => {
     const fake = createFakeContext()
-    mocks.fetchRepos.mockResolvedValue([repo()])
+    vi.mocked(runtime.fetchRepos).mockResolvedValue([repo()])
     fake.confirm.mockResolvedValue(false)
 
-    await runOcmSwitch(fake.context, { remote: undefined, cwd: '/work/oc-manager' })
+    await runOcmSwitch(fake.context, switchDeps(runtime, { remote: undefined, cwd: '/work/oc-manager' }))
 
-    expect(mocks.setPendingWarp).not.toHaveBeenCalled()
+    expect(runtime.setPendingWarp).not.toHaveBeenCalled()
     expect(fake.dispatch).not.toHaveBeenCalled()
   })
 
   it('uses the current session directory to find the matching repo', async () => {
     const fake = createFakeContext({ type: 'session', sessionID: 'ses_a' })
-    mocks.fetchRepos.mockResolvedValue([repo()])
+    fake.context.data.session.get = () => ({
+      id: 'ses_a',
+      projectID: 'proj_a',
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 2 },
+      location: { directory: '/work/session-dir' },
+    })
 
-    await runOcmSwitch(fake.context, { remote: undefined })
+    await runOcmSwitch(fake.context, switchDeps(runtime, { remote: undefined }))
 
-    expect(mocks.resolveOpenCodeProjectId).toHaveBeenCalledWith('/work/session-dir')
+    expect(runtime.resolveProjectId).toHaveBeenCalledWith('/work/session-dir')
   })
 
   it('offers a picker with matching repos first when several match, skipping repos that are not ready', async () => {
@@ -116,18 +141,17 @@ describe('runOcmSwitch from a local TUI', () => {
     const main = repo()
     const worktree = repo({ repoId: 3, name: 'oc-manager-feature', branch: 'feature', isWorktree: true })
     const other = repo({ repoId: 2, name: 'other', projectId: 'proj_b', branch: null })
-    mocks.fetchRepos.mockResolvedValue([other, main, worktree, repo({ repoId: 4, name: 'cloning', cloneStatus: 'cloning' })])
+    vi.mocked(runtime.fetchRepos).mockResolvedValue([other, main, worktree, repo({ repoId: 4, name: 'cloning', cloneStatus: 'cloning' })])
     fake.select.mockResolvedValue({ kind: 'repo', repo: worktree })
 
-    await runOcmSwitch(fake.context, { remote: undefined, cwd: '/work/oc-manager' })
+    await runOcmSwitch(fake.context, switchDeps(runtime, { remote: undefined, cwd: '/work/oc-manager' }))
 
-    const options = fake.select.mock.calls[0]![0].options as { title: string; description?: string; category: string }[]
-    expect(options.map((option) => [option.title, option.category, option.description])).toEqual([
+    expect(offeredOptions(fake).map((option) => [option.title, option.category, option.description])).toEqual([
       ['oc-manager', 'Matches this directory', 'main'],
       ['oc-manager-feature', 'Matches this directory', 'worktree · feature'],
       ['other', 'Manager repos', undefined],
     ])
-    expect(mocks.setPendingWarp).toHaveBeenCalledWith({
+    expect(runtime.setPendingWarp).toHaveBeenCalledWith({
       kind: 'attach',
       target: { managerUrl: MANAGER_URL, token: 'tok', repoId: 3, repoName: 'oc-manager-feature' },
     })
@@ -135,23 +159,22 @@ describe('runOcmSwitch from a local TUI', () => {
 
   it('offers every ready repo when nothing matches, and does nothing when dismissed', async () => {
     const fake = createFakeContext()
-    mocks.resolveOpenCodeProjectId.mockResolvedValue(null)
-    mocks.fetchRepos.mockResolvedValue([repo(), repo({ repoId: 2, name: 'other' })])
+    vi.mocked(runtime.resolveProjectId).mockResolvedValue(null)
+    vi.mocked(runtime.fetchRepos).mockResolvedValue([repo(), repo({ repoId: 2, name: 'other' })])
     fake.select.mockResolvedValue(undefined)
 
-    await runOcmSwitch(fake.context, { remote: undefined, cwd: '/tmp' })
+    await runOcmSwitch(fake.context, switchDeps(runtime, { remote: undefined, cwd: '/tmp' }))
 
-    const options = fake.select.mock.calls[0]![0].options as { category: string }[]
-    expect(options.map((option) => option.category)).toEqual(['Manager repos', 'Manager repos'])
-    expect(mocks.warmRepoProxy).not.toHaveBeenCalled()
-    expect(mocks.setPendingWarp).not.toHaveBeenCalled()
+    expect(offeredOptions(fake).map((option) => option.category)).toEqual(['Manager repos', 'Manager repos'])
+    expect(runtime.warmRepoProxy).not.toHaveBeenCalled()
+    expect(runtime.setPendingWarp).not.toHaveBeenCalled()
   })
 
   it('reports a Manager without ready repos', async () => {
     const fake = createFakeContext()
-    mocks.fetchRepos.mockResolvedValue([repo({ cloneStatus: 'error' })])
+    vi.mocked(runtime.fetchRepos).mockResolvedValue([repo({ cloneStatus: 'error' })])
 
-    await runOcmSwitch(fake.context, { remote: undefined, cwd: '/work/oc-manager' })
+    await runOcmSwitch(fake.context, switchDeps(runtime, { remote: undefined, cwd: '/work/oc-manager' }))
 
     expect(fake.toast).toHaveBeenCalledWith({
       variant: 'error',
@@ -165,35 +188,37 @@ describe('runOcmSwitch from an attached TUI', () => {
   const remote: RemoteContext = { managerUrl: MANAGER_URL, managerHost: 'manager.example', repoName: 'oc-manager', repoId: 1 }
 
   it('offers local opencode first and marks the current repo as unavailable', async () => {
+    const runtime = createRuntime()
     const fake = createFakeContext()
-    mocks.fetchRepos.mockResolvedValue([repo(), repo({ repoId: 2, name: 'other' })])
+    vi.mocked(runtime.fetchRepos).mockResolvedValue([repo(), repo({ repoId: 2, name: 'other' })])
     fake.select.mockResolvedValue({ kind: 'local' })
 
-    await runOcmSwitch(fake.context, { remote })
+    await runOcmSwitch(fake.context, switchDeps(runtime, { remote }))
 
-    expect(mocks.resolveManagerAuth).toHaveBeenCalledWith(MANAGER_URL)
-    expect(mocks.resolveOpenCodeProjectId).not.toHaveBeenCalled()
-    const options = fake.select.mock.calls[0]![0].options as { title: string; disabled?: boolean; description?: string }[]
+    expect(runtime.resolveManagerAuth).toHaveBeenCalledWith(MANAGER_URL)
+    expect(runtime.resolveProjectId).not.toHaveBeenCalled()
+    const options = offeredOptions(fake)
     expect(options.map((option) => [option.title, option.disabled ?? false])).toEqual([
       ['Local opencode', false],
       ['oc-manager', true],
       ['other', false],
     ])
     expect(options[1]!.description).toBe('Current')
-    expect(mocks.setPendingWarp).toHaveBeenCalledWith({ kind: 'local' })
-    expect(mocks.warmRepoProxy).not.toHaveBeenCalled()
+    expect(runtime.setPendingWarp).toHaveBeenCalledWith({ kind: 'local' })
+    expect(runtime.warmRepoProxy).not.toHaveBeenCalled()
     expect(fake.dispatch).toHaveBeenCalledWith('app.exit')
   })
 
   it('switches to another Manager repo', async () => {
+    const runtime = createRuntime()
     const fake = createFakeContext()
     const other = repo({ repoId: 2, name: 'other' })
-    mocks.fetchRepos.mockResolvedValue([repo(), other])
+    vi.mocked(runtime.fetchRepos).mockResolvedValue([repo(), other])
     fake.select.mockResolvedValue({ kind: 'repo', repo: other })
 
-    await runOcmSwitch(fake.context, { remote })
+    await runOcmSwitch(fake.context, switchDeps(runtime, { remote }))
 
-    expect(mocks.setPendingWarp).toHaveBeenCalledWith({
+    expect(runtime.setPendingWarp).toHaveBeenCalledWith({
       kind: 'attach',
       target: { managerUrl: MANAGER_URL, token: 'tok', repoId: 2, repoName: 'other' },
     })
@@ -202,35 +227,38 @@ describe('runOcmSwitch from an attached TUI', () => {
 
 describe('runOcmSwitch failures', () => {
   it('reports an auth failure without contacting the Manager', async () => {
+    const runtime = createRuntime()
     const fake = createFakeContext()
-    mocks.resolveManagerAuth.mockResolvedValue({ ok: false, message: 'No manager configured. Run `ocm login <url>` first.' })
+    vi.mocked(runtime.resolveManagerAuth).mockResolvedValue({ ok: false, reason: 'no-manager', message: 'No manager configured. Run `ocm login <url>` first.' })
 
-    await runOcmSwitch(fake.context, { remote: undefined })
+    await runOcmSwitch(fake.context, switchDeps(runtime, { remote: undefined }))
 
     expect(fake.toast).toHaveBeenCalledWith({ variant: 'error', message: 'No manager configured. Run `ocm login <url>` first.' })
-    expect(mocks.fetchRepos).not.toHaveBeenCalled()
+    expect(runtime.fetchRepos).not.toHaveBeenCalled()
   })
 
   it('reports a Manager request failure and does not exit', async () => {
+    const runtime = createRuntime()
     const fake = createFakeContext()
-    mocks.fetchRepos.mockRejectedValue(new Error('manager responded 502 Bad Gateway'))
+    vi.mocked(runtime.fetchRepos).mockRejectedValue(new Error('manager responded 502 Bad Gateway'))
 
-    await runOcmSwitch(fake.context, { remote: undefined, cwd: '/work/oc-manager' })
+    await runOcmSwitch(fake.context, switchDeps(runtime, { remote: undefined, cwd: '/work/oc-manager' }))
 
     expect(fake.toast).toHaveBeenCalledWith({ variant: 'error', message: 'manager responded 502 Bad Gateway' })
     expect(fake.dispatch).not.toHaveBeenCalled()
   })
 
   it('does not exit when the repo proxy cannot be warmed', async () => {
+    const runtime = createRuntime()
     const fake = createFakeContext()
-    mocks.fetchRepos.mockResolvedValue([repo()])
+    vi.mocked(runtime.fetchRepos).mockResolvedValue([repo()])
     fake.confirm.mockResolvedValue(true)
-    mocks.warmRepoProxy.mockRejectedValue(new Error('Manager is older than ocm requires'))
+    vi.mocked(runtime.warmRepoProxy).mockRejectedValue(new Error('Manager is older than ocm requires'))
 
-    await runOcmSwitch(fake.context, { remote: undefined, cwd: '/work/oc-manager' })
+    await runOcmSwitch(fake.context, switchDeps(runtime, { remote: undefined, cwd: '/work/oc-manager' }))
 
     expect(fake.toast).toHaveBeenCalledWith({ variant: 'error', message: 'Manager is older than ocm requires' })
-    expect(mocks.setPendingWarp).not.toHaveBeenCalled()
+    expect(runtime.setPendingWarp).not.toHaveBeenCalled()
     expect(fake.dispatch).not.toHaveBeenCalled()
   })
 })

@@ -6,12 +6,6 @@ import { openCodeLocationQueryOptions } from '@/lib/openCodeLocation'
 import { parseRepoRoute } from '@/lib/navigation'
 import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
 
-/**
- * Warms the picker's project location on a local repo route so the first session picker open does
- * not serialise the location lookup ahead of the session list. The repo path comes from the repos
- * query the repo worktrees provider already observes, so a route restored before that query settles
- * still prefetches once the repo data arrives. The prefetch never creates a query observer.
- */
 export function useSessionPickerLocationPrefetch(): void {
   const { pathname } = useLocation()
   const queryClient = useQueryClient()

@@ -1,86 +1,91 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import type { Mock } from 'vitest'
 import { Hono } from 'hono'
+import type { Database } from 'bun:sqlite'
 import { spawnSync } from 'child_process'
-import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs'
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'fs'
 import { join } from 'path'
-import { tmpdir } from 'os'
-import { sanitizeRepoDirectoryName } from '@opencode-manager/shared/utils'
+import { z } from 'zod'
+import { MirrorCheckoutsResponseSchema, MirrorWorktreeCreateResponseSchema } from '@opencode-manager/shared/schemas'
+import { sanitizeRepoDirectoryName, type RepoSibling } from '@opencode-manager/shared/utils'
+import { getReposPath } from '@opencode-manager/shared/config/env'
+import { parseJsonText } from '@opencode-manager/shared/utils'
+import type { Repo } from '../../../src/types/repo'
+import type { GitAuthEnvironmentProvider } from '../../../src/services/git-auth'
+import type { RepoWorkspaceProvider } from '../../../src/services/repo-workspace'
+import type { OpenCodeClient } from '../../../src/services/opencode/client'
+import { createInternalRepoMirrorRoutes, type MirrorRouteDeps } from '../../../src/routes/internal/repo-mirror'
+import { createTempWorkspace, type TempWorkspace } from '../../helpers/test-env'
+import { createTestDatabase } from '../../helpers/test-database'
+import { readJson } from '../../helpers/read-json'
+import { createStubOpenCodeClient } from '../../helpers/stub-opencode-client'
 
-const { mockGetActiveDirectories, mockGitOut, mockSafeGitOut, getTmpRoot, setTmpRoot } = vi.hoisted(() => {
-  const mockGetActiveDirectories = vi.fn().mockReturnValue([])
-  const mockGitOut = vi.fn().mockResolvedValue('main')
-  const mockSafeGitOut = vi.fn().mockResolvedValue('main')
-  let tmpRoot = ''
-  return {
-    mockGetActiveDirectories,
-    mockGitOut,
-    mockSafeGitOut,
-    getTmpRoot: () => tmpRoot,
-    setTmpRoot: (v: string) => { tmpRoot = v },
-  }
+const BeginResponseSchema = z.object({
+  uploadId: z.string(),
+  repoId: z.number(),
+  chunkSize: z.number(),
+  created: z.boolean(),
 })
+const CommitResponseSchema = z.object({
+  repoId: z.number(),
+  fullPath: z.string(),
+  branch: z.string().nullable(),
+  head: z.string().nullable(),
+  created: z.boolean(),
+})
+const HeadResponseSchema = z.object({
+  repoId: z.number(),
+  branch: z.string().nullable(),
+  head: z.string().nullable(),
+  dirty: z.boolean(),
+})
+const ContainsResponseSchema = z.object({ repoId: z.number(), contained: z.boolean() })
+const PatchSnapshotResponseSchema = z.object({
+  repoId: z.number(),
+  branch: z.string().nullable(),
+  head: z.string().nullable(),
+  patch: z.string(),
+})
+const AppliedPatchResponseSchema = z.object({
+  repoId: z.number(),
+  fullPath: z.string(),
+  branch: z.string().nullable(),
+  head: z.string().nullable(),
+  created: z.boolean(),
+  applied: z.boolean(),
+})
+const ErrorResponseSchema = z.object({ error: z.string(), message: z.string().optional() })
+const LegacyErrorResponseSchema = z.object({ error: z.string(), message: z.string() })
+const UploadDeletedSchema = z.object({ ok: z.boolean() })
 
-vi.mock('../../../src/services/sse-aggregator', () => ({
-  sseAggregator: {
-    getActiveDirectories: mockGetActiveDirectories,
-  },
-}))
+function repoAt(fullPath: string, overrides: Partial<Repo> = {}): Repo {
+  return {
+    id: 1,
+    localPath: fullPath,
+    fullPath,
+    defaultBranch: 'main',
+    cloneStatus: 'ready',
+    clonedAt: 1,
+    ...overrides,
+  }
+}
 
-vi.mock('@opencode-manager/shared/config/env', () => ({
-  getReposPath: () => getTmpRoot(),
-  getWorkspacePath: () => '/tmp/fake-workspace',
-}))
+function siblingAt(fullPath: string, overrides: Partial<RepoSibling> = {}): RepoSibling {
+  return { ...repoAt(fullPath), isWorktree: true, ...overrides }
+}
 
-vi.mock('../../../src/routes/internal/repo-sync-helpers', () => ({
-  gitOut: (...args: unknown[]) => mockGitOut(...args),
-  safeGitOut: (...args: unknown[]) => mockSafeGitOut(...args),
-  isSafeRelativePath: vi.fn(),
-}))
+interface RepoWorkspaceFakes {
+  create: Mock<RepoWorkspaceProvider['create']>
+  remove: Mock<RepoWorkspaceProvider['remove']>
+}
 
-const mockGetRepoById = vi.fn()
-const mockUpdateLastPulled = vi.fn()
-const mockUpdateRepoBranch = vi.fn()
-const mockDeleteRepo = vi.fn()
-
-vi.mock('../../../src/db/queries', () => ({
-  getRepoById: (...args: unknown[]) => mockGetRepoById(...args),
-  updateLastPulled: (...args: unknown[]) => mockUpdateLastPulled(...args),
-  updateRepoBranch: (...args: unknown[]) => mockUpdateRepoBranch(...args),
-  deleteRepo: (...args: unknown[]) => mockDeleteRepo(...args),
-  createRepo: vi.fn(),
-  getRepoByLocalPath: vi.fn(),
-  getRepoByUrlAndBranch: vi.fn(),
-  updateRepoStatus: vi.fn(),
-}))
-
-const mockEnsureMirrorTargetPath = vi.fn()
-const mockCreateRepoRow = vi.fn()
-const mockIsRepoInUse = vi.fn()
-const mockIsDirectoryInUse = vi.fn()
-const mockResolveRepoWorkingDirectory = vi.fn()
-const mockListRepoSiblings = vi.fn()
-const mockListGitWorktrees = vi.fn()
-
-vi.mock('../../../src/services/repo', () => ({
-  ensureMirrorTargetPath: (...args: unknown[]) => mockEnsureMirrorTargetPath(...args),
-  createRepoRow: (...args: unknown[]) => mockCreateRepoRow(...args),
-  isRepoInUse: (...args: unknown[]) => mockIsRepoInUse(...args),
-  isDirectoryInUse: (...args: unknown[]) => mockIsDirectoryInUse(...args),
-  resolveRepoWorkingDirectory: (...args: unknown[]) => mockResolveRepoWorkingDirectory(...args),
-  listRepoSiblings: (...args: unknown[]) => mockListRepoSiblings(...args),
-  listGitWorktrees: (...args: unknown[]) => mockListGitWorktrees(...args),
-}))
-
-const mockGetGitEnvironment = vi.fn().mockReturnValue({})
-const mockGitAuthService = { getGitEnvironment: mockGetGitEnvironment }
-const mockRepoWorkspaces = { create: vi.fn() }
-const mockOpenCodeClient = {}
-
-import { createInternalRepoMirrorRoutes } from '../../../src/routes/internal/repo-mirror'
+function reposPath(): string {
+  return getReposPath()
+}
 
 const CHUNK_SIZE = 8 * 1024 * 1024
 
-let mockSiblingRows: Array<Record<string, unknown>> = []
+let mockSiblingRows: RepoSibling[] = []
 
 function runGit(cwd: string, args: string[], input?: string) {
   return spawnSync('git', args, { cwd, encoding: 'utf-8', input })
@@ -106,27 +111,12 @@ function revOf(dir: string, ref: string): string {
 }
 
 function bundleOf(dir: string, name: string): Buffer {
-  const bundlePath = join(getTmpRoot(), `${name}.bundle`)
+  const bundlePath = join(reposPath(), `${name}.bundle`)
   runGit(dir, ['bundle', 'create', bundlePath, '--all'])
   return readFileSync(bundlePath)
 }
 
-interface BeginResponse {
-  uploadId: string
-  repoId: number
-  chunkSize: number
-  created: boolean
-}
-
-interface CommitResponse {
-  repoId: number
-  fullPath: string
-  branch: string | null
-  head: string | null
-  created: boolean
-}
-
-async function begin(app: Hono, urlRepoId: number, body: Record<string, unknown>): Promise<Response> {
+async function begin(app: Hono, urlRepoId: number, body: { create?: boolean; name?: string; force?: boolean }) {
   return app.request(`/api/internal/repos/${urlRepoId}/mirror/begin`, {
     method: 'POST',
     body: JSON.stringify(body),
@@ -134,7 +124,7 @@ async function begin(app: Hono, urlRepoId: number, body: Record<string, unknown>
   })
 }
 
-async function putPart(app: Hono, urlRepoId: number, uploadId: string, index: number, chunk: Buffer): Promise<Response> {
+async function putPart(app: Hono, urlRepoId: number, uploadId: string, index: number, chunk: Buffer) {
   return app.request(`/api/internal/repos/${urlRepoId}/mirror/parts/${uploadId}/${index}`, {
     method: 'PUT',
     body: chunk,
@@ -142,7 +132,7 @@ async function putPart(app: Hono, urlRepoId: number, uploadId: string, index: nu
   })
 }
 
-async function commit(app: Hono, urlRepoId: number, uploadId: string, totalParts: number, gzip = false): Promise<Response> {
+async function commit(app: Hono, urlRepoId: number, uploadId: string, totalParts: number, gzip = false) {
   return app.request(`/api/internal/repos/${urlRepoId}/mirror/commit`, {
     method: 'POST',
     body: JSON.stringify({ uploadId, totalParts, gzip }),
@@ -153,12 +143,12 @@ async function commit(app: Hono, urlRepoId: number, uploadId: string, totalParts
 async function pushTarball(
   app: Hono,
   urlRepoId: number,
-  body: Record<string, unknown>,
+  body: { create?: boolean; name?: string; force?: boolean },
   tarball: Buffer,
-): Promise<{ beginRes: Response; commitRes: Response | null }> {
+) {
   const beginRes = await begin(app, urlRepoId, body)
   if (beginRes.status !== 200) return { beginRes, commitRes: null }
-  const beginJson = (await beginRes.clone().json()) as BeginResponse
+  const beginJson = BeginResponseSchema.parse(parseJsonText(await beginRes.text()))
   const { uploadId, repoId } = beginJson
   let index = 0
   for (let offset = 0; offset < tarball.length; offset += CHUNK_SIZE) {
@@ -182,51 +172,100 @@ async function pushTarball(
 
 describe('internal-repo-mirror routes', () => {
   let app: Hono
+  let db: Database
+  let workspace: TempWorkspace
+  let mockGitAuthService: GitAuthEnvironmentProvider
+  let mockRepoWorkspaces: RepoWorkspaceFakes
+  let mockOpenCodeClient: OpenCodeClient
+  let mockGetRepoById: Mock<MirrorRouteDeps['getRepoById']>
+  let mockUpdateLastPulled: Mock<MirrorRouteDeps['updateLastPulled']>
+  let mockUpdateRepoBranch: Mock<MirrorRouteDeps['updateRepoBranch']>
+  let mockDeleteRepo: Mock<MirrorRouteDeps['deleteRepo']>
+  let mockEnsureMirrorTargetPath: Mock<MirrorRouteDeps['ensureMirrorTargetPath']>
+  let mockCreateRepoRow: Mock<MirrorRouteDeps['createRepoRow']>
+  let mockIsRepoInUse: Mock<MirrorRouteDeps['isRepoInUse']>
+  let mockIsDirectoryInUse: Mock<MirrorRouteDeps['isDirectoryInUse']>
+  let mockResolveRepoWorkingDirectory: Mock<MirrorRouteDeps['resolveRepoWorkingDirectory']>
+  let mockListRepoSiblings: Mock<MirrorRouteDeps['listRepoSiblings']>
+  let mockListGitWorktrees: Mock<MirrorRouteDeps['listGitWorktrees']>
+  let mockSafeGitOut: Mock<MirrorRouteDeps['safeGitOut']>
 
   beforeEach(() => {
-    vi.clearAllMocks()
-    const tmpRootValue = join(tmpdir(), `mirror-route-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-    setTmpRoot(tmpRootValue)
-    mkdirSync(tmpRootValue, { recursive: true })
-    app = new Hono()
-    app.route('/api/internal/repos', createInternalRepoMirrorRoutes({} as any, mockOpenCodeClient as any, mockGitAuthService as any, mockRepoWorkspaces as any))
-    mockGetActiveDirectories.mockReturnValue([])
-    mockSafeGitOut.mockImplementation(async (dir: string, args: string[]) => {
+    db = createTestDatabase()
+    workspace = createTempWorkspace('mirror-route-test-')
+    mkdirSync(reposPath(), { recursive: true })
+
+    mockGetRepoById = vi.fn<MirrorRouteDeps['getRepoById']>(() => null)
+    mockUpdateLastPulled = vi.fn<MirrorRouteDeps['updateLastPulled']>()
+    mockUpdateRepoBranch = vi.fn<MirrorRouteDeps['updateRepoBranch']>()
+    mockDeleteRepo = vi.fn<MirrorRouteDeps['deleteRepo']>()
+    mockEnsureMirrorTargetPath = vi.fn<MirrorRouteDeps['ensureMirrorTargetPath']>((name: string) => ({
+      localPath: name,
+      fullPath: join(reposPath(), name),
+    }))
+    mockCreateRepoRow = vi.fn<MirrorRouteDeps['createRepoRow']>((_db, input) => ({
+      repo: repoAt(input.fullPath, { localPath: input.localPath }),
+      created: true,
+    }))
+    mockIsRepoInUse = vi.fn<MirrorRouteDeps['isRepoInUse']>(() => false)
+    mockIsDirectoryInUse = vi.fn<MirrorRouteDeps['isDirectoryInUse']>(() => false)
+    mockResolveRepoWorkingDirectory = vi.fn<MirrorRouteDeps['resolveRepoWorkingDirectory']>(
+      async (repo, directory) => {
+        if (directory === undefined || directory === repo.fullPath) return repo.fullPath
+        return null
+      },
+    )
+    mockListRepoSiblings = vi.fn<MirrorRouteDeps['listRepoSiblings']>(async (_db, _repoId, _gitEnv, _client, filter) => {
+      const siblings = mockSiblingRows
+      return filter ? siblings.filter(filter) : siblings
+    })
+    mockListGitWorktrees = vi.fn<MirrorRouteDeps['listGitWorktrees']>(async () => [])
+    mockSafeGitOut = vi.fn<MirrorRouteDeps['safeGitOut']>(async (dir, args) => {
       const result = runGit(dir, args, '')
       return result.status === 0 ? result.stdout : null
     })
-    mockEnsureMirrorTargetPath.mockReturnValue({ localPath: 'test-repo', fullPath: join(getTmpRoot(), 'test-repo') })
-    mockCreateRepoRow.mockImplementation((_db: any, input: any) => ({ repo: { id: 1, fullPath: input.fullPath, localPath: input.localPath }, created: true }))
-    mockIsRepoInUse.mockReturnValue(false)
-    mockIsDirectoryInUse.mockReturnValue(false)
-    mockResolveRepoWorkingDirectory.mockImplementation(async (repo: any, directory: string | undefined) => {
-      if (directory === undefined || directory === repo.fullPath) return repo.fullPath
-      return null
-    })
+
     mockSiblingRows = []
-    mockListRepoSiblings.mockImplementation(async (...args: unknown[]) => {
-      const filter = args[4]
-      return typeof filter === 'function'
-        ? mockSiblingRows.filter(filter as (sibling: Record<string, unknown>) => boolean)
-        : mockSiblingRows
-    })
-    mockListGitWorktrees.mockResolvedValue([])
-    mockGetGitEnvironment.mockReturnValue({})
-    mockRepoWorkspaces.create.mockReset()
-    mockGetRepoById.mockReturnValue(null)
+    mockGitAuthService = { getGitEnvironment: vi.fn(() => ({})) }
+    mockRepoWorkspaces = { create: vi.fn<RepoWorkspaceProvider['create']>(async () => { throw new Error('not stubbed') }), remove: vi.fn<RepoWorkspaceProvider['remove']>() }
+    mockOpenCodeClient = createStubOpenCodeClient()
+
+    app = new Hono()
+    app.route('/api/internal/repos', createInternalRepoMirrorRoutes(
+      db,
+      mockOpenCodeClient,
+      mockGitAuthService,
+      mockRepoWorkspaces,
+      {
+        getRepoById: mockGetRepoById,
+        updateLastPulled: mockUpdateLastPulled,
+        updateRepoBranch: mockUpdateRepoBranch,
+        deleteRepo: mockDeleteRepo,
+        ensureMirrorTargetPath: mockEnsureMirrorTargetPath,
+        createRepoRow: mockCreateRepoRow,
+        isDirectoryInUse: mockIsDirectoryInUse,
+        isRepoInUse: mockIsRepoInUse,
+        resolveRepoWorkingDirectory: mockResolveRepoWorkingDirectory,
+        listRepoSiblings: mockListRepoSiblings,
+        listGitWorktrees: mockListGitWorktrees,
+        gitOut: vi.fn<MirrorRouteDeps['gitOut']>(async () => ''),
+        safeGitOut: mockSafeGitOut,
+      } satisfies MirrorRouteDeps,
+    ))
   })
 
   afterEach(() => {
-    rmSync(getTmpRoot(), { recursive: true, force: true })
+    workspace.restore()
+    db.close()
   })
 
   describe('GET /:repoId/mirror', () => {
     it('returns a streamable tarball containing repo files', async () => {
-      const repoDir = join(getTmpRoot(), 'test-repo')
+      const repoDir = join(reposPath(), 'test-repo')
       mkdirSync(repoDir, { recursive: true })
       writeFileSync(join(repoDir, 'test.txt'), 'hello world')
 
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: repoDir })
+      mockGetRepoById.mockReturnValue(repoAt(repoDir, { id: 1 }))
 
       const res = await app.request('/api/internal/repos/1/mirror')
       expect(res.status).toBe(200)
@@ -235,9 +274,9 @@ describe('internal-repo-mirror routes', () => {
       const body = Buffer.from(await res.arrayBuffer())
       expect(body.length).toBeGreaterThan(0)
 
-      const extractDir = join(getTmpRoot(), 'extract')
+      const extractDir = join(reposPath(), 'extract')
       mkdirSync(extractDir, { recursive: true })
-      const tarFile = join(getTmpRoot(), 'test.tar')
+      const tarFile = join(reposPath(), 'test.tar')
       writeFileSync(tarFile, body)
 
       spawnSync('tar', ['-x', '-C', extractDir, '-f', tarFile], { stdio: 'inherit' })
@@ -247,11 +286,11 @@ describe('internal-repo-mirror routes', () => {
     })
 
     it('returns gzip-compressed stream when ?compress=gzip', async () => {
-      const repoDir = join(getTmpRoot(), 'test-repo')
+      const repoDir = join(reposPath(), 'test-repo')
       mkdirSync(repoDir, { recursive: true })
       writeFileSync(join(repoDir, 'test.txt'), 'hello world')
 
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: repoDir })
+      mockGetRepoById.mockReturnValue(repoAt(repoDir, { id: 1 }))
 
       const res = await app.request('/api/internal/repos/1/mirror?compress=gzip')
       expect(res.status).toBe(200)
@@ -261,14 +300,12 @@ describe('internal-repo-mirror routes', () => {
       const body = Buffer.from(await res.arrayBuffer())
       expect(body.length).toBeGreaterThan(0)
 
-      // Verify the body is gzip-compressed (starts with gzip magic bytes)
       expect(body[0]).toBe(0x1f)
       expect(body[1]).toBe(0x8b)
 
-      // Verify it extracts correctly via tar -xz
-      const extractDir = join(getTmpRoot(), 'extract-compressed')
+      const extractDir = join(reposPath(), 'extract-compressed')
       mkdirSync(extractDir, { recursive: true })
-      const tarFile = join(getTmpRoot(), 'test.tar.gz')
+      const tarFile = join(reposPath(), 'test.tar.gz')
       writeFileSync(tarFile, body)
       spawnSync('tar', ['-xz', '-C', extractDir, '-f', tarFile], { stdio: 'inherit' })
       expect(existsSync(join(extractDir, 'test.txt'))).toBe(true)
@@ -296,7 +333,7 @@ describe('internal-repo-mirror routes', () => {
         headers: { 'content-type': 'application/x-tar' },
       })
       expect(res.status).toBe(410)
-      const json = (await res.json()) as { error: string; message: string }
+      const json = await readJson(res, LegacyErrorResponseSchema)
       expect(json.error).toBe('cli_too_old')
       expect(json.message).toMatch(/upgrade to ocm-cli/i)
     })
@@ -304,65 +341,65 @@ describe('internal-repo-mirror routes', () => {
 
   describe('GET /:repoId/mirror/head', () => {
     it('returns head, branch and dirty state for the manager repo', async () => {
-      const repoDir = initRepoAt(join(getTmpRoot(), 'head-repo'))
+      const repoDir = initRepoAt(join(reposPath(), 'head-repo'))
       const head = commitFileAt(repoDir, 'tracked.txt', 'first\n')
       runGit(repoDir, ['checkout', '-b', 'feature'])
       writeFileSync(join(repoDir, 'tracked.txt'), 'dirty\n')
-      mockGetRepoById.mockReturnValue({ id: 7, fullPath: repoDir })
+      mockGetRepoById.mockReturnValue(repoAt(repoDir, { id: 7 }))
 
       const res = await app.request('/api/internal/repos/7/mirror/head')
       expect(res.status).toBe(200)
-      const json = (await res.json()) as { head: string; branch: string; dirty: boolean }
+      const json = await readJson(res, HeadResponseSchema)
       expect(json.head).toBe(head)
       expect(json.branch).toBe('feature')
       expect(json.dirty).toBe(true)
     })
 
     it('reports a detached HEAD as a null branch', async () => {
-      const repoDir = initRepoAt(join(getTmpRoot(), 'head-detached'))
+      const repoDir = initRepoAt(join(reposPath(), 'head-detached'))
       const head = commitFileAt(repoDir, 'tracked.txt', 'first\n')
       runGit(repoDir, ['checkout', head])
-      mockGetRepoById.mockReturnValue({ id: 9, fullPath: repoDir })
+      mockGetRepoById.mockReturnValue(repoAt(repoDir, { id: 9 }))
 
       const res = await app.request('/api/internal/repos/9/mirror/head')
       expect(res.status).toBe(200)
-      const json = (await res.json()) as { branch: string | null }
+      const json = await readJson(res, HeadResponseSchema)
       expect(json.branch).toBeNull()
     })
 
     it('reports a clean repo as not dirty', async () => {
-      const repoDir = initRepoAt(join(getTmpRoot(), 'head-clean'))
+      const repoDir = initRepoAt(join(reposPath(), 'head-clean'))
       commitFileAt(repoDir, 'tracked.txt', 'first\n')
-      mockGetRepoById.mockReturnValue({ id: 8, fullPath: repoDir })
+      mockGetRepoById.mockReturnValue(repoAt(repoDir, { id: 8 }))
 
       const res = await app.request('/api/internal/repos/8/mirror/head')
-      const json = (await res.json()) as { dirty: boolean }
+      const json = await readJson(res, HeadResponseSchema)
       expect(json.dirty).toBe(false)
     })
 
     it('reads the checkout state of a directory inside the repository', async () => {
-      const repoDir = initRepoAt(join(getTmpRoot(), 'head-base'))
+      const repoDir = initRepoAt(join(reposPath(), 'head-base'))
       commitFileAt(repoDir, 'main.txt', 'base\n')
-      const worktreeDir = join(getTmpRoot(), 'head-worktree')
+      const worktreeDir = join(reposPath(), 'head-worktree')
       runGit(repoDir, ['worktree', 'add', '-b', 'side', worktreeDir])
       const sideHead = revOf(worktreeDir, 'HEAD')
-      mockGetRepoById.mockReturnValue({ id: 7, fullPath: repoDir })
+      mockGetRepoById.mockReturnValue(repoAt(repoDir, { id: 7 }))
       mockResolveRepoWorkingDirectory.mockResolvedValue(worktreeDir)
 
       const res = await app.request(`/api/internal/repos/7/mirror/head?directory=${encodeURIComponent(worktreeDir)}`)
       expect(res.status).toBe(200)
-      const json = (await res.json()) as { head: string; branch: string }
+      const json = await readJson(res, HeadResponseSchema)
       expect(json.branch).toBe('side')
       expect(json.head).toBe(sideHead)
     })
 
     it('returns 400 when the directory is not part of the repository', async () => {
-      mockGetRepoById.mockReturnValue({ id: 7, fullPath: join(getTmpRoot(), 'head-repo') })
+      mockGetRepoById.mockReturnValue(repoAt(join(reposPath(), 'head-repo'), { id: 7 }))
       mockResolveRepoWorkingDirectory.mockResolvedValue(null)
 
       const res = await app.request('/api/internal/repos/7/mirror/head?directory=/elsewhere')
       expect(res.status).toBe(400)
-      const json = (await res.json()) as { error: string }
+      const json = await readJson(res, ErrorResponseSchema)
       expect(json.error).toBe('Directory is not part of this repository')
     })
 
@@ -375,57 +412,57 @@ describe('internal-repo-mirror routes', () => {
 
   describe('GET /:repoId/mirror/contains/:sha', () => {
     it('returns contained=true when local sha is an ancestor of server HEAD', async () => {
-      mockGetRepoById.mockReturnValue({ id: 7, fullPath: join(getTmpRoot(), 'repo7') })
+      mockGetRepoById.mockReturnValue(repoAt(join(reposPath(), 'repo7'), { id: 7 }))
       mockSafeGitOut.mockResolvedValue('')
 
       const res = await app.request('/api/internal/repos/7/mirror/contains/abc1234')
       expect(res.status).toBe(200)
-      const json = (await res.json()) as { contained: boolean }
+      const json = await readJson(res, ContainsResponseSchema)
       expect(json.contained).toBe(true)
     })
 
     it('returns contained=false when ancestry check fails (sha not in server history)', async () => {
-      mockGetRepoById.mockReturnValue({ id: 7, fullPath: join(getTmpRoot(), 'repo7') })
+      mockGetRepoById.mockReturnValue(repoAt(join(reposPath(), 'repo7'), { id: 7 }))
       mockSafeGitOut.mockResolvedValue(null)
 
       const res = await app.request('/api/internal/repos/7/mirror/contains/abc1234')
-      const json = (await res.json()) as { contained: boolean }
+      const json = await readJson(res, ContainsResponseSchema)
       expect(json.contained).toBe(false)
     })
 
     it('rejects a malformed sha with 400', async () => {
-      mockGetRepoById.mockReturnValue({ id: 7, fullPath: join(getTmpRoot(), 'repo7') })
+      mockGetRepoById.mockReturnValue(repoAt(join(reposPath(), 'repo7'), { id: 7 }))
       const res = await app.request('/api/internal/repos/7/mirror/contains/not-a-sha')
       expect(res.status).toBe(400)
     })
 
     it('checks containment against a directory inside the repository', async () => {
-      const worktreeDir = join(getTmpRoot(), 'contains-worktree')
-      mockGetRepoById.mockReturnValue({ id: 7, fullPath: join(getTmpRoot(), 'repo7') })
+      const worktreeDir = join(reposPath(), 'contains-worktree')
+      mockGetRepoById.mockReturnValue(repoAt(join(reposPath(), 'repo7'), { id: 7 }))
       mockResolveRepoWorkingDirectory.mockResolvedValue(worktreeDir)
       mockSafeGitOut.mockResolvedValue('')
 
       const res = await app.request(`/api/internal/repos/7/mirror/contains/abc1234?directory=${encodeURIComponent(worktreeDir)}`)
       expect(res.status).toBe(200)
-      const json = (await res.json()) as { contained: boolean }
+      const json = await readJson(res, ContainsResponseSchema)
       expect(json.contained).toBe(true)
       expect(mockSafeGitOut).toHaveBeenCalledWith(worktreeDir, ['merge-base', '--is-ancestor', 'abc1234', 'HEAD'])
     })
 
     it('returns 400 when the directory is not part of the repository', async () => {
-      mockGetRepoById.mockReturnValue({ id: 7, fullPath: join(getTmpRoot(), 'repo7') })
+      mockGetRepoById.mockReturnValue(repoAt(join(reposPath(), 'repo7'), { id: 7 }))
       mockResolveRepoWorkingDirectory.mockResolvedValue(null)
 
       const res = await app.request('/api/internal/repos/7/mirror/contains/abc1234?directory=/elsewhere')
       expect(res.status).toBe(400)
-      const json = (await res.json()) as { error: string }
+      const json = await readJson(res, ErrorResponseSchema)
       expect(json.error).toBe('Directory is not part of this repository')
     })
   })
 
   describe('patch sync flow', () => {
     it('imports a git bundle into an existing manager repo', async () => {
-      const sourceDir = join(getTmpRoot(), 'bundle-source')
+      const sourceDir = join(reposPath(), 'bundle-source')
       mkdirSync(sourceDir, { recursive: true })
       spawnSync('git', ['init', '-b', 'main'], { cwd: sourceDir, stdio: 'ignore' })
       spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: sourceDir, stdio: 'ignore' })
@@ -438,10 +475,10 @@ describe('internal-repo-mirror routes', () => {
       spawnSync('git', ['add', 'feature.txt'], { cwd: sourceDir, stdio: 'ignore' })
       spawnSync('git', ['commit', '-m', 'feature'], { cwd: sourceDir, stdio: 'ignore' })
       spawnSync('git', ['checkout', 'main'], { cwd: sourceDir, stdio: 'ignore' })
-      const bundlePath = join(getTmpRoot(), 'source.bundle')
+      const bundlePath = join(reposPath(), 'source.bundle')
       spawnSync('git', ['bundle', 'create', bundlePath, '--all'], { cwd: sourceDir, stdio: 'ignore' })
 
-      const targetDir = join(getTmpRoot(), 'bundle-target')
+      const targetDir = join(reposPath(), 'bundle-target')
       mkdirSync(targetDir, { recursive: true })
       spawnSync('git', ['init', '-b', 'main'], { cwd: targetDir, stdio: 'ignore' })
       spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: targetDir, stdio: 'ignore' })
@@ -450,7 +487,7 @@ describe('internal-repo-mirror routes', () => {
       spawnSync('git', ['add', 'old.txt'], { cwd: targetDir, stdio: 'ignore' })
       spawnSync('git', ['commit', '-m', 'target'], { cwd: targetDir, stdio: 'ignore' })
 
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: targetDir })
+      mockGetRepoById.mockReturnValue(repoAt(targetDir, { id: 1 }))
       mockSafeGitOut.mockImplementation(async (_repoPath: string, args: string[]) => {
         if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return 'main'
         if (args[0] === 'rev-parse' && args[1] === 'HEAD') return 'abc'
@@ -470,7 +507,7 @@ describe('internal-repo-mirror routes', () => {
     })
 
     it('replaces a dirty manager working tree when importing a bundle', async () => {
-      const sourceDir = join(getTmpRoot(), 'bundle-source-dirty')
+      const sourceDir = join(reposPath(), 'bundle-source-dirty')
       mkdirSync(sourceDir, { recursive: true })
       spawnSync('git', ['init', '-b', 'main'], { cwd: sourceDir, stdio: 'ignore' })
       spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: sourceDir, stdio: 'ignore' })
@@ -479,10 +516,10 @@ describe('internal-repo-mirror routes', () => {
       writeFileSync(join(sourceDir, 'tracked.txt'), 'from bundle\n')
       spawnSync('git', ['add', '.gitignore', 'tracked.txt'], { cwd: sourceDir, stdio: 'ignore' })
       spawnSync('git', ['commit', '-m', 'source'], { cwd: sourceDir, stdio: 'ignore' })
-      const bundlePath = join(getTmpRoot(), 'source-dirty.bundle')
+      const bundlePath = join(reposPath(), 'source-dirty.bundle')
       spawnSync('git', ['bundle', 'create', bundlePath, '--all'], { cwd: sourceDir, stdio: 'ignore' })
 
-      const targetDir = join(getTmpRoot(), 'bundle-target-dirty')
+      const targetDir = join(reposPath(), 'bundle-target-dirty')
       mkdirSync(targetDir, { recursive: true })
       spawnSync('git', ['init', '-b', 'main'], { cwd: targetDir, stdio: 'ignore' })
       spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: targetDir, stdio: 'ignore' })
@@ -495,7 +532,7 @@ describe('internal-repo-mirror routes', () => {
       writeFileSync(join(targetDir, 'stale-untracked.txt'), 'stale\n')
       writeFileSync(join(targetDir, 'ignored.txt'), 'keep me\n')
 
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: targetDir })
+      mockGetRepoById.mockReturnValue(repoAt(targetDir, { id: 1 }))
       mockSafeGitOut.mockImplementation(async (_repoPath: string, args: string[]) => {
         if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return 'main'
         if (args[0] === 'rev-parse' && args[1] === 'HEAD') return 'abc'
@@ -517,7 +554,7 @@ describe('internal-repo-mirror routes', () => {
     })
 
     it('does not move branches checked out in other worktrees when importing into a worktree', async () => {
-      const sourceDir = join(getTmpRoot(), 'bundle-source-wt')
+      const sourceDir = join(reposPath(), 'bundle-source-wt')
       mkdirSync(sourceDir, { recursive: true })
       spawnSync('git', ['init', '-b', 'main'], { cwd: sourceDir, stdio: 'ignore' })
       spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: sourceDir, stdio: 'ignore' })
@@ -529,10 +566,10 @@ describe('internal-repo-mirror routes', () => {
       writeFileSync(join(sourceDir, 'feature.txt'), 'feature\n')
       spawnSync('git', ['add', 'feature.txt'], { cwd: sourceDir, stdio: 'ignore' })
       spawnSync('git', ['commit', '-m', 'feature'], { cwd: sourceDir, stdio: 'ignore' })
-      const bundlePath = join(getTmpRoot(), 'source-wt.bundle')
+      const bundlePath = join(reposPath(), 'source-wt.bundle')
       spawnSync('git', ['bundle', 'create', bundlePath, '--all'], { cwd: sourceDir, stdio: 'ignore' })
 
-      const baseDir = join(getTmpRoot(), 'wt-base')
+      const baseDir = join(reposPath(), 'wt-base')
       mkdirSync(baseDir, { recursive: true })
       spawnSync('git', ['init', '-b', 'main'], { cwd: baseDir, stdio: 'ignore' })
       spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: baseDir, stdio: 'ignore' })
@@ -541,10 +578,10 @@ describe('internal-repo-mirror routes', () => {
       spawnSync('git', ['add', 'tracked.txt'], { cwd: baseDir, stdio: 'ignore' })
       spawnSync('git', ['commit', '-m', 'server main'], { cwd: baseDir, stdio: 'ignore' })
       const serverMainHead = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: baseDir, encoding: 'utf-8' }).stdout.trim()
-      const worktreeDir = join(getTmpRoot(), 'wt-base-feature')
+      const worktreeDir = join(reposPath(), 'wt-base-feature')
       spawnSync('git', ['worktree', 'add', '-b', 'feature', worktreeDir], { cwd: baseDir, stdio: 'ignore' })
 
-      mockGetRepoById.mockReturnValue({ id: 2, fullPath: worktreeDir })
+      mockGetRepoById.mockReturnValue(repoAt(worktreeDir, { id: 2 }))
       mockSafeGitOut.mockImplementation(async (_repoPath: string, args: string[]) => {
         if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return 'feature'
         if (args[0] === 'rev-parse' && args[1] === 'HEAD') return 'abc'
@@ -577,11 +614,11 @@ describe('internal-repo-mirror routes', () => {
       gitCmd(baseDir, ['checkout', '-b', 'feature'])
       const baseFeatureSha = gitCommitFile(baseDir, 'base-feature.txt', 'base feature\n')
 
-      const worktreeDir = join(getTmpRoot(), 'target-branch-wt')
+      const worktreeDir = join(reposPath(), 'target-branch-wt')
       gitCmd(baseDir, ['worktree', 'add', '--detach', worktreeDir, baseFeatureSha])
       expect(currentBranchOf(worktreeDir)).toBe('HEAD')
 
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: baseDir })
+      mockGetRepoById.mockReturnValue(repoAt(baseDir, { id: 1 }))
       mockResolveRepoWorkingDirectory.mockResolvedValue(worktreeDir)
 
       const res = await app.request(`/api/internal/repos/1/mirror/bundle?directory=${encodeURIComponent(worktreeDir)}`, {
@@ -609,7 +646,7 @@ describe('internal-repo-mirror routes', () => {
     }
 
     function initGitRepo(name: string): string {
-      const dir = join(getTmpRoot(), name)
+      const dir = join(reposPath(), name)
       mkdirSync(dir, { recursive: true })
       gitCmd(dir, ['init', '-b', 'main'], '')
       gitCmd(dir, ['config', 'user.email', 'test@test.com'])
@@ -625,12 +662,12 @@ describe('internal-repo-mirror routes', () => {
     }
 
     function makeBundle(dir: string, name: string): Buffer {
-      const bundlePath = join(getTmpRoot(), `${name}.bundle`)
+      const bundlePath = join(reposPath(), `${name}.bundle`)
       gitCmd(dir, ['bundle', 'create', bundlePath, '--all'])
       return readFileSync(bundlePath)
     }
 
-    async function postBundle(app: Hono, urlRepoId: number, bundle: Buffer, headers: Record<string, string>): Promise<Response> {
+    async function postBundle(app: Hono, urlRepoId: number, bundle: Buffer, headers: Record<string, string>) {
       return app.request(`/api/internal/repos/${urlRepoId}/mirror/bundle`, {
         method: 'POST',
         body: bundle,
@@ -656,7 +693,7 @@ describe('internal-repo-mirror routes', () => {
       const targetDir = initGitRepo('strict-mismatch-target')
       const targetMainSha = gitCommitFile(targetDir, 'main.txt', 'target main\n')
       writeFileSync(join(targetDir, 'untracked.txt'), 'keep me\n')
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: targetDir })
+      mockGetRepoById.mockReturnValue(repoAt(targetDir, { id: 1 }))
 
       const res = await postBundle(app, 1, bundle, {
         'x-ocm-branch': 'feature',
@@ -664,7 +701,7 @@ describe('internal-repo-mirror routes', () => {
       })
 
       expect(res.status).toBe(409)
-      const json = (await res.json()) as { error: string }
+      const json = await readJson(res, ErrorResponseSchema)
       expect(json.error).toContain('targets')
       expect(gitCmd(targetDir, ['symbolic-ref', '--quiet', '--short', 'HEAD']).stdout.trim()).toBe('main')
       expect(revRef(targetDir, 'refs/heads/main')).toBe(targetMainSha)
@@ -687,12 +724,12 @@ describe('internal-repo-mirror routes', () => {
       writeFileSync(join(targetDir, 'untracked.txt'), 'keep me\n')
       writeFileSync(join(targetDir, 'tracked-local.txt'), 'modified\n')
       gitCmd(targetDir, ['add', 'tracked-local.txt'])
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: targetDir })
+      mockGetRepoById.mockReturnValue(repoAt(targetDir, { id: 1 }))
 
       const res = await postBundle(app, 1, bundle, { 'x-ocm-branch': 'ghost' })
 
       expect(res.status).toBe(409)
-      const json = (await res.json()) as { error: string }
+      const json = await readJson(res, ErrorResponseSchema)
       expect(json.error).toContain("no branch 'ghost'")
       expect(gitCmd(targetDir, ['symbolic-ref', '--quiet', '--short', 'HEAD']).stdout.trim()).toBe('main')
       expect(revRef(targetDir, 'refs/heads/main')).toBe(targetMainSha)
@@ -712,18 +749,18 @@ describe('internal-repo-mirror routes', () => {
 
       const baseDir = initGitRepo('locked-target-base')
       const baseMainSha = gitCommitFile(baseDir, 'main.txt', 'base main\n')
-      const wt1Dir = join(getTmpRoot(), 'locked-target-wt1')
+      const wt1Dir = join(reposPath(), 'locked-target-wt1')
       gitCmd(baseDir, ['worktree', 'add', '-b', 'other', wt1Dir])
-      const wt2Dir = join(getTmpRoot(), 'locked-target-wt2')
+      const wt2Dir = join(reposPath(), 'locked-target-wt2')
       gitCmd(baseDir, ['worktree', 'add', '-b', 'shared', wt2Dir])
       const wt2SharedSha = revRef(wt2Dir, 'refs/heads/shared')
       writeFileSync(join(wt1Dir, 'untracked.txt'), 'keep me\n')
-      mockGetRepoById.mockReturnValue({ id: 2, fullPath: wt1Dir })
+      mockGetRepoById.mockReturnValue(repoAt(wt1Dir, { id: 2 }))
 
       const res = await postBundle(app, 2, bundle, { 'x-ocm-branch': 'shared' })
 
       expect(res.status).toBe(409)
-      const json = (await res.json()) as { error: string }
+      const json = await readJson(res, ErrorResponseSchema)
       expect(json.error).toContain('checked out in another worktree')
       expect(currentBranchOf(wt1Dir)).toBe('other')
       expect(readFileSync(join(wt1Dir, 'untracked.txt'), 'utf-8')).toBe('keep me\n')
@@ -747,7 +784,7 @@ describe('internal-repo-mirror routes', () => {
       const targetDir = initGitRepo('cross-branch-target')
       gitCommitFile(targetDir, 'main.txt', 'target main\n')
       writeFileSync(join(targetDir, 'stale-untracked.txt'), 'stale\n')
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: targetDir })
+      mockGetRepoById.mockReturnValue(repoAt(targetDir, { id: 1 }))
       mockSafeGitOut.mockImplementation(async (_repoPath: string, args: string[]) => {
         if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return 'topic'
         if (args[0] === 'rev-parse' && args[1] === 'HEAD') return incomingTopicSha
@@ -764,7 +801,7 @@ describe('internal-repo-mirror routes', () => {
       expect(readFileSync(join(targetDir, 'topic.txt'), 'utf-8')).toBe('source topic\n')
       expect(existsSync(join(targetDir, 'stale-untracked.txt'))).toBe(false)
       expect(syncRefCount(targetDir)).toBe(0)
-      expect(mockUpdateRepoBranch).toHaveBeenCalledWith({}, 1, 'topic')
+      expect(mockUpdateRepoBranch).toHaveBeenCalledWith(expect.anything(), 1, 'topic')
     })
 
     it('moves an existing local target branch to the incoming sha and resets it on a normal non-strict push', async () => {
@@ -780,7 +817,7 @@ describe('internal-repo-mirror routes', () => {
       gitCommitFile(targetDir, 'main.txt', 'target main\n')
       gitCmd(targetDir, ['branch', 'topic'], '')
       const localTopicSha = revRef(targetDir, 'refs/heads/topic')
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: targetDir })
+      mockGetRepoById.mockReturnValue(repoAt(targetDir, { id: 1 }))
       mockSafeGitOut.mockResolvedValue(null)
 
       const res = await postBundle(app, 1, bundle, { 'x-ocm-branch': 'topic' })
@@ -809,7 +846,7 @@ describe('internal-repo-mirror routes', () => {
       gitCommitFile(targetDir, 'main.txt', 'target main\n')
       writeFileSync(join(targetDir, 'main.txt'), 'dirty edit\n')
       writeFileSync(join(targetDir, 'stale-untracked.txt'), 'stale\n')
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: targetDir })
+      mockGetRepoById.mockReturnValue(repoAt(targetDir, { id: 1 }))
       mockSafeGitOut.mockResolvedValue(null)
 
       const forcedRes = await app.request('/api/internal/repos/1/mirror/bundle?force=1', {
@@ -842,7 +879,7 @@ describe('internal-repo-mirror routes', () => {
       const targetMainSha = gitCommitFile(targetDir, 'main.txt', 'target main\n')
       writeFileSync(join(targetDir, 'main.txt'), 'dirty edit\n')
       writeFileSync(join(targetDir, 'untracked.txt'), 'keep me\n')
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: targetDir })
+      mockGetRepoById.mockReturnValue(repoAt(targetDir, { id: 1 }))
       mockSafeGitOut.mockResolvedValue(null)
 
       const res = await postBundle(app, 1, bundle, { 'x-ocm-branch': 'topic' })
@@ -866,7 +903,7 @@ describe('internal-repo-mirror routes', () => {
       const targetDir = initGitRepo('strict-same-target')
       gitCommitFile(targetDir, 'main.txt', 'target main\n')
       writeFileSync(join(targetDir, 'stale-untracked.txt'), 'stale\n')
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: targetDir })
+      mockGetRepoById.mockReturnValue(repoAt(targetDir, { id: 1 }))
       mockSafeGitOut.mockResolvedValue(null)
 
       const res = await postBundle(app, 1, bundle, {
@@ -883,7 +920,7 @@ describe('internal-repo-mirror routes', () => {
     })
 
     it('imports a bundle whose ocm-sync refs include a symbolic HEAD without failing', async () => {
-      const sourceDir = join(getTmpRoot(), 'bundle-source-head')
+      const sourceDir = join(reposPath(), 'bundle-source-head')
       mkdirSync(sourceDir, { recursive: true })
       spawnSync('git', ['init', '-b', 'main'], { cwd: sourceDir, stdio: 'ignore' })
       spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: sourceDir, stdio: 'ignore' })
@@ -893,10 +930,10 @@ describe('internal-repo-mirror routes', () => {
       spawnSync('git', ['commit', '-m', 'source'], { cwd: sourceDir, stdio: 'ignore' })
       const headSha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: sourceDir, encoding: 'utf-8' }).stdout.trim()
       spawnSync('git', ['checkout', headSha], { cwd: sourceDir, stdio: 'ignore' })
-      const bundlePath = join(getTmpRoot(), 'source-head.bundle')
+      const bundlePath = join(reposPath(), 'source-head.bundle')
       spawnSync('git', ['bundle', 'create', bundlePath, '--all'], { cwd: sourceDir, stdio: 'ignore' })
 
-      const targetDir = join(getTmpRoot(), 'bundle-target-head')
+      const targetDir = join(reposPath(), 'bundle-target-head')
       mkdirSync(targetDir, { recursive: true })
       spawnSync('git', ['init', '-b', 'main'], { cwd: targetDir, stdio: 'ignore' })
       spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: targetDir, stdio: 'ignore' })
@@ -905,7 +942,7 @@ describe('internal-repo-mirror routes', () => {
       spawnSync('git', ['add', 'old.txt'], { cwd: targetDir, stdio: 'ignore' })
       spawnSync('git', ['commit', '-m', 'target'], { cwd: targetDir, stdio: 'ignore' })
 
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: targetDir })
+      mockGetRepoById.mockReturnValue(repoAt(targetDir, { id: 1 }))
       mockSafeGitOut.mockImplementation(async (_repoPath: string, args: string[]) => {
         if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return 'main'
         if (args[0] === 'rev-parse' && args[1] === 'HEAD') return headSha
@@ -924,7 +961,7 @@ describe('internal-repo-mirror routes', () => {
     })
 
     it('returns a git bundle for pull fast path', async () => {
-      const repoDir = join(getTmpRoot(), 'bundle-download')
+      const repoDir = join(reposPath(), 'bundle-download')
       mkdirSync(repoDir, { recursive: true })
       spawnSync('git', ['init', '-b', 'main'], { cwd: repoDir, stdio: 'ignore' })
       spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoDir, stdio: 'ignore' })
@@ -932,21 +969,21 @@ describe('internal-repo-mirror routes', () => {
       writeFileSync(join(repoDir, 'tracked.txt'), 'bundle payload\n')
       spawnSync('git', ['add', 'tracked.txt'], { cwd: repoDir, stdio: 'ignore' })
       spawnSync('git', ['commit', '-m', 'bundle'], { cwd: repoDir, stdio: 'ignore' })
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: repoDir })
+      mockGetRepoById.mockReturnValue(repoAt(repoDir, { id: 1 }))
 
       const res = await app.request('/api/internal/repos/1/mirror/bundle')
       const body = Buffer.from(await res.arrayBuffer())
 
       expect(res.status).toBe(200)
       expect(body.length).toBeGreaterThan(0)
-      const verifyPath = join(getTmpRoot(), 'download.bundle')
+      const verifyPath = join(reposPath(), 'download.bundle')
       writeFileSync(verifyPath, body)
       const verify = spawnSync('git', ['bundle', 'verify', verifyPath], { cwd: repoDir, encoding: 'utf-8' })
       expect(verify.status).toBe(0)
     })
 
     it('applies a patch to an existing manager repo', async () => {
-      const repoDir = join(getTmpRoot(), 'patch-repo')
+      const repoDir = join(reposPath(), 'patch-repo')
       mkdirSync(repoDir, { recursive: true })
       spawnSync('git', ['init'], { cwd: repoDir, stdio: 'ignore' })
       spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoDir, stdio: 'ignore' })
@@ -956,7 +993,7 @@ describe('internal-repo-mirror routes', () => {
       spawnSync('git', ['commit', '-m', 'initial'], { cwd: repoDir, stdio: 'ignore' })
       const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repoDir, encoding: 'utf-8' }).stdout.trim()
 
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: repoDir })
+      mockGetRepoById.mockReturnValue(repoAt(repoDir, { id: 1 }))
       mockSafeGitOut.mockImplementation(async (_repoPath: string, args: string[]) => {
         if (args[0] === 'rev-parse' && args[1] === 'HEAD') return head
         if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return 'main'
@@ -971,12 +1008,13 @@ describe('internal-repo-mirror routes', () => {
       })
 
       expect(res.status).toBe(200)
+      expect(await readJson(res, AppliedPatchResponseSchema)).toMatchObject({ repoId: 1, applied: true })
       expect(readFileSync(join(repoDir, 'tracked.txt'), 'utf-8')).toBe('after\n')
       expect(mockUpdateLastPulled).toHaveBeenCalledWith(expect.anything(), 1)
     })
 
     it('returns a patch snapshot for pull fast path', async () => {
-      const repoDir = join(getTmpRoot(), 'snapshot-repo')
+      const repoDir = join(reposPath(), 'snapshot-repo')
       mkdirSync(repoDir, { recursive: true })
       spawnSync('git', ['init', '-b', 'main'], { cwd: repoDir, stdio: 'ignore' })
       spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoDir, stdio: 'ignore' })
@@ -986,7 +1024,7 @@ describe('internal-repo-mirror routes', () => {
       spawnSync('git', ['commit', '-m', 'initial'], { cwd: repoDir, stdio: 'ignore' })
       writeFileSync(join(repoDir, 'tracked.txt'), 'after\n')
 
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: repoDir })
+      mockGetRepoById.mockReturnValue(repoAt(repoDir, { id: 1 }))
       mockSafeGitOut.mockImplementation(async (_repoPath: string, args: string[]) => {
         if (args[0] === 'rev-parse' && args[1] === 'HEAD') return 'abc'
         if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return 'main'
@@ -995,7 +1033,7 @@ describe('internal-repo-mirror routes', () => {
       })
 
       const res = await app.request('/api/internal/repos/1/mirror/patch')
-      const json = await res.json() as { patch: string; head: string; branch: string }
+      const json = await readJson(res, PatchSnapshotResponseSchema)
 
       expect(res.status).toBe(200)
       expect(json.head).toBe('abc')
@@ -1006,22 +1044,22 @@ describe('internal-repo-mirror routes', () => {
 
   describe('chunked upload flow (begin/parts/commit)', () => {
     it('creates a repo and populates from chunked tarball', async () => {
-      const targetPath = join(getTmpRoot(), 'test-repo')
+      const targetPath = join(reposPath(), 'test-repo')
       mockEnsureMirrorTargetPath.mockReturnValue({ localPath: 'test-repo', fullPath: targetPath })
-      mockCreateRepoRow.mockImplementation((_db: any, input: any) => ({ repo: { id: 1, fullPath: input.fullPath, localPath: input.localPath }, created: true }))
+      mockCreateRepoRow.mockImplementation((_db, input) => ({ repo: repoAt(input.fullPath, { id: 1, localPath: input.localPath }), created: true }))
 
-      const sourceDir = join(getTmpRoot(), 'source')
+      const sourceDir = join(reposPath(), 'source')
       mkdirSync(sourceDir, { recursive: true })
       writeFileSync(join(sourceDir, 'payload.txt'), 'payload data')
 
       const result = spawnSync('tar', ['-c', '-C', sourceDir, '.'], { encoding: 'buffer' })
-      const tarball = result.stdout as Buffer
+      const tarball = Buffer.from(result.stdout)
 
       const { beginRes, commitRes } = await pushTarball(app, 0, { create: true, name: 'test-repo' }, tarball)
 
       expect(beginRes.status).toBe(200)
       expect(commitRes?.status).toBe(200)
-      const json = (await commitRes!.json()) as CommitResponse
+      const json = await readJson(commitRes!, CommitResponseSchema)
       expect(json.created).toBe(true)
       expect(json.repoId).toBe(1)
       expect(json.fullPath).toBe(targetPath)
@@ -1033,16 +1071,16 @@ describe('internal-repo-mirror routes', () => {
     })
 
     it('splits a tarball across multiple PUTs of a fixed test chunk size', async () => {
-      const targetPath = join(getTmpRoot(), 'test-repo')
+      const targetPath = join(reposPath(), 'test-repo')
       mockEnsureMirrorTargetPath.mockReturnValue({ localPath: 'test-repo', fullPath: targetPath })
-      mockCreateRepoRow.mockImplementation((_db: any, input: any) => ({ repo: { id: 1, fullPath: input.fullPath, localPath: input.localPath }, created: true }))
+      mockCreateRepoRow.mockImplementation((_db, input) => ({ repo: repoAt(input.fullPath, { id: 1, localPath: input.localPath }), created: true }))
 
-      const sourceDir = join(getTmpRoot(), 'source-multi')
+      const sourceDir = join(reposPath(), 'source-multi')
       mkdirSync(sourceDir, { recursive: true })
       writeFileSync(join(sourceDir, 'a.bin'), Buffer.alloc(64 * 1024, 0xab))
       writeFileSync(join(sourceDir, 'b.bin'), Buffer.alloc(64 * 1024, 0xcd))
 
-      const tarFile = join(getTmpRoot(), 'multi.tar')
+      const tarFile = join(reposPath(), 'multi.tar')
       spawnSync('tar', ['-c', '-C', sourceDir, '-f', tarFile, '.'], { stdio: 'ignore' })
       const tarball = readFileSync(tarFile)
       const testChunkSize = 16 * 1024
@@ -1050,7 +1088,7 @@ describe('internal-repo-mirror routes', () => {
 
       const beginRes = await begin(app, 0, { create: true, name: 'test-repo' })
       expect(beginRes.status).toBe(200)
-      const beginJson = (await beginRes.json()) as BeginResponse
+      const beginJson = await readJson(beginRes, BeginResponseSchema)
 
       let index = 0
       for (let offset = 0; offset < tarball.length; offset += testChunkSize) {
@@ -1068,26 +1106,26 @@ describe('internal-repo-mirror routes', () => {
     })
 
     it('creates the mirror target parent before final rename', async () => {
-      const targetPath = join(getTmpRoot(), 'nested', 'test-repo')
+      const targetPath = join(reposPath(), 'nested', 'test-repo')
       mockEnsureMirrorTargetPath.mockReturnValue({ localPath: 'nested/test-repo', fullPath: targetPath })
-      mockCreateRepoRow.mockImplementation((_db: any, input: any) => ({ repo: { id: 1, fullPath: input.fullPath, localPath: input.localPath }, created: true }))
+      mockCreateRepoRow.mockImplementation((_db, input) => ({ repo: repoAt(input.fullPath, { id: 1, localPath: input.localPath }), created: true }))
 
-      const sourceDir = join(getTmpRoot(), 'source-nested')
+      const sourceDir = join(reposPath(), 'source-nested')
       mkdirSync(sourceDir, { recursive: true })
       writeFileSync(join(sourceDir, 'payload.txt'), 'payload data')
 
       const result = spawnSync('tar', ['-c', '-C', sourceDir, '.'], { encoding: 'buffer' })
-      const tarball = result.stdout as Buffer
+      const tarball = Buffer.from(result.stdout)
 
       const { commitRes } = await pushTarball(app, 0, { create: true, name: 'test-repo' }, tarball)
       expect(commitRes?.status).toBe(200)
-      const json = (await commitRes!.json()) as CommitResponse
+      const json = await readJson(commitRes!, CommitResponseSchema)
       expect(json.fullPath).toBe(targetPath)
       expect(existsSync(join(targetPath, 'payload.txt'))).toBe(true)
     })
 
     it('preserves gitignored local files on the receiving repo across commit', async () => {
-      const repoDir = join(getTmpRoot(), 'test-repo')
+      const repoDir = join(reposPath(), 'test-repo')
       mkdirSync(repoDir, { recursive: true })
       spawnSync('git', ['init'], { cwd: repoDir, stdio: 'ignore' })
       spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoDir, stdio: 'ignore' })
@@ -1099,15 +1137,15 @@ describe('internal-repo-mirror routes', () => {
       spawnSync('git', ['add', '.gitignore', 'tracked.txt'], { cwd: repoDir, stdio: 'ignore' })
       spawnSync('git', ['commit', '-m', 'init'], { cwd: repoDir, stdio: 'ignore' })
 
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: repoDir })
+      mockGetRepoById.mockReturnValue(repoAt(repoDir, { id: 1 }))
 
-      const sourceDir = join(getTmpRoot(), 'source-carry')
+      const sourceDir = join(reposPath(), 'source-carry')
       mkdirSync(sourceDir, { recursive: true })
       writeFileSync(join(sourceDir, 'tracked.txt'), 'new tracked')
       writeFileSync(join(sourceDir, 'added.txt'), 'added')
 
       const result = spawnSync('tar', ['-c', '-C', sourceDir, '.'], { encoding: 'buffer' })
-      const tarball = result.stdout as Buffer
+      const tarball = Buffer.from(result.stdout)
 
       const { commitRes } = await pushTarball(app, 1, { force: true }, tarball)
       expect(commitRes?.status).toBe(200)
@@ -1119,23 +1157,23 @@ describe('internal-repo-mirror routes', () => {
     })
 
     it('returns 409 from begin when repo is in use and force not set', async () => {
-      const repoDir = join(getTmpRoot(), 'test-repo')
+      const repoDir = join(reposPath(), 'test-repo')
       mkdirSync(repoDir, { recursive: true })
       writeFileSync(join(repoDir, 'existing.txt'), 'existing')
 
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: repoDir })
+      mockGetRepoById.mockReturnValue(repoAt(repoDir, { id: 1 }))
       mockIsRepoInUse.mockReturnValue(true)
 
       const res = await begin(app, 1, {})
       expect(res.status).toBe(409)
-      const json = (await res.json()) as { error: string }
+      const json = await readJson(res, ErrorResponseSchema)
       expect(json.error).toBe('repo_in_use')
     })
 
     it('returns 400 when create=true but name missing', async () => {
       const res = await begin(app, 0, { create: true })
       expect(res.status).toBe(400)
-      const json = (await res.json()) as { error: string }
+      const json = await readJson(res, ErrorResponseSchema)
       expect(json.error).toBe('name required')
     })
 
@@ -1156,51 +1194,51 @@ describe('internal-repo-mirror routes', () => {
     })
 
     it('rejects commit requests with zero uploaded parts', async () => {
-      const targetPath = join(getTmpRoot(), 'empty-parts-repo')
+      const targetPath = join(reposPath(), 'empty-parts-repo')
       mockEnsureMirrorTargetPath.mockReturnValue({ localPath: 'empty-parts-repo', fullPath: targetPath })
-      mockCreateRepoRow.mockImplementation((_db: any, input: any) => ({ repo: { id: 1, fullPath: input.fullPath, localPath: input.localPath }, created: true }))
+      mockCreateRepoRow.mockImplementation((_db, input) => ({ repo: repoAt(input.fullPath, { id: 1, localPath: input.localPath }), created: true }))
 
       const beginRes = await begin(app, 0, { create: true, name: 'empty-parts-repo' })
       expect(beginRes.status).toBe(200)
-      const beginJson = (await beginRes.json()) as BeginResponse
+      const beginJson = await readJson(beginRes, BeginResponseSchema)
 
       const commitRes = await commit(app, beginJson.repoId, beginJson.uploadId, 0)
       expect(commitRes.status).toBe(400)
-      const json = (await commitRes.json()) as { error: string }
+      const json = await readJson(commitRes, ErrorResponseSchema)
       expect(json.error).toBe('totalParts must be a positive integer')
       expect(mockUpdateLastPulled).not.toHaveBeenCalled()
     })
 
     it('rolls back created DB row when commit fails on invalid tarball', async () => {
-      const targetPath = join(getTmpRoot(), 'test-repo')
+      const targetPath = join(reposPath(), 'test-repo')
       mockEnsureMirrorTargetPath.mockReturnValue({ localPath: 'test-repo', fullPath: targetPath })
-      mockCreateRepoRow.mockImplementation((_db: any, input: any) => ({ repo: { id: 1, fullPath: input.fullPath, localPath: input.localPath }, created: true }))
+      mockCreateRepoRow.mockImplementation((_db, input) => ({ repo: repoAt(input.fullPath, { id: 1, localPath: input.localPath }), created: true }))
       mockDeleteRepo.mockReturnValue(undefined)
 
       const beginRes = await begin(app, 0, { create: true, name: 'test-repo' })
       expect(beginRes.status).toBe(200)
-      const beginJson = (await beginRes.json()) as BeginResponse
+      const beginJson = await readJson(beginRes, BeginResponseSchema)
 
       const putRes = await putPart(app, beginJson.repoId, beginJson.uploadId, 0, Buffer.from('not a tarball'))
       expect(putRes.status).toBe(200)
 
       const commitRes = await commit(app, beginJson.repoId, beginJson.uploadId, 1)
       expect(commitRes.status).toBe(500)
-      expect(mockDeleteRepo).toHaveBeenCalledWith({}, 1)
+      expect(mockDeleteRepo).toHaveBeenCalledWith(expect.anything(), 1)
     })
 
     it('does not delete existing repo on commit failure when createRepoRow returns non-created', async () => {
-      const existingRepoPath = join(getTmpRoot(), 'existing-repo-fail')
-      mockEnsureMirrorTargetPath.mockReturnValue({ localPath: 'new-name', fullPath: join(getTmpRoot(), 'new-name') })
+      const existingRepoPath = join(reposPath(), 'existing-repo-fail')
+      mockEnsureMirrorTargetPath.mockReturnValue({ localPath: 'new-name', fullPath: join(reposPath(), 'new-name') })
       mockCreateRepoRow.mockImplementation(() => ({
-        repo: { id: 5, fullPath: existingRepoPath, localPath: 'existing-repo' },
+        repo: repoAt(existingRepoPath, { id: 5, localPath: 'existing-repo' }),
         created: false,
       }))
       mockDeleteRepo.mockReturnValue(undefined)
 
       const beginRes = await begin(app, 0, { create: true, name: 'new-name' })
       expect(beginRes.status).toBe(200)
-      const beginJson = (await beginRes.json()) as BeginResponse
+      const beginJson = await readJson(beginRes, BeginResponseSchema)
 
       const putRes = await putPart(app, beginJson.repoId, beginJson.uploadId, 0, Buffer.from('not a tarball'))
       expect(putRes.status).toBe(200)
@@ -1211,61 +1249,61 @@ describe('internal-repo-mirror routes', () => {
     })
 
     it('returns 409 when create-on-push finds existing repo in use and force not set', async () => {
-      const existingRepoPath = join(getTmpRoot(), 'existing-repo')
+      const existingRepoPath = join(reposPath(), 'existing-repo')
       mockEnsureMirrorTargetPath.mockReturnValue({ localPath: 'existing-repo', fullPath: existingRepoPath })
       mockCreateRepoRow.mockImplementation(() => ({
-        repo: { id: 5, fullPath: existingRepoPath, localPath: 'existing-repo' },
+        repo: repoAt(existingRepoPath, { id: 5, localPath: 'existing-repo' }),
         created: false,
       }))
       mockIsRepoInUse.mockReturnValue(true)
 
       const res = await begin(app, 0, { create: true, name: 'existing-repo' })
       expect(res.status).toBe(409)
-      const json = (await res.json()) as { error: string }
+      const json = await readJson(res, ErrorResponseSchema)
       expect(json.error).toBe('repo_in_use')
     })
 
     it('allows create-on-push of existing repo when force=true even if in use', async () => {
-      const existingRepoPath = join(getTmpRoot(), 'existing-repo-force')
+      const existingRepoPath = join(reposPath(), 'existing-repo-force')
       mockEnsureMirrorTargetPath.mockReturnValue({ localPath: 'existing-repo-force', fullPath: existingRepoPath })
       mockCreateRepoRow.mockImplementation(() => ({
-        repo: { id: 7, fullPath: existingRepoPath, localPath: 'existing-repo-force' },
+        repo: repoAt(existingRepoPath, { id: 7, localPath: 'existing-repo-force' }),
         created: false,
       }))
       mockIsRepoInUse.mockReturnValue(true)
 
-      const sourceDir = join(getTmpRoot(), 'source-force')
+      const sourceDir = join(reposPath(), 'source-force')
       mkdirSync(sourceDir, { recursive: true })
       writeFileSync(join(sourceDir, 'forced.txt'), 'forced content')
       const result = spawnSync('tar', ['-c', '-C', sourceDir, '.'], { encoding: 'buffer' })
-      const tarball = result.stdout as Buffer
+      const tarball = Buffer.from(result.stdout)
 
       const { commitRes } = await pushTarball(app, 0, { create: true, name: 'existing-repo-force', force: true }, tarball)
       expect(commitRes?.status).toBe(200)
-      const json = (await commitRes!.json()) as CommitResponse
+      const json = await readJson(commitRes!, CommitResponseSchema)
       expect(json.created).toBe(false)
       expect(json.repoId).toBe(7)
       expect(existsSync(join(json.fullPath, 'forced.txt'))).toBe(true)
     })
 
     it('uses existing repo fullPath when createRepoRow finds matching origin/branch', async () => {
-      const existingRepoPath = join(getTmpRoot(), 'existing-repo')
-      mockEnsureMirrorTargetPath.mockReturnValue({ localPath: 'new-name', fullPath: join(getTmpRoot(), 'new-name') })
+      const existingRepoPath = join(reposPath(), 'existing-repo')
+      mockEnsureMirrorTargetPath.mockReturnValue({ localPath: 'new-name', fullPath: join(reposPath(), 'new-name') })
       mockCreateRepoRow.mockImplementation(() => ({
-        repo: { id: 5, fullPath: existingRepoPath, localPath: 'existing-repo' },
+        repo: repoAt(existingRepoPath, { id: 5, localPath: 'existing-repo' }),
         created: false,
       }))
 
-      const sourceDir = join(getTmpRoot(), 'source-existing')
+      const sourceDir = join(reposPath(), 'source-existing')
       mkdirSync(sourceDir, { recursive: true })
       writeFileSync(join(sourceDir, 'file.txt'), 'existing content')
 
       const result = spawnSync('tar', ['-c', '-C', sourceDir, '.'], { encoding: 'buffer' })
-      const tarball = result.stdout as Buffer
+      const tarball = Buffer.from(result.stdout)
 
       const { commitRes } = await pushTarball(app, 0, { create: true, name: 'new-name' }, tarball)
       expect(commitRes?.status).toBe(200)
-      const json = (await commitRes!.json()) as CommitResponse
+      const json = await readJson(commitRes!, CommitResponseSchema)
       expect(json.created).toBe(false)
       expect(json.repoId).toBe(5)
       expect(json.fullPath).toBe(existingRepoPath)
@@ -1275,19 +1313,20 @@ describe('internal-repo-mirror routes', () => {
     })
 
     it('DELETE removes the upload session and deletes the created repo', async () => {
-      mockEnsureMirrorTargetPath.mockReturnValue({ localPath: 'abort-repo', fullPath: join(getTmpRoot(), 'abort-repo') })
-      mockCreateRepoRow.mockImplementation((_db: any, input: any) => ({ repo: { id: 11, fullPath: input.fullPath, localPath: input.localPath }, created: true }))
+      mockEnsureMirrorTargetPath.mockReturnValue({ localPath: 'abort-repo', fullPath: join(reposPath(), 'abort-repo') })
+      mockCreateRepoRow.mockImplementation((_db, input) => ({ repo: repoAt(input.fullPath, { id: 11, localPath: input.localPath }), created: true }))
       mockDeleteRepo.mockReturnValue(undefined)
 
       const beginRes = await begin(app, 0, { create: true, name: 'abort-repo' })
       expect(beginRes.status).toBe(200)
-      const beginJson = (await beginRes.json()) as BeginResponse
+      const beginJson = await readJson(beginRes, BeginResponseSchema)
 
       const delRes = await app.request(`/api/internal/repos/${beginJson.repoId}/mirror/uploads/${beginJson.uploadId}`, {
         method: 'DELETE',
       })
       expect(delRes.status).toBe(200)
-      expect(mockDeleteRepo).toHaveBeenCalledWith({}, 11)
+      expect(await readJson(delRes, UploadDeletedSchema)).toEqual({ ok: true })
+      expect(mockDeleteRepo).toHaveBeenCalledWith(expect.anything(), 11)
 
       const commitRes = await commit(app, beginJson.repoId, beginJson.uploadId, 1)
       expect(commitRes.status).toBe(404)
@@ -1298,7 +1337,7 @@ describe('internal-repo-mirror routes', () => {
     it('returns 410 for the old GET contract', async () => {
       const res = await app.request('/api/internal/repos/1/mirror/target?branch=feature')
       expect(res.status).toBe(410)
-      const json = (await res.json()) as { error: string; message: string }
+      const json = await readJson(res, LegacyErrorResponseSchema)
       expect(json.error).toBe('cli_too_old')
       expect(json.message).toMatch(/upgrade to ocm-cli/i)
     })
@@ -1310,7 +1349,7 @@ describe('internal-repo-mirror routes', () => {
         headers: { 'content-type': 'application/json' },
       })
       expect(res.status).toBe(410)
-      const json = (await res.json()) as { error: string }
+      const json = await readJson(res, ErrorResponseSchema)
       expect(json.error).toBe('cli_too_old')
     })
   })
@@ -1319,35 +1358,35 @@ describe('internal-repo-mirror routes', () => {
     let baseDir: string
 
     beforeEach(() => {
-      baseDir = initRepoAt(join(getTmpRoot(), 'checkouts-base'))
+      baseDir = initRepoAt(join(reposPath(), 'checkouts-base'))
       commitFileAt(baseDir, 'main.txt', 'base\n')
       runGit(baseDir, ['checkout', '-b', 'feature'])
       commitFileAt(baseDir, 'feature.txt', 'feature\n')
       runGit(baseDir, ['checkout', 'main'])
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: baseDir, localPath: 'checkouts-base' })
+      mockGetRepoById.mockReturnValue(repoAt(baseDir, { id: 1, localPath: 'checkouts-base' }))
     })
 
     function addWorktree(branch: string, dirName: string): string {
-      const dir = join(getTmpRoot(), dirName)
+      const dir = join(reposPath(), dirName)
       runGit(baseDir, ['worktree', 'add', '-b', branch, dir])
       return dir
     }
 
     it('orders matching worktrees, includes legacy repo rows and excludes schedule worktrees', async () => {
       const featureHead = revOf(baseDir, 'refs/heads/feature')
-      const wtFeature = join(getTmpRoot(), 'checkouts-wt-feature')
+      const wtFeature = join(reposPath(), 'checkouts-wt-feature')
       runGit(baseDir, ['worktree', 'add', wtFeature, 'feature'])
       const wtFeatureOcm = addWorktree('feature-ocm', 'checkouts-wt-ocm')
       const legacyDir = addWorktree('feature-ocm-2', 'checkouts-legacy')
       const wtFeatureOcm3 = addWorktree('feature-ocm-3', 'checkouts-wt-ocm-3')
-      const scheduleDir = join(getTmpRoot(), 'checkouts-schedule')
+      const scheduleDir = join(reposPath(), 'checkouts-schedule')
 
       mockSiblingRows = [
-        { id: -1, fullPath: wtFeature, worktreeSource: 'opencode', isWorktree: true },
-        { id: -1, fullPath: wtFeatureOcm, worktreeSource: 'opencode', isWorktree: true },
-        { id: 5, fullPath: legacyDir, isWorktree: true },
-        { id: -1, fullPath: scheduleDir, worktreeSource: 'schedule', isWorktree: true },
-        { id: -1, fullPath: wtFeatureOcm3, worktreeSource: 'git', isWorktree: true },
+        siblingAt(wtFeature, { id: -1, worktreeSource: 'opencode' }),
+        siblingAt(wtFeatureOcm, { id: -1, worktreeSource: 'opencode' }),
+        siblingAt(legacyDir, { id: 5 }),
+        siblingAt(scheduleDir, { id: -1, worktreeSource: 'schedule' }),
+        siblingAt(wtFeatureOcm3, { id: -1, worktreeSource: 'git' }),
       ]
       mockListGitWorktrees.mockResolvedValue([
         { path: baseDir, branch: 'main' },
@@ -1398,7 +1437,7 @@ describe('internal-repo-mirror routes', () => {
       const res = await app.request('/api/internal/repos/1/mirror/checkouts?branch=feature')
 
       expect(res.status).toBe(200)
-      const json = (await res.json()) as { suffixedWorktreeBranch: string; branchCheckedOut: boolean; worktrees: unknown[] }
+      const json = await readJson(res, MirrorCheckoutsResponseSchema)
       expect(json.suffixedWorktreeBranch).toBe('feature-ocm-3')
       expect(json.branchCheckedOut).toBe(false)
       expect(json.worktrees).toEqual([])
@@ -1408,7 +1447,7 @@ describe('internal-repo-mirror routes', () => {
       const res = await app.request('/api/internal/repos/1/mirror/checkouts')
 
       expect(res.status).toBe(400)
-      const json = (await res.json()) as { error: string }
+      const json = await readJson(res, ErrorResponseSchema)
       expect(json.error).toBe('branch required')
       expect(mockGetRepoById).not.toHaveBeenCalled()
     })
@@ -1417,7 +1456,7 @@ describe('internal-repo-mirror routes', () => {
       const res = await app.request(`/api/internal/repos/1/mirror/checkouts?branch=${encodeURIComponent(branch)}`)
 
       expect(res.status).toBe(400)
-      const json = (await res.json()) as { error: string }
+      const json = await readJson(res, ErrorResponseSchema)
       expect(json.error).toBe('invalid branch name')
       expect(mockListGitWorktrees).not.toHaveBeenCalled()
     })
@@ -1447,16 +1486,16 @@ describe('internal-repo-mirror routes', () => {
 
   describe('POST /:repoId/mirror/worktree', () => {
     let baseDir: string
-    let repo: { id: number; fullPath: string; localPath: string }
+    let repo: Repo
 
     beforeEach(() => {
-      baseDir = initRepoAt(join(getTmpRoot(), 'wt-base'))
+      baseDir = initRepoAt(join(reposPath(), 'wt-base'))
       commitFileAt(baseDir, 'main.txt', 'base\n')
-      repo = { id: 1, fullPath: baseDir, localPath: 'wt-base' }
+      repo = repoAt(baseDir, { id: 1, localPath: 'wt-base' })
       mockGetRepoById.mockReturnValue(repo)
     })
 
-    async function request(body: Buffer, headers: Record<string, string>): Promise<Response> {
+    async function request(body: Buffer, headers: Record<string, string>) {
       return app.request('/api/internal/repos/1/mirror/worktree', {
         method: 'POST',
         body,
@@ -1465,26 +1504,26 @@ describe('internal-repo-mirror routes', () => {
     }
 
     it('streams a bundle into a new worktree and reports its checkout state', async () => {
-      const sourceDir = initRepoAt(join(getTmpRoot(), 'wt-source'))
+      const sourceDir = initRepoAt(join(reposPath(), 'wt-source'))
       commitFileAt(sourceDir, 'main.txt', 'source main\n')
       runGit(sourceDir, ['checkout', '-b', 'feature'])
       const incomingFeatureSha = commitFileAt(sourceDir, 'feature.txt', 'source feature\n')
       runGit(sourceDir, ['checkout', 'main'])
       const bundle = bundleOf(sourceDir, 'wt-source')
 
-      const worktreeDir = join(getTmpRoot(), 'wt-created')
+      const worktreeDir = join(reposPath(), 'wt-created')
       runGit(baseDir, ['worktree', 'add', '-b', 'feature-ocm', worktreeDir])
 
       mockListGitWorktrees.mockResolvedValue([{ path: baseDir, branch: 'main' }])
-      mockRepoWorkspaces.create.mockImplementation(async (_repo: unknown, options: { initialize: (directory: string) => Promise<void> }) => {
-        await options.initialize(worktreeDir)
+      mockRepoWorkspaces.create.mockImplementation(async (_repo, options) => {
+        await options?.initialize?.(worktreeDir)
         return { directory: worktreeDir, worktreeSetup: { status: 'none' } }
       })
 
       const res = await request(bundle, { 'x-ocm-branch': 'feature', 'x-ocm-target-branch': 'feature-ocm' })
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({
+      expect(await readJson(res, MirrorWorktreeCreateResponseSchema)).toEqual({
         repoId: 1,
         fullPath: worktreeDir,
         branch: 'feature-ocm',
@@ -1500,7 +1539,7 @@ describe('internal-repo-mirror routes', () => {
     })
 
     it('applies the leading working-tree patch inside initialize before the worktree is reported', async () => {
-      const sourceDir = initRepoAt(join(getTmpRoot(), 'wt-patch-source'))
+      const sourceDir = initRepoAt(join(reposPath(), 'wt-patch-source'))
       commitFileAt(sourceDir, 'main.txt', 'source main\n')
       runGit(sourceDir, ['checkout', '-b', 'feature'])
       commitFileAt(sourceDir, 'feature.txt', 'source feature\n')
@@ -1511,14 +1550,14 @@ describe('internal-repo-mirror routes', () => {
       runGit(sourceDir, ['add', '-N', 'untracked.txt'])
       const patchBuf = Buffer.from(runGit(sourceDir, ['diff', '--binary', 'HEAD']).stdout, 'utf-8')
 
-      const worktreeDir = join(getTmpRoot(), 'wt-patch-created')
+      const worktreeDir = join(reposPath(), 'wt-patch-created')
       runGit(baseDir, ['worktree', 'add', '-b', 'feature-ocm', worktreeDir])
 
       mockListGitWorktrees.mockResolvedValue([{ path: baseDir, branch: 'main' }])
       let mainDuringInitialize: string | undefined
       let untrackedDuringInitialize: string | undefined
-      mockRepoWorkspaces.create.mockImplementation(async (_repo: unknown, options: { initialize: (directory: string) => Promise<void> }) => {
-        await options.initialize(worktreeDir)
+      mockRepoWorkspaces.create.mockImplementation(async (_repo, options) => {
+        await options?.initialize?.(worktreeDir)
         mainDuringInitialize = readFileSync(join(worktreeDir, 'main.txt'), 'utf-8')
         untrackedDuringInitialize = readFileSync(join(worktreeDir, 'untracked.txt'), 'utf-8')
         return { directory: worktreeDir, worktreeSetup: { status: 'none' } }
@@ -1545,7 +1584,7 @@ describe('internal-repo-mirror routes', () => {
       })
 
       expect(res.status).toBe(400)
-      const json = (await res.json()) as { error: string }
+      const json = await readJson(res, ErrorResponseSchema)
       expect(json.error).toBe('invalid patch length')
       expect(mockListGitWorktrees).not.toHaveBeenCalled()
       expect(mockRepoWorkspaces.create).not.toHaveBeenCalled()
@@ -1561,7 +1600,7 @@ describe('internal-repo-mirror routes', () => {
       })
 
       expect(res.status).toBe(409)
-      const json = (await res.json()) as { error: string }
+      const json = await readJson(res, ErrorResponseSchema)
       expect(json.error).toContain('patch length')
       expect(mockRepoWorkspaces.create).not.toHaveBeenCalled()
     })
@@ -1572,7 +1611,7 @@ describe('internal-repo-mirror routes', () => {
       const res = await request(Buffer.from('bundle'), { 'x-ocm-branch': 'feature', 'x-ocm-target-branch': 'feature-ocm' })
 
       expect(res.status).toBe(409)
-      const json = (await res.json()) as { error: string }
+      const json = await readJson(res, ErrorResponseSchema)
       expect(json.error).toBe('branch_in_use')
       expect(mockRepoWorkspaces.create).not.toHaveBeenCalled()
     })
@@ -1595,7 +1634,7 @@ describe('internal-repo-mirror routes', () => {
       const res = await request(Buffer.from('bundle'), { 'x-ocm-branch': branch, 'x-ocm-target-branch': 'feature-ocm' })
 
       expect(res.status).toBe(400)
-      const json = (await res.json()) as { error: string }
+      const json = await readJson(res, ErrorResponseSchema)
       expect(json.error).toBe('invalid branch name')
       expect(mockListGitWorktrees).not.toHaveBeenCalled()
       expect(mockRepoWorkspaces.create).not.toHaveBeenCalled()
@@ -1605,7 +1644,7 @@ describe('internal-repo-mirror routes', () => {
       const res = await request(Buffer.from('bundle'), { 'x-ocm-branch': 'feature', 'x-ocm-target-branch': targetBranch })
 
       expect(res.status).toBe(400)
-      const json = (await res.json()) as { error: string }
+      const json = await readJson(res, ErrorResponseSchema)
       expect(json.error).toBe('invalid branch name')
       expect(mockListGitWorktrees).not.toHaveBeenCalled()
       expect(mockRepoWorkspaces.create).not.toHaveBeenCalled()
@@ -1638,18 +1677,18 @@ describe('internal-repo-mirror routes', () => {
       const res = await request(Buffer.from('bundle'), { 'x-ocm-branch': 'feature', 'x-ocm-target-branch': 'feature-ocm' })
 
       expect(res.status).toBe(409)
-      const json = (await res.json()) as { error: string }
+      const json = await readJson(res, ErrorResponseSchema)
       expect(json.error).toContain('worktree create failed')
     })
   })
 
   describe('mirror directory scoping', () => {
     it('serves a bundle for a directory inside the repository', async () => {
-      const repoDir = initRepoAt(join(getTmpRoot(), 'dir-bundle-base'))
+      const repoDir = initRepoAt(join(reposPath(), 'dir-bundle-base'))
       commitFileAt(repoDir, 'main.txt', 'base\n')
-      const worktreeDir = join(getTmpRoot(), 'dir-bundle-wt')
+      const worktreeDir = join(reposPath(), 'dir-bundle-wt')
       runGit(repoDir, ['worktree', 'add', '-b', 'side', worktreeDir])
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: repoDir })
+      mockGetRepoById.mockReturnValue(repoAt(repoDir, { id: 1 }))
       mockResolveRepoWorkingDirectory.mockResolvedValue(worktreeDir)
 
       const res = await app.request(`/api/internal/repos/1/mirror/bundle?directory=${encodeURIComponent(worktreeDir)}`)
@@ -1660,46 +1699,46 @@ describe('internal-repo-mirror routes', () => {
     })
 
     it('returns 400 when the bundle download directory is not part of the repository', async () => {
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: join(getTmpRoot(), 'repo') })
+      mockGetRepoById.mockReturnValue(repoAt(join(reposPath(), 'repo'), { id: 1 }))
       mockResolveRepoWorkingDirectory.mockResolvedValue(null)
 
       const res = await app.request('/api/internal/repos/1/mirror/bundle?directory=/elsewhere')
 
       expect(res.status).toBe(400)
-      const json = (await res.json()) as { error: string }
+      const json = await readJson(res, ErrorResponseSchema)
       expect(json.error).toBe('Directory is not part of this repository')
     })
 
     it('serves a patch snapshot for a directory inside the repository', async () => {
-      const repoDir = initRepoAt(join(getTmpRoot(), 'dir-patch-base'))
+      const repoDir = initRepoAt(join(reposPath(), 'dir-patch-base'))
       commitFileAt(repoDir, 'main.txt', 'base\n')
-      const worktreeDir = join(getTmpRoot(), 'dir-patch-wt')
+      const worktreeDir = join(reposPath(), 'dir-patch-wt')
       runGit(repoDir, ['worktree', 'add', '-b', 'side', worktreeDir])
       writeFileSync(join(worktreeDir, 'main.txt'), 'changed\n')
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: repoDir })
+      mockGetRepoById.mockReturnValue(repoAt(repoDir, { id: 1 }))
       mockResolveRepoWorkingDirectory.mockResolvedValue(worktreeDir)
 
       const res = await app.request(`/api/internal/repos/1/mirror/patch?directory=${encodeURIComponent(worktreeDir)}`)
 
       expect(res.status).toBe(200)
-      const json = (await res.json()) as { branch: string; patch: string }
+      const json = await readJson(res, PatchSnapshotResponseSchema)
       expect(json.branch).toBe('side')
       expect(json.patch).toContain('main.txt')
     })
 
     it('returns 400 when the patch download directory is not part of the repository', async () => {
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: join(getTmpRoot(), 'repo') })
+      mockGetRepoById.mockReturnValue(repoAt(join(reposPath(), 'repo'), { id: 1 }))
       mockResolveRepoWorkingDirectory.mockResolvedValue(null)
 
       const res = await app.request('/api/internal/repos/1/mirror/patch?directory=/elsewhere')
 
       expect(res.status).toBe(400)
-      const json = (await res.json()) as { error: string }
+      const json = await readJson(res, ErrorResponseSchema)
       expect(json.error).toBe('Directory is not part of this repository')
     })
 
     it('returns 400 when the bundle directory is not part of the repository', async () => {
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: join(getTmpRoot(), 'repo') })
+      mockGetRepoById.mockReturnValue(repoAt(join(reposPath(), 'repo'), { id: 1 }))
       mockResolveRepoWorkingDirectory.mockResolvedValue(null)
 
       const res = await app.request('/api/internal/repos/1/mirror/bundle?directory=/elsewhere', {
@@ -1709,12 +1748,12 @@ describe('internal-repo-mirror routes', () => {
       })
 
       expect(res.status).toBe(400)
-      const json = (await res.json()) as { error: string }
+      const json = await readJson(res, ErrorResponseSchema)
       expect(json.error).toBe('Directory is not part of this repository')
     })
 
     it('returns 400 when the patch directory is not part of the repository', async () => {
-      mockGetRepoById.mockReturnValue({ id: 1, fullPath: join(getTmpRoot(), 'repo') })
+      mockGetRepoById.mockReturnValue(repoAt(join(reposPath(), 'repo'), { id: 1 }))
       mockResolveRepoWorkingDirectory.mockResolvedValue(null)
 
       const res = await app.request('/api/internal/repos/1/mirror/patch', {
@@ -1724,7 +1763,7 @@ describe('internal-repo-mirror routes', () => {
       })
 
       expect(res.status).toBe(400)
-      const json = (await res.json()) as { error: string }
+      const json = await readJson(res, ErrorResponseSchema)
       expect(json.error).toBe('Directory is not part of this repository')
     })
   })

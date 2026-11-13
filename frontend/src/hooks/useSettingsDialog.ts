@@ -6,20 +6,12 @@ const SETTINGS_CONTENT_TABS = ['account', 'general', 'notifications', 'voice', '
 export type SettingsContentTab = (typeof SETTINGS_CONTENT_TABS)[number]
 
 export function isSettingsContentTab(value: string | null): value is SettingsContentTab {
-  return value !== null && (SETTINGS_CONTENT_TABS as readonly string[]).includes(value)
+  return value !== null && SETTINGS_CONTENT_TABS.some((tab) => tab === value)
 }
 
 interface UseSettingsDialogReturn {
   isOpen: boolean
-  /**
-   * Opens the settings dialog without a tab, so mobile shows the settings menu and desktop falls
-   * back to Account.
-   */
   open: () => void
-  /**
-   * Opens the settings dialog on the given tab by pushing a new history entry, so Back closes
-   * settings instead of leaving the page, and clears the mobile sheet selection behind the dialog.
-   */
   openTab: (tab: SettingsContentTab) => void
   close: () => void
   toggle: () => void

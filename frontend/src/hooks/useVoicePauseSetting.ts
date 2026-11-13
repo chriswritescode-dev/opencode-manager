@@ -53,12 +53,12 @@ function getServerPauseMs(): number {
   return DEFAULT_VOICE_PAUSE_MS
 }
 
-/**
- * Reads and writes the device-local pause-before-sending duration, keeping every
- * mounted consumer in the tab and other tabs in sync. Missing or unusable stored
- * values fall back to {@link DEFAULT_VOICE_PAUSE_MS}.
- */
-export function useVoicePauseSetting(): { pauseMs: number; setPauseMs: (ms: number) => void } {
+export interface VoicePauseSetting {
+  pauseMs: number
+  setPauseMs: (ms: number) => void
+}
+
+export function useVoicePauseSetting(): VoicePauseSetting {
   const pauseMs = useSyncExternalStore(subscribe, readPauseMs, getServerPauseMs)
   return { pauseMs, setPauseMs }
 }

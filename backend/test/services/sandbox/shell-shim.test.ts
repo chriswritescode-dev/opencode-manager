@@ -393,7 +393,7 @@ describe('sandbox shell shim', () => {
       commandMod.overrideSandboxExecutableTrustValidator(() => true)
       const shimPath = await shimMod.ensureSandboxShellShim(configHome)
 
-      const env: Record<string, string | undefined> = { ...process.env }
+      const env = { ...process.env }
       delete env[SANDBOX_SHELL_ENV_WORKDIR]
       const result = spawnSync(shimPath, ['-c', `touch ${payloadFile}`], { encoding: 'utf8', env })
       expect(result.status).toBe(126)
@@ -439,7 +439,7 @@ describe('sandbox shell shim', () => {
         `ocm-session-${'A'.repeat(12)}`,
         `ocm-session-${'a'.repeat(12)}extra`,
       ]) {
-        const env: Record<string, string | undefined> = {
+        const env: NodeJS.ProcessEnv = {
           ...process.env,
           [SANDBOX_SHELL_ENV_WORKDIR]: directory,
         }

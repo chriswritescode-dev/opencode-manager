@@ -1,9 +1,5 @@
+import { selectTableColumns } from '../rows'
 import type { Migration } from '../migration-runner'
-
-interface ColumnInfo {
-  name: string
-  notnull: number
-}
 
 const LEGACY_SUFFIX = '_legacy_202610181320'
 
@@ -66,12 +62,12 @@ const migration: Migration = {
   id: '202610181320-remote-schedule-targets',
 
   up(db) {
-    const jobColumns = db.prepare('PRAGMA table_info(schedule_jobs)').all() as ColumnInfo[]
+    const jobColumns = selectTableColumns(db, 'schedule_jobs')
     if (jobColumns.length === 0) {
       return
     }
 
-    const runColumns = db.prepare('PRAGMA table_info(schedule_runs)').all() as ColumnInfo[]
+    const runColumns = selectTableColumns(db, 'schedule_runs')
     const jobColumnNames = new Set(jobColumns.map((column) => column.name))
     const runColumnNames = new Set(runColumns.map((column) => column.name))
     const jobsNeedRebuild =

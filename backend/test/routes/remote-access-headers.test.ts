@@ -1,19 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Database } from 'bun:sqlite'
 import { Hono } from 'hono'
 import { ENV } from '@opencode-manager/shared/config/env'
-
-const loggerMocks = vi.hoisted(() => ({
-  info: vi.fn(),
-  warn: vi.fn(),
-  error: vi.fn(),
-  debug: vi.fn(),
-}))
-
-vi.mock('../../src/utils/logger', () => ({ logger: loggerMocks }))
-
+import { RemoteAccessHeaderListSchema, RemoteAccessHeadersResponseSchema } from '@opencode-manager/shared/schemas'
+import { z } from 'zod'
 import { createTestDb } from '../helpers/assistant-workspace'
 import { expectNoSecretsLogged } from '../helpers/log-assertions'
+import { readJson } from '../helpers/read-json'
 import {
   CLOUDFLARE_CLIENT_ID,
   CLOUDFLARE_CLIENT_SECRET,
@@ -21,6 +14,7 @@ import {
   CLOUDFLARE_SECRET_VALUES,
 } from '../helpers/remote-access-headers'
 import { decryptSecret } from '../../src/utils/crypto'
+import { selectRow } from '../../src/db/rows'
 import { RemoteAccessHeadersService, REMOTE_ACCESS_HEADERS_SECRET_KEY } from '../../src/services/remote-access-headers'
 import { createRemoteAccessHeaderRoutes } from '../../src/routes/remote-access-headers'
 
@@ -28,7 +22,10 @@ const REPLACEMENT_SECRET_VALUE = 'replacement-secret-77aa13c5'
 
 const SECRET_VALUES = [...CLOUDFLARE_SECRET_VALUES, REPLACEMENT_SECRET_VALUE]
 
-const mutableAuth = ENV.AUTH as unknown as { SECRET: string }
+const ErrorResponseSchema = z.object({ error: z.string() })
+const SecretValueSchema = z.object({ value: z.string() })
+
+const authEnv: { SECRET: string } = ENV.AUTH
 const originalSecret = ENV.AUTH.SECRET
 
 function buildHeaders(count: number) {
@@ -48,8 +45,7 @@ describe('remote access header routes', () => {
   })
 
   afterEach(() => {
-    mutableAuth.SECRET = originalSecret
-    vi.clearAllMocks()
+    authEnv.SECRET = originalSecret
   })
 
   const readSummary = () => app.request('/remote-access-headers')
@@ -65,7 +61,7 @@ describe('remote access header routes', () => {
     const res = await readSummary()
 
     expect(res.status).toBe(200)
-    await expect(res.json()).resolves.toEqual({ headers: [], unreadable: false })
+    await expect(readJson(res, RemoteAccessHeadersResponseSchema)).resolves.toEqual({ headers: [], unreadable: false })
   })
 
   it('stores headers without exposing their values', async () => {
@@ -73,7 +69,7 @@ describe('remote access header routes', () => {
 
     expect(res.status).toBe(200)
     const body = await res.text()
-    expect(JSON.parse(body)).toEqual({
+    expect(RemoteAccessHeadersResponseSchema.parse(JSON.parse(body))).toEqual({
       headers: [
         { name: 'CF-Access-Client-Id', hasValue: true },
         { name: 'CF-Access-Client-Secret', hasValue: true },
@@ -91,15 +87,13 @@ describe('remote access header routes', () => {
   it('stores header values encrypted at rest', async () => {
     await putHeaders(CLOUDFLARE_HEADERS)
 
-    const row = db
-      .prepare('SELECT value FROM app_secrets WHERE key = ?')
-      .get(REMOTE_ACCESS_HEADERS_SECRET_KEY) as { value: string } | undefined
+    const row = selectRow(db, SecretValueSchema, 'SELECT value FROM app_secrets WHERE key = ?', REMOTE_ACCESS_HEADERS_SECRET_KEY)
 
-    expect(row).toBeDefined()
+    expect(row).not.toBeNull()
     const encrypted = row?.value ?? ''
     expect(encrypted).not.toContain(CLOUDFLARE_CLIENT_ID)
     expect(encrypted).not.toContain(CLOUDFLARE_CLIENT_SECRET)
-    expect(JSON.parse(decryptSecret(encrypted))).toEqual(CLOUDFLARE_HEADERS)
+    expect(RemoteAccessHeaderListSchema.parse(JSON.parse(decryptSecret(encrypted)))).toEqual(CLOUDFLARE_HEADERS)
   })
 
   it('keeps a stored value when the replacement value is blank', async () => {
@@ -129,35 +123,24 @@ describe('remote access header routes', () => {
     const res = await putHeaders([{ name: 'CF-Access-Client-Id', value: '' }])
 
     expect(res.status).toBe(400)
-    await expect(res.json()).resolves.toMatchObject({ error: 'A value is required for CF-Access-Client-Id' })
+    await expect(readJson(res, ErrorResponseSchema)).resolves.toEqual({
+      error: 'A value is required for CF-Access-Client-Id',
+    })
   })
 
-  it('rejects a reserved header name', async () => {
-    const res = await putHeaders([{ name: 'Cookie', value: 'session=1' }])
-
-    expect(res.status).toBe(400)
-    expect(service.read().headers).toEqual([])
-  })
-
-  it('rejects more than eight headers', async () => {
-    const res = await putHeaders(buildHeaders(9))
-
-    expect(res.status).toBe(400)
-    expect(service.read().headers).toEqual([])
-  })
-
-  it('rejects duplicate header names after merging', async () => {
-    const res = await putHeaders([
-      { name: 'CF-Access-Client-Id', value: 'first' },
-      { name: 'cf-access-client-id', value: 'second' },
-    ])
-
-    expect(res.status).toBe(400)
-    expect(service.read().headers).toEqual([])
-  })
-
-  it('rejects a value with a line break after merging', async () => {
-    const res = await putHeaders([{ name: 'X-Remote-Header', value: 'line\r\nbreak' }])
+  it.each([
+    ['a reserved header name', [{ name: 'Cookie', value: 'session=1' }]],
+    ['more than eight headers', buildHeaders(9)],
+    [
+      'duplicate header names after merging',
+      [
+        { name: 'CF-Access-Client-Id', value: 'first' },
+        { name: 'cf-access-client-id', value: 'second' },
+      ],
+    ],
+    ['a value with a line break after merging', [{ name: 'X-Remote-Header', value: 'line\r\nbreak' }]],
+  ])('rejects %s', async (_label, headers) => {
+    const res = await putHeaders(headers)
 
     expect(res.status).toBe(400)
     expect(service.read().headers).toEqual([])
@@ -169,8 +152,11 @@ describe('remote access header routes', () => {
     const res = await putHeaders([])
 
     expect(res.status).toBe(200)
-    await expect(res.json()).resolves.toEqual({ headers: [], unreadable: false })
-    await expect((await readSummary()).json()).resolves.toEqual({ headers: [], unreadable: false })
+    await expect(readJson(res, RemoteAccessHeadersResponseSchema)).resolves.toEqual({ headers: [], unreadable: false })
+    await expect(readJson(await readSummary(), RemoteAccessHeadersResponseSchema)).resolves.toEqual({
+      headers: [],
+      unreadable: false,
+    })
   })
 
   it('clears stored headers on delete', async () => {
@@ -179,30 +165,36 @@ describe('remote access header routes', () => {
     const res = await app.request('/remote-access-headers', { method: 'DELETE' })
 
     expect(res.status).toBe(200)
-    await expect(res.json()).resolves.toEqual({ headers: [], unreadable: false })
-    await expect((await readSummary()).json()).resolves.toEqual({ headers: [], unreadable: false })
+    await expect(readJson(res, RemoteAccessHeadersResponseSchema)).resolves.toEqual({ headers: [], unreadable: false })
+    await expect(readJson(await readSummary(), RemoteAccessHeadersResponseSchema)).resolves.toEqual({
+      headers: [],
+      unreadable: false,
+    })
   })
 
   it('reports headers that cannot be decrypted as unreadable and unset', async () => {
     await putHeaders(CLOUDFLARE_HEADERS)
-    mutableAuth.SECRET = 'a-different-auth-secret'
+    authEnv.SECRET = 'a-different-auth-secret'
 
-    await expect((await readSummary()).json()).resolves.toEqual({ headers: [], unreadable: true })
+    await expect(readJson(await readSummary(), RemoteAccessHeadersResponseSchema)).resolves.toEqual({
+      headers: [],
+      unreadable: true,
+    })
     expect(service.read()).toEqual({ headers: [], unreadable: true })
   })
 
   it('recovers the stored headers when the original secret returns', async () => {
     await putHeaders(CLOUDFLARE_HEADERS)
-    mutableAuth.SECRET = 'a-different-auth-secret'
+    authEnv.SECRET = 'a-different-auth-secret'
     await readSummary()
-    mutableAuth.SECRET = originalSecret
+    authEnv.SECRET = originalSecret
 
     expect(service.read().headers).toEqual(CLOUDFLARE_HEADERS)
   })
 
   describe('logging', () => {
     afterEach(() => {
-      expectNoSecretsLogged(loggerMocks, SECRET_VALUES)
+      expectNoSecretsLogged(SECRET_VALUES)
     })
 
     it('logs a write without values', async () => {
@@ -213,7 +205,7 @@ describe('remote access header routes', () => {
 
     it('logs an unreadable store without values', async () => {
       await putHeaders(CLOUDFLARE_HEADERS)
-      mutableAuth.SECRET = 'a-different-auth-secret'
+      authEnv.SECRET = 'a-different-auth-secret'
       await readSummary()
     })
   })

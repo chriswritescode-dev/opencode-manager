@@ -11,16 +11,10 @@ export interface UseSessionSearchOptions {
   limit?: number
   allDirectories?: boolean
   project?: { id: string; subpath: string }
-  /** Searches a linked server instead of the route's server. */
   serverId?: string
-  /** Seeds the search box, for callers that mount the hook after a query is already entered. */
   initialQuery?: string
 }
 
-/**
- * Owns the sessions-dialog search state: the raw query, its debounced server
- * value, the root-session selection, and the immediate local title filter.
- */
 export function useSessionSearch(directories: string[], options: UseSessionSearchOptions = {}) {
   const limit = options.limit ?? DEFAULT_LIMIT
   const allDirectories = options.allDirectories ?? false

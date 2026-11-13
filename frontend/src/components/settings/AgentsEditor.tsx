@@ -17,10 +17,6 @@ interface AgentsEditorProps {
   onDelete: (name: string) => void
 }
 
-/**
- * Renders configured agents alongside agent files discovered in the workspace directory, with add,
- * edit and delete entry points against the managed config.
- */
 export function AgentsEditor({ agents, directoryAgents = [], onSave, onDelete }: AgentsEditorProps) {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [editingAgent, setEditingAgent] = useState<{ name: string; agent: OpenCodeAgentConfig } | null>(null)

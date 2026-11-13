@@ -1,24 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ApiKeyDialog } from './ApiKeyDialog'
-import { providerCredentialsApi } from '@/api/providers'
-import { oauthApi } from '@/api/oauth'
-import { FetchError } from '@/api/fetchWrapper'
+import { renderWithProviders } from '@/test/render'
+import type { FetchRoute } from '@/test/fetchFake'
 import type { Provider } from '@/api/providers'
-
-vi.mock('@/api/providers', () => ({
-  providerCredentialsApi: {
-    set: vi.fn(),
-  },
-}))
-
-vi.mock('@/api/oauth', () => ({
-  oauthApi: {
-    getAuthMethods: vi.fn(),
-  },
-}))
+import type { ProviderAuthMethods } from '@/api/oauth'
 
 function providerFixture(id: string, name: string): Provider {
   return { id, name, models: [] }
@@ -27,64 +14,83 @@ function providerFixture(id: string, name: string): Provider {
 const azureProvider = providerFixture('azure', 'Azure')
 const anthropicProvider = providerFixture('anthropic', 'Anthropic')
 
-function renderDialog(provider: Provider, onSuccess = vi.fn()) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(
-    <QueryClientProvider client={queryClient}>
-      <ApiKeyDialog open onOpenChange={vi.fn()} provider={provider} onSuccess={onSuccess} />
-    </QueryClientProvider>,
+const defaultAuthMethods: ProviderAuthMethods = {
+  azure: [
+    {
+      type: 'key',
+      label: 'API key',
+      form: [
+        {
+          key: 'resourceName',
+          type: 'string',
+          title: 'Enter Azure Resource Name',
+          placeholder: 'e.g. my-models',
+          required: true,
+        },
+      ],
+    },
+  ],
+  anthropic: [{ type: 'key', label: 'API key' }],
+}
+
+interface RenderOptions {
+  authMethods?: ProviderAuthMethods
+  save?: FetchRoute['respond']
+}
+
+function renderDialog(provider: Provider, options: RenderOptions = {}) {
+  const onSuccess = vi.fn()
+  const result = renderWithProviders(
+    <ApiKeyDialog open onOpenChange={vi.fn()} provider={provider} onSuccess={onSuccess} />,
+    {
+      auth: false,
+      theme: false,
+      toaster: false,
+      fetchRoutes: [
+        {
+          method: 'GET',
+          path: '/api/oauth/auth-methods',
+          respond: () => ({ json: { providers: options.authMethods ?? defaultAuthMethods } }),
+        },
+        {
+          method: 'POST',
+          path: '/api/providers/:providerId/credentials',
+          respond: options.save ?? (() => ({ json: { success: true } })),
+        },
+      ],
+    },
   )
-  return { onSuccess }
+  return { ...result, onSuccess }
 }
 
 describe('ApiKeyDialog', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    vi.mocked(providerCredentialsApi.set).mockResolvedValue(undefined)
-    vi.mocked(oauthApi.getAuthMethods).mockResolvedValue({
-      azure: [
-        {
-          type: 'key',
-          label: 'API key',
-          form: [
-            {
-              key: 'resourceName',
-              type: 'string',
-              title: 'Enter Azure Resource Name',
-              placeholder: 'e.g. my-models',
-              required: true,
-            },
-          ],
-        },
-      ],
-      anthropic: [{ type: 'key', label: 'API key' }],
-    })
-  })
-
   it('submits the api key alone for key methods without form fields', async () => {
     const user = userEvent.setup()
-    const { onSuccess } = renderDialog(anthropicProvider)
+    const { onSuccess, fetchFake } = renderDialog(anthropicProvider)
 
     await user.type(await screen.findByLabelText('API Key'), 'sk-ant-test')
     await user.click(screen.getByRole('button', { name: 'Connect' }))
 
     await waitFor(() => {
-      expect(providerCredentialsApi.set).toHaveBeenCalledWith('anthropic', 'sk-ant-test', undefined)
+      expect(fetchFake.lastRequest('POST', '/api/providers/anthropic/credentials')?.body).toEqual({
+        apiKey: 'sk-ant-test',
+      })
     })
     expect(onSuccess).toHaveBeenCalledTimes(1)
   })
 
   it('renders required key method fields and submits their answers with the api key', async () => {
     const user = userEvent.setup()
-    const { onSuccess } = renderDialog(azureProvider)
+    const { onSuccess, fetchFake } = renderDialog(azureProvider)
 
     await user.type(await screen.findByLabelText('API Key'), 'az-test')
     await user.type(screen.getByLabelText('Enter Azure Resource Name'), 'my-models')
     await user.click(screen.getByRole('button', { name: 'Connect' }))
 
     await waitFor(() => {
-      expect(providerCredentialsApi.set).toHaveBeenCalledWith('azure', 'az-test', {
-        resourceName: 'my-models',
+      expect(fetchFake.lastRequest('POST', '/api/providers/azure/credentials')?.body).toEqual({
+        apiKey: 'az-test',
+        answer: { resourceName: 'my-models' },
       })
     })
     expect(onSuccess).toHaveBeenCalledTimes(1)
@@ -105,10 +111,12 @@ describe('ApiKeyDialog', () => {
 
   it('shows the upstream validation failure without reporting success', async () => {
     const user = userEvent.setup()
-    vi.mocked(providerCredentialsApi.set).mockRejectedValue(
-      new FetchError('Missing required form field: resourceName', 502, 'InvalidRequestError'),
-    )
-    const { onSuccess } = renderDialog(azureProvider)
+    const { onSuccess } = renderDialog(azureProvider, {
+      save: () => ({
+        status: 502,
+        json: { error: 'Missing required form field: resourceName', code: 'InvalidRequestError' },
+      }),
+    })
 
     await user.type(await screen.findByLabelText('API Key'), 'az-test')
     await user.type(screen.getByLabelText('Enter Azure Resource Name'), 'my-models')
@@ -122,41 +130,42 @@ describe('ApiKeyDialog', () => {
 
   it('keeps Connect enabled while a conditional required field is hidden and renders external fields', async () => {
     const user = userEvent.setup()
-    vi.mocked(oauthApi.getAuthMethods).mockResolvedValue({
-      azure: [
-        {
-          type: 'key',
-          label: 'API key',
-          form: [
-            {
-              key: 'deploymentType',
-              type: 'string',
-              title: 'Deployment',
-              required: true,
-              default: 'github.com',
-              options: [
-                { value: 'github.com', label: 'GitHub.com' },
-                { value: 'enterprise', label: 'GitHub Enterprise' },
-              ],
-            },
-            {
-              key: 'enterpriseUrl',
-              type: 'string',
-              title: 'Enterprise URL',
-              required: true,
-              when: [{ key: 'deploymentType', op: 'eq', value: 'enterprise' }],
-            },
-            {
-              key: 'docs',
-              type: 'external',
-              url: 'https://example.com/docs',
-              title: 'Read the docs',
-            },
-          ],
-        },
-      ],
+    renderDialog(azureProvider, {
+      authMethods: {
+        azure: [
+          {
+            type: 'key',
+            label: 'API key',
+            form: [
+              {
+                key: 'deploymentType',
+                type: 'string',
+                title: 'Deployment',
+                required: true,
+                default: 'github.com',
+                options: [
+                  { value: 'github.com', label: 'GitHub.com' },
+                  { value: 'enterprise', label: 'GitHub Enterprise' },
+                ],
+              },
+              {
+                key: 'enterpriseUrl',
+                type: 'string',
+                title: 'Enterprise URL',
+                required: true,
+                when: [{ key: 'deploymentType', op: 'eq', value: 'enterprise' }],
+              },
+              {
+                key: 'docs',
+                type: 'external',
+                url: 'https://example.com/docs',
+                title: 'Read the docs',
+              },
+            ],
+          },
+        ],
+      },
     })
-    renderDialog(azureProvider)
 
     await user.type(await screen.findByLabelText('API Key'), 'az-test')
 

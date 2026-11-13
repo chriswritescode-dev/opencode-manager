@@ -94,7 +94,6 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
       setIsCreating(false)
       refetch()
     } catch {
-      // Error handled by mutation
     }
   }
 
@@ -119,7 +118,6 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
       await git.renameBranch.mutateAsync({ from: renamingBranch, to: nextName })
       cancelRename()
     } catch {
-      // Error handled by mutation
     }
   }
 
@@ -146,7 +144,6 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
       })
       closeDelete()
     } catch {
-      // Error handled by mutation
     }
   }
 

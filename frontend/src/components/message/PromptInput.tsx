@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useImperativeHandle, forwardRef, memo, useCallback, type KeyboardEvent } from 'react'
+import { z } from 'zod'
 import { useSendPrompt, useInterruptSession, useSendShell, useAgents, useSkills } from '@/hooks/useOpenCode'
 import { useCommands } from '@/hooks/useCommands'
 import { useCommandHandler } from '@/hooks/useCommandHandler'
@@ -18,8 +19,8 @@ import { useTouchTapSelect } from '@/hooks/useTouchTapSelect'
 import { useMobile } from '@/hooks/useMobile'
 import { FINE_POINTER_MEDIA_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
 
-import { usePermissions } from '@/contexts/EventContext'
-import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { usePermissions } from '@/contexts/event-context'
+import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/opencode-server-context'
 import { Upload, X, Mic, Target } from 'lucide-react'
 
 import { SquareFill } from '@/components/ui/square-fill'
@@ -28,7 +29,7 @@ import { IconToggleButton } from '@/components/ui/icon-toggle-button'
 import { PromptSuggestions, type PromptSuggestion } from './PromptSuggestions'
 import { ComposerActivityBar } from './ComposerActivityBar'
 import { AgentQuickSelect } from '@/components/agent/AgentQuickSelect'
-import { VoiceConversation, type VoiceConversationHandle } from './VoiceConversation'
+import { VoiceConversation, type VoiceConversationFactory, type VoiceConversationHandle } from './VoiceConversation'
 import { PermissionModeToggle } from '@/components/session/PermissionModeToggle'
 import { SessionSandboxMenu } from '@/components/session/SessionSandboxMenu'
 import { ComposerModelPill } from './ComposerModelPill'
@@ -89,7 +90,7 @@ const KEYBAR_KEYS: Array<{ id: KeybarKey, symbol: string, label: string }> = [
   { id: 'bash', symbol: '!', label: 'bash' },
 ]
 
-const COMPOSER_MODE_STYLES: Record<ComposerMode, { label: string, frame: string, badge: string, key: string }> = {
+const COMPOSER_MODE_STYLES = {
   command: {
     label: 'COMMAND',
     frame: 'border-primary/70 ring-1 ring-primary/40 shadow-lg shadow-primary/20',
@@ -108,7 +109,7 @@ const COMPOSER_MODE_STYLES: Record<ComposerMode, { label: string, frame: string,
     badge: 'bg-warning text-warning-foreground',
     key: 'bg-warning text-warning-foreground border-warning',
   },
-}
+} satisfies Record<ComposerMode, { label: string, frame: string, badge: string, key: string }>
 
 const shiftRanges = (ranges: MatchRange[], offset: number): MatchRange[] =>
   ranges.map(([start, end]) => [start + offset, end + offset])
@@ -134,6 +135,7 @@ interface PromptInputProps {
   onScrollToBottom: () => void
   commandActions: PageCommandActions
   onPromptChange?: (hasContent: boolean) => void
+  voiceConversation?: VoiceConversationFactory
 }
 
 export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(function PromptInput({ 
@@ -145,7 +147,8 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   isStreamingResponse = false,
   onScrollToBottom,
   commandActions,
-  onPromptChange
+  onPromptChange,
+  voiceConversation
 }, ref) {
   const [restoredDraft] = useState(() => useComposerDraftStore.getState().getDraft(sessionID))
   const [prompt, setPrompt] = useState(restoredDraft.prompt)
@@ -621,7 +624,8 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
         try {
           if (reader.readyState !== 2) return
           
-          const dataUrl = reader.result as string
+          const parsedResult = z.string().safeParse(reader.result)
+          const dataUrl = parsedResult.success ? parsedResult.data : ''
           
           if (!dataUrl) {
             const blobUrl = URL.createObjectURL(file)
@@ -679,7 +683,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     const clipboardData = event.clipboardData
     if (!clipboardData) return
 
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as { MSStream?: boolean }).MSStream
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !('MSStream' in window)
     const isSecureContext = window.isSecureContext || (window.location.protocol === 'http:' && window.location.hostname === 'localhost')
 
 if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read) {
@@ -1135,7 +1139,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
         text,
         model: modelRef ?? undefined,
         agent: currentMode,
-        ...(options.busy ? { delivery: 'queue' as const } : {}),
+        delivery: options.busy ? 'queue' : undefined,
       })
       setStoredAgent(sessionID, currentMode)
     },
@@ -1263,6 +1267,7 @@ return (
         onEditInTextBox={handleVoiceEditInTextBox}
         onViewApproval={handleViewApproval}
         onActiveChange={handleVoiceActiveChange}
+        voiceConversation={voiceConversation}
       />
 
       {!isVoiceActive && (

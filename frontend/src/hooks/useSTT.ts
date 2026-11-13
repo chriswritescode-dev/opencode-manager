@@ -8,11 +8,8 @@ import { DEFAULT_STT_CONFIG, type STTConfig } from '@/api/types/settings'
 
 const STT_START_TIMEOUT_MS = 10_000
 
-/** Whether the user's speech-to-text configuration can capture in this browser. */
 export interface SttAvailability {
-  /** Whether speech-to-text is enabled in the user's voice settings. */
   isEnabled: boolean
-  /** Whether the configured speech-to-text provider can capture in this browser. */
   isSupported: boolean
 }
 
@@ -24,23 +21,13 @@ function resolveSttAvailability(config: STTConfig): SttAvailability {
   }
 }
 
-/**
- * Reads whether speech-to-text can capture, without creating a recorder.
- *
- * @returns The enabled flag from the user's voice settings and the browser support of its provider.
- */
 export function useSttAvailability(): SttAvailability {
   const { preferences } = useSettings()
   return resolveSttAvailability(preferences?.stt ?? DEFAULT_STT_CONFIG)
 }
 
 export interface StartRecordingOptions {
-  /** Enables automatic end-of-speech for the browser provider. Ignored by the external provider. */
   endpointing?: SttEndpointingOptions
-  /**
-   * Called when the browser provider ends the capture by itself. Receives the
-   * final transcript so a caller can send it without waiting for a render.
-   */
   onEndOfSpeech?: (reason: SttEndOfSpeechReason, finalText: string) => void
 }
 

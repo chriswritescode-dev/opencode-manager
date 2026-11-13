@@ -12,16 +12,16 @@ import {
 import { settingsApi } from '@/api/settings'
 import { invalidateConfigCaches } from '@/lib/queryInvalidation'
 
-const KIND_NOUN: Record<'agents' | 'commands', string> = {
+const KIND_NOUN = {
   agents: 'agent',
   commands: 'command',
-}
+} satisfies Record<'agents' | 'commands', string>
 
 const DIRECTORY_INPUT_PROPS = {
   webkitdirectory: '',
   directory: '',
   mozdirectory: '',
-} as React.InputHTMLAttributes<HTMLInputElement>
+}
 
 function isMarkdownFile(file: File): boolean {
   return (file.webkitRelativePath || file.name).toLowerCase().endsWith('.md')

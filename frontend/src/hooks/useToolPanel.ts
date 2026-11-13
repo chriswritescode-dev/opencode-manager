@@ -10,16 +10,16 @@ export type PanelTool = (typeof PANEL_TOOLS)[number]
 
 export type ToolPanelToggleAction = 'open' | 'switch' | 'close'
 
-const TOOL_OWNED_PARAMS: Partial<Record<PanelTool, readonly string[]>> = {
+const TOOL_OWNED_PARAMS = {
   terminal: ['terminal', 'terminalDirectory'],
   preview: ['previewPort', 'previewPath'],
   schedules: ['scheduleTab', 'scheduleDialog', 'jobId', 'runId'],
-}
+} satisfies Partial<Record<PanelTool, readonly string[]>>
 
 const PANEL_ONLY_TOOLS: ReadonlySet<PanelTool> = new Set(['schedules', 'sessions'])
 
 export function isPanelTool(value: string | null): value is PanelTool {
-  return value !== null && (PANEL_TOOLS as readonly string[]).includes(value)
+  return value !== null && PANEL_TOOLS.some((tool) => tool === value)
 }
 
 function clearToolParams(params: URLSearchParams, keep?: PanelTool): void {
@@ -49,10 +49,6 @@ export function toggleToolDialogParams(params: URLSearchParams, tool: PanelTool)
   clearToolParams(params, tool)
 }
 
-/**
- * Whether a tool click opens a panel, switches the docked panel to another tool, or closes it.
- * Switching keeps one history entry per open panel session, so closing goes back to before it opened.
- */
 export function resolveToolPanelToggle(currentTool: string | null, tool: PanelTool): ToolPanelToggleAction {
   if (currentTool === tool) return 'close'
   return isPanelTool(currentTool) ? 'switch' : 'open'
@@ -63,10 +59,6 @@ export function clearToolPanelParams(params: URLSearchParams): void {
   clearToolParams(params)
 }
 
-/**
- * Toggles a tool in the desktop tool panel from anywhere outside the panel: closes it when it is already
- * open, switches the open panel in place, or opens it with a new history entry.
- */
 export function useToolPanelToggle(): (tool: PanelTool) => void {
   const { searchParams, updateParams, closePushedParams } = useUrlParams()
   const panelParam = searchParams.get(PANEL_PARAM)
@@ -87,11 +79,6 @@ export interface ToolPanelState {
   closePanel: () => void
 }
 
-/**
- * URL state of the desktop tool panel (`?panel=`). While the panel surface is available, a tool opened
- * through the shared `?dialog=` param is moved into the panel; when it is not, an open panel tool falls
- * back to its dialog, or closes when it has none.
- */
 export function useToolPanel(panelAvailable: boolean): ToolPanelState {
   const { searchParams, updateParams, closePushedParams } = useUrlParams()
   const panelParam = searchParams.get(PANEL_PARAM)

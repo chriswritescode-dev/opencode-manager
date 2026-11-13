@@ -10,9 +10,10 @@ import { buildSessionPath } from '@opencode-manager/shared/utils'
 import { getRepoById } from '../../db/queries'
 import { handleOpenCodeError, parseJsonBody } from '../../utils/route-helpers'
 import type { OpenCodeClient } from '../../services/opencode/client'
-import type { SessionPermissionModeService } from '../../services/session-permission-modes'
-import type { RepoWorkspaceService } from '../../services/repo-workspace'
+import type { SessionPermissionModePinner } from '../../services/session-permission-modes'
+import type { RepoWorkspaceProvider } from '../../services/repo-workspace'
 import { SessionLaunchError, SessionLauncher } from '../../services/session-launcher'
+import type { LaunchSessionInput } from '../../services/session-launcher'
 import {
   isSessionBusy,
   readLatestAssistantReply,
@@ -26,6 +27,9 @@ const INTERNAL_SESSION_LIST_LIMIT_MAX = 50
 const INTERNAL_SESSION_LIST_LIMIT_DEFAULT = 10
 const INTERNAL_SESSION_WORKSPACE_NAME_FALLBACK = 'ocm-session'
 const INTERNAL_SESSION_REPLY_WAIT_MAX_MS = 45000
+
+type SessionListInput = NonNullable<Parameters<OpenCodeClient['api']['session']['list']>[0]>
+type SessionForkInput = NonNullable<Parameters<OpenCodeClient['api']['session']['fork']>[0]>
 
 const ListSessionsQuerySchema = z.object({
   repoId: z.coerce.number().int().optional(),
@@ -41,18 +45,18 @@ const ReplyQuerySchema = z.object({
   waitMs: z.coerce.number().int().min(0).max(INTERNAL_SESSION_REPLY_WAIT_MAX_MS).optional(),
 })
 
-function handleSessionRouteError(c: Context, error: unknown) {
-  if (error instanceof SessionLaunchError) {
-    return c.json({ error: error.message }, error.status)
+function handleSessionRouteError(c: Context, cause: unknown) {
+  if (cause instanceof SessionLaunchError) {
+    return c.json({ error: cause.message }, cause.status)
   }
-  return handleOpenCodeError(c, error, 'Internal session request failed', { unknownStatus: 502 })
+  return handleOpenCodeError(c, cause, 'Internal session request failed', { unknownStatus: 502 })
 }
 
 export function createInternalSessionRoutes(
   db: Database,
   openCodeClient: OpenCodeClient,
-  permissionModes: SessionPermissionModeService,
-  repoWorkspaces: RepoWorkspaceService,
+  permissionModes: SessionPermissionModePinner,
+  repoWorkspaces: RepoWorkspaceProvider,
 ) {
   const app = new Hono()
   const sessionLauncher = new SessionLauncher(db, openCodeClient, repoWorkspaces)
@@ -71,12 +75,8 @@ export function createInternalSessionRoutes(
 
     try {
       const project = repo ? await resolveRepoProjectId(openCodeClient, repo.fullPath) : undefined
-      const response = await openCodeClient.api.session.list({
-        limit,
-        order: 'desc',
-        parentID: null,
-        ...(project ? { project } : {}),
-      })
+      const listInput: SessionListInput = { limit, order: 'desc', parentID: null, project }
+      const response = await openCodeClient.api.session.list(listInput)
       const active = await openCodeClient.api.session.active()
 
       const repoIdByDirectory = new Map<string, number | null>()
@@ -112,21 +112,26 @@ export function createInternalSessionRoutes(
 
     const input = body.data
     try {
-      const launched = await sessionLauncher.launch({
-        repoId: input.repoId,
-        prompt: input.prompt,
-        ...(input.title ? { title: input.title } : {}),
-        ...(input.model ? { model: input.model } : {}),
-        ...(input.agent ? { agent: input.agent } : {}),
-        ...(input.worktree
-          ? {
-              workspace: {
-                name: input.title ?? INTERNAL_SESSION_WORKSPACE_NAME_FALLBACK,
-                ...(input.ref ? { ref: input.ref } : {}),
-              },
-            }
-          : {}),
-      })
+      const launchInput: LaunchSessionInput = { repoId: input.repoId, prompt: input.prompt }
+      if (input.title) {
+        launchInput.title = input.title
+      }
+      if (input.model) {
+        launchInput.model = input.model
+      }
+      if (input.agent) {
+        launchInput.agent = input.agent
+      }
+      if (input.worktree) {
+        const workspace: NonNullable<LaunchSessionInput['workspace']> = {
+          name: input.title ?? INTERNAL_SESSION_WORKSPACE_NAME_FALLBACK,
+        }
+        if (input.ref) {
+          workspace.ref = input.ref
+        }
+        launchInput.workspace = workspace
+      }
+      const launched = await sessionLauncher.launch(launchInput)
 
       permissionModes.pinAsk(launched.sessionId)
 
@@ -198,10 +203,8 @@ export function createInternalSessionRoutes(
 
     const beforeMessageId = body.data.beforeMessageId
     try {
-      const forked = await openCodeClient.api.session.fork({
-        sessionID: sessionId,
-        ...(beforeMessageId ? { before: beforeMessageId } : {}),
-      })
+      const forkInput: SessionForkInput = { sessionID: sessionId, before: beforeMessageId }
+      const forked = await openCodeClient.api.session.fork(forkInput)
       permissionModes.pinAsk(forked.id)
       return c.json({ sessionId: forked.id, directory: forked.location.directory })
     } catch (error) {

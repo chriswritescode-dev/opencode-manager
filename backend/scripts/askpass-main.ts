@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import http from 'http'
 import fs from 'fs'
+import { z } from 'zod'
 
 interface AskpassRequest {
   askpassType: 'https' | 'ssh'
@@ -9,11 +10,12 @@ interface AskpassRequest {
   repoId?: number
 }
 
-function fatal(err: unknown): never {
-  if (err instanceof Error) {
-    console.error(err.message)
-  } else if (typeof err === 'string') {
-    console.error(err)
+function fatal(cause: unknown): never {
+  if (cause instanceof Error) {
+    console.error(cause.message)
+  } else {
+    const text = z.string().safeParse(cause)
+    if (text.success) console.error(text.data)
   }
   process.exit(1)
 }

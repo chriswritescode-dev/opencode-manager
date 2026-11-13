@@ -12,11 +12,6 @@ export interface PreviewAvailability {
   markUnavailable: () => void
 }
 
-/**
- * Tracks whether the preview gateway is usable at request time. It starts in
- * the given state and is flipped by the server lifecycle: available once the
- * port is bound, unavailable after a bind error.
- */
 export function createPreviewAvailability(initialEnabled: boolean): PreviewAvailability {
   let enabled = initialEnabled
   return {

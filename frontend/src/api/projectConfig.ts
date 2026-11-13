@@ -1,4 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  ProjectConfigResponseSchema,
+  RunProjectActionResponseSchema,
+} from '@opencode-manager/shared/schemas'
 import type {
   MoveProjectItemRequest,
   ProjectAction,
@@ -14,7 +18,7 @@ function projectConfigQueryKey(repoId: number, directory: string | undefined) {
 }
 
 export function getProjectConfig(repoId: number, directory?: string): Promise<ProjectConfigResponse> {
-  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/project-config`, {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/project-config`, ProjectConfigResponseSchema, {
     params: { directory },
   })
 }
@@ -24,7 +28,7 @@ function updateProjectActions(
   actions: ProjectAction[],
   directory?: string,
 ): Promise<ProjectConfigResponse> {
-  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/project-config/actions`, {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/project-config/actions`, ProjectConfigResponseSchema, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ actions }),
@@ -37,7 +41,7 @@ function updateWorktreeSetup(
   commands: string[],
   directory?: string,
 ): Promise<ProjectConfigResponse> {
-  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/project-config/worktree-setup`, {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/project-config/worktree-setup`, ProjectConfigResponseSchema, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ commands }),
@@ -46,7 +50,7 @@ function updateWorktreeSetup(
 }
 
 function trustRepoConfig(repoId: number, request: TrustRepoConfigRequest): Promise<ProjectConfigResponse> {
-  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/project-config/trust`, {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/project-config/trust`, ProjectConfigResponseSchema, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
@@ -54,7 +58,7 @@ function trustRepoConfig(repoId: number, request: TrustRepoConfigRequest): Promi
 }
 
 function moveProjectItem(repoId: number, request: MoveProjectItemRequest): Promise<ProjectConfigResponse> {
-  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/project-config/move`, {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/project-config/move`, ProjectConfigResponseSchema, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
@@ -68,6 +72,7 @@ function runProjectAction(
 ): Promise<RunProjectActionResponse> {
   return fetchWrapper(
     `${API_BASE_URL}/api/repos/${repoId}/project-config/actions/${encodeURIComponent(actionId)}/run`,
+    RunProjectActionResponseSchema,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

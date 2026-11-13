@@ -36,10 +36,6 @@ interface RepoSchedulesContentProps {
   embedded: boolean
 }
 
-/**
- * A repository's schedule jobs, job detail and run history with their dialogs.
- * `embedded` renders it inside a side panel, which has no page header to hold the New Schedule action.
- */
 export function RepoSchedulesContent({ repoId, embedded }: RepoSchedulesContentProps) {
   const {
     scheduleTab,
@@ -342,7 +338,7 @@ export function RepoSchedulesContent({ repoId, embedded }: RepoSchedulesContentP
       {hasJobs && (
         <div className={embedded ? undefined : 'sm:block hidden'}>
           <ScheduleTabMenu
-            activeTab={repoScheduleTab as 'jobs' | 'detail' | 'runs'}
+            activeTab={repoScheduleTab}
             onTabChange={(tab) => setScheduleTab(tab)}
           />
         </div>

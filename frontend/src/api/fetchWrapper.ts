@@ -1,5 +1,6 @@
+import { z } from 'zod'
+import { JsonValueSchema, parseJsonText, type JsonValue } from '@opencode-manager/shared/utils'
 import { FetchError } from '@opencode-manager/shared'
-import type { ApiErrorResponse } from '@opencode-manager/shared'
 
 export { FetchError }
 
@@ -9,43 +10,58 @@ interface FetchWrapperOptions extends RequestInit {
   acceptedStatuses?: number[]
 }
 
-function formatDetails(details: unknown): string | undefined {
+const validationIssueSchema = z.object({
+  path: z.string(),
+  message: z.string(),
+})
+
+const apiErrorResponseSchema = z.object({
+  error: z.string().optional(),
+  code: z.string().optional(),
+  detail: z.string().optional(),
+  details: JsonValueSchema.optional(),
+  validationIssues: z.array(validationIssueSchema).optional(),
+  message: z.string().optional(),
+  data: z.object({ message: z.string().optional() }).optional(),
+})
+
+const validationDetailSchema = z.object({
+  path: z.array(z.union([z.string(), z.number()])).optional(),
+  message: z.string().optional(),
+})
+
+type ApiErrorBody = z.infer<typeof apiErrorResponseSchema>
+
+function formatDetails(details: JsonValue | undefined): string | undefined {
   if (Array.isArray(details)) {
     return details
-      .map((d) => {
-        if (typeof d !== 'object' || d === null) return null
-        const path = Array.isArray((d as Record<string, unknown>).path) 
-          ? ((d as Record<string, unknown>).path as string[]) 
-          : undefined
-        const message = typeof (d as Record<string, unknown>).message === 'string'
-          ? (d as Record<string, unknown>).message as string
-          : undefined
-        return path?.length ? `${path.join('.')}: ${message}` : message
+      .map((detail) => {
+        const parsed = validationDetailSchema.safeParse(detail)
+        if (!parsed.success) return null
+        const path = parsed.data.path
+        const message = parsed.data.message
+        return path && path.length > 0 ? `${path.join('.')}: ${message}` : message
       })
       .filter(Boolean)
       .join('; ')
   }
-  if (typeof details === 'string') return details
-  return undefined
+  const text = z.string().safeParse(details)
+  return text.success ? text.data : undefined
+}
+
+function parseErrorBody(text: string, status: number): ApiErrorBody {
+  if (!text) return { error: 'An error occurred' }
+  const parsed = apiErrorResponseSchema.safeParse(parseJsonText(text))
+  if (parsed.success) return parsed.data
+  return { error: /^\s*</.test(text) ? `Request failed with status ${status}` : text }
 }
 
 async function handleResponse(response: Response): Promise<never> {
   const text = await response.text().catch(() => '')
-  const data: ApiErrorResponse = (() => {
-    if (!text) return { error: 'An error occurred' }
-    try {
-      return JSON.parse(text) as ApiErrorResponse
-    } catch {
-      return { error: /^\s*</.test(text) ? `Request failed with status ${response.status}` : text }
-    }
-  })()
-  const errorData = data as ApiErrorResponse & { message?: string; data?: { message?: unknown } }
-  const openCodeMessage = typeof errorData.data?.message === 'string'
-    ? errorData.data.message
-    : undefined
+  const data = parseErrorBody(text, response.status)
   const detail = data.detail || formatDetails(data.details)
   throw new FetchError(
-    data.error || errorData.message || openCodeMessage || 'Request failed',
+    data.error || data.message || data.data?.message || 'Request failed',
     response.status,
     data.code,
     detail,
@@ -101,17 +117,21 @@ async function fetchWithTimeout(
   }
 }
 
-async function fetchWrapper<T = unknown>(
+async function fetchWrapper<T>(
   url: string,
+  schema: z.ZodType<T>,
   options: FetchWrapperOptions = {}
 ): Promise<T> {
   const response = await fetchWithTimeout(url, options)
 
-  try {
-    return await response.json()
-  } catch {
+  const body = await response.json().catch(() => {
     throw new FetchError('Invalid JSON response', response.status, 'INVALID_JSON')
+  })
+  const parsed = schema.safeParse(body)
+  if (!parsed.success) {
+    throw new FetchError('Unexpected response body', response.status, 'INVALID_RESPONSE', parsed.error.message)
   }
+  return parsed.data
 }
 
 async function fetchWrapperVoid(

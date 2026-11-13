@@ -1,4 +1,10 @@
+import type { z } from 'zod'
+
 export type GithubFetchFn = (url: string | URL | Request, init?: RequestInit) => Promise<Response>
+
+interface GithubRequestHeaders {
+  [key: string]: string
+}
 
 interface GithubRequestOptions {
   token?: string
@@ -12,7 +18,7 @@ export function githubFetch(
   options: GithubRequestOptions = {},
   fetchFn: GithubFetchFn = fetch,
 ): Promise<Response> {
-  const headers: Record<string, string> = {
+  const headers: GithubRequestHeaders = {
     Accept: options.accept ?? 'application/vnd.github+json',
     'User-Agent': 'opencode-manager',
   }
@@ -21,16 +27,17 @@ export function githubFetch(
   return fetchFn(url, { headers, signal: options.signal })
 }
 
-export async function githubFetchJson<T = unknown>(
+export async function githubFetchJson<Schema extends z.ZodType>(
   url: string,
+  schema: Schema,
   options: GithubRequestOptions = {},
   fetchFn: GithubFetchFn = fetch,
-): Promise<T> {
+): Promise<z.infer<Schema>> {
   const response = await githubFetch(url, options, fetchFn)
   if (!response.ok) {
     throw new Error(`GitHub request failed with status ${response.status}`)
   }
-  return response.json() as Promise<T>
+  return schema.parse(await response.json())
 }
 
 export async function githubFetchBinary(

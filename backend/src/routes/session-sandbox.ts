@@ -1,24 +1,21 @@
 import { Hono, type Context } from 'hono'
-import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { SetSessionSandboxRequestSchema } from '@opencode-manager/shared/schemas'
 import { openCodeErrorStatus } from '@opencode-manager/shared/opencode'
 import { SessionSandboxError, type SessionSandboxService } from '../services/session-sandbox'
-import { getErrorMessage } from '../utils/error-utils'
+import { getErrorMessage, toContentfulStatus } from '../utils/error-utils'
 import { handleServiceError, parseJsonBody } from '../utils/route-helpers'
 
-/**
- * Maps both sandbox errors and the OpenCode errors raised while resolving a session (for example
- * `SessionNotFoundError` or `InvalidRequestError` for a malformed id) to their real status codes.
- */
-function handleSessionSandboxError(c: Context, error: unknown, fallback: string) {
-  const status = openCodeErrorStatus(error)
+function handleSessionSandboxError(c: Context, cause: unknown, fallback: string) {
+  const status = openCodeErrorStatus(cause)
   if (status !== undefined) {
-    return c.json({ error: getErrorMessage(error) || fallback }, status as ContentfulStatusCode)
+    return c.json({ error: getErrorMessage(cause) || fallback }, toContentfulStatus(status))
   }
-  return handleServiceError(c, error, fallback, SessionSandboxError)
+  return handleServiceError(c, cause, fallback, SessionSandboxError)
 }
 
-export function createSessionSandboxRoutes(service: SessionSandboxService) {
+export type SessionSandboxRoutesService = Pick<SessionSandboxService, 'getClaim' | 'getState' | 'resolveShellTarget' | 'update'>
+
+export function createSessionSandboxRoutes(service: SessionSandboxRoutesService) {
   const app = new Hono()
 
   app.get('/:sessionId', async (c) => {

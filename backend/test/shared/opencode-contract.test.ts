@@ -1,6 +1,8 @@
 import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { describe, expect, it } from 'vitest'
+import { z } from 'zod'
+import { createFetchStub } from '../helpers/fetch-stub'
 import {
   OPENCODE_MIN_VERSION,
   OPENCODE_PINNED_VERSION,
@@ -28,13 +30,13 @@ interface CapturedRequest {
   headers: Record<string, string>
 }
 
-interface PackageManifest {
-  dependencies: Record<string, string>
-}
+const PackageManifestSchema = z.object({
+  dependencies: z.record(z.string(), z.string()),
+})
 
 function createFetchSpy() {
   const calls: CapturedRequest[] = []
-  const fetchSpy = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+  const fetchSpy = createFetchStub(async (input, init) => {
     calls.push({
       url: String(input),
       method: init?.method ?? 'GET',
@@ -44,7 +46,7 @@ function createFetchSpy() {
       status: 200,
       headers: { 'content-type': 'application/json' },
     })
-  }) as typeof fetch
+  })
 
   return { calls, fetchSpy }
 }
@@ -173,9 +175,9 @@ describe('OpenCode v2 contract', () => {
       for (const name of ['@opencode/client', '@opencode/schema', '@opencode/plugin', '@opencode/theme']) {
         expect(catalogVersion(name)).toBe(OPENCODE_PINNED_VERSION)
       }
-      const manifest = JSON.parse(
-        readFileSync(join(REPO_ROOT, 'shared', 'package.json'), 'utf8'),
-      ) as PackageManifest
+      const manifest = PackageManifestSchema.parse(
+        JSON.parse(readFileSync(join(REPO_ROOT, 'shared', 'package.json'), 'utf8')),
+      )
       expect(manifest.dependencies['@opencode/client']).toBe('catalog:')
       expect(manifest.dependencies['@opencode/schema']).toBe('catalog:')
     })

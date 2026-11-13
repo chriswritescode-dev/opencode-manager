@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { createServer } from 'http'
 import type { IncomingMessage, ServerResponse } from 'http'
-import type { AddressInfo } from 'net'
 import { mkdir, readFile, rm, writeFile } from 'fs/promises'
 import path from 'path'
+import { z } from 'zod'
 import { buildOpenCodeBasicAuth } from '@opencode-manager/shared/opencode'
+import { JsonObjectSchema, JsonValueSchema } from '@opencode-manager/shared/utils'
 import {
   createOpenCodeServeDirectories,
   resolveOpenCode2Binary,
@@ -12,6 +13,11 @@ import {
 } from '../helpers/opencode-binary'
 import type { OpenCodeServe } from '../helpers/opencode-binary'
 import { getOpenCodeServiceRegistrationPath } from '../../src/services/opencode-service-mode'
+
+const AddressInfoSchema = z.object({ port: z.number() })
+const ServiceRegistrationSchema = z.object({ password: z.string() })
+const SessionCreatedSchema = z.object({ data: z.object({ id: z.string() }) })
+const ActiveSessionsSchema = z.object({ data: JsonObjectSchema })
 
 const OPENCODE_BIN = resolveOpenCode2Binary()
 const RESTART_CONTINUE_TEXT = 'The server restarted while you were working. Continue from where you left off without repeating completed work.'
@@ -73,7 +79,7 @@ async function startHoldingMockLlm(): Promise<MockLlm> {
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
   return {
-    port: (server.address() as AddressInfo).port,
+    port: AddressInfoSchema.parse(server.address()).port,
     requestBodies,
     respondFromNowOn: () => {
       holding = false
@@ -96,7 +102,7 @@ async function waitFor<T>(description: string, probe: () => Promise<T | undefine
   throw new Error(`Timed out waiting for ${description}`)
 }
 
-async function requestJson<T>(serve: OpenCodeServe, pathname: string, init: RequestInit = {}): Promise<T> {
+async function sendJson(serve: OpenCodeServe, pathname: string, init: RequestInit = {}): Promise<void> {
   const response = await fetch(`${serve.baseUrl}${pathname}`, {
     ...init,
     headers: {
@@ -107,11 +113,29 @@ async function requestJson<T>(serve: OpenCodeServe, pathname: string, init: Requ
   })
   const text = await response.text()
   if (!response.ok) throw new Error(`${init.method ?? 'GET'} ${pathname} failed with ${response.status}: ${text}`)
-  return (text ? JSON.parse(text) : undefined) as T
+}
+
+async function requestJson<Schema extends z.ZodType>(
+  serve: OpenCodeServe,
+  pathname: string,
+  schema: Schema,
+  init: RequestInit = {},
+): Promise<z.infer<Schema>> {
+  const response = await fetch(`${serve.baseUrl}${pathname}`, {
+    ...init,
+    headers: {
+      Authorization: buildOpenCodeBasicAuth(serve.password),
+      'content-type': 'application/json',
+      ...init.headers,
+    },
+  })
+  const text = await response.text()
+  if (!response.ok) throw new Error(`${init.method ?? 'GET'} ${pathname} failed with ${response.status}: ${text}`)
+  return schema.parse(JSON.parse(text))
 }
 
 async function readActiveSessionIDs(serve: OpenCodeServe): Promise<string[]> {
-  const body = await requestJson<{ data: Record<string, unknown> }>(serve, '/api/session/active')
+  const body = await requestJson(serve, '/api/session/active', ActiveSessionsSchema)
   return Object.keys(body.data)
 }
 
@@ -142,15 +166,22 @@ describe.skipIf(OPENCODE_BIN === null)('OpenCode 2 service mode resumes sessions
     try {
       serve = await startOpenCodeServe({ service: true, directories })
       const firstServe = serve
-      const registration = JSON.parse(await readFile(getOpenCodeServiceRegistrationPath({ XDG_CONFIG_HOME: directories.configHome, XDG_STATE_HOME: directories.stateHome }), 'utf8')) as { password: string }
+      const registration = ServiceRegistrationSchema.parse(
+        JSON.parse(
+          await readFile(
+            getOpenCodeServiceRegistrationPath({ XDG_CONFIG_HOME: directories.configHome, XDG_STATE_HOME: directories.stateHome }),
+            'utf8',
+          ),
+        ),
+      )
       expect(registration.password).toBe(firstServe.password)
 
-      const session = await requestJson<{ data: { id: string } }>(firstServe, '/api/session', {
+      const session = await requestJson(firstServe, '/api/session', SessionCreatedSchema, {
         method: 'POST',
         body: JSON.stringify({ location: { directory: repoPath } }),
       })
       const sessionID = session.data.id
-      await requestJson(firstServe, `/api/session/${sessionID}/prompt`, {
+      await sendJson(firstServe, `/api/session/${sessionID}/prompt`, {
         method: 'POST',
         body: JSON.stringify({ text: 'Start a long task' }),
       })
@@ -172,7 +203,9 @@ describe.skipIf(OPENCODE_BIN === null)('OpenCode 2 service mode resumes sessions
       expect(resumedRequest).toContain(RESTART_CONTINUE_TEXT)
 
       const messages = await waitFor('the synthetic continue message', async () => {
-        const text = JSON.stringify(await requestJson<unknown>(secondServe, `/api/session/${sessionID}/message`))
+        const text = JSON.stringify(
+          await requestJson(secondServe, `/api/session/${sessionID}/message`, JsonValueSchema),
+        )
         return text.includes(RESTART_CONTINUE_TEXT) ? text : undefined
       })
       expect(messages).toContain(RESTART_CONTINUE_TEXT)

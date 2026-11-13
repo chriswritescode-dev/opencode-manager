@@ -42,7 +42,6 @@ const ttsFormSchema = z.object({
 }).superRefine((data, ctx) => {
   if (!data.enabled) return
   
-  // External provider specific validation
   if (data.provider === 'external') {
     if (!data.apiKey || data.apiKey.trim().length === 0) {
       ctx.addIssue({
@@ -60,7 +59,6 @@ const ttsFormSchema = z.object({
     }
   }
   
-  // Voice requirement depends on provider
   if (!data.voice || data.voice.trim().length === 0) {
     if (data.provider === 'builtin') {
       ctx.addIssue({
@@ -82,7 +80,6 @@ export function TTSSettings() {
   const [browserVoices, setBrowserVoices] = useState<string[]>([])
   const [isCheckingBuiltin, setIsCheckingBuiltin] = useState(false)
   
-  // Auto-save state
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSavedDataRef = useRef<TTSFormValues | null>(null)
@@ -101,7 +98,6 @@ export function TTSSettings() {
     && preferences.tts.endpoint,
   )
 
-  // Fetch available models and voices for external provider
   const { data: modelsData, isLoading: isLoadingModels, refetch: refetchModels } = useTTSModels(
     undefined,
     shouldDiscoverTTS
@@ -125,11 +121,8 @@ export function TTSSettings() {
   const watchModel = form.watch('model')
   const watchSpeed = form.watch('speed')
   
-  // Check builtin Web Speech API support
   const hasWebSpeechSupport = isWebSpeechSupported()
   
-  // Determine if test button should be enabled
-  // With auto-save, we allow testing as long as settings are valid (no need to wait for save)
   const canTest = (() => {
     if (!watchEnabled) return false
     
@@ -140,7 +133,6 @@ export function TTSSettings() {
     }
   })()
   
-  // Load browser voices when provider is builtin
   useEffect(() => {
     if (watchProvider === 'builtin' && watchEnabled) {
       setIsCheckingBuiltin(true)
@@ -179,7 +171,6 @@ export function TTSSettings() {
     }
   }
   
-  // Load preferences into form
   useEffect(() => {
     if (preferences?.tts) {
       reset({
@@ -197,7 +188,6 @@ export function TTSSettings() {
     }
   }, [preferences?.tts, reset])
   
-  // Auto-save on change with debouncing
   useEffect(() => {
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current)
@@ -262,7 +252,6 @@ export function TTSSettings() {
     <div className="bg-card border border-border rounded-lg p-6">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-lg font-semibold text-foreground">Text-to-Speech</h2>
-        {/* Show auto-save status instead of save button */}
         <div className="flex items-center gap-2 text-sm">
           {saveStatus === 'saving' && (
             <>
@@ -379,7 +368,6 @@ export function TTSSettings() {
                 Choose how you want to generate speech. Built-in works offline with no setup required.
               </div>
 
-              {/* External Provider Settings */}
               {watchProvider === 'external' && (
                 <>
                   <FormField
@@ -395,7 +383,6 @@ export function TTSSettings() {
                             {...field}
                             onChange={(e) => {
                               field.onChange(e)
-                              // Auto-save will handle debounced save
                             }}
                           />
                         </FormControl>
@@ -421,7 +408,6 @@ export function TTSSettings() {
                             {...field}
                             onChange={(e) => {
                               field.onChange(e)
-                              // Auto-save will handle debounced save
                             }}
                           />
                         </FormControl>
@@ -537,7 +523,6 @@ export function TTSSettings() {
                 </>
               )}
 
-              {/* Builtin Provider Settings */}
               {watchProvider === 'builtin' && (
                 <>
                   <FormField
@@ -623,7 +608,6 @@ export function TTSSettings() {
                 </>
               )}
 
-              {/* Common Settings for both providers */}
               <FormField
                 control={form.control}
                 name="speed"

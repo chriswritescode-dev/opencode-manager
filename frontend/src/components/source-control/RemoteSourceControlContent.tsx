@@ -8,6 +8,7 @@ import {
   type VcsFileStatus,
 } from '@/api/opencode'
 import { FileDiffContent } from '@/components/file-browser/FileDiffView'
+import { readFailureMessage } from '@/components/jsonValue'
 import { GitFlatFileList } from './GitFlatFileList'
 import { SourceControlDialog } from './SourceControlPanel'
 import { Button } from '@/components/ui/button'
@@ -42,8 +43,8 @@ function toGitFileStatus(entry: VcsFileStatus | VcsFileDiff): GitFileStatus {
   }
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Failed to load source control'
+function errorMessage(cause: unknown): string {
+  return readFailureMessage(cause) ?? 'Failed to load source control'
 }
 
 export function RemoteSourceControlContent({

@@ -150,7 +150,7 @@ export function RepoList({ onAddRepo }: { onAddRepo: () => void }) {
   const [filterMode, setFilterMode] = useState<RepoFilterMode>('recent')
   const isSelectionActive = selectionMode || selectedRepos.size > 0
 
-  const sortMode = (preferences?.repoSortMode as RepoSortMode) || 'recent'
+  const sortMode = preferences?.repoSortMode || 'recent'
   const repoOrder = preferences?.repoOrder
 
   const handleSortModeChange = (newSortMode: RepoSortMode) => {
@@ -377,12 +377,10 @@ export function RepoList({ onAddRepo }: { onAddRepo: () => void }) {
     const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedRepos.has(id))
     
     if (allVisibleSelected) {
-      // Unselect only the visible repos, keep hidden ones
       const newSelected = new Set(selectedRepos)
       visibleIds.forEach(id => newSelected.delete(id))
       setSelectedRepos(newSelected)
     } else {
-      // Add all visible repos to existing selection (preserves hidden selections)
       const newSelected = new Set(selectedRepos)
       visibleIds.forEach(id => newSelected.add(id))
       setSelectedRepos(newSelected)

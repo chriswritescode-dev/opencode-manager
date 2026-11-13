@@ -1,17 +1,22 @@
+import { z } from 'zod'
 import { InstallSkillUploadManifestEntrySchema, type InstallSkillUploadManifestEntry } from '@opencode-manager/shared'
 
 export class UploadValidationError extends Error {}
 
-type ParsedFormData = Record<string, unknown>
+type ParsedFormData = Record<string, string | File | (string | File)[] | undefined>
 
-export function parseUploadManifest(fileManifestRaw: unknown): InstallSkillUploadManifestEntry[] {
-  if (typeof fileManifestRaw !== 'string') {
+export function parseUploadManifest(
+  fileManifestRaw: string | File | (string | File)[] | undefined,
+): InstallSkillUploadManifestEntry[] {
+  const rawManifest = z.string().safeParse(fileManifestRaw)
+  if (!rawManifest.success) {
     throw new UploadValidationError('fileManifest is required as a JSON string')
   }
+  const fileManifest = rawManifest.data
 
   let manifestEntries: unknown
   try {
-    manifestEntries = JSON.parse(fileManifestRaw)
+    manifestEntries = JSON.parse(fileManifest)
   } catch {
     throw new UploadValidationError('fileManifest must be valid JSON')
   }

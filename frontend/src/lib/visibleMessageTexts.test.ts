@@ -22,17 +22,7 @@ const userMessage = (id: string, text: string): SessionMessageUser => ({
   time: { created: 1 },
 })
 
-const rect = (top: number, bottom: number): DOMRect => ({
-  top,
-  bottom,
-  left: 0,
-  right: 100,
-  width: 100,
-  height: bottom - top,
-  x: 0,
-  y: top,
-  toJSON: () => ({}),
-} as DOMRect)
+const rect = (top: number, bottom: number): DOMRect => new DOMRect(0, top, 100, bottom - top)
 
 const stubRect = (element: HTMLElement, top: number, bottom: number) => {
   element.getBoundingClientRect = () => rect(top, bottom)

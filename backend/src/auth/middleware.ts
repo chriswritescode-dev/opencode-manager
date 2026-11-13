@@ -1,13 +1,18 @@
 import { createMiddleware } from 'hono/factory'
 import { getTrustedOrigins } from '@opencode-manager/shared/config/env'
-import type { AuthInstance, Session } from './index'
+import type { Session } from './index'
+import type { AuthSessionReader } from '../routes/auth'
 import { logger } from '../utils/logger'
 
 const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 const UNTRUSTED_FETCH_SITES = new Set(['same-site', 'cross-site'])
 
+export interface AuthSessionProvider {
+  api: AuthSessionReader
+}
+
 export function createAuthMiddleware(
-  auth: AuthInstance,
+  auth: AuthSessionProvider,
   resolveTrustedOrigins: () => string[] = getTrustedOrigins,
 ) {
   return createMiddleware<{
@@ -47,8 +52,8 @@ export function createAuthMiddleware(
       return c.json({ error: 'Unauthorized' }, 401)
     }
 
-    c.set('session', session.session as Session['session'])
-    c.set('user', session.user as Session['user'])
+    c.set('session', session.session)
+    c.set('user', session.user)
     await next()
   })
 }

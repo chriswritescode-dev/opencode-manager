@@ -1,87 +1,49 @@
-import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
+import { describe, expect, it } from 'vitest'
 import { MultiRunSheet } from './MultiRunSheet'
-import { FetchError } from '@/api/fetchWrapper'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
-import type { FuseMultiRunRequest, MultiRun, MultiRunEntry, MultiRunFusion } from '@opencode-manager/shared/schemas'
+import { renderWithProviders } from '@/test/render'
+import { LocationCatcher } from '@/test/test-components'
+import { installPointerCapture } from '@/test/browserFakes'
+import {
+  makeCatalogModel,
+  makeCatalogProvider,
+} from '@/test/fixtures/api'
+import type { FetchRoute, FetchRouteResult } from '@/test/fetchFake'
+import {
+  FuseMultiRunRequestSchema,
+  type FuseMultiRunRequest,
+  type MultiRun,
+  type MultiRunEntry,
+  type MultiRunFusion,
+} from '@opencode-manager/shared/schemas'
+import type { GitBranch } from '@/api/repos'
+import type { ChangeWalkthroughState } from '@opencode-manager/shared/schemas'
 
-const mocks = vi.hoisted(() => ({
-  listMultiRuns: vi.fn(),
-  launchMultiRun: vi.fn(),
-  discardMultiRunEntry: vi.fn(),
-  fuseMultiRun: vi.fn(),
-  useProviders: vi.fn(),
-  useOpenCodeModelState: vi.fn(),
-  useOpenCodeDefaultModel: vi.fn(),
-  listBranches: vi.fn(),
-  getChangeWalkthrough: vi.fn(),
-  generateChangeWalkthrough: vi.fn(),
-}))
+const catalogProviders = [
+  makeCatalogProvider({ id: 'openai', name: 'OpenAI' }),
+  makeCatalogProvider({ id: 'anthropic', name: 'Anthropic' }),
+]
 
-const mockNavigate = vi.fn()
+function model(id: string, name: string, providerID: string, released: number) {
+  return makeCatalogModel({ id, modelID: id, name, providerID, time: { released } })
+}
 
-vi.mock('react-router-dom', async (importOriginal) => ({
-  ...(await importOriginal('react-router-dom')),
-  useNavigate: () => mockNavigate,
-}))
+const catalogModels = [
+  model('gpt-4o', 'GPT-4o', 'openai', 100),
+  model('gpt-4o-mini', 'GPT-4o mini', 'openai', 90),
+  model('gpt-4.1', 'GPT-4.1', 'openai', 80),
+  model('claude-opus', 'Claude Opus', 'anthropic', 70),
+  model('claude-sonnet', 'Claude Sonnet', 'anthropic', 60),
+  model('claude-haiku', 'Claude Haiku', 'anthropic', 50),
+  model('claude-sonnet-4.5', 'Claude Sonnet 4.5', 'anthropic', 40),
+]
 
-vi.mock('@/api/multiRuns', () => ({
-  listMultiRuns: mocks.listMultiRuns,
-  launchMultiRun: mocks.launchMultiRun,
-  discardMultiRunEntry: mocks.discardMultiRunEntry,
-  fuseMultiRun: mocks.fuseMultiRun,
-}))
-
-vi.mock('@/hooks/useProviders', () => ({
-  useProviders: mocks.useProviders,
-}))
-
-vi.mock('@/hooks/useModelSelection', () => ({
-  useOpenCodeModelState: mocks.useOpenCodeModelState,
-  useOpenCodeDefaultModel: mocks.useOpenCodeDefaultModel,
-}))
-
-vi.mock('@/api/repos', () => ({
-  listBranches: mocks.listBranches,
-}))
-
-vi.mock('@/api/changeWalkthroughs', () => ({
-  getChangeWalkthrough: mocks.getChangeWalkthrough,
-  generateChangeWalkthrough: mocks.generateChangeWalkthrough,
-}))
-
-vi.mock('@/lib/toast', () => ({
-  showToast: {
-    success: vi.fn(),
-    error: vi.fn(),
-    warning: vi.fn(),
-    info: vi.fn(),
-  },
-}))
-
-const providers = [
-  {
-    id: 'openai',
-    name: 'OpenAI',
-    models: [
-      { id: 'gpt-4o', modelID: 'gpt-4o', name: 'GPT-4o', released: 0, free: false },
-      { id: 'gpt-4o-mini', modelID: 'gpt-4o-mini', name: 'GPT-4o mini', released: 0, free: false },
-      { id: 'gpt-4.1', modelID: 'gpt-4.1', name: 'GPT-4.1', released: 0, free: false },
-    ],
-  },
-  {
-    id: 'anthropic',
-    name: 'Anthropic',
-    models: [
-      { id: 'claude-opus', modelID: 'claude-opus', name: 'Claude Opus', released: 0, free: false },
-      { id: 'claude-sonnet', modelID: 'claude-sonnet', name: 'Claude Sonnet', released: 0, free: false },
-      { id: 'claude-haiku', modelID: 'claude-haiku', name: 'Claude Haiku', released: 0, free: false },
-      { id: 'claude-sonnet-4.5', modelID: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', released: 0, free: false },
-    ],
-  },
+const branches: GitBranch[] = [
+  { name: 'main', type: 'local', current: true },
+  { name: 'remotes/origin/HEAD', type: 'remote', current: false },
+  { name: 'remotes/origin/release', type: 'remote', current: false },
 ]
 
 function entry(overrides: Partial<MultiRunEntry> & Pick<MultiRunEntry, 'id' | 'model'>): MultiRunEntry {
@@ -154,30 +116,105 @@ const olderRun: MultiRun = {
   entries: [entry({ id: 21, model: 'openai/gpt-4.1' }), entry({ id: 22, model: 'openai/gpt-4o-mini' })],
 }
 
-function createWrapper() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  )
+const emptyWalkthrough: ChangeWalkthroughState = {
+  walkthrough: null,
+  currentDiffHash: null,
+  hasChanges: false,
+  stale: false,
+  generating: false,
+  running: false,
+  error: null,
 }
 
-function renderSheet(overrides: Partial<React.ComponentProps<typeof MultiRunSheet>> = {}) {
-  const onOpenChange = vi.fn()
-  const view = render(
-    <MultiRunSheet
-      target={{ kind: 'repo', repoId: 7 }}
-      directory="/repo"
-      defaultBaseRef="main"
-      open
-      onOpenChange={onOpenChange}
-      {...overrides}
-    />,
-    { wrapper: createWrapper() },
-  )
-  return { ...view, onOpenChange }
+interface MultiRunServerOptions {
+  runs?: MultiRun[]
+  configModel?: string
+  launch?: () => FetchRouteResult
+  fuse?: (request: FuseMultiRunRequest) => FetchRouteResult
+  discard?: () => FetchRouteResult
 }
 
-function checkboxLabels() {
+interface MultiRunServer {
+  routes: FetchRoute[]
+  setRuns: (runs: MultiRun[]) => void
+}
+
+function createMultiRunServer(options: MultiRunServerOptions = {}): MultiRunServer {
+  let runs = options.runs ?? []
+  const configEntries = options.configModel
+    ? [{ type: 'document', info: { model: options.configModel } }]
+    : []
+  return {
+    routes: [
+      { method: 'GET', path: '/api/multi-runs', respond: () => ({ json: { runs } }) },
+      {
+        method: 'POST',
+        path: '/api/multi-runs',
+        respond: () => options.launch?.() ?? { json: { run: oneStartedRun } },
+      },
+      {
+        method: 'POST',
+        path: '/api/multi-runs/:runId/fusions',
+        respond: (request) => {
+          const parsed = FuseMultiRunRequestSchema.safeParse(request.body)
+          if (!parsed.success) return { status: 400, json: { error: 'invalid fuse request' } }
+          return options.fuse?.(parsed.data) ?? { json: { run: fuseRun } }
+        },
+      },
+      {
+        method: 'POST',
+        path: '/api/multi-runs/:runId/entries/:entryId/discard',
+        respond: () => options.discard?.() ?? { json: { run: oneStartedRun } },
+      },
+      { method: 'GET', path: '/api/opencode/api/provider', respond: () => ({ json: { location: { directory: '/repo' }, data: catalogProviders } }) },
+      { method: 'GET', path: '/api/opencode/api/model', respond: () => ({ json: { location: { directory: '/repo' }, data: catalogModels } }) },
+      { method: 'GET', path: '/api/providers/model-state', respond: () => ({ json: { recent: [], favorite: [], variant: {} } }) },
+      { method: 'GET', path: '/api/opencode/api/config', respond: () => ({ json: configEntries }) },
+      { method: 'GET', path: '/api/opencode/api/model/default', respond: () => ({ json: { location: { directory: '/repo' }, data: null } }) },
+      { method: 'GET', path: '/api/repos/7/git/branches', respond: () => ({ json: { branches, status: { ahead: 0, behind: 0 } } }) },
+      { method: 'GET', path: '/api/change-walkthroughs/helper-sessions', respond: () => ({ json: { sessionIds: [] } }) },
+      { method: 'GET', path: '/api/change-walkthroughs/ses_11', respond: () => ({ json: emptyWalkthrough }) },
+      { method: 'GET', path: '/api/files', respond: () => ({ json: [] }) },
+    ],
+    setRuns: (next) => {
+      runs = next
+    },
+  }
+}
+
+function renderSheet(options: MultiRunServerOptions & {
+  target?: 'repo' | 'server'
+  directory?: string
+  defaultBaseRef?: string
+} = {}) {
+  installPointerCapture()
+  const server = createMultiRunServer(options)
+  const onOpenChangeCalls: boolean[] = []
+  const onOpenChange = (open: boolean) => {
+    onOpenChangeCalls.push(open)
+  }
+  const capturedPathname = { current: '' }
+  const capturedSearch = { current: '' }
+  const target = options.target === 'server'
+    ? { kind: 'server' as const, serverId: 'srv_kitchen', directory: '/srv/app' }
+    : { kind: 'repo' as const, repoId: 7 }
+  const view = renderWithProviders(
+    <>
+      <LocationCatcher capturedPathname={capturedPathname} capturedSearch={capturedSearch} />
+      <MultiRunSheet
+        target={target}
+        directory={options.directory ?? (options.target === 'server' ? '/srv/app' : '/repo')}
+        defaultBaseRef={options.defaultBaseRef ?? (options.target === 'server' ? undefined : 'main')}
+        open
+        onOpenChange={onOpenChange}
+      />
+    </>,
+    { auth: false, theme: false, route: options.target === 'server' ? '/servers/srv_kitchen' : '/repos/7', fetchRoutes: server.routes },
+  )
+  return { ...view, server, onOpenChangeCalls, capturedPathname, capturedSearch }
+}
+
+function checkboxLabels(): Array<string | null> {
   return screen.getAllByRole('checkbox').map((checkbox) => checkbox.getAttribute('aria-label'))
 }
 
@@ -189,7 +226,7 @@ async function fillLaunchForm(user: ReturnType<typeof userEvent.setup>) {
   await openNewRun(user)
   await user.type(screen.getByLabelText('Group name'), 'Sweep')
   await user.type(screen.getByLabelText('Prompt'), 'go')
-  await user.click(screen.getByRole('checkbox', { name: 'GPT-4o' }))
+  await user.click(await screen.findByRole('checkbox', { name: 'GPT-4o' }))
 }
 
 async function enterSelection(user: ReturnType<typeof userEvent.setup>, runName = 'Pair') {
@@ -229,33 +266,6 @@ function startedFusionResponse(request: FuseMultiRunRequest, status: MultiRunFus
 }
 
 describe('MultiRunSheet', () => {
-  beforeAll(() => {
-    Element.prototype.hasPointerCapture ??= () => false
-    Element.prototype.setPointerCapture ??= () => {}
-    Element.prototype.releasePointerCapture ??= () => {}
-    Element.prototype.scrollIntoView ??= () => {}
-  })
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    for (const sessionId of useSessionStatus.getState().statuses.keys()) {
-      useSessionStatus.getState().clearStatus(sessionId)
-    }
-    mocks.useProviders.mockReturnValue({ data: { providers, models: [] }, isLoading: false })
-    mocks.useOpenCodeModelState.mockReturnValue({ data: { recent: [], favorite: [], variant: {} } })
-    mocks.useOpenCodeDefaultModel.mockReturnValue({ data: null })
-    mocks.listBranches.mockResolvedValue({
-      branches: [
-        { name: 'main', type: 'local', current: true },
-        { name: 'remotes/origin/HEAD', type: 'remote', current: false },
-        { name: 'remotes/origin/release', type: 'remote', current: false },
-      ],
-      status: { ahead: 0, behind: 0 },
-    })
-    mocks.listMultiRuns.mockResolvedValue([])
-    mocks.getChangeWalkthrough.mockResolvedValue({ walkthrough: null, currentDiffHash: null, stale: false })
-  })
-
   it('opens as a right sheet on the Runs tab', async () => {
     renderSheet()
 
@@ -277,19 +287,18 @@ describe('MultiRunSheet', () => {
   describe('New run', () => {
     it('lists the OpenCode default model first without repeating it', async () => {
       const user = userEvent.setup()
-      mocks.useOpenCodeDefaultModel.mockReturnValue({ data: 'anthropic/claude-sonnet' })
-      renderSheet()
+      renderSheet({ configModel: 'anthropic/claude-sonnet' })
       await openNewRun(user)
 
       expect(screen.getByText('Default')).toBeInTheDocument()
       expect(checkboxLabels()).toEqual([
         'Claude Sonnet',
-        'GPT-4o',
-        'GPT-4o mini',
-        'GPT-4.1',
         'Claude Opus',
         'Claude Haiku',
         'Claude Sonnet 4.5',
+        'GPT-4o',
+        'GPT-4o mini',
+        'GPT-4.1',
       ])
     })
 
@@ -351,29 +360,27 @@ describe('MultiRunSheet', () => {
 
     it('submits the launch request and switches to Runs', async () => {
       const user = userEvent.setup()
-      mocks.launchMultiRun.mockResolvedValue(oneStartedRun)
-      renderSheet()
+      const { fetchFake } = renderSheet()
 
       await fillLaunchForm(user)
       await user.click(screen.getByRole('button', { name: 'Launch' }))
 
-      await waitFor(() => {
-        expect(mocks.launchMultiRun).toHaveBeenCalledWith({
+      await waitFor(() =>
+        expect(fetchFake.lastRequest('POST', '/api/multi-runs')?.body).toEqual({
           repoId: 7,
           name: 'Sweep',
           prompt: 'go',
           models: ['openai/gpt-4o'],
           isolate: true,
           baseRef: 'main',
-        })
-      })
+        }),
+      )
       await waitFor(() => expect(screen.getByRole('tab', { name: 'Runs' })).toHaveAttribute('aria-selected', 'true'))
     })
 
     it('submits the selected remote branch as the base ref', async () => {
       const user = userEvent.setup()
-      mocks.launchMultiRun.mockResolvedValue(oneStartedRun)
-      renderSheet()
+      const { fetchFake } = renderSheet()
 
       await fillLaunchForm(user)
       const branchSelect = screen.getByRole('combobox', { name: 'Start from' })
@@ -382,35 +389,34 @@ describe('MultiRunSheet', () => {
       await user.click(screen.getByRole('option', { name: /release/ }))
       await user.click(screen.getByRole('button', { name: 'Launch' }))
 
-      await waitFor(() => {
-        expect(mocks.launchMultiRun).toHaveBeenCalledWith(expect.objectContaining({ baseRef: 'origin/release' }))
-      })
+      await waitFor(() =>
+        expect(fetchFake.lastRequest('POST', '/api/multi-runs')?.body).toMatchObject({ baseRef: 'origin/release' }),
+      )
     })
 
     it('omits the base ref when runs are not isolated', async () => {
       const user = userEvent.setup()
-      mocks.launchMultiRun.mockResolvedValue(oneStartedRun)
-      renderSheet()
+      const { fetchFake } = renderSheet()
 
       await fillLaunchForm(user)
       await user.click(screen.getByRole('switch', { name: 'Isolate runs' }))
       expect(screen.queryByRole('combobox', { name: 'Start from' })).not.toBeInTheDocument()
       await user.click(screen.getByRole('button', { name: 'Launch' }))
 
-      await waitFor(() => expect(mocks.launchMultiRun).toHaveBeenCalledTimes(1))
-      expect(mocks.launchMultiRun.mock.calls[0][0]).toEqual({
-        repoId: 7,
-        name: 'Sweep',
-        prompt: 'go',
-        models: ['openai/gpt-4o'],
-        isolate: false,
-      })
+      await waitFor(() =>
+        expect(fetchFake.lastRequest('POST', '/api/multi-runs')?.body).toEqual({
+          repoId: 7,
+          name: 'Sweep',
+          prompt: 'go',
+          models: ['openai/gpt-4o'],
+          isolate: false,
+        }),
+      )
     })
 
     it('submits the catalog id for configured model aliases', async () => {
       const user = userEvent.setup()
-      mocks.launchMultiRun.mockResolvedValue(oneStartedRun)
-      renderSheet()
+      const { fetchFake } = renderSheet()
 
       await openNewRun(user)
       await user.type(screen.getByLabelText('Group name'), 'Sweep')
@@ -418,17 +424,18 @@ describe('MultiRunSheet', () => {
       await user.click(screen.getByRole('checkbox', { name: 'Claude Sonnet 4.5' }))
       await user.click(screen.getByRole('button', { name: 'Launch' }))
 
-      await waitFor(() => {
-        expect(mocks.launchMultiRun).toHaveBeenCalledWith(
-          expect.objectContaining({ models: ['anthropic/claude-sonnet-4.5'] }),
-        )
-      })
+      await waitFor(() =>
+        expect(fetchFake.lastRequest('POST', '/api/multi-runs')?.body).toMatchObject({
+          models: ['anthropic/claude-sonnet-4.5'],
+        }),
+      )
     })
 
     it('renders a single disabled launch button while the launch is pending', async () => {
       const user = userEvent.setup()
-      mocks.launchMultiRun.mockReturnValue(new Promise(() => {}))
-      renderSheet()
+      const { fetchFake } = renderSheet({
+        launch: () => new Promise<FetchRouteResult>(() => undefined),
+      })
 
       await fillLaunchForm(user)
       await user.click(screen.getByRole('button', { name: 'Launch' }))
@@ -438,18 +445,17 @@ describe('MultiRunSheet', () => {
       expect(pending).toHaveAttribute('aria-busy', 'true')
       expect(screen.queryByRole('button', { name: 'Launch' })).not.toBeInTheDocument()
       await user.click(pending)
-      expect(mocks.launchMultiRun).toHaveBeenCalledTimes(1)
+      expect(fetchFake.findRequests('POST', '/api/multi-runs')).toHaveLength(1)
     })
 
     it('keeps the New run tab when the launch request fails', async () => {
       const user = userEvent.setup()
-      mocks.launchMultiRun.mockRejectedValue(new Error('launch failed'))
-      renderSheet()
+      renderSheet({ launch: () => ({ status: 500, json: { error: 'launch failed' } }) })
 
       await fillLaunchForm(user)
       await user.click(screen.getByRole('button', { name: 'Launch' }))
 
-      await waitFor(() => expect(mocks.launchMultiRun).toHaveBeenCalled())
+      expect(await screen.findByText('launch failed')).toBeInTheDocument()
       expect(screen.getByRole('tab', { name: 'New run' })).toHaveAttribute('aria-selected', 'true')
       expect(screen.getByLabelText('Group name')).toHaveValue('Sweep')
     })
@@ -458,8 +464,7 @@ describe('MultiRunSheet', () => {
   describe('Runs', () => {
     it('expands the newest run and collapses older ones', async () => {
       const user = userEvent.setup()
-      mocks.listMultiRuns.mockResolvedValue([oneStartedRun, olderRun])
-      renderSheet()
+      renderSheet({ runs: [oneStartedRun, olderRun] })
 
       const newest = await screen.findByRole('region', { name: 'Sweep' })
       const older = screen.getByRole('region', { name: 'Older sweep' })
@@ -472,8 +477,7 @@ describe('MultiRunSheet', () => {
     })
 
     it('lists entries with their status and failure reason', async () => {
-      mocks.listMultiRuns.mockResolvedValue([oneStartedRun])
-      renderSheet()
+      renderSheet({ runs: [oneStartedRun] })
 
       const card = await screen.findByRole('region', { name: 'Sweep' })
       expect(within(card).getByText('openai/gpt-4o')).toBeInTheDocument()
@@ -484,8 +488,7 @@ describe('MultiRunSheet', () => {
 
     it('labels a launched entry with a busy session as running', async () => {
       useSessionStatus.getState().setStatus('ses_11', { type: 'busy' })
-      mocks.listMultiRuns.mockResolvedValue([oneStartedRun])
-      renderSheet()
+      renderSheet({ runs: [oneStartedRun] })
 
       const card = await screen.findByRole('region', { name: 'Sweep' })
       expect(within(card).getByText('Running')).toBeInTheDocument()
@@ -494,21 +497,19 @@ describe('MultiRunSheet', () => {
 
     it('opens a started entry in the workspaces tab and closes the sheet', async () => {
       const user = userEvent.setup()
-      mocks.listMultiRuns.mockResolvedValue([oneStartedRun])
-      const { onOpenChange } = renderSheet()
+      const result = renderSheet({ runs: [oneStartedRun] })
 
       const card = await screen.findByRole('region', { name: 'Sweep' })
       await user.click(within(card).getByRole('button', { name: 'Open' }))
 
-      expect(onOpenChange).toHaveBeenCalledWith(false)
-      expect(mockNavigate).toHaveBeenCalledWith('/repos/7/sessions/ses_11?repoTab=workspaces')
+      expect(result.onOpenChangeCalls).toContain(false)
+      expect(result.capturedPathname.current).toBe('/repos/7/sessions/ses_11')
+      expect(result.capturedSearch.current).toBe('?repoTab=workspaces')
     })
 
     it('discards an entry from its overflow menu after confirmation', async () => {
       const user = userEvent.setup()
-      mocks.listMultiRuns.mockResolvedValue([oneStartedRun])
-      mocks.discardMultiRunEntry.mockResolvedValue(oneStartedRun)
-      renderSheet()
+      const { fetchFake } = renderSheet({ runs: [oneStartedRun] })
 
       await user.click(await screen.findByRole('button', { name: 'More actions for openai/gpt-4o' }))
       await user.click(await screen.findByRole('menuitem', { name: /discard/i }))
@@ -516,46 +517,43 @@ describe('MultiRunSheet', () => {
       const confirmDialog = await screen.findByRole('dialog', { name: 'Discard run' })
       await user.click(within(confirmDialog).getByRole('button', { name: 'Discard' }))
 
-      await waitFor(() => expect(mocks.discardMultiRunEntry).toHaveBeenCalledWith(3, 11))
+      await waitFor(() =>
+        expect(fetchFake.lastRequest('POST', '/api/multi-runs/3/entries/11/discard')).toBeDefined(),
+      )
     })
 
     it('opens the walkthrough dialog for an entry session', async () => {
       const user = userEvent.setup()
-      mocks.listMultiRuns.mockResolvedValue([oneStartedRun])
-      renderSheet()
+      const result = renderSheet({ runs: [oneStartedRun] })
 
       const card = await screen.findByRole('region', { name: 'Sweep' })
       await user.click(within(card).getByRole('button', { name: /walkthrough/i }))
 
       expect(await screen.findByText('Change walkthrough')).toBeInTheDocument()
       await waitFor(() =>
-        expect(mocks.getChangeWalkthrough).toHaveBeenCalledWith('ses_11', { kind: 'session' }),
+        expect(result.fetchFake.findRequests('GET', '/api/change-walkthroughs/ses_11')).toHaveLength(1),
       )
     })
 
     it('lists fusions with truncation and opens the fusion session', async () => {
       const user = userEvent.setup()
-      mocks.listMultiRuns.mockResolvedValue([{ ...oneStartedRun, fusions: [fusion()] }])
-      renderSheet()
+      const result = renderSheet({ runs: [{ ...oneStartedRun, fusions: [fusion()] }] })
 
       const card = await screen.findByRole('region', { name: 'Sweep' })
       expect(within(card).getByText('Fusions')).toBeInTheDocument()
       expect(within(card).getByText('from 1 source (truncated)')).toBeInTheDocument()
 
-      const fusionRow = within(card).getByText('from 1 source (truncated)').closest('li') as HTMLElement
-      await user.click(within(fusionRow).getByRole('button', { name: 'Open' }))
-      expect(mockNavigate).toHaveBeenCalledWith('/repos/7/sessions/ses_fusion?repoTab=workspaces')
+      const fusionRow = within(card).getByText('from 1 source (truncated)').closest<HTMLElement>('li')
+      expect(fusionRow).not.toBeNull()
+      await user.click(within(fusionRow ?? card).getByRole('button', { name: 'Open' }))
+      expect(result.capturedPathname.current).toBe('/repos/7/sessions/ses_fusion')
+      expect(result.capturedSearch.current).toBe('?repoTab=workspaces')
     })
   })
 
   describe('Fusion selection mode', () => {
-    beforeEach(() => {
-      mocks.listMultiRuns.mockResolvedValue([fuseRun])
-    })
-
     it('disables Fuse results for runs with fewer than two launched entries', async () => {
-      mocks.listMultiRuns.mockResolvedValue([oneStartedRun])
-      renderSheet()
+      renderSheet({ runs: [oneStartedRun] })
 
       const card = await screen.findByRole('region', { name: 'Sweep' })
       expect(within(card).getByRole('button', { name: /fuse results/i })).toBeDisabled()
@@ -563,7 +561,7 @@ describe('MultiRunSheet', () => {
 
     it('enters selection mode in place and exits it', async () => {
       const user = userEvent.setup()
-      renderSheet()
+      renderSheet({ runs: [fuseRun] })
 
       const card = await enterSelection(user)
       expect(within(card).getByText('Selection mode')).toBeInTheDocument()
@@ -578,7 +576,7 @@ describe('MultiRunSheet', () => {
     it('dims unready entries with their reason and blocks selecting them', async () => {
       const user = userEvent.setup()
       useSessionStatus.getState().setStatus('ses_14', { type: 'busy' })
-      renderSheet()
+      renderSheet({ runs: [fuseRun] })
 
       const card = await enterSelection(user)
 
@@ -591,7 +589,7 @@ describe('MultiRunSheet', () => {
 
     it('requires two sources and a synthesis model before starting', async () => {
       const user = userEvent.setup()
-      renderSheet()
+      renderSheet({ runs: [fuseRun] })
 
       const card = await enterSelection(user)
       const submit = screen.getByRole('button', { name: /start fusion/i })
@@ -607,18 +605,18 @@ describe('MultiRunSheet', () => {
 
     it('submits the selected sources, model, instructions and base ref', async () => {
       const user = userEvent.setup()
-      mocks.fuseMultiRun.mockResolvedValue(fuseRun)
-      renderSheet()
+      const { fetchFake } = renderSheet({
+        runs: [fuseRun],
+        fuse: (request) => ({ json: { run: startedFusionResponse(request) } }),
+      })
 
       await selectSourcesAndModel(user)
       await user.click(screen.getByText('Instructions (optional)'))
       await user.type(screen.getByLabelText('Instructions'), 'Merge the best ideas')
       await user.click(screen.getByRole('button', { name: /start fusion/i }))
 
-      await waitFor(() => expect(mocks.fuseMultiRun).toHaveBeenCalledTimes(1))
-      const [runId, request] = mocks.fuseMultiRun.mock.calls[0] as [number, FuseMultiRunRequest]
-      expect(runId).toBe(5)
-      expect(request).toEqual({
+      await waitFor(() => expect(fetchFake.findRequests('POST', '/api/multi-runs/5/fusions')).toHaveLength(1))
+      expect(fetchFake.lastRequest('POST', '/api/multi-runs/5/fusions')?.body).toEqual({
         requestId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/),
         entryIds: [11, 13],
         model: 'openai/gpt-4o',
@@ -629,10 +627,9 @@ describe('MultiRunSheet', () => {
 
     it('always runs the fusion in a new worktree without a destination choice', async () => {
       const user = userEvent.setup()
-      mocks.listMultiRuns.mockResolvedValue([
-        { ...fuseRun, entries: fuseRun.entries.map((item) => (item.id === 11 ? { ...item, isolated: false } : item)) },
-      ])
-      renderSheet()
+      renderSheet({
+        runs: [{ ...fuseRun, entries: fuseRun.entries.map((item) => (item.id === 11 ? { ...item, isolated: false } : item)) }],
+      })
 
       await selectSourcesAndModel(user)
 
@@ -642,8 +639,7 @@ describe('MultiRunSheet', () => {
 
     it('shows the new fusion as Starting while the request is pending', async () => {
       const user = userEvent.setup()
-      mocks.fuseMultiRun.mockReturnValue(new Promise(() => {}))
-      renderSheet()
+      renderSheet({ runs: [fuseRun], fuse: () => new Promise<FetchRouteResult>(() => undefined) })
 
       const card = await selectSourcesAndModel(user)
       await user.click(screen.getByRole('button', { name: /start fusion/i }))
@@ -652,57 +648,62 @@ describe('MultiRunSheet', () => {
       expect(within(card).getByText('Starting')).toBeInTheDocument()
       expect(within(card).getByText('from 2 sources')).toBeInTheDocument()
       await user.click(screen.getByRole('button', { name: /start fusion/i }))
-      expect(mocks.fuseMultiRun).toHaveBeenCalledTimes(1)
+      expect(screen.getAllByRole('button', { name: /start fusion/i })).toHaveLength(1)
     })
 
     it('opens the new session when the fusion starts', async () => {
       const user = userEvent.setup()
-      mocks.fuseMultiRun.mockImplementation((_runId: number, request: FuseMultiRunRequest) =>
-        Promise.resolve(startedFusionResponse(request)),
-      )
-      const { onOpenChange } = renderSheet()
+      const result = renderSheet({
+        runs: [fuseRun],
+        fuse: (request) => ({ json: { run: startedFusionResponse(request) } }),
+      })
 
       await selectSourcesAndModel(user)
       await user.click(screen.getByRole('button', { name: /start fusion/i }))
 
-      await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/repos/7/sessions/ses_new_fusion?repoTab=workspaces')
-      })
-      expect(onOpenChange).toHaveBeenCalledWith(false)
+      await waitFor(() => expect(result.capturedPathname.current).toBe('/repos/7/sessions/ses_new_fusion'))
+      expect(result.capturedSearch.current).toBe('?repoTab=workspaces')
+      expect(result.onOpenChangeCalls).toContain(false)
     })
 
     it('regenerates the request id after a failed fusion', async () => {
       const user = userEvent.setup()
-      mocks.fuseMultiRun.mockImplementation((_runId: number, request: FuseMultiRunRequest) =>
-        Promise.resolve(startedFusionResponse(request, 'failed')),
-      )
-      renderSheet()
+      const { fetchFake } = renderSheet({
+        runs: [fuseRun],
+        fuse: (request) => ({ json: { run: startedFusionResponse(request, 'failed') } }),
+      })
 
       await selectSourcesAndModel(user)
       const submit = screen.getByRole('button', { name: /start fusion/i })
       await user.click(submit)
-      await waitFor(() => expect(mocks.fuseMultiRun).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(fetchFake.findRequests('POST', '/api/multi-runs/5/fusions')).toHaveLength(1))
       await waitFor(() => expect(submit).toBeEnabled())
       await user.click(submit)
-      await waitFor(() => expect(mocks.fuseMultiRun).toHaveBeenCalledTimes(2))
+      await waitFor(() => expect(fetchFake.findRequests('POST', '/api/multi-runs/5/fusions')).toHaveLength(2))
 
-      const first = mocks.fuseMultiRun.mock.calls[0][1] as FuseMultiRunRequest
-      const second = mocks.fuseMultiRun.mock.calls[1][1] as FuseMultiRunRequest
-      expect(second.requestId).not.toBe(first.requestId)
+      const [first, second] = fetchFake.findRequests('POST', '/api/multi-runs/5/fusions')
+      const firstBody = FuseMultiRunRequestSchema.parse(first?.body)
+      const secondBody = FuseMultiRunRequestSchema.parse(second?.body)
+      expect(secondBody.requestId).not.toBe(firstBody.requestId)
     })
 
     it('shows unavailable source reasons inline on the affected rows', async () => {
       const user = userEvent.setup()
-      mocks.fuseMultiRun.mockRejectedValue(
-        new FetchError('Some selected results are not ready to fuse', 409, 'FUSION_SOURCES_UNAVAILABLE', undefined, {
-          details: {
-            unavailableSources: [
-              { entryId: 13, model: 'anthropic/claude-opus', reason: 'running', message: 'The session is still running.' },
-            ],
+      renderSheet({
+        runs: [fuseRun],
+        fuse: () => ({
+          status: 409,
+          json: {
+            error: 'Some selected results are not ready to fuse',
+            code: 'FUSION_SOURCES_UNAVAILABLE',
+            details: {
+              unavailableSources: [
+                { entryId: 13, model: 'anthropic/claude-opus', reason: 'running', message: 'The session is still running.' },
+              ],
+            },
           },
         }),
-      )
-      renderSheet()
+      })
 
       const card = await selectSourcesAndModel(user)
       await user.click(screen.getByRole('button', { name: /start fusion/i }))
@@ -713,10 +714,10 @@ describe('MultiRunSheet', () => {
 
     it('shows the context limit message in the composer', async () => {
       const user = userEvent.setup()
-      mocks.fuseMultiRun.mockRejectedValue(
-        new FetchError('The selected results are too large to fuse.', 413, 'FUSION_CONTEXT_LIMIT'),
-      )
-      renderSheet()
+      renderSheet({
+        runs: [fuseRun],
+        fuse: () => ({ status: 413, json: { error: 'The selected results are too large to fuse.', code: 'FUSION_CONTEXT_LIMIT' } }),
+      })
 
       await selectSourcesAndModel(user)
       await user.click(screen.getByRole('button', { name: /start fusion/i }))
@@ -726,25 +727,30 @@ describe('MultiRunSheet', () => {
 
     it('offers to open a recovered fusion attempt', async () => {
       const user = userEvent.setup()
-      mocks.fuseMultiRun.mockRejectedValue(
-        new FetchError('An earlier fusion attempt is already running', 409, 'FUSION_ATTEMPT_RECOVERED', undefined, {
-          details: { fusions: [{ fusionId: 31, sessionId: 'ses_recovered' }] },
+      const result = renderSheet({
+        runs: [fuseRun],
+        fuse: () => ({
+          status: 409,
+          json: {
+            error: 'An earlier fusion attempt is already running',
+            code: 'FUSION_ATTEMPT_RECOVERED',
+            details: { fusions: [{ fusionId: 31, sessionId: 'ses_recovered' }] },
+          },
         }),
-      )
-      renderSheet()
+      })
 
       await selectSourcesAndModel(user)
       await user.click(screen.getByRole('button', { name: /start fusion/i }))
 
       expect(await screen.findByText('An earlier attempt is already running.')).toBeInTheDocument()
-      const message = screen.getByText('An earlier attempt is already running.').parentElement as HTMLElement
-      await user.click(within(message).getByRole('button', { name: 'Open' }))
-      expect(mockNavigate).toHaveBeenCalledWith('/repos/7/sessions/ses_recovered')
+      const message = screen.getByText('An earlier attempt is already running.').parentElement
+      expect(message).not.toBeNull()
+      await user.click(within(message ?? document.body).getByRole('button', { name: 'Open' }))
+      expect(result.capturedPathname.current).toBe('/repos/7/sessions/ses_recovered')
     })
   })
 
   describe('Linked server target', () => {
-    const serverTarget = { kind: 'server', serverId: 'srv_kitchen', directory: '/srv/app' } as const
     const serverRun: MultiRun = {
       ...oneStartedRun,
       repoId: null,
@@ -752,83 +758,77 @@ describe('MultiRunSheet', () => {
       directory: '/srv/app',
     }
 
-    function renderServerSheet() {
-      return renderSheet({ target: serverTarget, directory: '/srv/app', defaultBaseRef: undefined })
-    }
-
     it('lists the runs of the server directory', async () => {
-      mocks.listMultiRuns.mockResolvedValue([serverRun])
-      renderServerSheet()
+      const result = renderSheet({ target: 'server', runs: [serverRun] })
 
       expect(await screen.findByRole('region', { name: 'Sweep' })).toBeInTheDocument()
-      expect(mocks.listMultiRuns).toHaveBeenCalledWith(serverTarget)
+      const request = result.fetchFake.lastRequest('GET', '/api/multi-runs')
+      expect(request?.searchParams.get('serverId')).toBe('srv_kitchen')
+      expect(request?.searchParams.get('directory')).toBe('/srv/app')
     })
 
     it('launches with the server target instead of a repository', async () => {
       const user = userEvent.setup()
-      mocks.launchMultiRun.mockResolvedValue(serverRun)
-      renderServerSheet()
+      const { fetchFake } = renderSheet({ target: 'server' })
 
       await fillLaunchForm(user)
       await user.click(screen.getByRole('button', { name: 'Launch' }))
 
-      await waitFor(() => {
-        expect(mocks.launchMultiRun).toHaveBeenCalledWith({
+      await waitFor(() =>
+        expect(fetchFake.lastRequest('POST', '/api/multi-runs')?.body).toEqual({
           serverId: 'srv_kitchen',
           directory: '/srv/app',
           name: 'Sweep',
           prompt: 'go',
           models: ['openai/gpt-4o'],
           isolate: true,
-        })
-      })
+        }),
+      )
     })
 
     it('takes the base ref as text because server branches are not listed', async () => {
       const user = userEvent.setup()
-      mocks.launchMultiRun.mockResolvedValue(serverRun)
-      renderServerSheet()
+      const { fetchFake } = renderSheet({ target: 'server' })
 
       await openNewRun(user)
       expect(screen.getByRole('textbox', { name: 'Start from' })).toBeInTheDocument()
       expect(screen.queryByRole('combobox', { name: 'Start from' })).not.toBeInTheDocument()
       await user.type(screen.getByLabelText('Start from'), 'release')
-      expect(mocks.listBranches).not.toHaveBeenCalled()
+      expect(fetchFake.findRequests('GET', '/api/repos/7/git/branches')).toHaveLength(0)
 
       await user.type(screen.getByLabelText('Group name'), 'Sweep')
       await user.type(screen.getByLabelText('Prompt'), 'go')
       await user.click(screen.getByRole('checkbox', { name: 'GPT-4o' }))
       await user.click(screen.getByRole('button', { name: 'Launch' }))
 
-      await waitFor(() => {
-        expect(mocks.launchMultiRun).toHaveBeenCalledWith(expect.objectContaining({ baseRef: 'release' }))
-      })
+      await waitFor(() =>
+        expect(fetchFake.lastRequest('POST', '/api/multi-runs')?.body).toMatchObject({ baseRef: 'release' }),
+      )
     })
 
     it('opens sessions on the server route and hides the local-only walkthrough', async () => {
       const user = userEvent.setup()
-      mocks.listMultiRuns.mockResolvedValue([serverRun])
-      const { onOpenChange } = renderServerSheet()
+      const result = renderSheet({ target: 'server', runs: [serverRun] })
 
       const card = await screen.findByRole('region', { name: 'Sweep' })
       expect(within(card).queryByRole('button', { name: /walkthrough/i })).not.toBeInTheDocument()
 
       await user.click(within(card).getByRole('button', { name: 'Open' }))
 
-      expect(onOpenChange).toHaveBeenCalledWith(false)
-      expect(mockNavigate).toHaveBeenCalledWith('/servers/srv_kitchen/sessions/ses_11')
+      expect(result.onOpenChangeCalls).toContain(false)
+      expect(result.capturedPathname.current).toBe('/servers/srv_kitchen/sessions/ses_11')
     })
 
     it('opens a server fusion session on the server route', async () => {
       const user = userEvent.setup()
-      mocks.listMultiRuns.mockResolvedValue([{ ...serverRun, fusions: [fusion()] }])
-      renderServerSheet()
+      const result = renderSheet({ target: 'server', runs: [{ ...serverRun, fusions: [fusion()] }] })
 
       const card = await screen.findByRole('region', { name: 'Sweep' })
-      const fusionRow = within(card).getByText('from 1 source (truncated)').closest('li') as HTMLElement
-      await user.click(within(fusionRow).getByRole('button', { name: 'Open' }))
+      const fusionRow = within(card).getByText('from 1 source (truncated)').closest<HTMLElement>('li')
+      expect(fusionRow).not.toBeNull()
+      await user.click(within(fusionRow ?? card).getByRole('button', { name: 'Open' }))
 
-      expect(mockNavigate).toHaveBeenCalledWith('/servers/srv_kitchen/sessions/ses_fusion')
+      expect(result.capturedPathname.current).toBe('/servers/srv_kitchen/sessions/ses_fusion')
     })
   })
 })

@@ -19,12 +19,12 @@ export function getRunStatusLabel(status: ScheduleRun['status']) {
 }
 
 export function getRunTitle(run: ScheduleRunRow): string {
-  if ('jobName' in run && typeof run.jobName === 'string') return run.jobName
+  if ('jobName' in run) return run.jobName
   return run.sessionTitle ?? 'No session recorded'
 }
 
 export function getRunRepoName(run: ScheduleRunRow): string | null {
-  return 'repoName' in run && typeof run.repoName === 'string' ? run.repoName : null
+  return 'repoName' in run ? run.repoName : null
 }
 
 export function formatRunBranch(run: ScheduleRunRow): string | null {

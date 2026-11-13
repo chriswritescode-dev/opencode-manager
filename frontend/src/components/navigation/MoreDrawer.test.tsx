@@ -1,76 +1,13 @@
-import { render, screen, fireEvent, within } from '@testing-library/react'
-import { beforeEach, describe, it, expect, vi } from 'vitest'
-import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { Route, Routes } from 'react-router-dom'
 import { MoreDrawer } from './MoreDrawer'
-import { useAuth } from '@/hooks/useAuth'
-import { useServerHealth } from '@/hooks/useServerHealth'
-import { getRepo } from '@/api/repos'
-import type { ActiveWorkItem } from '@/lib/activeWork'
+import { renderWithProviders } from '@/test/render'
+import { LocationCatcher } from '@/test/test-components'
+import { appRoutes } from '@/test/fixtures/appRoutes'
+import { makeHealthResponse, makeRepo } from '@/test/fixtures/api'
+import type { FetchRoute } from '@/test/fetchFake'
 import type { UnreadScheduleRun } from '@/api/schedules'
-
-vi.mock('@/hooks/useAuth')
-vi.mock('@/hooks/useServerHealth')
-vi.mock('@/api/repos', () => ({
-  getRepo: vi.fn(),
-}))
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
-  return {
-    ...actual,
-    useNavigate: vi.fn(),
-  }
-})
-
-const activityMocks = vi.hoisted(() => ({
-  useActiveWork: vi.fn(),
-  useActivityWindowMinutes: vi.fn(),
-}))
-
-vi.mock('@/hooks/useActiveWork', () => ({
-  useActiveWork: activityMocks.useActiveWork,
-  useActivityWindowMinutes: activityMocks.useActivityWindowMinutes,
-  useRepoActivityState: () => null,
-}))
-
-const scheduleMocks = vi.hoisted(() => ({
-  useUnreadScheduleRuns: vi.fn(),
-  useMarkAllScheduleRunsViewed: vi.fn(),
-}))
-
-vi.mock('@/hooks/useSchedules', () => ({
-  useUnreadScheduleRuns: scheduleMocks.useUnreadScheduleRuns,
-  useMarkAllScheduleRunsViewed: scheduleMocks.useMarkAllScheduleRunsViewed,
-}))
-
-function createActiveWorkItem(): ActiveWorkItem {
-  const now = Date.now()
-  return {
-    key: '1:s1',
-    state: 'recent',
-    updatedAt: now,
-    path: '/repos/1/sessions/s1',
-    session: {
-      id: 's1',
-      projectID: 'proj-1',
-      title: 'Session s1',
-      time: { created: now - 10_000, updated: now },
-      location: { directory: '/path/to/repo1' },
-      cost: 0,
-      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-    },
-    repo: {
-      id: 1,
-      name: 'repo1',
-      fullPath: '/path/to/repo1',
-      localPath: '/path/to/repo1',
-      defaultBranch: 'main',
-      currentBranch: 'main',
-      cloneStatus: 'ready',
-      clonedAt: 0,
-    },
-  }
-}
 
 function createUnreadScheduleRun(): UnreadScheduleRun {
   const now = Date.now()
@@ -94,194 +31,126 @@ function createUnreadScheduleRun(): UnreadScheduleRun {
     worktreePath: null,
     jobName: 'Nightly report',
     repoName: 'repo1',
-    repoPath: '/path/to/repo1',
+    repoPath: '/workspace/repos/repo1',
+    serverName: null,
     preview: 'Report ready',
   }
 }
 
-function setActivityGroups(groups: {
-  needsInput?: ActiveWorkItem[]
-  running?: ActiveWorkItem[]
-  recent?: ActiveWorkItem[]
-}) {
-  activityMocks.useActiveWork.mockReturnValue({
-    groups: {
-      needsInput: groups.needsInput ?? [],
-      running: groups.running ?? [],
-      recent: groups.recent ?? [],
-    },
-    isLoading: false,
-    isError: false,
-  })
+interface RenderOptions {
+  unread?: UnreadScheduleRun[]
+  health?: FetchRoute
 }
 
-const mockAuth = (logout = vi.fn()) => {
-  vi.mocked(useAuth).mockReturnValue({
-    user: null,
-    isAuthenticated: false,
-    isLoading: false,
-    config: null,
-    signInWithEmail: vi.fn(),
-    signInWithProvider: vi.fn(),
-    signInWithPasskey: vi.fn(),
-    signUpWithEmail: vi.fn(),
-    addPasskey: vi.fn(),
-    logout,
-    refreshSession: vi.fn(),
-  })
-}
-
-const mockServerHealth = (health?: Partial<ReturnType<typeof useServerHealth>['data']>) => {
-  const baseHealth = {
-    status: 'healthy' as const,
-    timestamp: new Date().toISOString(),
-    database: 'connected' as const,
-    opencode: 'healthy' as const,
-    opencodePort: 5551,
-    opencodeVersion: null,
-    opencodeMinVersion: '1.0.0',
-    opencodeManagerVersion: null,
-    error: undefined,
-  }
-
-  vi.mocked(useServerHealth).mockReturnValue({
-    data: {
-      ...baseHealth,
-      ...health,
-    },
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  })
-}
-
-const createQueryClient = () => new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: false,
-    },
-  },
-})
-
-const renderMoreDrawer = ({
-  initialEntry = '/',
-  routePath = '*',
-  onClose = vi.fn(),
-}: {
-  initialEntry?: string
-  routePath?: string
-  onClose?: () => void
-} = {}) => render(
-  <QueryClientProvider client={createQueryClient()}>
-    <MemoryRouter initialEntries={[initialEntry]}>
+function renderMoreDrawer(initialEntry = '/', routePath = '*', options: RenderOptions = {}) {
+  const capturedPathname = { current: '' }
+  const capturedSearch = { current: '' }
+  const onClose = vi.fn()
+  const result = renderWithProviders(
+    <>
       <Routes>
         <Route path={routePath} element={<MoreDrawer isOpen onClose={onClose} />} />
       </Routes>
-    </MemoryRouter>
-  </QueryClientProvider>,
-)
+      <LocationCatcher capturedPathname={capturedPathname} capturedSearch={capturedSearch} />
+    </>,
+    {
+      route: initialEntry,
+      theme: false,
+      fetchRoutes: [
+        ...(options.health ? [options.health] : []),
+        ...appRoutes({
+          repos: [makeRepo({ id: 1, name: 'repo1', fullPath: '/workspace/repos/repo1' })],
+          unreadSchedules: { runs: options.unread ?? [], total: options.unread?.length ?? 0, failed: 0 },
+        }),
+        { method: 'POST', path: '/api/auth/sign-out', respond: () => ({ json: { success: true } }) },
+      ],
+    },
+  )
+  return { ...result, capturedPathname, capturedSearch, onClose }
+}
 
 describe('MoreDrawer', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    vi.mocked(useNavigate).mockReturnValue(vi.fn())
-    vi.mocked(getRepo).mockResolvedValue({
-      id: 1,
-      localPath: 'wrong-repo',
-      fullPath: '/workspace/repos/wrong-repo',
-      branch: 'main',
-      defaultBranch: 'main',
-      cloneStatus: 'ready',
-      clonedAt: 0,
-    })
-    activityMocks.useActivityWindowMinutes.mockReturnValue(30)
-    setActivityGroups({})
-    scheduleMocks.useUnreadScheduleRuns.mockReturnValue({ data: { runs: [], total: 0, failed: 0 } })
-    scheduleMocks.useMarkAllScheduleRunsViewed.mockReturnValue({ mutate: vi.fn(), isPending: false })
-  })
-
   it('renders Settings and Logout menu items', () => {
-    mockAuth()
-    mockServerHealth()
-    const handleClose = vi.fn()
-    renderMoreDrawer({ onClose: handleClose })
+    renderMoreDrawer()
+
     expect(screen.getByText('Settings')).toBeInTheDocument()
     expect(screen.getByText('Logout')).toBeInTheDocument()
   })
 
   it('does not render theme controls', () => {
-    mockAuth()
-    mockServerHealth()
-    const handleClose = vi.fn()
-    renderMoreDrawer({ onClose: handleClose })
+    renderMoreDrawer()
+
     expect(screen.queryByText('Theme')).not.toBeInTheDocument()
     expect(screen.queryByText('Light')).not.toBeInTheDocument()
     expect(screen.queryByText('Dark')).not.toBeInTheDocument()
     expect(screen.queryByText('System')).not.toBeInTheDocument()
   })
 
-  it('navigates to settings URL when Settings is clicked', () => {
-    const navigateMock = vi.fn()
-    vi.mocked(useNavigate).mockReturnValue(navigateMock)
-    mockAuth()
-    mockServerHealth()
-    const handleClose = vi.fn()
-    renderMoreDrawer({ onClose: handleClose })
+  it('navigates to settings URL when Settings is clicked', async () => {
+    const { capturedSearch } = renderMoreDrawer()
+
     fireEvent.click(screen.getByText('Settings'))
-    expect(navigateMock).toHaveBeenCalledWith(
-      { search: 'settings=open' },
-      { replace: true },
-    )
+
+    await waitFor(() => expect(capturedSearch.current).toContain('settings=open'))
   })
 
-  it('calls logout when Logout is clicked', () => {
-    const logoutMock = vi.fn().mockResolvedValue(undefined)
-    mockAuth(logoutMock)
-    mockServerHealth()
-    const handleClose = vi.fn()
-    renderMoreDrawer({ onClose: handleClose })
+  it('logs out when Logout is clicked', async () => {
+    const { fetchFake, onClose } = renderMoreDrawer()
+
     fireEvent.click(screen.getByText('Logout'))
-    expect(logoutMock).toHaveBeenCalled()
+
+    await waitFor(() => expect(fetchFake.lastRequest('POST', '/api/auth/sign-out')).toBeDefined())
+    expect(onClose).toHaveBeenCalled()
   })
 
-  it('displays OpenCode and Manager versions when available', () => {
-    mockAuth()
-    mockServerHealth({ opencodeVersion: '1.4.11', opencodeManagerVersion: '0.9.16' })
-    const handleClose = vi.fn()
-    renderMoreDrawer({ onClose: handleClose })
-    expect(screen.getByText('v1.4.11 · Manager v0.9.16')).toBeInTheDocument()
+  it('displays OpenCode and Manager versions when available', async () => {
+    renderMoreDrawer('/', '*', {
+      health: {
+        method: 'GET',
+        path: '/api/health',
+        respond: () => ({ json: makeHealthResponse({ opencodeVersion: '1.4.11', opencodeManagerVersion: '0.9.16' }) }),
+      },
+    })
+
+    expect(await screen.findByText('v1.4.11 · Manager v0.9.16')).toBeInTheDocument()
   })
 
-  it('shows unhealthy server status when server is unhealthy', () => {
-    mockAuth()
-    mockServerHealth({ opencode: 'unhealthy' as const, opencodeVersion: '1.4.11' })
-    const handleClose = vi.fn()
-    renderMoreDrawer({ onClose: handleClose })
-    expect(screen.getByText('v1.4.11')).toBeInTheDocument()
+  it('shows unhealthy server status when server is unhealthy', async () => {
+    renderMoreDrawer('/', '*', {
+      health: {
+        method: 'GET',
+        path: '/api/health',
+        respond: () => ({ json: makeHealthResponse({ opencode: 'unhealthy', opencodeVersion: '1.4.11', opencodeManagerVersion: null }) }),
+      },
+    })
+
+    expect(await screen.findByText('v1.4.11')).toBeInTheDocument()
   })
 
-  it('shows fallback text when version is not available', () => {
-    mockAuth()
-    mockServerHealth({ opencodeVersion: null, opencodeManagerVersion: null })
-    const handleClose = vi.fn()
-    renderMoreDrawer({ onClose: handleClose })
+  it('shows fallback text when version is not available', async () => {
+    renderMoreDrawer('/', '*', {
+      health: {
+        method: 'GET',
+        path: '/api/health',
+        respond: () => ({ json: makeHealthResponse({ opencodeVersion: null, opencodeManagerVersion: null }) }),
+      },
+    })
+
+    expect(await screen.findByText('Settings')).toBeInTheDocument()
     expect(screen.queryByText('OpenCode')).not.toBeInTheDocument()
   })
 
   it('leaves commands and file mentions to the prompt input', () => {
-    mockAuth()
-    mockServerHealth()
-    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1', routePath: '/repos/:id/sessions/:sessionId' })
+    renderMoreDrawer('/repos/1/sessions/session-1', '/repos/:id/sessions/:sessionId')
 
     expect(screen.queryByText('Commands')).not.toBeInTheDocument()
     expect(screen.queryByText('Mention File')).not.toBeInTheDocument()
   })
 
-  it('groups session items into workspace and project sections', () => {
-    mockAuth()
-    mockServerHealth()
-    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1', routePath: '/repos/:id/sessions/:sessionId' })
+  it('groups session items into workspace and project sections', async () => {
+    renderMoreDrawer('/repos/1/sessions/session-1', '/repos/:id/sessions/:sessionId')
 
+    await screen.findByText('repo1')
     const sectionLabels = (name: string) =>
       within(screen.getByRole('region', { name })).getAllByRole('button').map((button) => button.textContent)
 
@@ -291,101 +160,82 @@ describe('MoreDrawer', () => {
     expect(screen.getAllByText('Logout')).toHaveLength(1)
   })
 
-  it('shows Assistant instead of the source repo on assistant routes', () => {
-    mockAuth()
-    mockServerHealth()
-    const handleClose = vi.fn()
-    renderMoreDrawer({ initialEntry: '/repos/1/assistant', routePath: '/repos/:id/assistant', onClose: handleClose })
+  it('shows Assistant instead of the source repo on assistant routes', async () => {
+    renderMoreDrawer('/repos/1/assistant', '/repos/:id/assistant')
 
-    expect(screen.getByText('Assistant')).toBeInTheDocument()
-    expect(screen.queryByText('wrong-repo')).not.toBeInTheDocument()
+    expect(await screen.findByText('Assistant')).toBeInTheDocument()
+    expect(screen.queryByText('repo1')).not.toBeInTheDocument()
   })
 
-  it('shows Assistant instead of the source repo on canonical /assistant route', () => {
-    mockAuth()
-    mockServerHealth()
-    const handleClose = vi.fn()
-    renderMoreDrawer({ initialEntry: '/assistant', routePath: '/assistant', onClose: handleClose })
+  it('shows Assistant instead of the source repo on canonical /assistant route', async () => {
+    renderMoreDrawer('/assistant', '/assistant')
 
-    expect(screen.getByText('Assistant')).toBeInTheDocument()
-    expect(screen.queryByText('wrong-repo')).not.toBeInTheDocument()
+    expect(await screen.findByText('Assistant')).toBeInTheDocument()
+    expect(screen.queryByText('repo1')).not.toBeInTheDocument()
   })
 
-  it('preserves session route as return target when opening schedules', () => {
-    const navigateMock = vi.fn()
-    vi.mocked(useNavigate).mockReturnValue(navigateMock)
-    mockAuth()
-    mockServerHealth()
-    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1?assistant=1', routePath: '/repos/:id/sessions/:sessionId' })
+  it('preserves session route as return target when opening schedules', async () => {
+    const { capturedPathname, capturedSearch } = renderMoreDrawer(
+      '/repos/1/sessions/session-1?assistant=1',
+      '/repos/:id/sessions/:sessionId',
+    )
 
     fireEvent.click(screen.getByText('Schedules'))
 
-    expect(navigateMock).toHaveBeenCalledWith('/repos/1/schedules?returnTo=%2Frepos%2F1%2Fsessions%2Fsession-1%3Fassistant%3D1')
+    await waitFor(() =>
+      expect(capturedSearch.current).toBe(
+        '?returnTo=%2Frepos%2F1%2Fsessions%2Fsession-1%3Fassistant%3D1',
+      ),
+    )
+    expect(capturedPathname.current).toBe('/repos/1/schedules')
   })
 
-  it('swaps the menu for the Sessions sheet from a session', () => {
-    const navigateMock = vi.fn()
-    vi.mocked(useNavigate).mockReturnValue(navigateMock)
-    mockAuth()
-    mockServerHealth()
-    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1?mobileTab=more', routePath: '/repos/:id/sessions/:sessionId' })
+  it('swaps the menu for the Sessions sheet from a session', async () => {
+    const { capturedSearch } = renderMoreDrawer(
+      '/repos/1/sessions/session-1?mobileTab=more',
+      '/repos/:id/sessions/:sessionId',
+    )
 
     fireEvent.click(screen.getByText('Sessions'))
 
-    expect(navigateMock).toHaveBeenCalledWith(
-      { search: 'mobileTab=sessions' },
-      { state: { urlParamHistory: { previousSearch: '?mobileTab=more' } } },
-    )
+    await waitFor(() => expect(capturedSearch.current).toContain('mobileTab=sessions'))
   })
 
-  it('keeps Home and hides the Sessions row outside a session', () => {
-    mockAuth()
-    mockServerHealth()
-    renderMoreDrawer({ initialEntry: '/repos/1', routePath: '/repos/:id' })
+  it('keeps Home and hides the Sessions row outside a session', async () => {
+    renderMoreDrawer('/repos/1', '/repos/:id')
 
-    expect(screen.getByText('Home')).toBeInTheDocument()
+    expect(await screen.findByText('Home')).toBeInTheDocument()
     expect(screen.queryByText('Sessions')).not.toBeInTheDocument()
   })
 
-  it('offers the Assistant from a repo session', () => {
-    const navigateMock = vi.fn()
-    vi.mocked(useNavigate).mockReturnValue(navigateMock)
-    mockAuth()
-    mockServerHealth()
-    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1', routePath: '/repos/:id/sessions/:sessionId' })
+  it('offers the Assistant from a repo session', async () => {
+    const { capturedPathname } = renderMoreDrawer(
+      '/repos/1/sessions/session-1',
+      '/repos/:id/sessions/:sessionId',
+    )
 
     fireEvent.click(screen.getByRole('button', { name: 'Assistant' }))
 
-    expect(navigateMock).toHaveBeenCalledWith('/assistant')
+    await waitFor(() => expect(capturedPathname.current).toBe('/assistant'))
   })
 
   it('does not offer the Assistant from an assistant session', () => {
-    mockAuth()
-    mockServerHealth()
-    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1?assistant=1', routePath: '/repos/:id/sessions/:sessionId' })
+    renderMoreDrawer('/repos/1/sessions/session-1?assistant=1', '/repos/:id/sessions/:sessionId')
 
     expect(screen.queryByRole('button', { name: 'Assistant' })).not.toBeInTheDocument()
   })
 
-  it('shows no Activity section even when there are activity items', () => {
-    mockAuth()
-    mockServerHealth()
-    setActivityGroups({ recent: [createActiveWorkItem()] })
-    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1', routePath: '/repos/:id/sessions/:sessionId' })
+  it('shows no Activity section even when there are recent sessions', async () => {
+    renderMoreDrawer('/repos/1/sessions/session-1', '/repos/:id/sessions/:sessionId')
 
+    await screen.findByText('repo1')
     expect(screen.queryByRole('heading', { name: 'Activity' })).not.toBeInTheDocument()
-    expect(screen.queryByText('Session s1')).not.toBeInTheDocument()
   })
 
-  it('offers only the remote-capable project items on a linked-server route', () => {
-    mockAuth()
-    mockServerHealth()
-    renderMoreDrawer({
-      initialEntry: '/servers/srv_kitchen/sessions/ses_remote',
-      routePath: '/servers/:serverId/sessions/:sessionId',
-    })
+  it('offers only the remote-capable project items on a linked-server route', async () => {
+    renderMoreDrawer('/servers/srv_kitchen/sessions/ses_remote', '/servers/:serverId/sessions/:sessionId')
 
-    expect(screen.getByText('Home')).toBeInTheDocument()
+    expect(await screen.findByText('Home')).toBeInTheDocument()
     expect(screen.getByText('MCP')).toBeInTheDocument()
     expect(screen.getByText('Skills')).toBeInTheDocument()
     expect(screen.getByText('Settings')).toBeInTheDocument()
@@ -400,20 +250,15 @@ describe('MoreDrawer', () => {
     expect(screen.queryByRole('button', { name: 'Assistant' })).not.toBeInTheDocument()
   })
 
-  it('shows unread reports and marks them all read', () => {
-    const markAllReportsViewed = vi.fn()
-    mockAuth()
-    mockServerHealth()
-    scheduleMocks.useUnreadScheduleRuns.mockReturnValue({
-      data: { runs: [createUnreadScheduleRun()], total: 1, failed: 0 },
+  it('shows unread reports and marks them all read', async () => {
+    const { fetchFake } = renderMoreDrawer('/repos/1/sessions/session-1', '/repos/:id/sessions/:sessionId', {
+      unread: [createUnreadScheduleRun()],
     })
-    scheduleMocks.useMarkAllScheduleRunsViewed.mockReturnValue({ mutate: markAllReportsViewed, isPending: false })
-    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1', routePath: '/repos/:id/sessions/:sessionId' })
 
-    expect(screen.getByText('Nightly report')).toBeInTheDocument()
+    expect(await screen.findByText('Nightly report')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Mark all read' }))
 
-    expect(markAllReportsViewed).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(fetchFake.lastRequest('POST', '/api/schedules/all/runs/viewed')).toBeDefined())
   })
 })

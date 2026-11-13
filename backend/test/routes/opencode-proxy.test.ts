@@ -1,253 +1,176 @@
-import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync, spawn } from 'child_process'
 import { createServer, request } from 'http'
-import type { Server } from 'http'
-import type { AddressInfo } from 'net'
+import type { Server, ServerResponse } from 'http'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { Hono } from 'hono'
 import { createNodeWebSocket } from '@hono/node-ws'
 import type { Database } from 'bun:sqlite'
+import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
 import { buildOpenCodeBasicAuth } from '@opencode-manager/shared/opencode'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
+import { z } from 'zod'
 import { createOpenCodeProxyRoutes } from '../../src/routes/opencode-proxy'
-import type { SettingsService } from '../../src/services/settings'
+import { SettingsService } from '../../src/services/settings'
 import { OpenCodeSupervisor } from '../../src/services/opencode-supervisor'
+import { opencodeServerManager } from '../../src/services/opencode-single-server'
+import { getOrCreateInternalToken } from '../../src/services/internal-token'
+import { createTestDatabase, seedRepo } from '../helpers/test-database'
+import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
+import { DEFAULT_SERVER_INFO } from '../helpers/opencode-server-harness'
+import { startHttpUpstream, type HttpUpstream, type RecordedUpstreamRequest } from '../helpers/http-upstream'
+import { readJson } from '../helpers/read-json'
 import { resolveOpenCode2Binary, startOpenCodeServe, type OpenCodeServe } from '../helpers/opencode-binary'
 import { startWebSocketServer } from '../helpers/websocket-server'
 
-vi.mock('bun:sqlite', () => ({
-  Database: vi.fn(),
-}))
+const REPO_PATH = '/srv/repos/my-repo'
+const ErrorResponseSchema = z.object({ error: z.string() })
+const JsonLocationBodySchema = z.object({
+  title: z.string(),
+  location: z.object({ directory: z.string() }),
+})
 
-vi.mock('../../src/services/internal-token', () => ({
-  getOrCreateInternalToken: vi.fn().mockReturnValue('test-internal-token'),
-}))
+let upstreamBaseUrl = 'http://127.0.0.1:5551'
 
-const isLifecycleInitializedMock = vi.hoisted(() => vi.fn().mockReturnValue(true))
-
-vi.mock('../../src/services/opencode-single-server', () => ({
-  opencodeServerManager: { isLifecycleInitialized: isLifecycleInitializedMock },
-}))
-
-const getRepoByIdMock = vi.hoisted(() => vi.fn())
-
-vi.mock('../../src/db/queries', () => ({
-  getRepoById: getRepoByIdMock,
-}))
-
-const upstreamBaseUrl = vi.hoisted(() => ({ value: 'http://127.0.0.1:5551' }))
-
-vi.mock('../../src/services/opencode/upstream', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../../src/services/opencode/upstream')>(),
-  getOpenCodeUpstreamBaseUrl: () => upstreamBaseUrl.value,
-}))
-
-const getOpenCodeServerPasswordMock = vi.hoisted(() => vi.fn().mockReturnValue('test-password'))
-
-const readyRepo = { id: 7, fullPath: '/srv/repos/my-repo', cloneStatus: 'ready' }
-
-const mockSettingsService = {
-  getOpenCodeServerPassword: getOpenCodeServerPasswordMock,
-} as unknown as SettingsService
-
-const mockDb = {} as Database
-
-function createProxyApp(): Hono {
-  const proxyApp = new Hono()
-  proxyApp.route('/api/opencode-proxy', createOpenCodeProxyRoutes(mockDb, mockSettingsService, createNodeWebSocket({ app: proxyApp }).upgradeWebSocket))
-  return proxyApp
-}
-
-function upstreamOk() {
-  const upstreamFetch = vi.fn().mockResolvedValue(
-    new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
-  )
-  globalThis.fetch = upstreamFetch as unknown as typeof fetch
-  return upstreamFetch
+function respondOk(_request: RecordedUpstreamRequest, response: ServerResponse): void {
+  response.writeHead(200, { 'content-type': 'text/plain' })
+  response.end('ok')
 }
 
 describe('opencode-proxy routes', () => {
+  let db: Database
+  let settingsService: SettingsService
+  let upstream: HttpUpstream
+  let token: string
   let app: Hono
-  let originalFetch: typeof globalThis.fetch
+
+  beforeAll(async () => {
+    upstream = await startHttpUpstream()
+  })
+
+  afterAll(async () => {
+    await upstream.close()
+  })
 
   beforeEach(() => {
-    vi.clearAllMocks()
-    isLifecycleInitializedMock.mockReturnValue(true)
-    originalFetch = globalThis.fetch
+    db = createTestDatabase()
+    settingsService = new SettingsService(db)
+    token = getOrCreateInternalToken(db)
+    upstreamBaseUrl = upstream.baseUrl
+    upstream.requests.length = 0
+    upstream.setResponder(respondOk)
+    opencodeServerManager.setLifecycleInitialized(true)
     app = createProxyApp()
   })
 
   afterEach(() => {
-    globalThis.fetch = originalFetch
+    opencodeServerManager.setLifecycleInitialized(true)
+    db.close()
   })
+
+  function createProxyApp(): Hono {
+    const proxyApp = new Hono()
+    proxyApp.route(
+      '/api/opencode-proxy',
+      createOpenCodeProxyRoutes(
+        db,
+        settingsService,
+        createNodeWebSocket({ app: proxyApp }).upgradeWebSocket,
+        () => upstreamBaseUrl,
+      ),
+    )
+    return proxyApp
+  }
+
+  const authHeaders = () => ({ Authorization: `Bearer ${token}` })
 
   it('returns 401 without authorization header', async () => {
     const res = await app.request('/api/opencode-proxy/doc')
+
     expect(res.status).toBe(401)
-    const body = await res.json() as { error: string }
-    expect(body.error).toBe('Unauthorized')
+    await expect(readJson(res, ErrorResponseSchema)).resolves.toEqual({ error: 'Unauthorized' })
   })
 
   it('returns 503 and never forwards when the OpenCode lifecycle is not initialized', async () => {
-    isLifecycleInitializedMock.mockReturnValue(false)
-    const upstreamFetch = vi.fn().mockResolvedValue(new Response('should not be reached'))
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
+    opencodeServerManager.setLifecycleInitialized(false)
 
     const res = await app.request('/api/opencode-proxy/session/ses_1/message', {
       method: 'POST',
-      headers: { Authorization: 'Bearer test-internal-token' },
+      headers: authHeaders(),
     })
 
     expect(res.status).toBe(503)
-    expect(upstreamFetch).not.toHaveBeenCalled()
+    expect(upstream.requests).toHaveLength(0)
   })
 
-  it('returns 401 with invalid bearer token', async () => {
-    const res = await app.request('/api/opencode-proxy/doc', {
-      headers: { Authorization: 'Bearer wrong-token' },
-    })
+  it.each([
+    ['an invalid bearer token', 'Bearer wrong-token'],
+    ['an invalid basic auth password', `Basic ${Buffer.from('opencode:wrong-password').toString('base64')}`],
+  ])('returns 401 with %s', async (_label, authorization) => {
+    const res = await app.request('/api/opencode-proxy/doc', { headers: { Authorization: authorization } })
+
     expect(res.status).toBe(401)
-    const body = await res.json() as { error: string }
-    expect(body.error).toBe('Unauthorized')
+    await expect(readJson(res, ErrorResponseSchema)).resolves.toEqual({ error: 'Unauthorized' })
   })
 
-  it('returns 401 with invalid basic auth password', async () => {
-    const res = await app.request('/api/opencode-proxy/doc', {
-      headers: { Authorization: 'Basic ' + Buffer.from('opencode:wrong-password').toString('base64') },
-    })
-    expect(res.status).toBe(401)
-    const body = await res.json() as { error: string }
-    expect(body.error).toBe('Unauthorized')
-  })
+  it.each([
+    ['a bearer token', 'bearer'],
+    ['basic auth', 'basic'],
+  ])('injects the managed Basic auth for %s', async (_label, scheme) => {
+    const authorization = scheme === 'bearer'
+      ? `Bearer ${token}`
+      : `Basic ${Buffer.from(`opencode:${token}`).toString('base64')}`
 
-  it('returns 200 with valid bearer and injected Basic auth', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/doc', {
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
+    const res = await app.request('/api/opencode-proxy/doc', { headers: { Authorization: authorization } })
 
     expect(res.status).toBe(200)
-    expect(upstreamFetch).toHaveBeenCalled()
-
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const fetchUrl = fetchCall[0]
-    expect(fetchUrl).toContain('http://127.0.0.1:')
-
-    const fetchHeaders = fetchCall[1].headers as Record<string, string>
-    expect(fetchHeaders['Authorization']).toMatch(/^Basic /)
-    expect(fetchHeaders['Authorization']).not.toContain('Bearer')
-    expect(fetchHeaders['Authorization']).toContain(
-      Buffer.from('opencode:test-password').toString('base64')
-    )
+    const [recorded] = upstream.requests
+    expect(recorded?.url).toBe('/doc')
+    expect(recorded?.headers.authorization).toBe(buildOpenCodeBasicAuth(settingsService.getOpenCodeServerPassword()))
   })
 
-  it('returns 200 with valid basic auth (opencode attach) and injected Basic auth', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const basicAuthHeader = 'Basic ' + Buffer.from('opencode:test-internal-token').toString('base64')
+  it('forwards the location headers unchanged', async () => {
     const res = await app.request('/api/opencode-proxy/doc', {
-      headers: { Authorization: basicAuthHeader },
-    })
-
-    expect(res.status).toBe(200)
-    expect(upstreamFetch).toHaveBeenCalled()
-
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const fetchHeaders = fetchCall[1].headers as Record<string, string>
-
-    expect(fetchHeaders['Authorization']).toMatch(/^Basic /)
-    expect(fetchHeaders['Authorization']).not.toContain('Bearer')
-    expect(fetchHeaders['Authorization']).toContain(
-      Buffer.from('opencode:test-password').toString('base64')
-    )
-  })
-
-  it('strips caller Bearer and injects Basic auth', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    await app.request('/api/opencode-proxy/doc', {
       headers: {
-        Authorization: 'Bearer test-internal-token',
-        'x-opencode-directory': '/some/dir',
-      },
-    })
-
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const fetchHeaders = fetchCall[1].headers as Record<string, string>
-
-    expect(fetchHeaders['Authorization']).not.toContain('Bearer')
-    expect(fetchHeaders['Authorization']).toMatch(/^Basic /)
-    expect(fetchHeaders['x-opencode-directory']).toBe('/some/dir')
-  })
-
-  it('forwards x-opencode-directory header unchanged', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    await app.request('/api/opencode-proxy/doc', {
-      headers: {
-        Authorization: 'Bearer test-internal-token',
+        ...authHeaders(),
         'x-opencode-directory': '/home/user/project',
         'x-opencode-workspace': 'my-workspace',
       },
     })
 
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const fetchHeaders = fetchCall[1].headers as Record<string, string>
-
-    expect(fetchHeaders['x-opencode-directory']).toBe('/home/user/project')
-    expect(fetchHeaders['x-opencode-workspace']).toBe('my-workspace')
+    expect(res.status).toBe(200)
+    const [recorded] = upstream.requests
+    expect(recorded?.headers['x-opencode-directory']).toBe('/home/user/project')
+    expect(recorded?.headers['x-opencode-workspace']).toBe('my-workspace')
   })
 
   it('defaults x-opencode-directory to the workspace when the caller sends no location', async () => {
-    const upstreamFetch = upstreamOk()
+    await app.request('/api/opencode-proxy/doc', { headers: authHeaders() })
 
-    await app.request('/api/opencode-proxy/doc', {
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
-
-    const fetchHeaders = (upstreamFetch.mock.calls[0] as [string, RequestInit])[1].headers as Record<string, string>
-    expect(fetchHeaders['x-opencode-directory']).toBe(encodeURIComponent(getWorkspacePath()))
+    expect(upstream.requests[0]?.headers['x-opencode-directory']).toBe(encodeURIComponent(getWorkspacePath()))
   })
 
   it('returns 501 for WebSocket upgrade requests', async () => {
     const res = await app.request('/api/opencode-proxy/ws', {
-      headers: {
-        Authorization: 'Bearer test-internal-token',
-        Connection: 'Upgrade',
-        Upgrade: 'websocket',
-      },
+      headers: { ...authHeaders(), Connection: 'Upgrade', Upgrade: 'websocket' },
     })
+
     expect(res.status).toBe(501)
-    const body = await res.json() as { error: string }
-    expect(body.error).toContain('WebSocket')
+    await expect(readJson(res, ErrorResponseSchema)).resolves.toEqual({
+      error: 'WebSocket proxying is only supported for ticketed persistent PTY connects',
+    })
+    expect(upstream.requests).toHaveLength(0)
   })
 
-  it('still requires authorization for WebSocket upgrades without a PTY ticket', async () => {
-    const res = await app.request('/api/opencode-proxy/api/experimental/persistent-pty/pty_1/connect', {
-      headers: { Connection: 'Upgrade', Upgrade: 'websocket' },
-    })
-    expect(res.status).toBe(401)
-  })
+  it.each([
+    '/api/opencode-proxy/ws',
+    '/api/opencode-proxy/api/experimental/persistent-pty/pty_1/connect',
+    '/api/opencode-proxy/api/pty/pty_1/connect?ticket=abc',
+  ])('still requires authorization for WebSocket upgrades at %s', async (path) => {
+    const res = await app.request(path, { headers: { Connection: 'Upgrade', Upgrade: 'websocket' } })
 
-  it('requires authorization for a ticketed /api/pty connect', async () => {
-    const res = await app.request('/api/opencode-proxy/api/pty/pty_1/connect?ticket=abc', {
-      headers: { Connection: 'Upgrade', Upgrade: 'websocket' },
-    })
     expect(res.status).toBe(401)
   })
 
@@ -255,814 +178,426 @@ describe('opencode-proxy routes', () => {
     const res = await app.request('/api/opencode-proxy/api/experimental/persistent-pty/pty_1/connect?ticket=abc', {
       headers: { Connection: 'Upgrade', Upgrade: 'websocket', Origin: 'http://evil.example' },
     })
+
     expect(res.status).toBe(403)
-    const body = await res.json() as { error: string }
-    expect(body.error).toBe('Origin not allowed')
+    await expect(readJson(res, ErrorResponseSchema)).resolves.toEqual({ error: 'Origin not allowed' })
   })
 
   it('returns 503 for a ticketed persistent PTY connect before lifecycle initialization', async () => {
-    isLifecycleInitializedMock.mockReturnValue(false)
+    opencodeServerManager.setLifecycleInitialized(false)
+
     const res = await app.request('/api/opencode-proxy/api/experimental/persistent-pty/pty_1/connect?ticket=abc', {
       headers: { Connection: 'Upgrade', Upgrade: 'websocket' },
     })
+
     expect(res.status).toBe(503)
   })
 
   it('does not resolve a repo for a ticketed persistent PTY connect through the repo mount', async () => {
-    const res = await app.request('/api/opencode-proxy/repos/999/api/experimental/persistent-pty/pty_1/connect?ticket=abc', {
-      headers: { Connection: 'Upgrade', Upgrade: 'websocket', Origin: 'http://evil.example' },
-    })
+    const res = await app.request(
+      '/api/opencode-proxy/repos/999/api/experimental/persistent-pty/pty_1/connect?ticket=abc',
+      { headers: { Connection: 'Upgrade', Upgrade: 'websocket', Origin: 'http://evil.example' } },
+    )
+
     expect(res.status).toBe(403)
-    expect(getRepoByIdMock).not.toHaveBeenCalled()
   })
 
-  it('preserves SSE content-type header from upstream', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('event: message\ndata: hello\n\n', {
-        status: 200,
-        headers: { 'content-type': 'text/event-stream' },
-      })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/events', {
-      headers: { Authorization: 'Bearer test-internal-token' },
+  it('streams an SSE response through with its content type', async () => {
+    upstream.setResponder((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      response.end('event: message\ndata: hello\n\n')
     })
+
+    const res = await app.request('/api/opencode-proxy/events', { headers: authHeaders() })
 
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toBe('text/event-stream')
+    expect(await res.text()).toBe('event: message\ndata: hello\n\n')
   })
 
-  it('does not buffer SSE response body', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('data: chunk1\n\ndata: chunk2\n\n', {
-        status: 200,
-        headers: { 'content-type': 'text/event-stream' },
-      })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
+  it('returns 502 when the upstream fetch fails', async () => {
+    upstreamBaseUrl = 'http://127.0.0.1:1'
 
-    const res = await app.request('/api/opencode-proxy/events', {
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
-
-    expect(res.status).toBe(200)
-    expect(res.body).toBeDefined()
-  })
-
-  it('returns 502 when upstream fetch fails', async () => {
-    const upstreamFetch = vi.fn().mockRejectedValue(new Error('Connection refused'))
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/doc', {
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
+    const res = await app.request('/api/opencode-proxy/doc', { headers: authHeaders() })
 
     expect(res.status).toBe(502)
-    const body = await res.json() as { error: string }
-    expect(body.error).toBe('Proxy request failed')
+    await expect(readJson(res, ErrorResponseSchema)).resolves.toEqual({ error: 'Proxy request failed' })
   })
 
   it('returns a null body for bodyless upstream statuses', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/doc', {
-      headers: { Authorization: 'Bearer test-internal-token' },
+    upstream.setResponder((_request, response) => {
+      response.writeHead(204)
+      response.end()
     })
+
+    const res = await app.request('/api/opencode-proxy/doc', { headers: authHeaders() })
 
     expect(res.status).toBe(204)
     expect(await res.text()).toBe('')
   })
 
-  it('preserves query string in upstream URL', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
+  it.each([
+    ['/session/ses_1/shell', 'POST', '/session/ses_1/shell'],
+    ['/%70ty', 'POST', '/%70ty'],
+    ['/session/ses_1/command', 'POST', '/session/ses_1/command'],
+    ['/session/ses_1/prompt_async', 'POST', '/session/ses_1/prompt_async'],
+    ['/doc?foo=bar&baz=qux', 'GET', '/doc?foo=bar&baz=qux'],
+  ])('forwards %s to the upstream', async (path, method, expectedUrl) => {
+    const res = await app.request(`/api/opencode-proxy${path}`, { method, headers: authHeaders() })
 
-    await app.request('/api/opencode-proxy/doc?foo=bar&baz=qux', {
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
-
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const fetchUrl = fetchCall[0]
-    expect(fetchUrl).toContain('?foo=bar&baz=qux')
+    expect(res.status).toBe(200)
+    expect(upstream.requests[0]?.url).toBe(expectedUrl)
   })
 
-  it('strips hop-by-hop headers from request', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
+  it('strips hop-by-hop headers from the request', async () => {
     await app.request('/api/opencode-proxy/doc', {
       headers: {
-        Authorization: 'Bearer test-internal-token',
+        ...authHeaders(),
         Host: 'localhost:5003',
-        Connection: 'keep-alive',
+        Connection: 'close',
         'Transfer-Encoding': 'chunked',
       },
     })
 
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const fetchHeaders = fetchCall[1].headers as Record<string, string>
-
-    expect(fetchHeaders['Host']).toBeUndefined()
-    expect(fetchHeaders['host']).toBeUndefined()
-    expect(fetchHeaders['Connection']).toBeUndefined()
-    expect(fetchHeaders['connection']).toBeUndefined()
-    expect(fetchHeaders['Transfer-Encoding']).toBeUndefined()
-    expect(fetchHeaders['transfer-encoding']).toBeUndefined()
+    const [recorded] = upstream.requests
+    expect(recorded?.headers.host).toBe(`127.0.0.1:${upstream.port}`)
+    expect(recorded?.headers.connection).not.toBe('close')
   })
 
-  it('strips hop-by-hop headers from response', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', {
-        status: 200,
-        headers: {
-          'content-type': 'text/plain',
-          connection: 'keep-alive',
-          'transfer-encoding': 'chunked',
-        },
+  it('strips hop-by-hop headers from the response', async () => {
+    upstream.setResponder((_request, response) => {
+      response.writeHead(200, {
+        'content-type': 'text/plain',
+        connection: 'keep-alive',
+        'transfer-encoding': 'chunked',
       })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/doc', {
-      headers: { Authorization: 'Bearer test-internal-token' },
+      response.end('ok')
     })
+
+    const res = await app.request('/api/opencode-proxy/doc', { headers: authHeaders() })
 
     expect(res.headers.get('connection')).toBeNull()
     expect(res.headers.get('transfer-encoding')).toBeNull()
     expect(res.headers.get('content-type')).toBe('text/plain')
   })
 
-  it('forwards the session shell endpoint', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/session/ses_1/shell', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
-
-    expect(res.status).toBe(200)
-    expect(upstreamFetch).toHaveBeenCalled()
-  })
-
-  it('forwards percent-encoded PTY paths when the OpenCode child is enforced', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/%70ty', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
-
-    expect(res.status).toBe(200)
-    expect(upstreamFetch).toHaveBeenCalled()
-  })
-
-  it('forwards custom slash command execution when the OpenCode child is enforced', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/session/ses_1/command', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
-
-    expect(res.status).toBe(200)
-    expect(upstreamFetch).toHaveBeenCalled()
-  })
-
-  it('forwards a local MCP server add when the OpenCode child is enforced', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/mcp', {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer test-internal-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        name: 'evil',
-        config: { type: 'local', command: ['node', 'server.js'] },
+  it.each([
+    [
+      'a local MCP server add',
+      'POST',
+      '/mcp',
+      JSON.stringify({ name: 'evil', config: { type: 'local', command: ['node', 'server.js'] } }),
+    ],
+    [
+      'a command-bearing MCP server add',
+      'POST',
+      '/mcp',
+      JSON.stringify({ name: 'evil', config: { command: ['npx', 'evil-server'] } }),
+    ],
+    [
+      'a remote MCP server add',
+      'POST',
+      '/mcp',
+      JSON.stringify({ name: 'remote-server', config: { type: 'remote', url: 'https://example.com/mcp' } }),
+    ],
+    [
+      'a config mutation with LSP servers and experimental hooks',
+      'PATCH',
+      '/config',
+      JSON.stringify({
+        lsp: { typescript: { command: ['typescript-language-server'] } },
+        experimental: { hook: { file_edited: [{ command: ['chmod', '+x', 'x'] }] }, chatMaxRetries: 4 },
       }),
-    })
-
-    expect(res.status).toBe(200)
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const forwarded = JSON.parse(await new Response(fetchCall[1].body as ReadableStream).text()) as Record<string, unknown>
-    expect(forwarded).toEqual({
-      name: 'evil',
-      config: { type: 'local', command: ['node', 'server.js'] },
-    })
-  })
-
-  it('forwards a command-bearing MCP add without an explicit local type when the OpenCode child is enforced', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/mcp', {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer test-internal-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        name: 'evil',
-        config: { command: ['npx', 'evil-server'] },
-      }),
-    })
-
-    expect(res.status).toBe(200)
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const forwarded = JSON.parse(await new Response(fetchCall[1].body as ReadableStream).text()) as Record<string, unknown>
-    expect(forwarded).toEqual({
-      name: 'evil',
-      config: { command: ['npx', 'evil-server'] },
-    })
-  })
-
-  it('forwards a remote MCP server add when the OpenCode child is enforced', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/mcp', {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer test-internal-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        name: 'remote-server',
-        config: { type: 'remote', url: 'https://example.com/mcp' },
-      }),
-    })
-
-    expect(res.status).toBe(200)
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const forwarded = JSON.parse(await new Response(fetchCall[1].body as ReadableStream).text()) as Record<string, unknown>
-    expect(forwarded).toEqual({
-      name: 'remote-server',
-      config: { type: 'remote', url: 'https://example.com/mcp' },
-    })
-  })
-
-  it('forwards MCP server adds raw when enforcement is off', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/mcp', {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer test-internal-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        name: 'local-server',
-        config: { type: 'local', command: ['node', 'server.js'] },
-      }),
-    })
-
-    expect(res.status).toBe(200)
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const forwarded = JSON.parse(await new Response(fetchCall[1].body as ReadableStream).text()) as { config: { type: string } }
-    expect(forwarded.config.type).toBe('local')
-  })
-
-  it('forwards a PATCH /config mutation with LSP servers and experimental hooks exactly when enforced', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const body = JSON.stringify({
-      lsp: { typescript: { command: ['typescript-language-server'] } },
-      experimental: {
-        hook: { file_edited: [{ command: ['chmod', '+x', 'x'] }] },
-        chatMaxRetries: 4,
-      },
-    })
-    const res = await app.request('/api/opencode-proxy/config', {
-      method: 'PATCH',
-      headers: {
-        Authorization: 'Bearer test-internal-token',
-        'Content-Type': 'application/json',
-      },
+    ],
+    [
+      'a config mutation with plugins',
+      'PATCH',
+      '/config',
+      JSON.stringify({ theme: 'dark', plugin: ['opencode-plugin-npm'] }),
+    ],
+    [
+      'a config mutation with local MCP servers and formatter config',
+      'PATCH',
+      '/config',
+      JSON.stringify({ formatter: { command: 'prettier' }, mcp: { local: { type: 'local', command: ['node', 'server.js'] } } }),
+    ],
+    ['a session mutation', 'PATCH', '/session/ses_1/message', JSON.stringify({ content: 'hello' })],
+    [
+      'a well-known auth write',
+      'PUT',
+      '/auth/sso.example.com',
+      JSON.stringify({ type: 'wellknown', key: 'SSO_TOKEN', token: 't' }),
+    ],
+    ['an api auth write', 'PUT', '/auth/anthropic', JSON.stringify({ type: 'api', key: 'sk-test' })],
+  ])('forwards %s body unchanged', async (_label, method, path, body) => {
+    const res = await app.request(`/api/opencode-proxy${path}`, {
+      method,
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body,
     })
 
     expect(res.status).toBe(200)
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const forwarded = JSON.parse(await new Response(fetchCall[1].body as ReadableStream).text()) as Record<string, unknown>
-    expect(forwarded).toEqual(JSON.parse(body))
+    expect(upstream.requests[0]?.body).toBe(body)
+    expect(upstream.requests[0]?.headers['content-type']).toBe('application/json')
   })
 
-  it('forwards ordinary agent endpoints when the OpenCode child is enforced', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/session/ses_1/prompt_async', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
-
-    expect(res.status).toBe(200)
-    expect(upstreamFetch).toHaveBeenCalled()
-  })
-
-  it('forwards a PATCH /config mutation with plugins exactly when the OpenCode child is enforced', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const body = JSON.stringify({ theme: 'dark', plugin: ['opencode-plugin-npm'] })
+  it('forwards a malformed config body unchanged', async () => {
     const res = await app.request('/api/opencode-proxy/config', {
       method: 'PATCH',
-      headers: {
-        Authorization: 'Bearer test-internal-token',
-        'Content-Type': 'application/json',
-      },
-      body,
-    })
-
-    expect(res.status).toBe(200)
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const forwarded = JSON.parse(await new Response(fetchCall[1].body as ReadableStream).text()) as Record<string, unknown>
-    expect(forwarded).toEqual(JSON.parse(body))
-  })
-
-  it('forwards a PATCH /config mutation with local MCP servers and formatter config exactly when enforced', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const body = JSON.stringify({
-      formatter: { command: 'prettier' },
-      mcp: { local: { type: 'local', command: ['node', 'server.js'] } },
-    })
-    const res = await app.request('/api/opencode-proxy/config', {
-      method: 'PATCH',
-      headers: {
-        Authorization: 'Bearer test-internal-token',
-        'Content-Type': 'application/json',
-      },
-      body,
-    })
-
-    expect(res.status).toBe(200)
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const forwarded = JSON.parse(await new Response(fetchCall[1].body as ReadableStream).text()) as Record<string, unknown>
-    expect(forwarded).toEqual(JSON.parse(body))
-  })
-
-  it('forwards a malformed PATCH /config body exactly when enforced', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/config', {
-      method: 'PATCH',
-      headers: {
-        Authorization: 'Bearer test-internal-token',
-        'Content-Type': 'application/json',
-      },
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: '{not json',
     })
 
     expect(res.status).toBe(200)
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    expect(await new Response(fetchCall[1].body as ReadableStream).text()).toBe('{not json')
-  })
-
-  it('forwards PATCH /config mutations raw when enforcement is off', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/config', {
-      method: 'PATCH',
-      headers: {
-        Authorization: 'Bearer test-internal-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ theme: 'dark', plugin: ['opencode-plugin-npm'] }),
-    })
-
-    expect(res.status).toBe(200)
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const forwarded = JSON.parse(await new Response(fetchCall[1].body as ReadableStream).text()) as Record<string, unknown>
-    expect(forwarded.plugin).toEqual(['opencode-plugin-npm'])
-  })
-
-  it('forwards non-config mutations raw when enforced', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/session/ses_1/message', {
-      method: 'PATCH',
-      headers: {
-        Authorization: 'Bearer test-internal-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ content: 'hello' }),
-    })
-
-    expect(res.status).toBe(200)
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const forwarded = JSON.parse(await new Response(fetchCall[1].body as ReadableStream).text()) as Record<string, unknown>
-    expect(forwarded.content).toBe('hello')
-  })
-
-  it('forwards a well-known auth write when enforced', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/auth/sso.example.com', {
-      method: 'PUT',
-      headers: {
-        Authorization: 'Bearer test-internal-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ type: 'wellknown', key: 'SSO_TOKEN', token: 't' }),
-    })
-
-    expect(res.status).toBe(200)
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const forwarded = JSON.parse(await new Response(fetchCall[1].body as ReadableStream).text()) as Record<string, unknown>
-    expect(forwarded).toEqual({ type: 'wellknown', key: 'SSO_TOKEN', token: 't' })
-  })
-
-  it('forwards api and oauth auth writes when enforced', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/auth/anthropic', {
-      method: 'PUT',
-      headers: {
-        Authorization: 'Bearer test-internal-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ type: 'api', key: 'sk-test' }),
-    })
-
-    expect(res.status).toBe(200)
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const forwarded = JSON.parse(await new Response(fetchCall[1].body as ReadableStream).text()) as Record<string, unknown>
-    expect(forwarded).toEqual({ type: 'api', key: 'sk-test' })
-  })
-
-  it('forwards auth writes raw when enforcement is off', async () => {
-    const upstreamFetch = vi.fn().mockResolvedValue(
-      new Response('ok', { status: 200, headers: { 'content-type': 'application/json' } })
-    )
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const res = await app.request('/api/opencode-proxy/auth/sso.example.com', {
-      method: 'PUT',
-      headers: {
-        Authorization: 'Bearer test-internal-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ type: 'wellknown', key: 'SSO_TOKEN', token: 't' }),
-    })
-
-    expect(res.status).toBe(200)
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const forwarded = JSON.parse(await new Response(fetchCall[1].body as ReadableStream).text()) as Record<string, unknown>
-    expect(forwarded.type).toBe('wellknown')
+    expect(upstream.requests[0]?.body).toBe('{not json')
   })
 
   it('returns 503 through the proxy gate on a below-threshold health failure and reopens once the supervisor recovers', async () => {
-    const lifecycle = { initialized: true }
-    isLifecycleInitializedMock.mockImplementation(() => lifecycle.initialized)
-    const manager = {
-      start: vi.fn().mockResolvedValue(undefined),
-      stop: vi.fn().mockResolvedValue(undefined),
-      isOperationInProgress: vi.fn(() => false),
-      checkHealth: vi.fn().mockResolvedValue(true),
-      restart: vi.fn().mockResolvedValue(undefined),
-      clearStartupError: vi.fn(),
-      getLastStartupError: vi.fn(() => null),
-      isLastStartupErrorNonRecoverable: vi.fn(() => false),
-      setLifecycleInitialized: vi.fn((value: boolean) => { lifecycle.initialized = value }),
-      getPort: vi.fn(() => 5551),
-      getVersion: vi.fn(() => '2.0.15'),
-      getMinVersion: vi.fn(() => '2.0.15'),
-      isVersionSupported: vi.fn(() => true),
-    }
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, {} as SettingsService, {
+    const health = vi.fn<OpenCodeApi['server']['info']>(async () => DEFAULT_SERVER_INFO)
+    opencodeServerManager.setOpenCodeClient(createStubOpenCodeClient({ api: { server: { info: health } } }))
+    const supervisor = new OpenCodeSupervisor(opencodeServerManager, settingsService, {
       failureThreshold: 2,
       watchEnabled: false,
     })
-    await supervisor.start()
 
-    const upstreamFetch = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }))
-    globalThis.fetch = upstreamFetch as unknown as typeof fetch
-
-    const healthyRes = await app.request('/api/opencode-proxy/doc', {
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
+    const healthyRes = await app.request('/api/opencode-proxy/doc', { headers: authHeaders() })
     expect(healthyRes.status).toBe(200)
-    expect(upstreamFetch).toHaveBeenCalledTimes(1)
+    expect(upstream.requests).toHaveLength(1)
 
-    manager.checkHealth.mockResolvedValueOnce(false)
+    health.mockRejectedValueOnce(new Error('OpenCode health check failed'))
     const status = await supervisor.checkNow('manual')
     expect(status.state).toBe('unhealthy')
-    expect(lifecycle.initialized).toBe(false)
+    expect(opencodeServerManager.isLifecycleInitialized()).toBe(false)
 
-    const blockedRes = await app.request('/api/opencode-proxy/doc', {
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
+    const blockedRes = await app.request('/api/opencode-proxy/doc', { headers: authHeaders() })
     expect(blockedRes.status).toBe(503)
-    expect(upstreamFetch).toHaveBeenCalledTimes(1)
+    expect(upstream.requests).toHaveLength(1)
 
-    manager.checkHealth.mockResolvedValueOnce(true)
     const recovered = await supervisor.checkNow('manual')
     expect(recovered.healthy).toBe(true)
-    expect(lifecycle.initialized).toBe(true)
+    expect(opencodeServerManager.isLifecycleInitialized()).toBe(true)
 
-    const reopenedRes = await app.request('/api/opencode-proxy/doc', {
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
+    const reopenedRes = await app.request('/api/opencode-proxy/doc', { headers: authHeaders() })
     expect(reopenedRes.status).toBe(200)
-    expect(upstreamFetch).toHaveBeenCalledTimes(2)
+    expect(upstream.requests).toHaveLength(2)
   })
 })
 
 describe('opencode-proxy repo-scoped mount', () => {
+  let db: Database
+  let settingsService: SettingsService
+  let upstream: HttpUpstream
+  let token: string
+  let repoId: number
   let app: Hono
-  let originalFetch: typeof globalThis.fetch
+
+  beforeAll(async () => {
+    upstream = await startHttpUpstream()
+  })
+
+  afterAll(async () => {
+    await upstream.close()
+  })
 
   beforeEach(() => {
-    vi.clearAllMocks()
-    isLifecycleInitializedMock.mockReturnValue(true)
-    originalFetch = globalThis.fetch
+    db = createTestDatabase()
+    settingsService = new SettingsService(db)
+    token = getOrCreateInternalToken(db)
+    repoId = seedRepo(db, { localPath: 'my-repo', sourcePath: REPO_PATH }).id
+    upstreamBaseUrl = upstream.baseUrl
+    upstream.requests.length = 0
+    upstream.setResponder(respondOk)
+    opencodeServerManager.setLifecycleInitialized(true)
     app = createProxyApp()
   })
 
   afterEach(() => {
-    globalThis.fetch = originalFetch
+    db.close()
   })
 
-  it('returns 404 for an unknown repo', async () => {
-    getRepoByIdMock.mockReturnValue(null)
-    const upstreamFetch = upstreamOk()
+  function createProxyApp(): Hono {
+    const proxyApp = new Hono()
+    proxyApp.route(
+      '/api/opencode-proxy',
+      createOpenCodeProxyRoutes(
+        db,
+        settingsService,
+        createNodeWebSocket({ app: proxyApp }).upgradeWebSocket,
+        () => upstreamBaseUrl,
+      ),
+    )
+    return proxyApp
+  }
 
-    const res = await app.request('/api/opencode-proxy/repos/999/api/session', {
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
+  const authHeaders = () => ({ Authorization: `Bearer ${token}` })
+
+  it('returns 404 for an unknown repo', async () => {
+    const res = await app.request('/api/opencode-proxy/repos/999/api/session', { headers: authHeaders() })
 
     expect(res.status).toBe(404)
-    expect(upstreamFetch).not.toHaveBeenCalled()
+    expect(upstream.requests).toHaveLength(0)
   })
 
   it('returns 404 for a non-ready repo', async () => {
-    getRepoByIdMock.mockReturnValue({ ...readyRepo, cloneStatus: 'cloning' })
-    const upstreamFetch = upstreamOk()
+    const cloning = seedRepo(db, { localPath: 'cloning-repo', cloneStatus: 'cloning' })
 
-    const res = await app.request('/api/opencode-proxy/repos/7/api/session', {
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
+    const res = await app.request(`/api/opencode-proxy/repos/${cloning.id}/api/session`, { headers: authHeaders() })
 
     expect(res.status).toBe(404)
-    expect(upstreamFetch).not.toHaveBeenCalled()
+    expect(upstream.requests).toHaveLength(0)
   })
 
   it('pins x-opencode-directory to the repo path', async () => {
-    getRepoByIdMock.mockReturnValue(readyRepo)
-    const upstreamFetch = upstreamOk()
-
-    const res = await app.request('/api/opencode-proxy/repos/7/api/session?limit=1', {
+    const res = await app.request(`/api/opencode-proxy/repos/${repoId}/api/session?limit=1`, {
       headers: {
-        Authorization: 'Bearer test-internal-token',
+        ...authHeaders(),
         'x-opencode-directory': encodeURIComponent('/some/other/dir'),
       },
     })
 
     expect(res.status).toBe(200)
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const fetchHeaders = fetchCall[1].headers as Record<string, string>
-    expect(fetchHeaders['x-opencode-directory']).toBe(encodeURIComponent('/srv/repos/my-repo'))
-    expect(fetchCall[0]).toBe('http://127.0.0.1:5551/api/session?limit=1')
+    const [recorded] = upstream.requests
+    expect(recorded?.headers['x-opencode-directory']).toBe(encodeURIComponent(REPO_PATH))
+    expect(recorded?.url).toBe('/api/session?limit=1')
   })
 
   it('rewrites the location[directory] query value', async () => {
-    getRepoByIdMock.mockReturnValue(readyRepo)
-    const upstreamFetch = upstreamOk()
-
     const res = await app.request(
-      `/api/opencode-proxy/repos/7/api/agent?location%5Bdirectory%5D=${encodeURIComponent('/local/dir')}`,
-      { headers: { Authorization: 'Bearer test-internal-token' } }
+      `/api/opencode-proxy/repos/${repoId}/api/agent?location%5Bdirectory%5D=${encodeURIComponent('/local/dir')}`,
+      { headers: authHeaders() },
     )
 
     expect(res.status).toBe(200)
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const fetchUrl = new URL(fetchCall[0])
-    expect(fetchUrl.searchParams.get('location[directory]')).toBe('/srv/repos/my-repo')
+    const recordedUrl = upstream.requests[0]?.url ?? ''
+    expect(new URL(recordedUrl, 'http://upstream.example').searchParams.get('location[directory]')).toBe(REPO_PATH)
   })
 
   it('rewrites the directory query on GET /api/session', async () => {
-    getRepoByIdMock.mockReturnValue(readyRepo)
-    const upstreamFetch = upstreamOk()
-
-    const res = await app.request('/api/opencode-proxy/repos/7/api/session?directory=/local/dir&limit=5', {
-      headers: { Authorization: 'Bearer test-internal-token' },
-    })
+    const res = await app.request(
+      `/api/opencode-proxy/repos/${repoId}/api/session?directory=/local/dir&limit=5`,
+      { headers: authHeaders() },
+    )
 
     expect(res.status).toBe(200)
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const fetchUrl = new URL(fetchCall[0])
-    expect(fetchUrl.searchParams.get('directory')).toBe('/srv/repos/my-repo')
-    expect(fetchUrl.searchParams.get('limit')).toBe('5')
+    const recordedUrl = new URL(upstream.requests[0]?.url ?? '', 'http://upstream.example')
+    expect(recordedUrl.searchParams.get('directory')).toBe(REPO_PATH)
+    expect(recordedUrl.searchParams.get('limit')).toBe('5')
   })
 
   it('rewrites a JSON body top-level location.directory', async () => {
-    getRepoByIdMock.mockReturnValue(readyRepo)
-    const upstreamFetch = upstreamOk()
-
-    const res = await app.request('/api/opencode-proxy/repos/7/api/session', {
+    const res = await app.request(`/api/opencode-proxy/repos/${repoId}/api/session`, {
       method: 'POST',
-      headers: {
-        Authorization: 'Bearer test-internal-token',
-        'Content-Type': 'application/json',
-      },
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: 'x', location: { directory: '/local/dir' } }),
     })
 
     expect(res.status).toBe(200)
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    const forwarded = JSON.parse(fetchCall[1].body as string) as Record<string, unknown>
-    expect(forwarded).toEqual({ title: 'x', location: { directory: '/srv/repos/my-repo' } })
+    const forwarded = JsonLocationBodySchema.parse(JSON.parse(upstream.requests[0]?.body ?? ''))
+    expect(forwarded).toEqual({ title: 'x', location: { directory: REPO_PATH } })
   })
 
   it('streams a non-JSON body through untouched', async () => {
-    getRepoByIdMock.mockReturnValue(readyRepo)
-    const upstreamFetch = upstreamOk()
-
-    const res = await app.request('/api/opencode-proxy/repos/7/api/session', {
+    const res = await app.request(`/api/opencode-proxy/repos/${repoId}/api/session`, {
       method: 'POST',
-      headers: {
-        Authorization: 'Bearer test-internal-token',
-        'Content-Type': 'text/plain',
-      },
+      headers: { ...authHeaders(), 'Content-Type': 'text/plain' },
       body: 'location=/local/dir',
     })
 
     expect(res.status).toBe(200)
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    expect(fetchCall[1].body).toBeInstanceOf(ReadableStream)
-    expect(await new Response(fetchCall[1].body as ReadableStream).text()).toBe('location=/local/dir')
+    expect(upstream.requests[0]?.body).toBe('location=/local/dir')
   })
 
   it('forwards a JSON body without a location unchanged', async () => {
-    getRepoByIdMock.mockReturnValue(readyRepo)
-    const upstreamFetch = upstreamOk()
     const body = JSON.stringify({ title: 'x' })
 
-    const res = await app.request('/api/opencode-proxy/repos/7/api/session', {
+    const res = await app.request(`/api/opencode-proxy/repos/${repoId}/api/session`, {
       method: 'POST',
-      headers: {
-        Authorization: 'Bearer test-internal-token',
-        'Content-Type': 'application/json',
-      },
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body,
     })
 
     expect(res.status).toBe(200)
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    expect(new TextDecoder().decode(fetchCall[1].body as ArrayBuffer)).toBe(body)
+    expect(upstream.requests[0]?.body).toBe(body)
   })
 
   it('forwards a malformed JSON body unchanged', async () => {
-    getRepoByIdMock.mockReturnValue(readyRepo)
-    const upstreamFetch = upstreamOk()
-
-    const res = await app.request('/api/opencode-proxy/repos/7/api/session', {
+    const res = await app.request(`/api/opencode-proxy/repos/${repoId}/api/session`, {
       method: 'POST',
-      headers: {
-        Authorization: 'Bearer test-internal-token',
-        'Content-Type': 'application/json',
-      },
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: '{not json',
     })
 
     expect(res.status).toBe(200)
-    const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-    expect(new TextDecoder().decode(fetchCall[1].body as ArrayBuffer)).toBe('{not json')
+    expect(upstream.requests[0]?.body).toBe('{not json')
   })
 
   describe('workspace directories', () => {
     const worktreePath = join(getWorkspacePath(), '.opencode', 'state', 'opencode', 'worktree', 'abc123', 'feature')
     const otherRepoPath = join(getWorkspacePath(), 'repos', 'other-repo')
 
-    beforeEach(() => {
-      getRepoByIdMock.mockReturnValue(readyRepo)
-    })
-
     it('keeps a workspace x-opencode-directory', async () => {
-      const upstreamFetch = upstreamOk()
-
-      const res = await app.request('/api/opencode-proxy/repos/7/api/agent', {
+      const res = await app.request(`/api/opencode-proxy/repos/${repoId}/api/agent`, {
         headers: {
-          Authorization: 'Bearer test-internal-token',
+          ...authHeaders(),
           'x-opencode-directory': encodeURIComponent(worktreePath),
         },
       })
 
       expect(res.status).toBe(200)
-      const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-      expect((fetchCall[1].headers as Record<string, string>)['x-opencode-directory']).toBe(encodeURIComponent(worktreePath))
+      expect(upstream.requests[0]?.headers['x-opencode-directory']).toBe(encodeURIComponent(worktreePath))
     })
 
     it('keeps another project location[directory] from the workspace', async () => {
-      const upstreamFetch = upstreamOk()
-
       const res = await app.request(
-        `/api/opencode-proxy/repos/7/api/agent?location%5Bdirectory%5D=${encodeURIComponent(otherRepoPath)}`,
-        { headers: { Authorization: 'Bearer test-internal-token' } }
+        `/api/opencode-proxy/repos/${repoId}/api/agent?location%5Bdirectory%5D=${encodeURIComponent(otherRepoPath)}`,
+        { headers: authHeaders() },
       )
 
       expect(res.status).toBe(200)
-      const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-      expect(new URL(fetchCall[0]).searchParams.get('location[directory]')).toBe(otherRepoPath)
-      expect((fetchCall[1].headers as Record<string, string>)['x-opencode-directory']).toBe(encodeURIComponent(otherRepoPath))
+      const [recorded] = upstream.requests
+      const recordedUrl = new URL(recorded?.url ?? '', 'http://upstream.example')
+      expect(recordedUrl.searchParams.get('location[directory]')).toBe(otherRepoPath)
+      expect(recorded?.headers['x-opencode-directory']).toBe(encodeURIComponent(otherRepoPath))
     })
 
     it('keeps a workspace body location.directory', async () => {
-      const upstreamFetch = upstreamOk()
-
-      const res = await app.request('/api/opencode-proxy/repos/7/api/session', {
+      const res = await app.request(`/api/opencode-proxy/repos/${repoId}/api/session`, {
         method: 'POST',
-        headers: {
-          Authorization: 'Bearer test-internal-token',
-          'Content-Type': 'application/json',
-        },
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: 'x', location: { directory: worktreePath } }),
       })
 
       expect(res.status).toBe(200)
-      const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-      expect(JSON.parse(fetchCall[1].body as string)).toEqual({ title: 'x', location: { directory: worktreePath } })
+      const forwarded = JsonLocationBodySchema.parse(JSON.parse(upstream.requests[0]?.body ?? ''))
+      expect(forwarded).toEqual({ title: 'x', location: { directory: worktreePath } })
     })
 
     it('keeps a workspace directory filter on the session list', async () => {
-      const upstreamFetch = upstreamOk()
-
-      const res = await app.request(`/api/opencode-proxy/repos/7/api/session?directory=${encodeURIComponent(worktreePath)}`, {
-        headers: { Authorization: 'Bearer test-internal-token' },
-      })
+      const res = await app.request(
+        `/api/opencode-proxy/repos/${repoId}/api/session?directory=${encodeURIComponent(worktreePath)}`,
+        { headers: authHeaders() },
+      )
 
       expect(res.status).toBe(200)
-      const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-      expect(new URL(fetchCall[0]).searchParams.get('directory')).toBe(worktreePath)
+      const recordedUrl = new URL(upstream.requests[0]?.url ?? '', 'http://upstream.example')
+      expect(recordedUrl.searchParams.get('directory')).toBe(worktreePath)
     })
 
     it('does not add a directory filter to an unfiltered session list', async () => {
-      const upstreamFetch = upstreamOk()
-
-      const res = await app.request('/api/opencode-proxy/repos/7/api/session?limit=50&parentID=null', {
-        headers: { Authorization: 'Bearer test-internal-token' },
+      const res = await app.request(`/api/opencode-proxy/repos/${repoId}/api/session?limit=50&parentID=null`, {
+        headers: authHeaders(),
       })
 
       expect(res.status).toBe(200)
-      const fetchCall = upstreamFetch.mock.calls[0] as [string, RequestInit]
-      expect(new URL(fetchCall[0]).searchParams.has('directory')).toBe(false)
+      const recordedUrl = new URL(upstream.requests[0]?.url ?? '', 'http://upstream.example')
+      expect(recordedUrl.searchParams.has('directory')).toBe(false)
     })
   })
 })
 
 const SHIPPED_OPENCODE_BIN = resolveOpenCode2Binary()
+
+const BoundPortSchema = z.object({ port: z.number() })
 
 function startMockLlm(): Promise<{ port: number; close: () => void }> {
   const server = createServer((req, res) => {
@@ -1088,13 +623,16 @@ function startMockLlm(): Promise<{ port: number; close: () => void }> {
     })
   })
   return new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', () => resolve({ port: (server.address() as AddressInfo).port, close: () => server.close() }))
+    server.listen(0, '127.0.0.1', () => {
+      resolve({ port: BoundPortSchema.parse(server.address()).port, close: () => server.close() })
+    })
   })
 }
 
 function runOpenCodeAgainstProxy(
   serverUrl: string,
   cwd: string,
+  internalToken: string,
   homeDirectory: string,
   configHome: string,
 ): Promise<{ status: number | null; stdout: string; stderr: string }> {
@@ -1112,7 +650,7 @@ function runOpenCodeAgainstProxy(
         XDG_STATE_HOME: join(configHome, '..', 'state'),
         XDG_CACHE_HOME: join(configHome, '..', 'cache'),
         OPENCODE_DISABLE_MODELS_FETCH: '1',
-        OPENCODE_PASSWORD: 'test-internal-token',
+        OPENCODE_PASSWORD: internalToken,
       },
     })
     let stdout = ''
@@ -1144,6 +682,9 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('opencode-proxy repo-scoped mount
   let homeDirectory: string
   let instance: OpenCodeServe
   let llm: { port: number; close: () => void }
+  let db: Database
+  let settingsService: SettingsService
+  let token: string
 
   beforeAll(async () => {
     instanceRoot = mkdtempSync(join(tmpdir(), 'ocm-proxy-e2e-'))
@@ -1173,9 +714,15 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('opencode-proxy repo-scoped mount
     instance = await startOpenCodeServe({ env: { HOME: homeDirectory, XDG_CONFIG_HOME: configHome } })
   })
 
+  beforeEach(() => {
+    db = createTestDatabase()
+    settingsService = new SettingsService(db)
+    token = getOrCreateInternalToken(db)
+  })
+
   afterEach(() => {
-    getOpenCodeServerPasswordMock.mockReturnValue('test-password')
-    upstreamBaseUrl.value = 'http://127.0.0.1:5551'
+    db.close()
+    upstreamBaseUrl = 'http://127.0.0.1:5551'
   })
 
   afterAll(async () => {
@@ -1183,6 +730,16 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('opencode-proxy repo-scoped mount
     llm.close()
     rmSync(instanceRoot, { recursive: true, force: true })
   })
+
+  function connectToInstance(): void {
+    upstreamBaseUrl = instance.baseUrl
+    settingsService.setOpenCodeServerPassword(instance.password)
+    opencodeServerManager.setLifecycleInitialized(true)
+  }
+
+  function seedRepoAt(repoPath: string): number {
+    return seedRepo(db, { localPath: 'repo', sourcePath: repoPath }).id
+  }
 
   it('pins the repo directory for a client started from an unrelated cwd', async () => {
     const root = mkdtempSync(join(tmpdir(), 'ocm-proxy-e2e-'))
@@ -1192,16 +749,16 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('opencode-proxy repo-scoped mount
       mkdirSync(directory, { recursive: true })
     }
 
-    upstreamBaseUrl.value = instance.baseUrl
-    getOpenCodeServerPasswordMock.mockReturnValue(instance.password)
-    getRepoByIdMock.mockReturnValue({ id: 1, fullPath: repoPath, cloneStatus: 'ready' })
+    connectToInstance()
+    const repoId = seedRepoAt(repoPath)
 
     const { proxyServer, proxyPort } = await startProxyServer()
 
     try {
       const result = await runOpenCodeAgainstProxy(
-        `http://127.0.0.1:${proxyPort}/api/opencode-proxy/repos/1`,
+        `http://127.0.0.1:${proxyPort}/api/opencode-proxy/repos/${repoId}`,
         clientCwd,
+        token,
         homeDirectory,
         configHome,
       )
@@ -1210,7 +767,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('opencode-proxy repo-scoped mount
       const response = await fetch(`${instance.baseUrl}/api/session?directory=${encodeURIComponent(repoPath)}`, {
         headers: { Authorization: buildOpenCodeBasicAuth(instance.password) },
       })
-      const body = (await response.json()) as { data: { location: { directory: string } }[] }
+      const body = z.object({ data: z.array(z.object({ location: z.object({ directory: z.string() }) })) }).parse(await response.json())
       expect(body.data.some((session) => session.location.directory === repoPath)).toBe(true)
     } finally {
       await new Promise<void>((resolve) => proxyServer.close(() => resolve()))
@@ -1224,13 +781,12 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('opencode-proxy repo-scoped mount
     const repoPath = join(root, 'repo')
     mkdirSync(repoPath, { recursive: true })
 
-    upstreamBaseUrl.value = instance.baseUrl
-    getOpenCodeServerPasswordMock.mockReturnValue(instance.password)
-    getRepoByIdMock.mockReturnValue({ id: 1, fullPath: repoPath, cloneStatus: 'ready' })
+    connectToInstance()
+    const repoId = seedRepoAt(repoPath)
 
     const { proxyServer, proxyPort } = await startProxyServer()
-    const repoProxy = `127.0.0.1:${proxyPort}/api/opencode-proxy/repos/1`
-    const clientAuth = 'Basic ' + Buffer.from('opencode:test-internal-token').toString('base64')
+    const repoProxy = `127.0.0.1:${proxyPort}/api/opencode-proxy/repos/${repoId}`
+    const clientAuth = `Basic ${Buffer.from(`opencode:${token}`).toString('base64')}`
     let leakedPtyDaemons: number[] = []
 
     try {
@@ -1240,7 +796,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('opencode-proxy repo-scoped mount
         body: JSON.stringify({ title: 'pty-bridge' }),
       })
       expect(created.status, await created.clone().text()).toBe(200)
-      const sessionID = ((await created.json()) as { data: { id: string } }).data.id
+      const sessionID = z.object({ data: z.object({ id: z.string() }) }).parse(await created.json()).data.id
 
       const terminal = await fetch(`http://${repoProxy}/api/experimental/session/${sessionID}/terminal`, {
         method: 'POST',
@@ -1248,14 +804,14 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('opencode-proxy repo-scoped mount
         body: JSON.stringify({ command: '/bin/sh', args: [], title: 'pty-bridge', env: {}, cwd: repoPath }),
       })
       expect(terminal.status, await terminal.clone().text()).toBe(200)
-      const ptyID = ((await terminal.json()) as { data: { id: string } }).data.id
+      const ptyID = z.object({ data: z.object({ id: z.string() }) }).parse(await terminal.json()).data.id
 
-      const token = await fetch(`http://${repoProxy}/api/experimental/persistent-pty/${ptyID}/connect-token`, {
+      const tokenResponse = await fetch(`http://${repoProxy}/api/experimental/persistent-pty/${ptyID}/connect-token`, {
         method: 'POST',
         headers: { Authorization: clientAuth, 'x-opencode-ticket': '1' },
       })
-      expect(token.status, await token.clone().text()).toBe(200)
-      const ticket = ((await token.json()) as { data: { ticket: string } }).data.ticket
+      expect(tokenResponse.status, await tokenResponse.clone().text()).toBe(200)
+      const ticket = z.object({ data: z.object({ ticket: z.string() }) }).parse(await tokenResponse.json()).data.ticket
 
       const socket = new WebSocket(`ws://${repoProxy}/api/experimental/persistent-pty/${ptyID}/connect?ticket=${encodeURIComponent(ticket)}`)
       socket.binaryType = 'arraybuffer'
@@ -1264,7 +820,7 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('opencode-proxy repo-scoped mount
         let sent = false
         const timer = setTimeout(() => reject(new Error(`timed out; received: ${received}`)), 20000)
         socket.addEventListener('message', (event) => {
-          received += typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data as ArrayBuffer)
+          received += event.data instanceof ArrayBuffer ? new TextDecoder().decode(event.data) : String(event.data)
           if (!sent && received.includes('replay_complete')) {
             sent = true
             socket.send('echo proxied-$((40+2))\n')
@@ -1297,16 +853,15 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('opencode-proxy repo-scoped mount
     const repoPath = join(root, 'repo')
     mkdirSync(repoPath, { recursive: true })
 
-    upstreamBaseUrl.value = instance.baseUrl
-    getOpenCodeServerPasswordMock.mockReturnValue(instance.password)
-    getRepoByIdMock.mockReturnValue({ id: 1, fullPath: repoPath, cloneStatus: 'ready' })
+    connectToInstance()
+    const repoId = seedRepoAt(repoPath)
 
     const { proxyServer, proxyPort } = await startProxyServer()
 
     try {
       const status = await readUpgradeRejectionStatus(
         proxyPort,
-        '/api/opencode-proxy/repos/1/api/experimental/persistent-pty/pty_bogus/connect?ticket=bogus',
+        `/api/opencode-proxy/repos/${repoId}/api/experimental/persistent-pty/pty_bogus/connect?ticket=bogus`,
       )
       expect(status).toBe(403)
     } finally {
@@ -1314,6 +869,19 @@ describe.skipIf(SHIPPED_OPENCODE_BIN === null)('opencode-proxy repo-scoped mount
       rmSync(root, { recursive: true, force: true })
     }
   }, 120000)
+
+  async function startProxyServer(): Promise<{ proxyServer: Server; proxyPort: number }> {
+    const { server, port } = await startWebSocketServer({
+      app: new Hono(),
+      register: (proxyApp, upgradeWebSocket) => {
+        proxyApp.route(
+          '/api/opencode-proxy',
+          createOpenCodeProxyRoutes(db, settingsService, upgradeWebSocket, () => upstreamBaseUrl),
+        )
+      },
+    })
+    return { proxyServer: server, proxyPort: port }
+  }
 })
 
 function listPtyDaemonPids(): number[] {
@@ -1364,14 +932,4 @@ function readUpgradeRejectionStatus(port: number, path: string): Promise<number>
     req.on('error', reject)
     req.end()
   })
-}
-
-async function startProxyServer(): Promise<{ proxyServer: Server; proxyPort: number }> {
-  const { server, port } = await startWebSocketServer({
-    app: new Hono(),
-    register: (proxyApp, upgradeWebSocket) => {
-      proxyApp.route('/api/opencode-proxy', createOpenCodeProxyRoutes(mockDb, mockSettingsService, upgradeWebSocket))
-    },
-  })
-  return { proxyServer: server, proxyPort: port }
 }

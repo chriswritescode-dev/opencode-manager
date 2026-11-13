@@ -1,8 +1,11 @@
 import React, { useMemo } from 'react'
-import type { FileDiffInfo, SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
+import { z } from 'zod'
+import type { SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
 import { useSettings } from '@/hooks/useSettings'
 import { useMobile } from '@/hooks/useMobile'
-import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/opencode-server-context'
+import { JsonObjectSchema, type JsonObject } from '@opencode-manager/shared/utils'
+import { readJsonArray, readJsonString } from '@/components/jsonValue'
 import { DiffStats } from './DiffStats'
 import { CodePreview, detectLanguage } from './CodePreview'
 import { DiffLines } from './DiffLines'
@@ -13,20 +16,16 @@ import { parseUnifiedDiff } from '@/lib/diffLines'
 import { cn } from '@/lib/utils'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 
-function isFileDiff(data: unknown): data is FileDiffInfo {
-  return (
-    typeof data === 'object' &&
-    data !== null &&
-    'file' in data &&
-    'patch' in data &&
-    'additions' in data &&
-    'deletions' in data &&
-    typeof (data as FileDiffInfo).file === 'string' &&
-    typeof (data as FileDiffInfo).patch === 'string' &&
-    typeof (data as FileDiffInfo).additions === 'number' &&
-    typeof (data as FileDiffInfo).deletions === 'number'
-  )
-}
+const fileDiffSchema = z.object({
+  file: z.string(),
+  patch: z.string(),
+  additions: z.number(),
+  deletions: z.number(),
+  status: z.enum(['added', 'deleted', 'modified']).optional(),
+  more: z.literal(true).optional(),
+})
+
+type FileDiff = z.infer<typeof fileDiffSchema>
 
 export function getRelativePath(filePath: string): string {
   const reposIndex = filePath.indexOf('/repos/')
@@ -53,7 +52,7 @@ const MOBILE_PATCH_PREVIEW_LINE_COUNT = 4
 
 interface FileToolRenderProps {
   part: SessionMessageAssistantTool
-  filediff?: FileDiffInfo
+  filediff?: FileDiff
   filePath?: string
   content?: string
   toolName: string
@@ -194,19 +193,21 @@ function FileToolRender({ part, filediff, filePath, content, toolName, onFileCli
   )
 }
 
-function fileDiffs(part: SessionMessageAssistantTool): FileDiffInfo[] {
+function fileDiffs(part: SessionMessageAssistantTool): FileDiff[] {
   if (part.state.status !== 'completed') return []
-  const metadata = part.state.metadata
-  const files: unknown[] = Array.isArray(metadata?.files) ? metadata.files : [metadata?.filediff]
-  return files.filter(isFileDiff)
+  const metadata = JsonObjectSchema.safeParse(part.state.metadata)
+  if (!metadata.success) return []
+  const files = readJsonArray(metadata.data.files) ?? [metadata.data.filediff]
+  return files.flatMap((file) => {
+    const parsed = fileDiffSchema.safeParse(file)
+    return parsed.success ? [parsed.data] : []
+  })
 }
 
-/** Returns the file path a file tool was called with, accepting both the `path` and legacy `filePath` input keys. */
-export function getToolInputPath(input: Record<string, unknown> | undefined): string | undefined {
-  const path = input?.path
-  if (typeof path === 'string' && path) return path
-  const filePath = input?.filePath
-  return typeof filePath === 'string' && filePath ? filePath : undefined
+export function getToolInputPath(input: JsonObject | undefined): string | undefined {
+  const path = readJsonString(input?.path)
+  if (path) return path
+  return readJsonString(input?.filePath) || undefined
 }
 
 export function getToolSpecificRender(part: SessionMessageAssistantTool, onFileClick?: (filePath: string) => void): React.ReactElement | null {
@@ -236,7 +237,7 @@ export function getToolSpecificRender(part: SessionMessageAssistantTool, onFileC
   }
 
   if (part.name === 'write' && inputPath) {
-    const content = input.content as string | undefined
+    const content = readJsonString(part.state.input.content)
     return <FileToolRender part={part} filePath={inputPath} content={content} toolName="Write" onFileClick={onFileClick} />
   }
 

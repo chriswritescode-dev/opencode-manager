@@ -41,7 +41,6 @@ async function generateText(
   return client.api.generate.text({ prompt: input.prompt, model }, { signal })
 }
 
-/** OpenCode serves generation from its global config location, so the model must be resolved there once its catalog has loaded. */
 async function resolveGenerateModel(client: OpenCodeClient, signal: AbortSignal): Promise<ModelRef> {
   const { providerID, id, variant } = await resolveOpenCodeModel(client, getOpenCodeGlobalConfigPath(), { signal })
   return variant ? { providerID, id, variant } : { providerID, id }

@@ -1,353 +1,182 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { PromptInput } from './PromptInput'
+import { describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import type { UseVoiceConversationInput, VoiceConversationController } from '@/hooks/useVoiceConversation'
+import type { SessionMessageAssistant } from '@opencode-manager/shared/opencode'
+import type { VoiceConversationFactory } from './VoiceConversation'
 import { useComposerDraftStore } from '@/stores/composerDraftStore'
-import {
-  SessionTranscriptContext,
-  type SessionTranscriptSnapshot,
-} from '@/contexts/session-transcript-context'
-import {
-  createCommandActionsMock,
-  createVoiceConversationControllerMock,
-} from '@/test/test-utils'
-import type {
-  UseVoiceConversationInput,
-  VoiceConversationController,
-} from '@/hooks/useVoiceConversation'
-import type { SessionMessageInfo } from '@opencode-manager/shared/opencode'
+import { useSendErrorStore } from '@/stores/sendErrorStore'
+import { useSessionAgentStore } from '@/stores/sessionAgentStore'
+import { createVoiceConversationControllerMock } from '@/test/test-utils'
+import { promptTextarea, renderPromptInput } from '@/test/promptInput'
+import type { FetchRouteResult } from '@/test/fetchFake'
 
-const createTestQueryClient = () => new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: false,
+interface VoiceHarness {
+  factory: VoiceConversationFactory
+  setController: (controller: Partial<VoiceConversationController>, capturedText?: string) => void
+  input: () => UseVoiceConversationInput
+}
+
+function voiceHarness(): VoiceHarness {
+  let controller: Partial<VoiceConversationController> = {}
+  let capturedText = 'half a sentence'
+  let latest: UseVoiceConversationInput | undefined
+  const factory: VoiceConversationFactory = (input) => {
+    latest = input
+    return createVoiceConversationControllerMock({
+      ...controller,
+      editInTextBox: () => input.onEditInTextBox(capturedText),
+    })
+  }
+  return {
+    factory,
+    setController: (next, text) => {
+      controller = next
+      if (text !== undefined) capturedText = text
     },
-  },
-})
+    input: () => {
+      if (!latest) throw new Error('useVoiceConversation was not called')
+      return latest
+    },
+  }
+}
 
-const mocks = vi.hoisted(() => ({
-  useSttAvailability: vi.fn(),
-  useVoiceConversation: vi.fn(),
-  useMobile: vi.fn(),
-  useSendPromptMutate: vi.fn(),
-  useSendPromptMutateAsync: vi.fn(),
-  sendPromptPending: vi.fn(() => false),
-  useUserBash: vi.fn(),
-  useSessionAgentStore: vi.fn(),
-  useSendErrorStore: vi.fn(),
-}))
+function assistantReply(tokens: SessionMessageAssistant['tokens']): SessionMessageAssistant {
+  return {
+    id: 'msg_voice_1',
+    type: 'assistant',
+    agent: 'build',
+    model: { providerID: 'anthropic', id: 'claude-sonnet-4-5' },
+    content: [{ type: 'text', text: 'hello there' }],
+    time: { created: 1, completed: 2 },
+    tokens,
+  }
+}
 
-vi.mock('@/hooks/useSTT', () => ({
-  useSttAvailability: mocks.useSttAvailability,
-}))
+function deferredRoute() {
+  let resolve: (result: FetchRouteResult) => void = () => {}
+  const respond = () => new Promise<FetchRouteResult>((settle) => {
+    resolve = settle
+  })
+  return { respond, resolve: (result: FetchRouteResult) => resolve(result) }
+}
 
-vi.mock('@/hooks/useVoiceConversation', () => ({
-  useVoiceConversation: mocks.useVoiceConversation,
-}))
-
-vi.mock('@/hooks/useMobile', () => ({
-  useMobile: mocks.useMobile,
-}))
-
-vi.mock('@/hooks/useOpenCode', () => ({
-  useSendPrompt: () => ({
-    mutate: mocks.useSendPromptMutate,
-    mutateAsync: mocks.useSendPromptMutateAsync,
-    isPending: mocks.sendPromptPending(),
-  }),
-  useInterruptSession: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
-  useSendShell: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(() => Promise.resolve()), isPending: false }),
-  useAgents: () => ({ data: [] }),
-  useSkills: () => ({ data: [] }),
-  useSession: () => ({ data: undefined }),
-}))
-
-vi.mock('@/hooks/useCommands', () => ({
-  useCommands: () => ({ searchCommands: () => [], findCommand: vi.fn(), recentNames: [] }),
-}))
-
-vi.mock('@/hooks/useCommandHandler', () => ({
-  useCommandHandler: () => ({ executeCommand: vi.fn() }),
-}))
-
-vi.mock('@/hooks/useFileSearch', () => ({
-  useFileSearch: () => ({ files: [] }),
-}))
-
-vi.mock('@/hooks/useModelSelection', () => ({
-  useModelSelection: () => ({
-    model: null,
-    modelString: 'test-model',
-    setModel: vi.fn(),
-    setActiveAgent: vi.fn(),
-    recentModels: [],
-    favoriteModels: [],
-    toggleFavorite: vi.fn(),
-    isModelReady: true,
-  }),
-}))
-
-vi.mock('@/hooks/useVariants', () => ({
-  useVariants: () => ({ hasVariants: false, currentVariant: null, cycleVariant: vi.fn() }),
-}))
-
-vi.mock('@/hooks/useSessionAgent', () => ({
-  useSessionAgent: () => ({ agent: 'default' }),
-}))
-
-vi.mock('@/stores/userBashStore', () => ({
-  useUserBash: mocks.useUserBash,
-}))
-
-vi.mock('@/stores/sessionAgentStore', () => ({
-  useSessionAgentStore: mocks.useSessionAgentStore,
-}))
-
-vi.mock('@/stores/sendErrorStore', () => ({
-  useSendErrorStore: mocks.useSendErrorStore,
-}))
-
-vi.mock('@/contexts/EventContext', () => ({
-  usePermissions: () => ({
-    hasForSession: vi.fn().mockReturnValue(false),
-    setShowDialog: vi.fn(),
-  }),
-}))
-
-vi.mock('@/components/agent/AgentQuickSelect', () => ({
-  AgentQuickSelect: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
-
-vi.mock('@/components/model/ModelQuickSelect', () => ({
-  ModelQuickSelect: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
-
-vi.mock('@/components/session/PermissionModeToggle', () => ({
-  PermissionModeToggle: () => null,
-}))
-
-vi.mock('./ComposerToolsMenu', () => ({
-  ComposerToolsMenu: () => null,
-}))
-
-vi.mock('@/components/session/SessionSandboxMenu', () => ({
-  SessionSandboxMenu: () => null,
-}))
-
-vi.mock('@/hooks/useSessionGoals', () => ({
-  useSessionGoal: () => ({ data: undefined }),
-  useSessionGoalCommand: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
-}))
-
-vi.mock('@/hooks/useSessionPermissionMode', () => ({
-  useSessionPermissionMode: () => ({ data: undefined }),
-}))
-
-vi.mock('./PromptSuggestions', () => ({
-  PromptSuggestions: () => null,
-}))
+function promptInboxBody(sessionID: string) {
+  return { data: { id: 'inbox_1', sessionID, type: 'user', time: { created: 1 }, payload: { text: '' } } }
+}
 
 describe('PromptInput voice conversation', () => {
-  const mockSetAgent = vi.fn()
-
-  const defaultProps = {
-    directory: '/test',
-    sessionID: 'test-session',
-    isSessionActive: false,
-    isStreamingResponse: false,
-    onScrollToBottom: vi.fn(),
-    commandActions: createCommandActionsMock(),
-    onPromptChange: vi.fn(),
-  }
-
-  const createUserMessage = (id: string, text: string): SessionMessageInfo => ({
-    id,
-    type: 'user',
-    text,
-    time: { created: 1000 },
-  } as SessionMessageInfo)
-
-  const buildSnapshot = (overrides: Partial<SessionTranscriptSnapshot> = {}): SessionTranscriptSnapshot => ({
-    messages: [],
-    pending: [],
-    status: 'idle',
-    ...overrides,
-  })
-
-  const renderComponent = (
-    overrides: Partial<typeof defaultProps> = {},
-    snapshotOverrides: Partial<SessionTranscriptSnapshot> = {},
-  ) => {
-    const queryClient = createTestQueryClient()
-    const tree = (
-      nextOverrides: Partial<typeof defaultProps>,
-      snapshot = buildSnapshot(snapshotOverrides),
-    ) => (
-      <QueryClientProvider client={queryClient}>
-        <SessionTranscriptContext.Provider value={snapshot}>
-          <PromptInput {...defaultProps} {...overrides} {...nextOverrides} />
-        </SessionTranscriptContext.Provider>
-      </QueryClientProvider>
-    )
-    const view = render(tree({}))
-    return {
-      ...view,
-      rerenderWith: (nextOverrides: Partial<typeof defaultProps>) => {
-        view.rerender(tree(nextOverrides, buildSnapshot(snapshotOverrides)))
-      },
-    }
-  }
-
-  const setVoiceController = (
-    controller: Partial<VoiceConversationController> = {},
-    capturedText = 'half a sentence',
-  ) => {
-    mocks.useVoiceConversation.mockImplementation((input: UseVoiceConversationInput) =>
-      createVoiceConversationControllerMock({
-        ...controller,
-        editInTextBox: () => input.onEditInTextBox(capturedText),
-      }),
-    )
-  }
-
-  const voiceInput = (): UseVoiceConversationInput => {
-    const call = mocks.useVoiceConversation.mock.calls.at(-1)
-    if (!call) throw new Error('useVoiceConversation was not called')
-    return call[0] as UseVoiceConversationInput
-  }
-
-  const promptInput = () => screen.getByPlaceholderText('Send a message...')
-  const voiceMic = () => screen.queryByRole('button', { name: 'Start voice conversation' })
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    useComposerDraftStore.setState({ drafts: {} })
-    mocks.useSendPromptMutateAsync.mockResolvedValue({ id: 'inbox_1' })
-    mocks.sendPromptPending.mockReturnValue(false)
-    mocks.useMobile.mockReturnValue(true)
-    mocks.useSttAvailability.mockReturnValue({ isEnabled: true, isSupported: true })
-    setVoiceController()
-    mocks.useUserBash.mockImplementation((selector) => selector({ addUserBashCommand: vi.fn() }))
-    mocks.useSessionAgentStore.mockImplementation((selector) => selector({ setAgent: mockSetAgent }))
-    mocks.useSendErrorStore.mockImplementation((selector) => selector({ errors: {} }))
-  })
-
   describe('microphone availability', () => {
-    it('shows the microphone on mobile when speech-to-text is enabled and supported', () => {
-      mocks.useMobile.mockReturnValue(true)
+    it.each([true, false])('shows the microphone when speech-to-text is enabled (mobile: %s)', async (mobile) => {
+      const voice = voiceHarness()
+      await renderPromptInput({ mobile, voiceConversation: voice.factory })
 
-      renderComponent()
-
-      expect(voiceMic()).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Start voice conversation' })).toBeInTheDocument()
     })
 
-    it('shows the microphone on desktop when speech-to-text is enabled and supported', () => {
-      mocks.useMobile.mockReturnValue(false)
+    it('hides the microphone when speech-to-text is disabled', async () => {
+      const voice = voiceHarness()
+      await renderPromptInput({ stt: 'disabled', voiceConversation: voice.factory })
 
-      renderComponent()
-
-      expect(voiceMic()).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Start voice conversation' })).toBeNull()
     })
 
-    it('hides the microphone when speech-to-text is disabled', () => {
-      mocks.useSttAvailability.mockReturnValue({ isEnabled: false, isSupported: true })
+    it('hides the microphone when the browser cannot capture speech', async () => {
+      const voice = voiceHarness()
+      await renderPromptInput({ stt: 'unsupported', voiceConversation: voice.factory })
 
-      renderComponent()
-
-      expect(voiceMic()).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Start voice conversation' })).toBeNull()
     })
 
-    it('hides the microphone when the browser cannot capture speech', () => {
-      mocks.useSttAvailability.mockReturnValue({ isEnabled: true, isSupported: false })
-
-      renderComponent()
-
-      expect(voiceMic()).toBeNull()
-    })
-
-    it('starts the conversation when the microphone is pressed', () => {
+    it('starts the conversation when the microphone is pressed', async () => {
+      const voice = voiceHarness()
       const controller = createVoiceConversationControllerMock()
-      mocks.useVoiceConversation.mockReturnValue(controller)
+      voice.setController(controller)
+      await renderPromptInput({ voiceConversation: voice.factory })
 
-      renderComponent()
-      fireEvent.click(voiceMic() as HTMLElement)
+      fireEvent.click(screen.getByRole('button', { name: 'Start voice conversation' }))
 
       expect(controller.start).toHaveBeenCalledTimes(1)
     })
   })
 
-  it('passes the published transcript to the voice conversation', () => {
-    const messages = [createUserMessage('msg_voice_1', 'hello there')]
+  it('passes the published transcript to the voice conversation', async () => {
+    const voice = voiceHarness()
+    await renderPromptInput({
+      voiceConversation: voice.factory,
+      transcript: { messages: [assistantReply({ input: 10, output: 5, reasoning: 0, cache: { read: 0, write: 0 } })], status: 'busy' },
+    })
 
-    renderComponent({}, { messages, status: 'busy' })
-
-    expect(mocks.useVoiceConversation).toHaveBeenCalledWith(
-      expect.objectContaining({ messages, status: 'busy' }),
-    )
+    expect(voice.input().messages).toHaveLength(1)
+    expect(voice.input().status).toBe('busy')
   })
 
   describe('while a conversation is active', () => {
-    it('replaces the composer with the conversation bar and keeps the draft after exit', () => {
+    it('replaces the composer with the conversation bar and keeps the draft after exit', async () => {
       const onVoiceConversationActiveChange = vi.fn()
-      const view = renderComponent({ onVoiceConversationActiveChange })
+      const voice = voiceHarness()
+      const { rerenderWith } = await renderPromptInput({ voiceConversation: voice.factory, onVoiceConversationActiveChange })
 
-      fireEvent.change(promptInput(), { target: { value: 'keep this draft' } })
+      fireEvent.change(promptTextarea(), { target: { value: 'keep this draft' } })
 
-      setVoiceController({ isActive: true, phase: 'listening', label: 'Listening' })
-      view.rerenderWith({})
+      voice.setController({ isActive: true, phase: 'listening', label: 'Listening' })
+      await rerenderWith()
 
       expect(screen.queryByPlaceholderText('Send a message...')).toBeNull()
       expect(screen.getByText('Listening')).toBeInTheDocument()
       expect(onVoiceConversationActiveChange).toHaveBeenLastCalledWith(true)
 
-      setVoiceController()
-      view.rerenderWith({})
+      voice.setController({})
+      await rerenderWith()
 
-      expect(promptInput()).toHaveValue('keep this draft')
+      expect(promptTextarea()).toHaveValue('keep this draft')
       expect(onVoiceConversationActiveChange).toHaveBeenLastCalledWith(false)
     })
 
-    it('moves the captured transcript into the text box', () => {
-      setVoiceController({ isActive: true, phase: 'listening', canEditInTextBox: true }, 'dictated words')
+    it('moves the captured transcript into the text box', async () => {
+      const voice = voiceHarness()
+      const { rerenderWith } = await renderPromptInput({ voiceConversation: voice.factory })
 
-      const view = renderComponent()
+      voice.setController({ isActive: true, phase: 'listening', canEditInTextBox: true }, 'dictated words')
+      await rerenderWith()
       fireEvent.click(screen.getByRole('button', { name: 'Edit in text box' }))
 
-      setVoiceController()
-      view.rerenderWith({})
+      voice.setController({})
+      await rerenderWith()
 
-      expect(promptInput()).toHaveValue('dictated words')
+      expect(promptTextarea()).toHaveValue('dictated words')
     })
 
-    it('appends the captured transcript after an existing draft', () => {
-      const view = renderComponent()
+    it('appends the captured transcript after an existing draft', async () => {
+      const voice = voiceHarness()
+      const { rerenderWith } = await renderPromptInput({ voiceConversation: voice.factory })
 
-      fireEvent.change(promptInput(), { target: { value: 'draft' } })
+      fireEvent.change(promptTextarea(), { target: { value: 'draft' } })
 
-      setVoiceController({ isActive: true, phase: 'listening', canEditInTextBox: true }, 'dictated words')
-      view.rerenderWith({})
+      voice.setController({ isActive: true, phase: 'listening', canEditInTextBox: true }, 'dictated words')
+      await rerenderWith()
       fireEvent.click(screen.getByRole('button', { name: 'Edit in text box' }))
 
-      setVoiceController()
-      view.rerenderWith({})
+      voice.setController({})
+      await rerenderWith()
 
-      expect(promptInput()).toHaveValue('draft dictated words')
+      expect(promptTextarea()).toHaveValue('draft dictated words')
     })
 
     it('focuses the text box with the cursor after the transcript once the conversation closes', async () => {
-      const view = renderComponent({ onVoiceConversationActiveChange: vi.fn() })
+      const voice = voiceHarness()
+      const { rerenderWith } = await renderPromptInput({ voiceConversation: voice.factory })
 
-      fireEvent.change(promptInput(), { target: { value: 'draft' } })
+      fireEvent.change(promptTextarea(), { target: { value: 'draft' } })
 
-      setVoiceController({ isActive: true, phase: 'listening', canEditInTextBox: true }, 'dictated words')
-      view.rerenderWith({})
+      voice.setController({ isActive: true, phase: 'listening', canEditInTextBox: true }, 'dictated words')
+      await rerenderWith()
       fireEvent.click(screen.getByRole('button', { name: 'Edit in text box' }))
 
-      setVoiceController()
-      view.rerenderWith({})
+      voice.setController({})
+      await rerenderWith()
 
       await waitFor(() => {
-        const input = promptInput() as HTMLTextAreaElement
+        const input = promptTextarea()
         expect(input).toHaveFocus()
         expect(input.selectionStart).toBe('draft dictated words'.length)
         expect(input.selectionEnd).toBe('draft dictated words'.length)
@@ -357,202 +186,164 @@ describe('PromptInput voice conversation', () => {
 
   describe('sending a voice turn', () => {
     it('queues the turn while the session is busy and leaves the draft untouched', async () => {
-      const view = renderComponent()
+      const voice = voiceHarness()
+      const { fetchFake, rerenderWith } = await renderPromptInput({ voiceConversation: voice.factory })
 
-      fireEvent.change(promptInput(), { target: { value: 'my draft' } })
+      fireEvent.change(promptTextarea(), { target: { value: 'my draft' } })
 
-      await voiceInput().sendTurn('add a retry', { busy: true })
+      await voice.input().sendTurn('add a retry', { busy: true })
 
-      expect(mocks.useSendPromptMutateAsync).toHaveBeenCalledWith({
-        sessionID: 'test-session',
+      expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/prompt')?.body).toMatchObject({
         text: 'add a retry',
-        model: undefined,
-        agent: 'default',
         delivery: 'queue',
       })
-      view.rerenderWith({})
-      expect(promptInput()).toHaveValue('my draft')
-      expect(mockSetAgent).toHaveBeenCalledWith('test-session', 'default')
+      await rerenderWith()
+      expect(promptTextarea()).toHaveValue('my draft')
+      expect(useSessionAgentStore.getState().agents['test-session']).toBe('build')
     })
 
     it('sends the turn without a delivery while the session is idle', async () => {
-      renderComponent()
+      const voice = voiceHarness()
+      const { fetchFake } = await renderPromptInput({ voiceConversation: voice.factory })
 
-      await voiceInput().sendTurn('add a retry', { busy: false })
+      await voice.input().sendTurn('add a retry', { busy: false })
 
-      expect(mocks.useSendPromptMutateAsync).toHaveBeenCalledWith({
-        sessionID: 'test-session',
+      expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/prompt')?.body).toMatchObject({
         text: 'add a retry',
-        model: undefined,
-        agent: 'default',
       })
+      expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/prompt')?.body).not.toHaveProperty('delivery')
     })
 
     it('rejects when the send fails so the conversation can report it', async () => {
-      mocks.useSendPromptMutateAsync.mockRejectedValue(new Error('offline'))
-      renderComponent()
+      const voice = voiceHarness()
+      await renderPromptInput({
+        voiceConversation: voice.factory,
+        sendPrompt: () => ({ status: 500, json: { error: 'offline' } }),
+      })
 
-      await expect(voiceInput().sendTurn('add a retry', { busy: false })).rejects.toThrow('offline')
+      await expect(voice.input().sendTurn('add a retry', { busy: false })).rejects.toThrow()
     })
   })
 })
 
 describe('PromptInput submission', () => {
-  const defaultProps = {
-    directory: '/test',
-    sessionID: 'test-session',
-    isSessionActive: false,
-    isStreamingResponse: false,
-    onScrollToBottom: vi.fn(),
-    commandActions: createCommandActionsMock(),
-    onPromptChange: vi.fn(),
-  }
+  it('keeps submitted text until send succeeds', async () => {
+    const send = deferredRoute()
+    await renderPromptInput({ sendPrompt: send.respond })
 
-  const renderComponent = (initialOverrides: Partial<typeof defaultProps> = {}) => {
-    const queryClient = createTestQueryClient()
-    const tree = (overrides: Partial<typeof defaultProps> = {}) => (
-      <QueryClientProvider client={queryClient}>
-        <PromptInput {...defaultProps} {...initialOverrides} {...overrides} />
-      </QueryClientProvider>
-    )
-    const view = render(tree())
-    return { ...view, rerenderWith: (overrides: Partial<typeof defaultProps>) => view.rerender(tree(overrides)) }
-  }
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    useComposerDraftStore.setState({ drafts: {} })
-    mocks.useSendPromptMutateAsync.mockResolvedValue({ id: 'inbox_1' })
-    mocks.sendPromptPending.mockReturnValue(false)
-    mocks.useMobile.mockReturnValue(true)
-    mocks.useSttAvailability.mockReturnValue({ isEnabled: true, isSupported: true })
-    mocks.useVoiceConversation.mockReturnValue(createVoiceConversationControllerMock())
-    mocks.useUserBash.mockImplementation((selector) => selector({ addUserBashCommand: vi.fn() }))
-    mocks.useSessionAgentStore.mockImplementation((selector) => selector({ setAgent: vi.fn() }))
-    mocks.useSendErrorStore.mockImplementation((selector) => selector({ errors: {} }))
-  })
-
-  it('keeps submitted text until send succeeds', () => {
-    mocks.useSendPromptMutateAsync.mockImplementation(() => new Promise(() => {}))
-    renderComponent()
-
-    const input = screen.getByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: 'retry me' } })
+    fireEvent.change(promptTextarea(), { target: { value: 'retry me' } })
     fireEvent.click(screen.getByTitle('Send'))
 
-    expect(input).toHaveValue('retry me')
-  })
+    expect(promptTextarea()).toHaveValue('retry me')
 
-  it('clears submitted text after send success', async () => {
-    renderComponent()
-
-    const input = screen.getByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: 'sent message' } })
-    fireEvent.click(screen.getByTitle('Send'))
-
-    await waitFor(() => {
-      expect(input).toHaveValue('')
+    await act(async () => {
+      send.resolve(promptInboxBody('test-session'))
     })
   })
 
-  it('clears submitted text once the server confirms it is processing', async () => {
-    mocks.useSendPromptMutateAsync.mockImplementation(() => new Promise(() => {}))
-    const view = renderComponent()
+  it('clears submitted text after send success', async () => {
+    await renderPromptInput()
 
-    const input = screen.getByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: 'do the thing' } })
+    fireEvent.change(promptTextarea(), { target: { value: 'sent message' } })
     fireEvent.click(screen.getByTitle('Send'))
 
-    expect(input).toHaveValue('do the thing')
+    await waitFor(() => expect(promptTextarea()).toHaveValue(''))
+  })
 
-    view.rerenderWith({ isStreamingResponse: true })
+  it('clears submitted text once the server confirms it is processing', async () => {
+    const send = deferredRoute()
+    const { rerenderWith } = await renderPromptInput({ sendPrompt: send.respond })
 
-    await waitFor(() => {
-      expect(input).toHaveValue('')
+    fireEvent.change(promptTextarea(), { target: { value: 'do the thing' } })
+    fireEvent.click(screen.getByTitle('Send'))
+    expect(promptTextarea()).toHaveValue('do the thing')
+
+    await rerenderWith({ isStreamingResponse: true })
+
+    await waitFor(() => expect(promptTextarea()).toHaveValue(''))
+    await act(async () => {
+      send.resolve(promptInboxBody('test-session'))
     })
   })
 
   it('allows queuing a follow-up while a non-queued send is pending', async () => {
-    mocks.sendPromptPending.mockReturnValue(true)
-    renderComponent({ isStreamingResponse: true })
+    const send = deferredRoute()
+    const { fetchFake, rerenderWith } = await renderPromptInput({ sendPrompt: send.respond })
 
-    const input = screen.getByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: 'follow-up' } })
+    fireEvent.change(promptTextarea(), { target: { value: 'first message' } })
+    fireEvent.click(screen.getByTitle('Send'))
 
+    await rerenderWith({ isStreamingResponse: true })
+
+    fireEvent.change(promptTextarea(), { target: { value: 'follow-up' } })
     const queueButton = screen.getByTitle('Queue message')
     expect(queueButton).not.toBeDisabled()
 
     fireEvent.click(queueButton)
 
-    await waitFor(() => expect(input).toHaveValue(''))
-    const [callArgs] = mocks.useSendPromptMutateAsync.mock.calls[0] as [{ text: string }]
-    expect(callArgs.text).toBe('follow-up')
+    await waitFor(() => expect(fetchFake.findRequests('POST', '/api/opencode/api/session/test-session/prompt')).toHaveLength(2))
+    expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/prompt')?.body).toMatchObject({
+      text: 'follow-up',
+      delivery: 'queue',
+    })
+    await act(async () => {
+      send.resolve(promptInboxBody('test-session'))
+    })
   })
 
-  it('restores a failed queued prompt when the input is empty', async () => {
-    const view = renderComponent({ isStreamingResponse: true })
+  it('restores a failed prompt when the input is empty', async () => {
+    await renderPromptInput()
+    expect(promptTextarea()).toHaveValue('')
 
-    const input = screen.getByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: 'queued message' } })
-    fireEvent.click(screen.getByTitle('Queue message'))
-
-    const [callArgs] = mocks.useSendPromptMutateAsync.mock.calls[0] as [{ text: string }]
-    expect(callArgs.text).toBe('queued message')
-
-    await waitFor(() => {
-      expect(input).toHaveValue('')
+    act(() => {
+      useSendErrorStore.getState().setError({
+        sessionID: 'test-session',
+        title: 'Error',
+        message: 'Queued send failed',
+        failedPrompt: 'queued message',
+      })
     })
 
-    mocks.useSendErrorStore.mockImplementation((selector) => selector({
-      errors: {
-        'test-session': {
-          sessionID: 'test-session',
-          title: 'Error',
-          message: 'Queued send failed',
-          failedPrompt: 'queued message',
-        },
-      },
-    }))
-
-    view.rerenderWith({})
-
-    await waitFor(() => {
-      expect(screen.getByPlaceholderText('Send a message...')).toHaveValue('queued message')
-    })
+    await waitFor(() => expect(promptTextarea()).toHaveValue('queued message'))
   })
 
   it('clears the restored prompt when the send error resolves', async () => {
-    mocks.useSendErrorStore.mockImplementation((selector) => selector({
-      errors: {
-        'test-session': {
-          sessionID: 'test-session',
-          title: 'Connection Failed',
-          message: 'Could not connect.',
-          failedPrompt: 'recovered prompt',
-          kind: 'network',
-        },
-      },
-    }))
-
-    const view = renderComponent()
-
-    await waitFor(() => {
-      expect(screen.getByPlaceholderText('Send a message...')).toHaveValue('recovered prompt')
+    await renderPromptInput()
+    act(() => {
+      useSendErrorStore.getState().setError({
+        sessionID: 'test-session',
+        title: 'Connection Failed',
+        message: 'Could not connect.',
+        failedPrompt: 'recovered prompt',
+        kind: 'network',
+      })
     })
 
-    mocks.useSendErrorStore.mockImplementation((selector) => selector({ errors: {} }))
-    view.rerenderWith({})
+    await waitFor(() => expect(promptTextarea()).toHaveValue('recovered prompt'))
 
-    await waitFor(() => {
-      expect(screen.getByPlaceholderText('Send a message...')).toHaveValue('')
+    act(() => {
+      useSendErrorStore.getState().clearError('test-session')
     })
+
+    await waitFor(() => expect(promptTextarea()).toHaveValue(''))
   })
 
-  it('keeps stop available while active with prompt content', () => {
-    renderComponent({ isSessionActive: true })
+  it('keeps stop available while active with prompt content', async () => {
+    await renderPromptInput({ isSessionActive: true })
 
-    fireEvent.change(screen.getByPlaceholderText('Send a message...'), { target: { value: 'draft while active' } })
+    fireEvent.change(promptTextarea(), { target: { value: 'draft while active' } })
 
     expect(screen.getAllByTitle('Stop').length).toBeGreaterThan(0)
+  })
+
+  it('clears the draft store for the session after a successful send', async () => {
+    await renderPromptInput({ sessionID: 'test-session' })
+
+    fireEvent.change(promptTextarea(), { target: { value: 'stored draft' } })
+    expect(useComposerDraftStore.getState().getDraft('test-session').prompt).toBe('stored draft')
+
+    fireEvent.click(screen.getByTitle('Send'))
+
+    await waitFor(() => expect(useComposerDraftStore.getState().getDraft('test-session').prompt).toBe(''))
   })
 })

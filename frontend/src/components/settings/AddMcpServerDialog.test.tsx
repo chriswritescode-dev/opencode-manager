@@ -1,33 +1,22 @@
-import { describe, it, expect, vi, beforeAll } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { McpServerConfig } from '@opencode-manager/shared/opencode'
+import { installPointerCapture } from '@/test/browserFakes'
+import { renderWithProviders } from '@/test/render'
 import { AddMcpServerDialog } from './AddMcpServerDialog'
-
-vi.mock('@/lib/toast', () => ({
-  showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), loading: vi.fn(), warning: vi.fn(), dismiss: vi.fn() },
-}))
 
 type SubmitHandler = (serverId: string, config: McpServerConfig) => Promise<void>
 
 function renderDialog(onSubmit: SubmitHandler, showConnectToggle?: boolean) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <AddMcpServerDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} showConnectToggle={showConnectToggle} />
-    </QueryClientProvider>,
+  installPointerCapture()
+  return renderWithProviders(
+    <AddMcpServerDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} showConnectToggle={showConnectToggle} />,
+    { auth: false, theme: false, tts: false, toaster: false },
   )
 }
 
 describe('AddMcpServerDialog', () => {
-  beforeAll(() => {
-    Element.prototype.hasPointerCapture ??= () => false
-    Element.prototype.setPointerCapture ??= () => {}
-    Element.prototype.releasePointerCapture ??= () => {}
-    Element.prototype.scrollIntoView ??= () => {}
-  })
-
   it('submits the server ID and a local server config exactly once', async () => {
     const onSubmit = vi.fn<SubmitHandler>().mockResolvedValue(undefined)
     const user = userEvent.setup()

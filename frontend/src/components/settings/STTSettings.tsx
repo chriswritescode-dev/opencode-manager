@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -95,14 +95,19 @@ export function STTSettings() {
     }
   }
 
+  const fetchModelsRef = useRef(fetchModels)
+
+  useEffect(() => {
+    fetchModelsRef.current = fetchModels
+  })
+
   useEffect(() => {
     if (watchProvider === 'external' && watchEndpoint) {
       const timer = setTimeout(() => {
-        fetchModels()
+        fetchModelsRef.current()
       }, 500)
       return () => clearTimeout(timer)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchProvider, watchEndpoint])
 
   const handleTest = async () => {
@@ -151,7 +156,7 @@ export function STTSettings() {
 
   useEffect(() => {
     if (preferences?.stt) {
-      const sttPrefs = preferences.stt as typeof preferences.stt & { model?: string; availableModels?: string[] }
+      const sttPrefs = preferences.stt
       reset({
         enabled: sttPrefs.enabled ?? DEFAULT_STT_CONFIG.enabled,
         provider: sttPrefs.provider ?? DEFAULT_STT_CONFIG.provider,
@@ -165,8 +170,7 @@ export function STTSettings() {
         setAvailableModels(sttPrefs.availableModels)
       }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preferences?.stt])
+  }, [preferences?.stt, reset])
 
   useEffect(() => {
     const timer = setTimeout(() => {

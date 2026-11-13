@@ -1,4 +1,7 @@
 import { pathToFileURL } from 'url'
+import { z } from 'zod'
+import type { JsonValue } from '@opencode-manager/shared/utils'
+import { SANDBOX_SHELL_STATE_KEY } from '../../src/services/opencode-plugin-state'
 
 export type ShellCreateBeforeEvent = {
   command?: string
@@ -8,60 +11,64 @@ export type ShellCreateBeforeEvent = {
   env: Record<string, string | undefined>
 }
 
+export type ToolMetadata = {
+  sandbox?: JsonValue
+  sandboxProvider?: JsonValue
+  path?: JsonValue
+  [key: string]: JsonValue | undefined
+}
+
 export type ToolResult = {
-  metadata?: Record<string, unknown>
-  [key: string]: unknown
+  output?: JsonValue
+  content?: JsonValue
+  metadata?: ToolMetadata
+  [key: string]: JsonValue | ToolMetadata | undefined
 }
 
 export type ToolExecuteAfterEvent = {
   tool: string
   status: 'completed' | 'error'
   result?: ToolResult
-  error?: unknown
+  error?: JsonValue
   id?: string
-  [key: string]: unknown
+  input?: JsonValue
 }
 
 export type GeneratedToolExecuteContext = {
   signal: AbortSignal
   sessionID?: string
   id?: string
-  [key: string]: unknown
 }
 
 export type GeneratedTool = {
   name: string
   description?: string
-  input?: unknown
-  execute?: (input: unknown, context: GeneratedToolExecuteContext) => Promise<unknown>
-  [key: string]: unknown
+  input?: JsonValue
+  execute?: (input: JsonValue, context: GeneratedToolExecuteContext) => Promise<JsonValue>
 }
 
 export type PermissionEvaluateEvent = {
   action: string
-  resources?: ReadonlyArray<string>
-  metadata?: Record<string, unknown>
+  resources?: ReadonlyArray<JsonValue | undefined>
+  metadata?: ToolMetadata
   effect?: string
   message?: string
-  [key: string]: unknown
 }
 
 export type SessionPromptEvent = {
   sessionID: string
-  prompt?: unknown
-  metadata?: Record<string, unknown>
-  [key: string]: unknown
+  prompt?: JsonValue
+  metadata?: ToolMetadata
 }
 
 export type SessionContextEvent = {
   sessionID: string
-  agent?: unknown
-  model?: unknown
-  system?: Array<{ type: string; text: string; [key: string]: unknown }>
-  messages?: unknown
-  tools?: Record<string, { description: string; input?: unknown }>
-  options?: unknown
-  [key: string]: unknown
+  agent?: JsonValue
+  model?: JsonValue
+  system?: Array<{ type: string; text: string }>
+  messages?: JsonValue
+  tools?: Record<string, { description: string; input?: JsonValue }>
+  options?: JsonValue
 }
 
 export type GeneratedPlugin = {
@@ -119,6 +126,8 @@ type PluginContext = {
 
 type PluginCleanup = () => Promise<void> | void
 
+type PluginSetup = (context: PluginContext) => PluginCleanup | void | Promise<PluginCleanup | void>
+
 function createRegistry<Event>(name: string) {
   const callbacks: Array<(event: Event) => Promise<void> | void> = []
   return {
@@ -133,7 +142,6 @@ function createRegistry<Event>(name: string) {
   }
 }
 
-/** Creates a test plugin context with hook registries, event triggers, and tool transforms. */
 function createPluginContext(location: { directory: string }) {
   const shellCreateBefore = createRegistry<ShellCreateBeforeEvent>('create.before')
   const toolExecuteAfter = createRegistry<ToolExecuteAfterEvent>('execute.after')
@@ -167,10 +175,9 @@ function createPluginContext(location: { directory: string }) {
       },
     },
     session: {
-      /** Registers prompt or context callbacks, rejecting unsupported session hook names. */
       hook: async (name, callback) => {
-        if (name === 'prompt') return sessionPrompt.register(callback as SessionPromptHookCallback)
-        if (name === 'context') return sessionContext.register(callback as SessionContextHookCallback)
+        if (name === 'prompt') return sessionPrompt.register(callback)
+        if (name === 'context') return sessionContext.register(callback)
         throw new Error(`unexpected session hook ${name}`)
       },
     },
@@ -203,38 +210,137 @@ function createPluginContext(location: { directory: string }) {
     triggerShellCreateBefore: (event: ShellCreateBeforeEvent) => shellCreateBefore.trigger(event),
     triggerToolExecuteAfter: (event: ToolExecuteAfterEvent) => toolExecuteAfter.trigger(event),
     triggerPermissionEvaluate: (event: PermissionEvaluateEvent) => permissionEvaluate.trigger(event),
-    /** Dispatches a prompt event to the registered session callbacks. */
     triggerSessionPrompt: (event: SessionPromptEvent) => sessionPrompt.trigger(event),
-    /** Dispatches a context event so registered callbacks can update it. */
     triggerSessionContext: (event: SessionContextEvent) => sessionContext.trigger(event),
     applyToolTransforms,
     registeredTools: () => applyToolTransforms([]),
   }
 }
 
+const ImportedPluginModuleSchema = z.object({
+  default: z.unknown(),
+})
+
+const PluginDefinitionSchema = z.object({
+  id: z.string().min(1),
+  setup: z.custom<PluginSetup>((value) => z.function().safeParse(value).success),
+})
+
+const PluginCleanupSchema = z.function().optional()
+
+export const SECRET_MASK_STATE_KEY = 'ocm-secret-masks.v1'
+
+export interface SecretMaskState {
+  byCwd: Map<string, string[]>
+  version: number
+  unionVersion: number
+  union: string[]
+}
+
+export interface SandboxShellPendingMarker {
+  callID: string
+  sessionID?: string
+}
+
+export interface SandboxShellState {
+  pendingMarkers: Map<string, SandboxShellPendingMarker>
+  sandboxedCallIDs: Set<string>
+  foreignOwners: Map<string, string>
+  inFlightSandboxedCommands: Map<string, number>
+}
+
+export interface SandboxClaimRequest {
+  sessionID?: string
+  directory?: string
+}
+
+export interface SandboxClaim {
+  tier: string
+  since: number
+}
+
+export interface SandboxArbiterProvider {
+  id: string
+  claim: (request: SandboxClaimRequest) => Promise<SandboxClaim | null>
+}
+
+export interface SandboxArbiterDecision {
+  owner: string | null
+}
+
+export interface SandboxArbiterRegistry {
+  version: number
+  providers: Map<string, SandboxArbiterProvider>
+  decisions: Map<string, Promise<SandboxArbiterDecision>>
+}
+
+export const SANDBOX_ARBITER_STATE_KEY = 'opencode.sandbox-arbiter.v1'
+
+const SecretMaskStateSchema = z.object({
+  byCwd: z.map(z.string(), z.array(z.string())),
+  version: z.number(),
+  unionVersion: z.number(),
+  union: z.array(z.string()),
+})
+
+const SandboxShellPendingMarkerSchema = z.object({
+  callID: z.string(),
+  sessionID: z.string().optional(),
+})
+
+const SandboxShellStateSchema = z.object({
+  pendingMarkers: z.map(z.string(), SandboxShellPendingMarkerSchema),
+  sandboxedCallIDs: z.set(z.string()),
+  foreignOwners: z.map(z.string(), z.string()),
+  inFlightSandboxedCommands: z.map(z.string(), z.number()),
+})
+
+const SandboxArbiterRegistrySchema = z.custom<SandboxArbiterRegistry>((value) => {
+  if (!(value instanceof Object)) return false
+  if (!('version' in value) || !Number.isFinite(value.version)) return false
+  if (!('providers' in value) || !(value.providers instanceof Map)) return false
+  return 'decisions' in value && value.decisions instanceof Map
+})
+
+function readPluginGlobalState<S extends z.ZodType>(key: string, schema: S): z.infer<S> | undefined {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, Symbol.for(key))
+  const parsed = schema.safeParse(descriptor?.value)
+  return parsed.success ? parsed.data : undefined
+}
+
+export function readSecretMaskState(): SecretMaskState | undefined {
+  return readPluginGlobalState(SECRET_MASK_STATE_KEY, SecretMaskStateSchema)
+}
+
+export function readSandboxShellState(): SandboxShellState | undefined {
+  return readPluginGlobalState(SANDBOX_SHELL_STATE_KEY, SandboxShellStateSchema)
+}
+
+export function readSandboxArbiterRegistry(): SandboxArbiterRegistry | undefined {
+  return readPluginGlobalState(SANDBOX_ARBITER_STATE_KEY, SandboxArbiterRegistrySchema)
+}
+
+export function resetPluginGlobalState(): void {
+  Reflect.deleteProperty(globalThis, Symbol.for(SECRET_MASK_STATE_KEY))
+  Reflect.deleteProperty(globalThis, Symbol.for(SANDBOX_SHELL_STATE_KEY))
+  Reflect.deleteProperty(globalThis, Symbol.for(SANDBOX_ARBITER_STATE_KEY))
+}
+
 let importCount = 0
 
-/** Imports a fresh plugin instance, validates its definition, and runs setup in the test context. */
 export async function loadGeneratedPlugin(file: string, options: LoadGeneratedPluginOptions = {}): Promise<GeneratedPlugin> {
   importCount += 1
-  const imported = (await import(`${pathToFileURL(file).href}?ocm-test=${importCount}`)) as { default?: unknown }
-  const definition = imported.default
-  if (definition === null || typeof definition !== 'object') {
-    throw new Error(`${file} must default-export a plugin definition object`)
+  const imported = ImportedPluginModuleSchema.parse(await import(`${pathToFileURL(file).href}?ocm-test=${importCount}`))
+  const parsedDefinition = PluginDefinitionSchema.safeParse(imported.default)
+  if (!parsedDefinition.success) {
+    throw new Error(`${file} must default-export a plugin definition object with an id and a setup function`)
   }
-  const id = (definition as { id?: unknown }).id
-  const setup = (definition as { setup?: unknown }).setup
-  if (typeof id !== 'string' || id.length === 0) {
-    throw new Error(`${file} must default-export a plugin id`)
-  }
-  if (typeof setup !== 'function') {
-    throw new Error(`${file} must default-export a setup function`)
-  }
+  const definition = parsedDefinition.data
 
   const registrations = createPluginContext({ directory: options.location?.directory ?? process.cwd() })
-  const cleanup = (await (setup as (context: PluginContext) => Promise<PluginCleanup | void> | PluginCleanup | void)(registrations.context)) as PluginCleanup | void
+  const cleanup = PluginCleanupSchema.parse(await definition.setup(registrations.context))
   return {
-    id,
+    id: definition.id,
     triggerShellCreateBefore: registrations.triggerShellCreateBefore,
     triggerToolExecuteAfter: registrations.triggerToolExecuteAfter,
     triggerPermissionEvaluate: registrations.triggerPermissionEvaluate,
@@ -243,7 +349,7 @@ export async function loadGeneratedPlugin(file: string, options: LoadGeneratedPl
     applyToolTransforms: registrations.applyToolTransforms,
     registeredTools: registrations.registeredTools,
     dispose: async () => {
-      if (typeof cleanup === 'function') await cleanup()
+      if (cleanup) await cleanup()
     },
   }
 }

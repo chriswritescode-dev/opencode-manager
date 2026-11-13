@@ -3,13 +3,21 @@ import { RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { onServiceWorkerUpdate, offServiceWorkerUpdate } from '@/lib/serviceWorker'
 
-export function PwaUpdatePrompt() {
+interface PwaUpdatePromptProps {
+  subscribeToUpdate?: typeof onServiceWorkerUpdate
+  unsubscribeFromUpdate?: typeof offServiceWorkerUpdate
+}
+
+export function PwaUpdatePrompt({
+  subscribeToUpdate = onServiceWorkerUpdate,
+  unsubscribeFromUpdate = offServiceWorkerUpdate,
+}: PwaUpdatePromptProps = {}) {
   const [visible, setVisible] = useState(false)
 
   useEffect(() => {
-    onServiceWorkerUpdate(() => setVisible(true))
-    return () => offServiceWorkerUpdate()
-  }, [])
+    subscribeToUpdate(() => setVisible(true))
+    return () => unsubscribeFromUpdate()
+  }, [subscribeToUpdate, unsubscribeFromUpdate])
 
   if (!visible) return null
 

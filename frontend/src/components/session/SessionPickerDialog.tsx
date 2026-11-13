@@ -1,9 +1,11 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { z } from 'zod'
 import { useQuery } from '@tanstack/react-query'
 import { format, startOfDay } from 'date-fns'
 import { ChevronsUpDown, MoreHorizontal, Pin, PinOff, Plus } from 'lucide-react'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
-import { OpenCodeServerProvider, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
+import { useOpenCodeServerId } from '@/contexts/opencode-server-context'
 import { openCodeLocationQueryOptions } from '@/lib/openCodeLocation'
 import type { Repo, Session } from '@/api/types'
 import { ACTIVE_WORK_GROUPS, MS_PER_MINUTE, formatActivityEmptyMessage } from '@/lib/activeWork'
@@ -22,12 +24,8 @@ import { ProjectPickerContent } from '@/components/session/ProjectPickerContent'
 import { AddRepoDialog } from '@/components/repo/AddRepoDialog'
 import { LocalRepoNewSessionButton } from '@/components/navigation/RepoSessionNav'
 import { RemoteProjectNavList } from '@/components/navigation/RemoteProjectNav'
-import {
-  PickerSearchBar,
-  optionId,
-  usePickerCursor,
-  usePickerKeyNav,
-} from '@/components/session/usePickerKeyboardNav'
+import { PickerSearchBar } from '@/components/session/PickerSearchBar'
+import { optionId, usePickerCursor, usePickerKeyNav } from '@/components/session/picker-cursor'
 import { partitionSessions } from '@/components/session/session-partition'
 import { buildRepoByDirectory, isRepoReady } from '@/components/navigation/sidebar-session-tree'
 import { useDeleteSession } from '@/hooks/useOpenCode'
@@ -37,7 +35,7 @@ import { useSessionPins, useToggleSessionPin } from '@/hooks/useSessionPins'
 import { usePersistentBoolean } from '@/hooks/usePersistentBoolean'
 import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
 import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
-import { useShortcutActions } from '@/contexts/KeyboardShortcutsContext'
+import { useShortcutActions } from '@/contexts/keyboard-shortcuts-context'
 import { useSettings } from '@/hooks/useSettings'
 import { buildPinnedSessionKeys, getSessionKey } from '@/lib/sessionKey'
 import { formatShortcutLabel, resolveShortcutBindings } from '@/lib/keyboardShortcuts'
@@ -48,15 +46,17 @@ const ALL_PROJECTS_STORAGE_KEY = 'oc:session-picker:all-projects'
 const UNTITLED_SESSION_TITLE = 'Untitled Session'
 const NEAR_BOTTOM_PX = 240
 
-type SessionPickerTab = 'active' | 'sessions' | 'projects'
+const sessionPickerTabSchema = z.enum(['active', 'sessions', 'projects'])
+
+type SessionPickerTab = z.infer<typeof sessionPickerTabSchema>
 
 const SESSION_PICKER_TABS: SessionPickerTab[] = ['active', 'sessions', 'projects']
 
-const SESSION_PICKER_TAB_LABELS: Record<SessionPickerTab, string> = {
+const SESSION_PICKER_TAB_LABELS = {
   active: 'Activity',
   sessions: 'Sessions',
   projects: 'Projects',
-}
+} satisfies Record<SessionPickerTab, string>
 
 function nextSessionPickerTab(tab: SessionPickerTab, tabs: SessionPickerTab[]): SessionPickerTab {
   const index = tabs.indexOf(tab)
@@ -71,9 +71,7 @@ function sessionsTabLabel(scopeEnabled: boolean, allProjects: boolean): string {
 export interface RemotePickerScope {
   serverId: string
   serverName?: string
-  /** Canonical project directory in view; omitted when the route scopes to the whole server. */
   projectDirectory?: string
-  /** Whether the route's project directory is still resolving, which holds the all-sessions search. */
   isPending?: boolean
 }
 
@@ -1204,17 +1202,12 @@ export interface SessionPickerPanelProps {
   onDeleteActiveSession: () => void
   onSelectRepo: (repo: Repo) => void
   onNavigate: (path: string) => void
-  /** Set on a linked-server route to list that server's sessions instead of Manager repos. */
   remote?: RemotePickerScope
   searchTrailing?: React.ReactNode
   onAddRepo?: () => void
   renderTitle?: (label: string) => React.ReactNode
 }
 
-/**
- * Picker content shared by the desktop dialog and the mobile sheet. A remote scope supplies its own
- * server, so every host reads the linked server's sessions without wrapping the panel itself.
- */
 export function SessionPickerPanel(props: SessionPickerPanelProps) {
   if (!props.remote) return <SessionPickerPanelBody {...props} />
   return (
@@ -1330,12 +1323,6 @@ function SessionPickerPanelBody({
 
   const canToggleScope = scopeEnabled && activeTab === 'sessions'
 
-  /**
-   * The sessions tab re-activates itself to toggle the scope. Pointer activation records whether the
-   * tab was already selected before Radix activates it, so the click that follows only toggles a
-   * tab that was already current. Keyboard activation toggles on Enter/Space directly and suppresses
-   * the click Radix would otherwise synthesize for the same key press.
-   */
   const handleSessionsPointerDown = () => {
     scopePressRef.current = canToggleScope
   }
@@ -1357,7 +1344,10 @@ function SessionPickerPanelBody({
     <>
       <Tabs
         value={activeTab}
-        onValueChange={(value) => setActiveTab(value as SessionPickerTab)}
+        onValueChange={(value) => {
+          const parsedTab = sessionPickerTabSchema.safeParse(value)
+          if (parsedTab.success) setActiveTab(parsedTab.data)
+        }}
         className="flex min-h-0 w-full min-w-0 flex-1 flex-col gap-0"
       >
         <div className="shrink-0 px-4 pt-4 sm:px-0 sm:pt-6">
@@ -1481,8 +1471,8 @@ export function SessionPickerDialog({
         onEscapeKeyDown={() => onOpenChange(false)}
         onOpenAutoFocus={(event) => {
           event.preventDefault()
-          if (!hasFinePointer) {
-            ;(event.currentTarget as HTMLElement).focus()
+          if (!hasFinePointer && event.currentTarget instanceof HTMLElement) {
+            event.currentTarget.focus()
           }
         }}
       >

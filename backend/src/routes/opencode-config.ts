@@ -49,21 +49,14 @@ function mergeMcpServerStatus(views: McpServerView[], status: McpStatusMap) {
   return views.map((view) => {
     const live = status[view.name]
     if (!live) return view
-    return {
-      ...view,
-      status: live.status,
-      ...('error' in live && live.error ? { error: live.error } : {}),
-    }
+    const merged = { ...view, status: live.status }
+    return 'error' in live && live.error ? { ...merged, error: live.error } : merged
   })
 }
 
-/**
- * Maps a config read failure to a JSON error response: 503 when the OpenCode server is unreachable,
- * 502 for other client errors, and 500 otherwise, using `message` as the client-facing text.
- */
-function toClientReadErrorResponse(c: Context, error: unknown, message: string) {
-  if (error instanceof ClientError) {
-    if (error.reason === 'Transport') {
+function toClientReadErrorResponse(c: Context, cause: unknown, message: string) {
+  if (cause instanceof ClientError) {
+    if (cause.reason === 'Transport') {
       return c.json({ error: 'OpenCode server unavailable' }, 503)
     }
     return c.json({ error: message }, 502)
@@ -71,12 +64,6 @@ function toClientReadErrorResponse(c: Context, error: unknown, message: string) 
   return c.json({ error: message }, 500)
 }
 
-/**
- * Serves the OpenCode config read routes (`/`, `/effective`, `/managed`, `/mcp`) and the `PUT` and
- * `PATCH` write routes. Reads and writes take the shared config file lock, `redactSecrets` masks
- * secret values in every response, and a `PATCH` that names config entities is rejected with 409
- * while OpenCode has not yet loaded the saved configuration.
- */
 export function createOpenCodeConfigRoutes(
   settingsService: SettingsService,
   openCodeClient: OpenCodeClient,
@@ -106,7 +93,7 @@ export function createOpenCodeConfigRoutes(
               entry.type === 'document'
                 ? {
                     ...entry,
-                    info: redactOpenCodeConfigContent(entry.info).content as typeof entry.info,
+                    info: redactOpenCodeConfigContent(entry.info).content,
                   }
                 : entry,
             )
@@ -124,7 +111,7 @@ export function createOpenCodeConfigRoutes(
       const info = await readManagedOpenCodeConfig(openCodeClient.api, snapshot.sources)
       return c.json({
         info: options.redactSecrets
-          ? redactOpenCodeConfigContent(info as Record<string, unknown>).content
+          ? redactOpenCodeConfigContent(info).content
           : info,
       })
     } catch (error) {
@@ -205,11 +192,6 @@ export function createOpenCodeConfigRoutes(
   return app
 }
 
-/**
- * Applies a validated config update and maps the outcome to a JSON response, redacting secrets when
- * `redactSecrets` is set and translating conflict, invalid-source, shadowed-removal, redacted-value
- * and schema-validation failures into their matching status codes.
- */
 async function applyUpdate(
   c: Context,
   input: Parameters<typeof applyOpenCodeConfigUpdate>[0],
@@ -221,10 +203,11 @@ async function applyUpdate(
     if (!redactSecrets) {
       return c.json(response.body, response.status)
     }
-    return c.json({
-      ...redactOpenCodeConfigFile(result.config),
-      ...(result.status === 'restart_pending' ? { restartRequired: true } : {}),
-    }, response.status)
+    const redactedConfig = redactOpenCodeConfigFile(result.config)
+    return c.json(
+      result.status === 'restart_pending' ? { ...redactedConfig, restartRequired: true } : redactedConfig,
+      response.status,
+    )
   } catch (error) {
     logger.error('Failed to update OpenCode config:', error)
     if (error instanceof OpenCodeConfigConflictError) {

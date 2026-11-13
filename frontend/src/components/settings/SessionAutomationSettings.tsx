@@ -4,8 +4,8 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   DEFAULT_SESSION_DEFAULTS,
+  SessionPermissionModeSchema,
   type SessionDefaults,
-  type SessionPermissionMode,
 } from '@opencode-manager/shared/schemas'
 
 export function SessionAutomationSettings() {
@@ -39,7 +39,10 @@ export function SessionAutomationSettings() {
         </div>
         <Select
           value={permissionMode}
-          onValueChange={(value) => updateSessionDefaults({ permissionMode: value as SessionPermissionMode })}
+          onValueChange={(value) => {
+            const parsedMode = SessionPermissionModeSchema.safeParse(value)
+            if (parsedMode.success) updateSessionDefaults({ permissionMode: parsedMode.data })
+          }}
         >
           <SelectTrigger id="sessionPermissionMode" className="w-full shrink-0 sm:w-40">
             <SelectValue placeholder="Select a mode" />

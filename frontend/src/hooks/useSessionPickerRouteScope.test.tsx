@@ -1,43 +1,24 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ReactNode } from 'react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { renderHook, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { waitFor } from '@testing-library/react'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { useSidebarServerStore } from '@/stores/sidebarServerStore'
 import { useSessionPickerRouteScope } from './useSessionPickerRouteScope'
+import { createTestQueryClient, renderHookWithProviders } from '@/test/render'
+import type { QueryClient } from '@tanstack/react-query'
+import { makeOpenCodeServer, makeSession } from '@/test/fixtures/api'
+import { createSessionServer } from '@/test/fixtures/sessionServer'
+import type { FetchRoute } from '@/test/fetchFake'
 
-const mocks = vi.hoisted(() => ({
-  getSession: vi.fn(),
-  listProjects: vi.fn(),
-}))
+const hookProviders = {
+  auth: false,
+  theme: false,
+  tts: false,
+  toaster: false,
+} as const
 
-vi.mock('@/api/opencode', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/opencode')>()
-  return { ...actual, getSession: mocks.getSession, listProjects: mocks.listProjects }
-})
-
-vi.mock('@/hooks/useOpenCodeServers', () => ({
-  useOpenCodeServers: () => ({
-    servers: [{ id: 'srv_kitchen', name: 'Kitchen', enabled: true }],
-    isLoading: false,
-  }),
-}))
-
-vi.mock('@/hooks/useSidebarRepoGroups', () => ({
-  useNavigableRepos: () => ({ repos: [], isLoading: false, refetch: vi.fn() }),
-}))
-
-function renderScope(entry: string, seed?: (queryClient: QueryClient) => void) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  seed?.(queryClient)
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[entry]}>{children}</MemoryRouter>
-    </QueryClientProvider>
-  )
-  return renderHook(() => useSessionPickerRouteScope(true), { wrapper })
-}
+const kitchen = makeOpenCodeServer({ id: 'srv_kitchen', name: 'Kitchen' })
+const remoteSessionPath = '/api/opencode/servers/srv_kitchen/api/session/ses_remote'
+const remoteProjectsPath = '/api/opencode/servers/srv_kitchen/api/project'
 
 const kitchenProject = {
   id: 'p1',
@@ -47,20 +28,31 @@ const kitchenProject = {
   sandboxes: [],
 }
 
+function renderScope(entry: string, extraRoutes: FetchRoute[] = [], session = makeSession({
+  id: 'ses_remote',
+  location: { directory: '/home/me/app/packages/web' },
+}), seed?: (queryClient: QueryClient) => void) {
+  const server = createSessionServer({
+    remoteServers: [kitchen],
+    projects: [kitchenProject],
+    remoteSessions: [session],
+  })
+  const queryClient = createTestQueryClient()
+  seed?.(queryClient)
+  return renderHookWithProviders(() => useSessionPickerRouteScope(true), {
+    ...hookProviders,
+    route: entry,
+    queryClient,
+    fetchRoutes: [...extraRoutes, ...server.routes],
+  })
+}
+
 describe('useSessionPickerRouteScope', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     useSidebarServerStore.setState({ serverId: 'srv_kitchen' })
-    mocks.listProjects.mockResolvedValue([])
   })
 
   it('resolves a session subdirectory to the canonical directory of its project', async () => {
-    mocks.getSession.mockResolvedValue({
-      id: 'ses_remote',
-      location: { directory: '/home/me/app/packages/web' },
-    })
-    mocks.listProjects.mockResolvedValue([kitchenProject])
-
     const { result } = renderScope('/servers/srv_kitchen/sessions/ses_remote')
 
     await waitFor(() => expect(result.current.remote?.projectDirectory).toBe('/home/me/app'))
@@ -70,40 +62,41 @@ describe('useSessionPickerRouteScope', () => {
   })
 
   it('falls back to the session directory when no project owns it', async () => {
-    mocks.getSession.mockResolvedValue({
-      id: 'ses_remote',
-      location: { directory: '/home/me/other' },
-    })
-
-    const { result } = renderScope('/servers/srv_kitchen/sessions/ses_remote')
+    const { result } = renderScope(
+      '/servers/srv_kitchen/sessions/ses_remote',
+      [],
+      makeSession({ id: 'ses_remote', location: { directory: '/home/me/other' } }),
+    )
 
     await waitFor(() => expect(result.current.remote?.projectDirectory).toBe('/home/me/other'))
     expect(result.current.remote?.isPending).toBe(false)
   })
 
   it('reports the scope as pending while the session directory resolves', async () => {
-    mocks.getSession.mockReturnValue(new Promise(() => undefined))
-
-    const { result } = renderScope('/servers/srv_kitchen/sessions/ses_remote')
+    const { result } = renderScope('/servers/srv_kitchen/sessions/ses_remote', [
+      { method: 'GET', path: remoteSessionPath, respond: () => new Promise(() => {}) },
+    ])
 
     await waitFor(() => expect(result.current.remote?.isPending).toBe(true))
     expect(result.current.remote?.projectDirectory).toBeUndefined()
   })
 
   it('reuses the session the open page already loaded', async () => {
-    mocks.getSession.mockReturnValue(new Promise(() => undefined))
-    mocks.listProjects.mockResolvedValue([kitchenProject])
-
-    const { result } = renderScope('/servers/srv_kitchen/sessions/ses_remote', (queryClient) => {
-      queryClient.setQueryData(
-        ['opencode', 'session', 'ses_remote', '/home/me/app/packages/web', 'srv_kitchen'],
-        { id: 'ses_remote', location: { directory: '/home/me/app/packages/web' } },
-      )
-    })
+    const { result, fetchFake } = renderScope(
+      '/servers/srv_kitchen/sessions/ses_remote',
+      [{ method: 'GET', path: remoteSessionPath, respond: () => new Promise(() => {}) }],
+      makeSession({ id: 'ses_remote', location: { directory: '/home/me/app/packages/web' } }),
+      (queryClient) => {
+        queryClient.setQueryData(
+          ['opencode', 'session', 'ses_remote', '/home/me/app/packages/web', 'srv_kitchen'],
+          makeSession({ id: 'ses_remote', location: { directory: '/home/me/app/packages/web' } }),
+        )
+      },
+    )
 
     await waitFor(() => expect(result.current.remote?.projectDirectory).toBe('/home/me/app'))
     expect(result.current.remote?.isPending).toBe(false)
-    expect(mocks.getSession).not.toHaveBeenCalled()
+    expect(fetchFake.findRequests('GET', remoteSessionPath)).toHaveLength(0)
   })
 
   it('scopes to the whole server on a route without a session', () => {
@@ -117,10 +110,10 @@ describe('useSessionPickerRouteScope', () => {
   it('resolves no linked-server scope for the local server', () => {
     useSidebarServerStore.setState({ serverId: LOCAL_OPENCODE_SERVER_ID })
 
-    const { result } = renderScope('/repos/5/sessions/ses_local')
+    const { result, fetchFake } = renderScope('/repos/5/sessions/ses_local')
 
     expect(result.current.remote).toBeUndefined()
-    expect(mocks.getSession).not.toHaveBeenCalled()
-    expect(mocks.listProjects).not.toHaveBeenCalled()
+    expect(fetchFake.findRequests('GET', remoteSessionPath)).toHaveLength(0)
+    expect(fetchFake.findRequests('GET', remoteProjectsPath)).toHaveLength(0)
   })
 })

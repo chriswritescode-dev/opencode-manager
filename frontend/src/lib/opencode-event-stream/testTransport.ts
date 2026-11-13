@@ -1,7 +1,9 @@
+import type { SSESubscribeRequest, SSEVisibilityRequest } from '@opencode-manager/shared/schemas'
+import type { JsonValue } from '@opencode-manager/shared/utils'
 import type { EventStreamConnection, EventStreamTransport, EventStreamTransportHandlers } from './types'
 
 export class TestEventStreamTransport implements EventStreamTransport {
-  readonly posts: Array<{ path: string; body: unknown }> = []
+  readonly posts: Array<{ path: string; body: SSESubscribeRequest | SSEVisibilityRequest }> = []
   readonly openedUrls: string[] = []
   closeCount = 0
   private handlers: EventStreamTransportHandlers | null = null
@@ -21,7 +23,7 @@ export class TestEventStreamTransport implements EventStreamTransport {
     return this.connection
   }
 
-  async post(path: string, body: unknown): Promise<boolean> {
+  async post(path: string, body: SSESubscribeRequest | SSEVisibilityRequest): Promise<boolean> {
     this.posts.push({ path, body })
     return true
   }
@@ -34,11 +36,11 @@ export class TestEventStreamTransport implements EventStreamTransport {
     this.connectedPayload({ clientId })
   }
 
-  connectedPayload(payload: unknown): void {
+  connectedPayload(payload: JsonValue): void {
     this.handlers?.onConnected(JSON.stringify(payload))
   }
 
-  message(data: unknown): void {
+  message(data: JsonValue): void {
     this.handlers?.onMessage(JSON.stringify(data))
   }
 
@@ -46,7 +48,7 @@ export class TestEventStreamTransport implements EventStreamTransport {
     this.handlers?.onHeartbeat()
   }
 
-  resync(payload?: unknown): void {
+  resync(payload?: JsonValue): void {
     this.handlers?.onResync(payload === undefined ? undefined : JSON.stringify(payload))
   }
 

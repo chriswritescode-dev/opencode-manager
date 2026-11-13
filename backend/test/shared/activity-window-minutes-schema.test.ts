@@ -15,7 +15,8 @@ describe('ActivityWindowMinutesSchema', () => {
   })
 
   it('rejects a non-option value through UserPreferencesSchema', () => {
-    expect(UserPreferencesSchema.shape.activityWindowMinutes.safeParse(45).success).toBe(false)
-    expect(UserPreferencesSchema.shape.activityWindowMinutes.safeParse(60).success).toBe(true)
+    const PreferencesActivityWindowSchema = UserPreferencesSchema.pick({ activityWindowMinutes: true })
+    expect(PreferencesActivityWindowSchema.safeParse({ activityWindowMinutes: 45 }).success).toBe(false)
+    expect(PreferencesActivityWindowSchema.safeParse({ activityWindowMinutes: 60 }).success).toBe(true)
   })
 })

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import type { Mock } from 'vitest'
 import { waitFor } from '@testing-library/react'
-import { AudioRecorder } from './audioRecorder'
+import { AudioRecorder, type AudioRecorderState } from './audioRecorder'
 
 class FakeMediaRecorder {
   static _instances: FakeMediaRecorder[] = []
@@ -14,13 +15,13 @@ class FakeMediaRecorder {
   }
 
   state: 'inactive' | 'recording' = 'inactive'
-  stream: MediaStream
+  stream: MockStream
   mimeType: string
-  ondataavailable: ((event: BlobEvent) => void) | null = null
+  ondataavailable: ((event: { data: Blob }) => void) | null = null
   onstop: (() => void) | null = null
   onerror: ((event: Event) => void) | null = null
 
-  constructor(stream: MediaStream, options?: MediaRecorderOptions) {
+  constructor(stream: MockStream, options?: MediaRecorderOptions) {
     this.stream = stream
     this.mimeType = options?.mimeType ?? ''
     FakeMediaRecorder._instances.push(this)
@@ -36,31 +37,35 @@ class FakeMediaRecorder {
   }
 }
 
-function createMockTrack(): MediaStreamTrack {
-  return { stop: vi.fn(), kind: 'audio' } as unknown as MediaStreamTrack
+interface MockTrack {
+  stop: Mock<() => void>
 }
 
-function createMockStream(tracks: MediaStreamTrack[] = [createMockTrack()]): MediaStream {
-  return {
-    getTracks: () => tracks,
-    getAudioTracks: () => tracks.filter(t => t.kind === 'audio'),
-    getVideoTracks: () => [],
-    addTrack: vi.fn(),
-    removeTrack: vi.fn(),
-    clone: vi.fn(),
-    getTrackById: vi.fn(),
-    active: true,
-    id: 'mock-stream',
-    onaddtrack: null,
-    onremovetrack: null,
-  } as unknown as MediaStream
+interface MockStream {
+  getTracks: () => MockTrack[]
 }
+
+type GetUserMediaMock = Mock<(constraints?: MediaStreamConstraints) => Promise<MockStream>>
+
+function createMockTrack(): MockTrack {
+  return { stop: vi.fn<() => void>() }
+}
+
+function createMockStream(tracks: MockTrack[] = [createMockTrack()]): MockStream {
+  return { getTracks: () => tracks }
+}
+
+const originalArrayBuffer = Blob.prototype.arrayBuffer
 
 describe('AudioRecorder.isSupported', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
-    delete (Blob.prototype as { arrayBuffer?: unknown }).arrayBuffer
+    Object.defineProperty(Blob.prototype, 'arrayBuffer', {
+      value: originalArrayBuffer,
+      configurable: true,
+      writable: true,
+    })
   })
 
   it('returns true when navigator.mediaDevices.getUserMedia and window.MediaRecorder exist', () => {
@@ -107,14 +112,14 @@ describe('AudioRecorder.isSupported', () => {
 })
 
 describe('AudioRecorder start', () => {
-  let mockGetUserMedia: ReturnType<typeof vi.fn>
-  let mockTrack: ReturnType<typeof createMockTrack>
-  let mockStream: MediaStream
+  let mockGetUserMedia: GetUserMediaMock
+  let mockTrack: MockTrack
+  let mockStream: MockStream
   let recorder: AudioRecorder
-  let onStateChange: ReturnType<typeof vi.fn>
-  let onError: ReturnType<typeof vi.fn>
-  let onDataAvailable: ReturnType<typeof vi.fn>
-  let onNoSpeech: ReturnType<typeof vi.fn>
+  let onStateChange: Mock<(state: AudioRecorderState) => void>
+  let onError: Mock<(message: string) => void>
+  let onDataAvailable: Mock<(blob: Blob) => void>
+  let onNoSpeech: Mock<() => void>
 
   beforeEach(() => {
     FakeMediaRecorder._instances = []
@@ -130,17 +135,17 @@ describe('AudioRecorder start', () => {
 
     mockTrack = createMockTrack()
     mockStream = createMockStream([mockTrack])
-    mockGetUserMedia = vi.fn().mockResolvedValue(mockStream)
+    mockGetUserMedia = vi.fn<(constraints?: MediaStreamConstraints) => Promise<MockStream>>().mockResolvedValue(mockStream)
     Object.defineProperty(navigator, 'mediaDevices', {
       value: { getUserMedia: mockGetUserMedia },
       writable: true,
       configurable: true,
     })
 
-    onStateChange = vi.fn()
-    onError = vi.fn()
-    onDataAvailable = vi.fn()
-    onNoSpeech = vi.fn()
+    onStateChange = vi.fn<(state: AudioRecorderState) => void>()
+    onError = vi.fn<(message: string) => void>()
+    onDataAvailable = vi.fn<(blob: Blob) => void>()
+    onNoSpeech = vi.fn<() => void>()
 
     recorder = new AudioRecorder()
     recorder.setOnStateChange(onStateChange)
@@ -193,13 +198,13 @@ describe('AudioRecorder start', () => {
 })
 
 describe('AudioRecorder stop', () => {
-  let mockGetUserMedia: ReturnType<typeof vi.fn>
-  let mockTrack: ReturnType<typeof createMockTrack>
-  let mockStream: MediaStream
+  let mockGetUserMedia: GetUserMediaMock
+  let mockTrack: MockTrack
+  let mockStream: MockStream
   let recorder: AudioRecorder
-  let onStateChange: ReturnType<typeof vi.fn>
-  let onDataAvailable: ReturnType<typeof vi.fn>
-  let onNoSpeech: ReturnType<typeof vi.fn>
+  let onStateChange: Mock<(state: AudioRecorderState) => void>
+  let onDataAvailable: Mock<(blob: Blob) => void>
+  let onNoSpeech: Mock<() => void>
 
   beforeEach(() => {
     FakeMediaRecorder._instances = []
@@ -212,16 +217,16 @@ describe('AudioRecorder stop', () => {
 
     mockTrack = createMockTrack()
     mockStream = createMockStream([mockTrack])
-    mockGetUserMedia = vi.fn().mockResolvedValue(mockStream)
+    mockGetUserMedia = vi.fn<(constraints?: MediaStreamConstraints) => Promise<MockStream>>().mockResolvedValue(mockStream)
     Object.defineProperty(navigator, 'mediaDevices', {
       value: { getUserMedia: mockGetUserMedia },
       writable: true,
       configurable: true,
     })
 
-    onStateChange = vi.fn()
-    onDataAvailable = vi.fn()
-    onNoSpeech = vi.fn()
+    onStateChange = vi.fn<(state: AudioRecorderState) => void>()
+    onDataAvailable = vi.fn<(blob: Blob) => void>()
+    onNoSpeech = vi.fn<() => void>()
 
     recorder = new AudioRecorder()
     recorder.setOnStateChange(onStateChange)
@@ -239,8 +244,8 @@ describe('AudioRecorder stop', () => {
     const mr = FakeMediaRecorder._instances[0]
     const chunk1 = new Blob(['part1'], { type: 'audio/webm;codecs=opus' })
     const chunk2 = new Blob(['part2'], { type: 'audio/webm;codecs=opus' })
-    mr.ondataavailable?.({ data: chunk1 } as BlobEvent)
-    mr.ondataavailable?.({ data: chunk2 } as BlobEvent)
+    mr.ondataavailable?.({ data: chunk1 })
+    mr.ondataavailable?.({ data: chunk2 })
 
     recorder.stop()
 
@@ -249,7 +254,7 @@ describe('AudioRecorder stop', () => {
     expect(onStateChange).toHaveBeenCalledWith('stopped')
 
     expect(onDataAvailable).toHaveBeenCalledTimes(1)
-    const emittedBlob = onDataAvailable.mock.calls[0][0] as Blob
+    const emittedBlob = onDataAvailable.mock.calls[0][0]
     expect(emittedBlob).toBeInstanceOf(Blob)
     expect(emittedBlob.type).toBe('audio/webm;codecs=opus')
   })
@@ -281,22 +286,22 @@ describe('AudioRecorder stop', () => {
     expect(mr.mimeType).toBe('')
 
     const chunk1 = new Blob(['audio-data'], { type: 'audio/ogg' })
-    mr.ondataavailable?.({ data: chunk1 } as BlobEvent)
+    mr.ondataavailable?.({ data: chunk1 })
 
     recorder.stop()
 
     expect(onDataAvailable).toHaveBeenCalledTimes(1)
-    const emittedBlob = onDataAvailable.mock.calls[0][0] as Blob
+    const emittedBlob = onDataAvailable.mock.calls[0][0]
     expect(emittedBlob.type).toBe('audio/ogg')
   })
 })
 
 describe('AudioRecorder no-speech', () => {
-  let mockGetUserMedia: ReturnType<typeof vi.fn>
-  let mockTrack: ReturnType<typeof createMockTrack>
+  let mockGetUserMedia: GetUserMediaMock
+  let mockTrack: MockTrack
   let recorder: AudioRecorder
-  let onDataAvailable: ReturnType<typeof vi.fn>
-  let onNoSpeech: ReturnType<typeof vi.fn>
+  let onDataAvailable: Mock<(blob: Blob) => void>
+  let onNoSpeech: Mock<() => void>
 
   beforeEach(async () => {
     FakeMediaRecorder._instances = []
@@ -308,15 +313,15 @@ describe('AudioRecorder no-speech', () => {
     })
 
     mockTrack = createMockTrack()
-    mockGetUserMedia = vi.fn().mockResolvedValue(createMockStream([mockTrack]))
+    mockGetUserMedia = vi.fn<(constraints?: MediaStreamConstraints) => Promise<MockStream>>().mockResolvedValue(createMockStream([mockTrack]))
     Object.defineProperty(navigator, 'mediaDevices', {
       value: { getUserMedia: mockGetUserMedia },
       writable: true,
       configurable: true,
     })
 
-    onDataAvailable = vi.fn()
-    onNoSpeech = vi.fn()
+    onDataAvailable = vi.fn<(blob: Blob) => void>()
+    onNoSpeech = vi.fn<() => void>()
 
     recorder = new AudioRecorder()
     recorder.setOnDataAvailable(onDataAvailable)
@@ -339,7 +344,7 @@ describe('AudioRecorder no-speech', () => {
     await recorder.start()
 
     const mr = FakeMediaRecorder._instances[0]
-    mr.ondataavailable?.({ data: new Blob([], { type: 'audio/webm;codecs=opus' }) } as BlobEvent)
+    mr.ondataavailable?.({ data: new Blob([], { type: 'audio/webm;codecs=opus' }) })
 
     recorder.stop()
 
@@ -369,7 +374,7 @@ describe('AudioRecorder no-speech', () => {
     await recorder.start()
 
     const mr = FakeMediaRecorder._instances[0]
-    mr.ondataavailable?.({ data: new Blob(['encoded-silence'], { type: 'audio/webm;codecs=opus' }) } as BlobEvent)
+    mr.ondataavailable?.({ data: new Blob(['encoded-silence'], { type: 'audio/webm;codecs=opus' }) })
 
     recorder.stop()
 
@@ -379,11 +384,11 @@ describe('AudioRecorder no-speech', () => {
 })
 
 describe('AudioRecorder abort and dispose', () => {
-  let mockGetUserMedia: ReturnType<typeof vi.fn>
-  let mockTrack: ReturnType<typeof createMockTrack>
+  let mockGetUserMedia: GetUserMediaMock
+  let mockTrack: MockTrack
   let recorder: AudioRecorder
-  let onDataAvailable: ReturnType<typeof vi.fn>
-  let onStateChange: ReturnType<typeof vi.fn>
+  let onDataAvailable: Mock<(blob: Blob) => void>
+  let onStateChange: Mock<(state: AudioRecorderState) => void>
 
   beforeEach(async () => {
     FakeMediaRecorder._instances = []
@@ -395,15 +400,15 @@ describe('AudioRecorder abort and dispose', () => {
     })
 
     mockTrack = createMockTrack()
-    mockGetUserMedia = vi.fn().mockResolvedValue(createMockStream([mockTrack]))
+    mockGetUserMedia = vi.fn<(constraints?: MediaStreamConstraints) => Promise<MockStream>>().mockResolvedValue(createMockStream([mockTrack]))
     Object.defineProperty(navigator, 'mediaDevices', {
       value: { getUserMedia: mockGetUserMedia },
       writable: true,
       configurable: true,
     })
 
-    onDataAvailable = vi.fn()
-    onStateChange = vi.fn()
+    onDataAvailable = vi.fn<(blob: Blob) => void>()
+    onStateChange = vi.fn<(state: AudioRecorderState) => void>()
 
     recorder = new AudioRecorder()
     recorder.setOnDataAvailable(onDataAvailable)
@@ -418,7 +423,7 @@ describe('AudioRecorder abort and dispose', () => {
     await recorder.start()
 
     const mr = FakeMediaRecorder._instances[0]
-    mr.ondataavailable?.({ data: new Blob(['audio-data']) } as BlobEvent)
+    mr.ondataavailable?.({ data: new Blob(['audio-data']) })
 
     recorder.abort()
 
@@ -431,7 +436,7 @@ describe('AudioRecorder abort and dispose', () => {
     await recorder.start()
 
     const mr = FakeMediaRecorder._instances[0]
-    mr.ondataavailable?.({ data: new Blob(['audio-data']) } as BlobEvent)
+    mr.ondataavailable?.({ data: new Blob(['audio-data']) })
 
     recorder.dispose()
 
@@ -443,8 +448,8 @@ describe('AudioRecorder abort and dispose', () => {
 
 describe('AudioRecorder error handling', () => {
   let recorder: AudioRecorder
-  let onError: ReturnType<typeof vi.fn>
-  let onStateChange: ReturnType<typeof vi.fn>
+  let onError: Mock<(message: string) => void>
+  let onStateChange: Mock<(state: AudioRecorderState) => void>
 
   beforeEach(() => {
     Object.defineProperty(window, 'MediaRecorder', {
@@ -458,8 +463,8 @@ describe('AudioRecorder error handling', () => {
       configurable: true,
     })
 
-    onError = vi.fn()
-    onStateChange = vi.fn()
+    onError = vi.fn<(message: string) => void>()
+    onStateChange = vi.fn<(state: AudioRecorderState) => void>()
 
     recorder = new AudioRecorder()
     recorder.setOnError(onError)

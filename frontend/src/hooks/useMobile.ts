@@ -1,17 +1,14 @@
 import { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react'
-import { useSwipeNavigation } from '@/contexts/SwipeNavigationContext'
+import { useSwipeNavigation } from '@/contexts/swipe-navigation-context'
 
-/** Returns whether the viewport is narrower than 768 pixels, or false without a browser window. */
 export function isMobileViewport(): boolean {
-  return typeof window !== 'undefined' ? window.innerWidth < 768 : false
+  return 'window' in globalThis ? window.innerWidth < 768 : false
 }
 
-/** Tracks whether the current viewport is mobile, updating the value on window resize. */
 export function useMobile() {
   const [isMobile, setIsMobile] = useState(isMobileViewport)
 
   useEffect(() => {
-    /** Refreshes the mobile state from the current viewport width. */
     const checkMobile = () => {
       setIsMobile(isMobileViewport())
     }
@@ -110,7 +107,7 @@ function useSwipeHandlers(
     const touch = e.touches[0]
 
     if (direction === 'vertical') {
-      const target = e.target as Element
+      const target = e.target instanceof Element ? e.target : null
       let scrollable: Element | null = target
       while (scrollable && scrollable !== e.currentTarget) {
         if (scrollable.scrollHeight > scrollable.clientHeight) {

@@ -7,12 +7,6 @@ import {
 } from '@opencode-manager/shared/opencode'
 import type { SSEEvent } from './sse-aggregator'
 
-/**
- * A goal outcome observed for a session, ready to be turned into a notification.
- *
- * `directory` is the working directory to attribute the outcome to, preferring the
- * observer's directory over the event location.
- */
 export interface SessionGoalOutcome {
   serverId: string
   sessionId: string
@@ -20,23 +14,9 @@ export interface SessionGoalOutcome {
   goal: GoalState
 }
 
-/**
- * Tracks the last goal state seen per session so each goal outcome is reported once.
- *
- * State is in-memory only and keyed by server and session separated by a NUL
- * character, which cannot appear in either id. Nothing is persisted or written to
- * the database, so a fresh tracker reports the first outcome it sees.
- */
 export class GoalOutcomeTracker {
   private readonly observed = new Map<string, { id: string; status: GoalStatus }>()
 
-  /**
-   * Records a goal change and returns the outcome it produces, if any.
-   *
-   * Returns an outcome only when the goal reached a terminal state and that exact
-   * goal id and status were not already seen for the session. A deleted session, a
-   * cleared goal, or a missing goal reports no outcome and forgets the stored state.
-   */
   observe(serverId: string, directory: string | null, event: SSEEvent): SessionGoalOutcome | null {
     if (event.type === 'session.deleted') {
       const sessionId = sessionIDFromEvent(event)

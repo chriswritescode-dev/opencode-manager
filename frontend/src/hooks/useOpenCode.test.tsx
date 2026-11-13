@@ -1,167 +1,117 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook, waitFor } from '@testing-library/react'
-import type { ReactNode } from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, screen, waitFor } from '@testing-library/react'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { SessionInfo } from '@opencode-manager/shared/opencode'
-import { useChildSessionReconciliation, useCreateSession, useDeleteSession, useSession, useSessionsAcrossDirectories } from './useOpenCode'
+import {
+  useChildSessionReconciliation,
+  useCreateSession,
+  useDeleteSession,
+  useSession,
+  useSessionsAcrossDirectories,
+} from './useOpenCode'
 import { FetchError } from '../api/fetchWrapper'
-import { showToast } from '../lib/toast'
 import { useSessionStatus } from '../stores/sessionStatusStore'
+import { renderHookWithProviders } from '@/test/render'
+import { makeSession } from '@/test/fixtures/api'
+import type { FetchRoute, FetchRouteResult } from '@/test/fetchFake'
 
-const mocks = vi.hoisted(() => ({
-  listSessionPage: vi.fn(),
-  deleteSession: vi.fn(),
-  createSession: vi.fn(),
-  getSession: vi.fn(),
-}))
+const SESSION_PATH = '/api/opencode/api/session'
 
-vi.mock('../lib/toast', () => ({
-  showToast: {
-    success: vi.fn(),
-    error: vi.fn(),
-  },
-}))
+const hookProviders = {
+  auth: false,
+  theme: false,
+  tts: false,
+} as const
 
-vi.mock('@/api/opencode', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/opencode')>()
-  mocks.getSession.mockImplementation(actual.getSession)
-  return {
-    ...actual,
-    listSessionPage: mocks.listSessionPage,
-    deleteSession: mocks.deleteSession,
-    createSession: mocks.createSession,
-    getSession: mocks.getSession,
-  }
-})
-
-const sessionInfo = (id: string, directory: string, updated = 1000): SessionInfo => ({
-  id,
-  projectID: 'proj_1',
-  title: `Session ${id}`,
-  time: { created: 1000, updated },
-  location: { directory },
-  cost: 0,
-  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-})
-
-const createWrapper = (queryClient: QueryClient) => {
-  return ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  )
+function sessionInfo(id: string, directory: string, updated = 1000): SessionInfo {
+  return makeSession({ id, title: `Session ${id}`, location: { directory }, time: { created: 1000, updated } })
 }
 
-const createQueryClient = () => new QueryClient({
-  defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-})
+function deferred<T>() {
+  let resolve: (value: T) => void = () => {}
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
+function sessionListRoute(respond: FetchRoute['respond']): FetchRoute {
+  return { method: 'GET', path: SESSION_PATH, respond }
+}
+
+function requestDirectories(fetchFake: ReturnType<typeof import('@/test/fetchFake').createFetchFake>): string[] {
+  return fetchFake.findRequests('GET', SESSION_PATH).map((request) => request.searchParams.get('directory') ?? '')
+}
 
 describe('useSessionsAcrossDirectories', () => {
-  const fetchMock = vi.fn()
-
-  beforeEach(() => {
-    mocks.listSessionPage.mockReset()
-    mocks.deleteSession.mockReset()
-    fetchMock.mockReset()
-    vi.stubGlobal('fetch', fetchMock)
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
-  it('pages sessions across two directories through the V2 facade', async () => {
-    mocks.listSessionPage.mockImplementation(async ({ directory, cursor }: { directory: string; cursor?: string }) => {
-      if (cursor === 'cursor_a') {
-        return { items: [sessionInfo('ses_a2', '/w/a', 2000)] }
-      }
-      return directory === '/w/a'
-        ? { items: [sessionInfo('ses_a1', '/w/a')], nextCursor: 'cursor_a' }
-        : { items: [sessionInfo('ses_b1', '/w/b')] }
+  it('pages sessions across two directories through the facade', async () => {
+    const { result, fetchFake } = renderHookWithProviders(() => useSessionsAcrossDirectories(['/w/a', '/w/b']), {
+      ...hookProviders,
+      fetchRoutes: [
+        sessionListRoute((request) => {
+          const directory = request.searchParams.get('directory')
+          if (request.searchParams.get('cursor') === 'cursor_a') {
+            return { json: { data: [sessionInfo('ses_a2', '/w/a', 2000)], cursor: {} } }
+          }
+          return directory === '/w/a'
+            ? { json: { data: [sessionInfo('ses_a1', '/w/a')], cursor: { next: 'cursor_a' } } }
+            : { json: { data: [sessionInfo('ses_b1', '/w/b')], cursor: {} } }
+        }),
+      ],
     })
 
-    const queryClient = createQueryClient()
-    const { result } = renderHook(
-      () => useSessionsAcrossDirectories(['/w/a', '/w/b']),
-      { wrapper: createWrapper(queryClient) },
-    )
-
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false)
-    })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
 
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_a1', 'ses_b1'])
     expect(result.current.hasNextPage).toBe(true)
-    expect(mocks.listSessionPage).toHaveBeenCalledWith({
-      directory: '/w/a',
-      limit: 25,
-      order: 'desc',
-      search: undefined,
-      parentID: null,
-    }, 'local')
-    expect(mocks.listSessionPage).toHaveBeenCalledWith({
-      directory: '/w/b',
-      limit: 25,
-      order: 'desc',
-      search: undefined,
-      parentID: null,
-    }, 'local')
+    expect(requestDirectories(fetchFake).sort()).toEqual(['/w/a', '/w/b'])
 
     await act(async () => {
       await result.current.fetchNextPage()
     })
 
-    await waitFor(() => {
-      expect(result.current.data).toHaveLength(3)
-    })
+    await waitFor(() => expect(result.current.data).toHaveLength(3))
 
-    expect(mocks.listSessionPage).toHaveBeenCalledWith({ directory: '/w/a', cursor: 'cursor_a', parentID: null }, 'local')
+    const pageRequest = fetchFake.lastRequest('GET', SESSION_PATH)
+    expect(pageRequest?.searchParams.get('directory')).toBe('/w/a')
+    expect(pageRequest?.searchParams.get('cursor')).toBe('cursor_a')
+    expect(pageRequest?.searchParams.get('parentID')).toBe('null')
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_a1', 'ses_b1', 'ses_a2'])
   })
 
   it('passes the trimmed search to every directory page', async () => {
-    mocks.listSessionPage.mockResolvedValue({ items: [] })
-
-    const queryClient = createQueryClient()
-    renderHook(
+    const { fetchFake } = renderHookWithProviders(
       () => useSessionsAcrossDirectories(['/w/a'], { search: '  deploy  ' }),
-      { wrapper: createWrapper(queryClient) },
+      {
+        ...hookProviders,
+        fetchRoutes: [sessionListRoute(() => ({ json: { data: [], cursor: {} } }))],
+      },
     )
 
-    await waitFor(() => {
-      expect(mocks.listSessionPage).toHaveBeenCalledWith({
-        directory: '/w/a',
-        limit: 25,
-        order: 'desc',
-        search: 'deploy',
-        parentID: null,
-      }, 'local')
-    })
+    await waitFor(() => expect(fetchFake.findRequests('GET', SESSION_PATH)).toHaveLength(1))
+    expect(fetchFake.lastRequest('GET', SESSION_PATH)?.searchParams.get('search')).toBe('deploy')
+    expect(fetchFake.lastRequest('GET', SESSION_PATH)?.searchParams.get('parentID')).toBe('null')
   })
 
   it('issues one call per page across all directories and paginates by cursor', async () => {
-    mocks.listSessionPage.mockImplementation(async ({ cursor }: { cursor?: string }) => {
-      if (cursor === 'cursor_all') {
-        return { items: [sessionInfo('ses_all2', '/w/b', 2000)] }
-      }
-      return { items: [sessionInfo('ses_all1', '/w/a')], nextCursor: 'cursor_all' }
-    })
-
-    const queryClient = createQueryClient()
-    const { result } = renderHook(
+    const { result, fetchFake } = renderHookWithProviders(
       () => useSessionsAcrossDirectories(['/w/a', '/w/b'], { allDirectories: true }),
-      { wrapper: createWrapper(queryClient) },
+      {
+        ...hookProviders,
+        fetchRoutes: [
+          sessionListRoute((request) => {
+            if (request.searchParams.get('cursor') === 'cursor_all') {
+              return { json: { data: [sessionInfo('ses_all2', '/w/b', 2000)], cursor: {} } }
+            }
+            return { json: { data: [sessionInfo('ses_all1', '/w/a')], cursor: { next: 'cursor_all' } } }
+          }),
+        ],
+      },
     )
 
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false)
-    })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
 
-    expect(mocks.listSessionPage).toHaveBeenCalledTimes(1)
-    expect(mocks.listSessionPage).toHaveBeenCalledWith({
-      limit: 25,
-      order: 'desc',
-      search: undefined,
-      parentID: null,
-    }, 'local')
+    expect(fetchFake.findRequests('GET', SESSION_PATH)).toHaveLength(1)
+    expect(fetchFake.lastRequest('GET', SESSION_PATH)?.searchParams.get('directory')).toBeNull()
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_all1'])
     expect(result.current.hasNextPage).toBe(true)
 
@@ -169,308 +119,235 @@ describe('useSessionsAcrossDirectories', () => {
       await result.current.fetchNextPage()
     })
 
-    await waitFor(() => {
-      expect(result.current.data).toHaveLength(2)
-    })
+    await waitFor(() => expect(result.current.data).toHaveLength(2))
 
-    expect(mocks.listSessionPage).toHaveBeenCalledTimes(2)
-    expect(mocks.listSessionPage).toHaveBeenLastCalledWith({ cursor: 'cursor_all', parentID: null }, 'local')
+    expect(fetchFake.findRequests('GET', SESSION_PATH)).toHaveLength(2)
+    expect(fetchFake.lastRequest('GET', SESSION_PATH)?.searchParams.get('cursor')).toBe('cursor_all')
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_all1', 'ses_all2'])
   })
 
   it('queries all directories when allDirectories is set without a directory scope', async () => {
-    mocks.listSessionPage.mockResolvedValue({ items: [sessionInfo('ses_all', '/w/a')] })
-
-    const queryClient = createQueryClient()
-    const { result } = renderHook(
+    const { result, fetchFake } = renderHookWithProviders(
       () => useSessionsAcrossDirectories([], { allDirectories: true }),
-      { wrapper: createWrapper(queryClient) },
+      {
+        ...hookProviders,
+        fetchRoutes: [sessionListRoute(() => ({ json: { data: [sessionInfo('ses_all', '/w/a')], cursor: {} } }))],
+      },
     )
 
     expect(result.current.isPending).toBe(true)
 
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false)
-    })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
 
     expect(result.current.isPending).toBe(false)
-    expect(mocks.listSessionPage).toHaveBeenCalledWith({
-      limit: 25,
-      order: 'desc',
-      search: undefined,
-      parentID: null,
-    }, 'local')
+    expect(fetchFake.lastRequest('GET', SESSION_PATH)?.searchParams.get('directory')).toBeNull()
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_all'])
   })
 
-  it('requests child sessions and records includeChildren in the query key', async () => {
-    mocks.listSessionPage.mockResolvedValue({ items: [sessionInfo('ses_child', '/w/a')] })
-
-    const queryClient = createQueryClient()
-    const { result } = renderHook(
-      () => useSessionsAcrossDirectories(['/w/a'], { includeChildren: true }),
-      { wrapper: createWrapper(queryClient) },
+  it('requests root-only and include-children lists as distinct cache entries', async () => {
+    const { queryClient, fetchFake } = renderHookWithProviders(
+      () => ({
+        rootOnly: useSessionsAcrossDirectories(['/w/a']),
+        withChildren: useSessionsAcrossDirectories(['/w/a'], { includeChildren: true }),
+      }),
+      {
+        ...hookProviders,
+        fetchRoutes: [sessionListRoute(() => ({ json: { data: [], cursor: {} } }))],
+      },
     )
 
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false)
-    })
+    await waitFor(() => expect(fetchFake.findRequests('GET', SESSION_PATH)).toHaveLength(2))
 
-    expect(mocks.listSessionPage).toHaveBeenCalledWith({
-      directory: '/w/a',
-      limit: 25,
-      order: 'desc',
-      search: undefined,
-    }, 'local')
-    expect(queryClient.getQueryCache().getAll()[0]?.queryKey).toEqual([
-      'opencode',
-      'sessions',
-      '/w/a',
-      {
-        search: undefined,
-        limit: 25,
-        allDirectories: false,
-        project: undefined,
-        subpath: undefined,
-        includeChildren: true,
-      },
-    ])
-  })
-
-  it('keeps root-only and include-children lists in distinct cache entries', async () => {
-    mocks.listSessionPage.mockResolvedValue({ items: [] })
-
-    const queryClient = createQueryClient()
-    const wrapper = createWrapper(queryClient)
-    renderHook(() => useSessionsAcrossDirectories(['/w/a']), { wrapper })
-    renderHook(() => useSessionsAcrossDirectories(['/w/a'], { includeChildren: true }), { wrapper })
-
-    await waitFor(() => {
-      expect(mocks.listSessionPage).toHaveBeenCalledTimes(2)
-    })
-
-    const optionObjects = queryClient
-      .getQueryCache()
-      .getAll()
-      .map((query) => query.queryKey[3] as { includeChildren?: boolean })
-    expect(optionObjects.some((options) => options.includeChildren === true)).toBe(true)
-    expect(optionObjects.some((options) => options.includeChildren === false)).toBe(true)
+    const parentIdFilters = fetchFake.findRequests('GET', SESSION_PATH).map(
+      (request) => request.searchParams.get('parentID'),
+    )
+    expect(parentIdFilters.sort()).toEqual(['null', null])
+    const optionKeys = queryClient.getQueryCache().getAll().map((query) => query.queryKey[3])
+    expect(optionKeys).toHaveLength(2)
   })
 
   it('pages a project scope through one cursor query with project and subpath', async () => {
-    mocks.listSessionPage.mockImplementation(async ({ cursor }: { cursor?: string }) => {
-      if (cursor === 'cursor_project') {
-        return { items: [sessionInfo('ses_wt', '/w/worktrees/alpha-feature', 2000)] }
-      }
-      return { items: [sessionInfo('ses_root', '/w/a')], nextCursor: 'cursor_project' }
-    })
-
-    const queryClient = createQueryClient()
-    const { result } = renderHook(
+    const { result, fetchFake } = renderHookWithProviders(
       () => useSessionsAcrossDirectories(['/w/a'], { project: { id: 'proj_x', subpath: '' } }),
-      { wrapper: createWrapper(queryClient) },
+      {
+        ...hookProviders,
+        fetchRoutes: [
+          sessionListRoute((request) => {
+            if (request.searchParams.get('cursor') === 'cursor_project') {
+              return { json: { data: [sessionInfo('ses_wt', '/w/worktrees/alpha-feature', 2000)], cursor: {} } }
+            }
+            return { json: { data: [sessionInfo('ses_root', '/w/a')], cursor: { next: 'cursor_project' } } }
+          }),
+        ],
+      },
     )
 
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false)
-    })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
 
-    expect(mocks.listSessionPage).toHaveBeenCalledTimes(1)
-    expect(mocks.listSessionPage).toHaveBeenCalledWith({
-      limit: 25,
-      order: 'desc',
-      search: undefined,
-      project: 'proj_x',
-      subpath: '',
-      parentID: null,
-    }, 'local')
+    expect(fetchFake.findRequests('GET', SESSION_PATH)).toHaveLength(1)
+    const projectRequest = fetchFake.lastRequest('GET', SESSION_PATH)
+    expect(projectRequest?.searchParams.get('project')).toBe('proj_x')
+    expect(projectRequest?.searchParams.get('subpath')).toBe('')
+    expect(projectRequest?.searchParams.get('directory')).toBeNull()
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_root'])
-    expect(result.current.hasNextPage).toBe(true)
 
     await act(async () => {
       await result.current.fetchNextPage()
     })
 
-    await waitFor(() => {
-      expect(result.current.data).toHaveLength(2)
-    })
-
-    expect(mocks.listSessionPage).toHaveBeenCalledTimes(2)
-    expect(mocks.listSessionPage).toHaveBeenLastCalledWith({ cursor: 'cursor_project', parentID: null }, 'local')
+    await waitFor(() => expect(result.current.data).toHaveLength(2))
+    expect(fetchFake.findRequests('GET', SESSION_PATH)).toHaveLength(2)
+    expect(fetchFake.lastRequest('GET', SESSION_PATH)?.searchParams.get('cursor')).toBe('cursor_project')
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_root', 'ses_wt'])
   })
 
-  it('deletes each session through the facade and removes it from cached lists without invalidating', async () => {
-    mocks.deleteSession.mockResolvedValue(undefined)
+  it('deletes a session through the facade and removes it from the rendered list without refetching', async () => {
+    const { result, fetchFake } = renderHookWithProviders(
+      () => ({
+        list: useSessionsAcrossDirectories(['/w/a']),
+        remove: useDeleteSession(['/w/a']),
+      }),
+      {
+        ...hookProviders,
+        fetchRoutes: [
+          sessionListRoute(() => ({
+            json: { data: [sessionInfo('ses_a1', '/w/a'), sessionInfo('ses_a2', '/w/a')], cursor: {} },
+          })),
+          { method: 'DELETE', path: `${SESSION_PATH}/ses_a1`, respond: () => ({ status: 204 }) },
+        ],
+      },
+    )
 
-    const queryClient = createQueryClient()
-    const listKey = ['opencode', 'sessions', '/w/a', { search: undefined, limit: 25, allDirectories: false }]
-    queryClient.setQueryData(listKey, {
-      pages: [{
-        items: [sessionInfo('ses_a1', '/w/a'), sessionInfo('ses_a2', '/w/a')],
-        nextParam: undefined,
-      }],
-      pageParams: [undefined],
-    })
-
-    const { result } = renderHook(() => useDeleteSession(['/w/a']), {
-      wrapper: createWrapper(queryClient),
-    })
+    await waitFor(() => expect(result.current.list.data.map((session) => session.id)).toEqual(['ses_a1', 'ses_a2']))
 
     await act(async () => {
-      await result.current.mutateAsync({ id: 'ses_a1', directory: '/w/a' })
+      await result.current.remove.mutateAsync({ id: 'ses_a1', directory: '/w/a' })
     })
 
-    expect(mocks.deleteSession).toHaveBeenCalledWith('ses_a1', 'local')
-    const cached = queryClient.getQueryData<{ pages: Array<{ items: SessionInfo[] }> }>(listKey)
-    expect(cached?.pages[0].items.map((session) => session.id)).toEqual(['ses_a2'])
-    expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(false)
+    await waitFor(() => expect(result.current.list.data.map((session) => session.id)).toEqual(['ses_a2']))
+    expect(fetchFake.findRequests('GET', SESSION_PATH)).toHaveLength(1)
+    expect(await screen.findByText('Session deleted')).toBeInTheDocument()
   })
 
-  it('invalidates the session list cache when a delete fails', async () => {
-    mocks.deleteSession.mockRejectedValue(new Error('nope'))
+  it('refreshes the session list when a delete fails', async () => {
+    const { result, fetchFake } = renderHookWithProviders(
+      () => ({
+        list: useSessionsAcrossDirectories(['/w/a']),
+        remove: useDeleteSession(['/w/a']),
+      }),
+      {
+        ...hookProviders,
+        fetchRoutes: [
+          sessionListRoute(() => ({ json: { data: [sessionInfo('ses_a1', '/w/a')], cursor: {} } })),
+          { method: 'DELETE', path: `${SESSION_PATH}/ses_a1`, respond: () => ({ status: 500, json: { error: 'nope' } }) },
+        ],
+      },
+    )
 
-    const queryClient = createQueryClient()
-    const listKey = ['opencode', 'sessions', '/w/a', { search: undefined, limit: 25, allDirectories: false }]
-    queryClient.setQueryData(listKey, {
-      pages: [{ items: [sessionInfo('ses_a1', '/w/a')], nextParam: undefined }],
-      pageParams: [undefined],
-    })
-
-    const { result } = renderHook(() => useDeleteSession(['/w/a']), {
-      wrapper: createWrapper(queryClient),
-    })
+    await waitFor(() => expect(result.current.list.data).toHaveLength(1))
 
     await act(async () => {
       await expect(
-        result.current.mutateAsync({ id: 'ses_a1', directory: '/w/a' }),
+        result.current.remove.mutateAsync({ id: 'ses_a1', directory: '/w/a' }),
       ).rejects.toThrow('Failed to delete 1 session(s)')
     })
 
-    await waitFor(() => {
-      expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true)
-    })
+    await waitFor(() => expect(fetchFake.findRequests('GET', SESSION_PATH)).toHaveLength(2))
   })
 
   it('does not keep previous results across a search change unless requested', async () => {
-    let resolveSearch: ((value: { items: SessionInfo[] }) => void) | undefined
-    mocks.listSessionPage.mockImplementation(({ search }: { search?: string }) => {
-      if (search === 'deploy') {
-        return new Promise<{ items: SessionInfo[] }>((resolve) => { resolveSearch = resolve })
-      }
-      return Promise.resolve({ items: [sessionInfo('ses_a1', '/w/a')] })
-    })
-
-    const queryClient = createQueryClient()
-    const { result, rerender } = renderHook(
-      (props: { search?: string }) => useSessionsAcrossDirectories(['/w/a'], { search: props.search }),
-      { wrapper: createWrapper(queryClient), initialProps: { search: undefined as string | undefined } },
+    const pendingSearch = deferred<FetchRouteResult>()
+    const { result, rerender } = renderHookWithProviders(
+      () => useSessionsAcrossDirectories(['/w/a'], { search: 'deploy' }),
+      {
+        ...hookProviders,
+        fetchRoutes: [
+          sessionListRoute((request) => (request.searchParams.get('search') === 'deploy'
+            ? pendingSearch.promise
+            : { json: { data: [sessionInfo('ses_a1', '/w/a')], cursor: {} } })),
+        ],
+      },
     )
-
-    await waitFor(() => {
-      expect(result.current.data.map((session) => session.id)).toEqual(['ses_a1'])
-    })
-
-    rerender({ search: 'deploy' })
-
-    await waitFor(() => expect(resolveSearch).toBeDefined())
 
     expect(result.current.isPlaceholderData).toBe(false)
     expect(result.current.isLoading).toBe(true)
     expect(result.current.data).toHaveLength(0)
 
     await act(async () => {
-      resolveSearch?.({ items: [sessionInfo('ses_b1', '/w/a')] })
+      pendingSearch.resolve({ json: { data: [sessionInfo('ses_b1', '/w/a')], cursor: {} } })
     })
 
-    await waitFor(() => {
-      expect(result.current.data.map((session) => session.id)).toEqual(['ses_b1'])
-    })
+    await waitFor(() => expect(result.current.data.map((session) => session.id)).toEqual(['ses_b1']))
+    rerender()
   })
 
   it('keeps previous results across a search change when requested', async () => {
-    let resolveSearch: ((value: { items: SessionInfo[] }) => void) | undefined
-    mocks.listSessionPage.mockImplementation(({ search }: { search?: string }) => {
-      if (search === 'deploy') {
-        return new Promise<{ items: SessionInfo[] }>((resolve) => { resolveSearch = resolve })
-      }
-      return Promise.resolve({ items: [sessionInfo('ses_a1', '/w/a')] })
-    })
-
-    const queryClient = createQueryClient()
-    const { result, rerender } = renderHook(
-      (props: { search?: string; keepPreviousResults?: boolean }) =>
-        useSessionsAcrossDirectories(['/w/a'], {
-          search: props.search,
-          keepPreviousResults: props.keepPreviousResults,
-        }),
+    const pendingSearch = deferred<FetchRouteResult>()
+    let search: string | undefined = undefined
+    const { result, rerender } = renderHookWithProviders(
+      () => useSessionsAcrossDirectories(['/w/a'], { search, keepPreviousResults: true }),
       {
-        wrapper: createWrapper(queryClient),
-        initialProps: { search: undefined as string | undefined, keepPreviousResults: true },
+        ...hookProviders,
+        fetchRoutes: [
+          sessionListRoute((request) => (request.searchParams.get('search') === 'deploy'
+            ? pendingSearch.promise
+            : { json: { data: [sessionInfo('ses_a1', '/w/a')], cursor: {} } })),
+        ],
       },
     )
 
-    await waitFor(() => {
-      expect(result.current.data.map((session) => session.id)).toEqual(['ses_a1'])
-    })
+    await waitFor(() => expect(result.current.data.map((session) => session.id)).toEqual(['ses_a1']))
 
-    rerender({ search: 'deploy', keepPreviousResults: true })
+    search = 'deploy'
+    rerender()
 
     await waitFor(() => expect(result.current.isPlaceholderData).toBe(true))
     expect(result.current.data.map((session) => session.id)).toEqual(['ses_a1'])
 
     await act(async () => {
-      resolveSearch?.({ items: [sessionInfo('ses_b1', '/w/a')] })
+      pendingSearch.resolve({ json: { data: [sessionInfo('ses_b1', '/w/a')], cursor: {} } })
     })
 
-    await waitFor(() => {
-      expect(result.current.data.map((session) => session.id)).toEqual(['ses_b1'])
-    })
+    await waitFor(() => expect(result.current.data.map((session) => session.id)).toEqual(['ses_b1']))
     expect(result.current.isPlaceholderData).toBe(false)
   })
 })
 
 describe('useSession', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
   it('maps a deleted session to a non-retried 404 through the real facade', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          _tag: 'SessionNotFoundError',
-          sessionID: 'ses_missing',
-          message: 'Session not found',
-        }),
-        { status: 404, headers: { 'Content-Type': 'application/json' } },
-      ),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const queryClient = createQueryClient()
-    const { result } = renderHook(() => useSession('ses_missing', '/w/a'), {
-      wrapper: createWrapper(queryClient),
+    const { result, fetchFake } = renderHookWithProviders(() => useSession('ses_missing', '/w/a'), {
+      ...hookProviders,
+      fetchRoutes: [
+        {
+          method: 'GET',
+          path: `${SESSION_PATH}/ses_missing`,
+          respond: () => ({
+            status: 404,
+            json: { _tag: 'SessionNotFoundError', sessionID: 'ses_missing', message: 'Session not found' },
+          }),
+        },
+      ],
     })
 
     await waitFor(() => expect(result.current.isError).toBe(true))
 
     expect(result.current.error).toBeInstanceOf(FetchError)
-    expect((result.current.error as FetchError).statusCode).toBe(404)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(result.current.error?.statusCode).toBe(404)
+    expect(fetchFake.findRequests('GET', `${SESSION_PATH}/ses_missing`)).toHaveLength(1)
   })
 })
 
 describe('useCreateSession', () => {
-  beforeEach(() => {
-    mocks.createSession.mockReset()
-    mocks.createSession.mockResolvedValue(sessionInfo('ses_new', '/w/a'))
+  const createRoute = (path = SESSION_PATH): FetchRoute => ({
+    method: 'POST',
+    path,
+    respond: () => ({ json: { data: sessionInfo('ses_new', '/w/a') } }),
   })
 
   it('refuses to create a session without a directory and reports the error', async () => {
-    const queryClient = createQueryClient()
-    const { result } = renderHook(() => useCreateSession(undefined), {
-      wrapper: createWrapper(queryClient),
+    const { result, fetchFake } = renderHookWithProviders(() => useCreateSession(undefined), {
+      ...hookProviders,
+      fetchRoutes: [createRoute()],
     })
 
     await act(async () => {
@@ -479,40 +356,40 @@ describe('useCreateSession', () => {
       )
     })
 
-    expect(mocks.createSession).not.toHaveBeenCalled()
-    expect(showToast.error).toHaveBeenCalled()
+    expect(fetchFake.findRequests('POST', SESSION_PATH)).toHaveLength(0)
+    expect(await screen.findByText('A directory is required to create a session')).toBeInTheDocument()
   })
 
   it('creates a session in the provided directory', async () => {
-    const queryClient = createQueryClient()
-    const { result } = renderHook(() => useCreateSession('/w/a'), {
-      wrapper: createWrapper(queryClient),
+    const { result, fetchFake } = renderHookWithProviders(() => useCreateSession('/w/a'), {
+      ...hookProviders,
+      fetchRoutes: [createRoute()],
     })
 
     await act(async () => {
       await result.current.mutateAsync({ agent: undefined })
     })
 
-    expect(mocks.createSession).toHaveBeenCalledWith({ directory: '/w/a', agent: undefined }, 'local')
+    expect(fetchFake.lastRequest('POST', SESSION_PATH)?.body).toEqual({ location: { directory: '/w/a' } })
   })
 
   it('creates a session on an explicit server for a caller outside the server scope', async () => {
-    const queryClient = createQueryClient()
-    const { result } = renderHook(() => useCreateSession('/srv/kitchen', undefined, 'srv_kitchen'), {
-      wrapper: createWrapper(queryClient),
-    })
+    const remotePath = '/api/opencode/servers/srv_kitchen/api/session'
+    const { result, fetchFake } = renderHookWithProviders(
+      () => useCreateSession('/srv/kitchen', undefined, 'srv_kitchen'),
+      { ...hookProviders, fetchRoutes: [createRoute(remotePath)] },
+    )
 
     await act(async () => {
       await result.current.mutateAsync({ agent: undefined })
     })
 
-    expect(mocks.createSession).toHaveBeenCalledWith({ directory: '/srv/kitchen', agent: undefined }, 'srv_kitchen')
+    expect(fetchFake.lastRequest('POST', remotePath)?.body).toEqual({ location: { directory: '/srv/kitchen' } })
   })
 })
 
 describe('useChildSessionReconciliation', () => {
   beforeEach(() => {
-    mocks.getSession.mockReset()
     useSessionStatus.setState({
       statuses: new Map(),
       statusCache: new Map(),
@@ -524,46 +401,43 @@ describe('useChildSessionReconciliation', () => {
   })
 
   const idleSession = (): SessionInfo => ({
-    ...sessionInfo('child-1', '/repo'),
+    ...sessionInfo('child-1', '/repo', 2000),
     time: { created: 1000, updated: 2000, idle: 2000 },
   })
 
+  const childRoute = (respond: FetchRoute['respond']): FetchRoute => ({
+    method: 'GET',
+    path: `${SESSION_PATH}/child-1`,
+    respond,
+  })
+
   it('applies one guarded snapshot for multiple observers sharing one fetch', async () => {
-    let resolveSession: ((value: SessionInfo) => void) | undefined
-    mocks.getSession.mockImplementation(
-      () => new Promise<SessionInfo>((resolve) => { resolveSession = resolve }),
+    const pendingSession = deferred<FetchRouteResult>()
+    const { fetchFake } = renderHookWithProviders(
+      () => ({
+        first: useChildSessionReconciliation('child-1'),
+        second: useChildSessionReconciliation('child-1'),
+      }),
+      { ...hookProviders, fetchRoutes: [childRoute(() => pendingSession.promise)] },
     )
 
-    const queryClient = createQueryClient()
-    const wrapper = createWrapper(queryClient)
-    const first = renderHook(() => useChildSessionReconciliation('child-1'), { wrapper })
-    const second = renderHook(() => useChildSessionReconciliation('child-1'), { wrapper })
-
-    await waitFor(() => expect(mocks.getSession).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(fetchFake.findRequests('GET', `${SESSION_PATH}/child-1`)).toHaveLength(1))
 
     await act(async () => {
-      resolveSession?.(idleSession())
+      pendingSession.resolve({ json: { data: idleSession() } })
     })
 
-    expect(mocks.getSession).toHaveBeenCalledTimes(1)
-    expect(useSessionStatus.getState().getStatus('child-1')).toEqual({ type: 'idle' })
+    await waitFor(() => expect(useSessionStatus.getState().getStatus('child-1')).toEqual({ type: 'idle' }))
+    expect(fetchFake.findRequests('GET', `${SESSION_PATH}/child-1`)).toHaveLength(1)
     expect(useSessionStatus.getState().knownSessions.has('child-1')).toBe(true)
-
-    first.unmount()
-    second.unmount()
   })
 
   it('releases the snapshot when unmounted while the request is pending', async () => {
-    let resolveSession: ((value: SessionInfo) => void) | undefined
-    mocks.getSession.mockImplementation(
-      () => new Promise<SessionInfo>((resolve) => { resolveSession = resolve }),
-    )
-
-    const queryClient = createQueryClient()
-    const wrapper = createWrapper(queryClient)
-    const { unmount } = renderHook(() => useChildSessionReconciliation('child-1'), { wrapper })
-
-    await waitFor(() => expect(mocks.getSession).toHaveBeenCalledTimes(1))
+    const pendingSession = deferred<FetchRouteResult>()
+    const { unmount } = renderHookWithProviders(() => useChildSessionReconciliation('child-1'), {
+      ...hookProviders,
+      fetchRoutes: [childRoute(() => pendingSession.promise)],
+    })
 
     act(() => {
       useSessionStatus.getState().setStatus('child-1', { type: 'busy' })
@@ -573,41 +447,36 @@ describe('useChildSessionReconciliation', () => {
     unmount()
 
     await act(async () => {
-      resolveSession?.(idleSession())
+      pendingSession.resolve({ json: { data: idleSession() } })
     })
 
     await waitFor(() => expect(useSessionStatus.getState().statusRevisions.size).toBe(0))
   })
 
   it('clears a stale child outcome when the fresh snapshot is busy', async () => {
-    mocks.getSession.mockResolvedValue(sessionInfo('child-1', '/repo'))
     useSessionStatus.getState().setStatus('child-1', { type: 'busy' })
     useSessionStatus.getState().setOutcome('child-1', 'failed')
-
-    const queryClient = createQueryClient()
-    renderHook(() => useChildSessionReconciliation('child-1'), {
-      wrapper: createWrapper(queryClient),
+    const { fetchFake } = renderHookWithProviders(() => useChildSessionReconciliation('child-1'), {
+      ...hookProviders,
+      fetchRoutes: [childRoute(() => ({ json: { data: sessionInfo('child-1', '/repo') } }))],
     })
 
-    await waitFor(() => {
-      expect(useSessionStatus.getState().statuses.get('child-1')).toEqual({ type: 'busy' })
-    })
+    await waitFor(() => expect(fetchFake.findRequests('GET', `${SESSION_PATH}/child-1`)).toHaveLength(1))
+    await waitFor(() => expect(useSessionStatus.getState().statuses.get('child-1')).toEqual({ type: 'busy' }))
     expect(useSessionStatus.getState().outcomes.get('child-1')).toBeUndefined()
   })
 
   it('does not reconcile a child whose lifecycle is already terminal', async () => {
     useSessionStatus.getState().setStatus('child-1', { type: 'idle' })
-
-    const queryClient = createQueryClient()
-    renderHook(() => useChildSessionReconciliation('child-1'), {
-      wrapper: createWrapper(queryClient),
+    const { fetchFake } = renderHookWithProviders(() => useChildSessionReconciliation('child-1'), {
+      ...hookProviders,
+      fetchRoutes: [childRoute(() => ({ json: { data: idleSession() } }))],
     })
 
     await act(async () => {
       await Promise.resolve()
     })
 
-    expect(mocks.getSession).not.toHaveBeenCalled()
-    expect(queryClient.getQueryState(['opencode', 'session-reconcile', 'child-1'])?.fetchStatus).not.toBe('fetching')
+    expect(fetchFake.findRequests('GET', `${SESSION_PATH}/child-1`)).toHaveLength(0)
   })
 })

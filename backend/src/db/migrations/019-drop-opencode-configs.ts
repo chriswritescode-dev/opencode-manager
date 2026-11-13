@@ -5,6 +5,14 @@ import path from 'node:path'
 import { getOpenCodeConfigFilePath, getOpenCodeConfigHome } from '@opencode-manager/shared/config/env'
 import type { Migration } from '../migration-runner'
 import { logger } from '../../utils/logger'
+import { z } from 'zod'
+import { selectRows } from '../rows'
+
+const OpenCodeConfigArchiveRowSchema = z.object({
+  config_name: z.string(),
+  config_content: z.string(),
+  is_default: z.number().nullable(),
+})
 
 function firstExistingConfigSourcePath(): string | null {
   const candidates = [
@@ -23,7 +31,7 @@ function writeArchivedConfig(archiveDir: string, configName: string, content: st
     writeFileSync(path.join(archiveDir, `${base}.json`), content, { flag: 'wx' })
     return
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+    if (!(error instanceof Error) || !('code' in error) || error.code !== 'EEXIST') {
       throw error
     }
   }
@@ -32,7 +40,7 @@ function writeArchivedConfig(archiveDir: string, configName: string, content: st
   writeFileSync(path.join(archiveDir, `${base}-${suffix}.json`), content, { flag: 'wx' })
 }
 
-function archiveConfigs(rows: Array<{ config_name: string; config_content: string }>): void {
+function archiveConfigs(rows: z.infer<typeof OpenCodeConfigArchiveRowSchema>[]): void {
   const archiveDir = path.join(getOpenCodeConfigHome(), 'opencode-configs-archive')
   mkdirSync(archiveDir, { recursive: true })
   for (const row of rows) {
@@ -49,7 +57,7 @@ const migration: Migration = {
   legacy: { version: 19, name: 'drop-opencode-configs' },
 
   up(db) {
-    const rows = db.prepare('SELECT config_name, config_content, is_default FROM opencode_configs').all() as Array<{ config_name: string; config_content: string; is_default: number | null }>
+    const rows = selectRows(db, OpenCodeConfigArchiveRowSchema, 'SELECT config_name, config_content, is_default FROM opencode_configs')
 
     try {
       archiveConfigs(rows)

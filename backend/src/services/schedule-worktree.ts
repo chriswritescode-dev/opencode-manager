@@ -5,7 +5,7 @@ import { getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import type { ScheduleRunWorktreesMode, ScheduleWorkspaceMode } from '@opencode-manager/shared/types'
 import type { Repo } from '../types/repo'
-import type { GitAuthService } from './git-auth'
+import type { GitAuthService, GitEnvironment } from './git-auth'
 import { isSSHUrl } from '@opencode-manager/shared/utils'
 import { executeCommand } from '../utils/process'
 import { resolveDefaultBranch, resolveBaseRef, createWorktreeSafely, listGitWorktrees, removeWorktree } from './repo'
@@ -24,9 +24,6 @@ export interface ScheduleWorktreeContext {
   runBranch: string
 }
 
-/**
- * A schedule worktree directory found on disk. `runId` is null for a schedule's shared worktree.
- */
 export interface ScheduleWorktreeEntry {
   jobId: number
   runId: number | null
@@ -34,15 +31,11 @@ export interface ScheduleWorktreeEntry {
   branch: string
 }
 
-/**
- * Build repo-context environment variables used by the GIT_ASKPASS handler
- * to resolve repo-specific credentials. Mirrors GitService.getEnvironmentForRepo.
- */
-export function buildRepoEnvForRepo(repo: { id?: number; fullPath: string }): Record<string, string> {
-  return {
-    ...(repo.id ? { OCM_GIT_REPO_ID: String(repo.id) } : {}),
-    OCM_GIT_REPO_CWD: repo.fullPath,
-  }
+export function buildRepoEnvForRepo(repo: { id?: number; fullPath: string }): GitEnvironment {
+  const env: GitEnvironment = {}
+  if (repo.id) env.OCM_GIT_REPO_ID = String(repo.id)
+  env.OCM_GIT_REPO_CWD = repo.fullPath
+  return env
 }
 
 export class ScheduleWorktreeManager {
@@ -51,12 +44,6 @@ export class ScheduleWorktreeManager {
     private readonly db: Database,
   ) {}
 
-  /**
-   * Prepares the directory a run works in. Returns null when there is no worktree to
-   * prepare (the assistant repo or a directory that is not a git checkout). A shared
-   * worktree that already exists and is clean is reused as-is; otherwise a worktree is
-   * created, continuing the shared branch when it already exists.
-   */
   async prepare(
     repo: Repo,
     job: { id: number; branch: string | null; workspaceMode: ScheduleWorkspaceMode },
@@ -121,11 +108,6 @@ export class ScheduleWorktreeManager {
     }
   }
 
-  /**
-   * Commits a finished run's changes to its branch. A `worktree` run's worktree is then
-   * removed, along with its branch when nothing was committed. Kept and shared worktrees
-   * stay on disk on their branch so the work can be continued.
-   */
   async finalize(
     repo: Repo,
     job: { id: number; name: string; prompt: string; workspaceMode: ScheduleWorkspaceMode },
@@ -181,11 +163,6 @@ export class ScheduleWorktreeManager {
     }
   }
 
-  /**
-   * Removes a kept or shared worktree. Uncommitted changes are committed to its branch
-   * first and the branch is kept, so no work is lost; if that commit fails the worktree
-   * is left in place.
-   */
   async releaseWorktree(repo: Repo, job: { name: string }, worktreePath: string): Promise<void> {
     const env = await this.buildGitEnv(repo, false, true)
 
@@ -196,9 +173,6 @@ export class ScheduleWorktreeManager {
     await removeWorktree(repo.fullPath, worktreePath, env)
   }
 
-  /**
-   * Lists the schedule worktree directories on disk, optionally for a single job.
-   */
   listWorktrees(jobId?: number): ScheduleWorktreeEntry[] {
     let names: string[]
     try {
@@ -219,17 +193,6 @@ export class ScheduleWorktreeManager {
     })
   }
 
-  /**
-   * Removes leftover worktrees and deletes the run branches for a set of
-   * finished runs. Used when clearing run history. The job's shared worktree and
-   * branch are never touched, since they belong to the schedule rather than a run.
-   * In `commit` mode a run worktree still on disk is released through
-   * `releaseWorktree`, so its pending changes are committed and its branch kept;
-   * branches whose worktree is already gone are deleted. In `discard` mode the
-   * worktrees are force-removed and every run branch deleted. Branch and worktree
-   * removal are local git operations, so no SSH setup is needed; failures are
-   * swallowed per artifact so one bad entry does not block the rest.
-   */
   async pruneRunArtifacts(
     repo: Repo,
     job: { id: number; name: string },
@@ -305,10 +268,6 @@ export class ScheduleWorktreeManager {
     }
   }
 
-  /**
-   * Refuses to create a worktree on a branch another checkout already has, which git
-   * would otherwise reject with an opaque error.
-   */
   private async assertRunBranchAvailable(repoPath: string, runBranch: string, worktreePath: string, env: Record<string, string>): Promise<void> {
     const targetPath = canonicalPathSync(path.resolve(worktreePath))
     const conflicting = (await listGitWorktrees(repoPath, env)).find((worktree) =>

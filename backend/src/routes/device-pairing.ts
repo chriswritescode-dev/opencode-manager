@@ -31,7 +31,6 @@ interface DevicePairingRouteDeps {
   isDevelopment?: () => boolean
 }
 
-/** Creates the routes that mint device pairing links for the Manager origin. */
 export function createDevicePairingRoutes(deps: DevicePairingRouteDeps) {
   const app = new Hono()
   const resolveTrustedOrigins = deps.resolveTrustedOrigins ?? getTrustedOrigins

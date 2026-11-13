@@ -1,3 +1,5 @@
+import { z } from 'zod'
+import { readJsonNumber, readJsonString } from '@/components/jsonValue'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -35,14 +37,15 @@ function FieldControl({ field, value, disabled, onChange }: ProviderAuthFieldPro
   }
 
   if (field.type === 'number' || field.type === 'integer') {
+    const numericText = z.union([z.number(), z.string()]).safeParse(value)
     return (
       <Input
         id={field.key}
         type="number"
-        value={typeof value === 'number' || typeof value === 'string' ? String(value) : ''}
+        value={numericText.success ? String(numericText.data) : ''}
         onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))}
-        min={typeof field.minimum === 'number' ? field.minimum : undefined}
-        max={typeof field.maximum === 'number' ? field.maximum : undefined}
+        min={readJsonNumber(field.minimum)}
+        max={readJsonNumber(field.maximum)}
         step={field.type === 'integer' ? 1 : 'any'}
         className="bg-background border-border"
         disabled={disabled}
@@ -64,7 +67,7 @@ function FieldControl({ field, value, disabled, onChange }: ProviderAuthFieldPro
   if (field.type === 'string' && field.options && field.options.length > 0) {
     return (
       <Select
-        value={typeof value === 'string' ? value : ''}
+        value={readJsonString(value) ?? ''}
         onValueChange={(next) => onChange(next)}
         disabled={disabled}
       >
@@ -85,7 +88,7 @@ function FieldControl({ field, value, disabled, onChange }: ProviderAuthFieldPro
   return (
     <Input
       id={field.key}
-      value={typeof value === 'string' ? value : ''}
+      value={readJsonString(value) ?? ''}
       onChange={(e) => onChange(e.target.value)}
       placeholder={field.type === 'string' ? field.placeholder : undefined}
       className="bg-background border-border"

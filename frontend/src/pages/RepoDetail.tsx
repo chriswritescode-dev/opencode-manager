@@ -156,7 +156,8 @@ export function RepoDetail() {
         notifyWorktreeSetup(workspace.worktreeSetup);
         if (workspace.worktreeSetup?.status === 'started') {
           const terminalId = workspace.worktreeSetup.terminal.id;
-          openTerminal(terminalId, { repoTab: 'workspaces', ...(workspace.directory ? { terminalDirectory: workspace.directory } : {}) });
+          const terminalParams = { repoTab: 'workspaces', terminalDirectory: workspace.directory };
+          openTerminal(terminalId, workspace.directory ? terminalParams : { repoTab: 'workspaces' });
           return;
         }
         setActiveTab('workspaces');

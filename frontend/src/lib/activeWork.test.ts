@@ -24,7 +24,7 @@ const NOW = 1_000_000_000_000
 const WINDOW_MS = 60_000
 
 function createSession(id: string, updated: number, directory: string, parentID?: string): Session {
-  return {
+  const session: Session = {
     id,
     projectID: 'proj-1',
     title: `Session ${id}`,
@@ -32,8 +32,9 @@ function createSession(id: string, updated: number, directory: string, parentID?
     location: { directory },
     cost: 0,
     tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-    ...(parentID ? { parentID } : {}),
   }
+  if (parentID) session.parentID = parentID
+  return session
 }
 
 function createRepo(overrides: Partial<Repo> & { id: number; fullPath: string }): Repo {
@@ -103,7 +104,7 @@ describe('rootSessionID', () => {
   it('terminates on a parent cycle', () => {
     const parents = new Map<string, string | null>([['a', 'b'], ['b', 'a']])
 
-    expect(typeof rootSessionID('a', parents)).toBe('string')
+    expect(['a', 'b']).toContain(rootSessionID('a', parents))
   })
 })
 

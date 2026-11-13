@@ -1,152 +1,146 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { ReplaceRemoteAccessHeadersRequest } from '@opencode-manager/shared/schemas'
+import { z } from 'zod'
 import { RemoteAccessHeadersSettings } from './RemoteAccessHeadersSettings'
-
-const mocks = vi.hoisted(() => ({
-  getRemoteAccessHeaders: vi.fn(),
-  replaceRemoteAccessHeaders: vi.fn(),
-  clearRemoteAccessHeaders: vi.fn(),
-}))
-
-vi.mock('@/api/devicePairing', () => ({
-  getRemoteAccessHeaders: mocks.getRemoteAccessHeaders,
-  replaceRemoteAccessHeaders: mocks.replaceRemoteAccessHeaders,
-  clearRemoteAccessHeaders: mocks.clearRemoteAccessHeaders,
-}))
+import { renderWithProviders } from '@/test/render'
+import type { FetchRoute } from '@/test/fetchFake'
 
 const STORED_VALUE_PLACEHOLDER = 'Stored – leave blank to keep'
 
-function renderSettings() {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  })
+const replaceRequestSchema = z.object({
+  headers: z.array(z.object({ name: z.string(), value: z.string().optional() })),
+})
 
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <RemoteAccessHeadersSettings />
-    </QueryClientProvider>,
-  )
+interface StoredHeader {
+  name: string
+  hasValue: boolean
+}
+
+function createHeadersServer(initial: StoredHeader[] = [], unreadable = false) {
+  let headers = initial
+
+  const routes: FetchRoute[] = [
+    {
+      method: 'GET',
+      path: '/api/settings/remote-access-headers',
+      respond: () => ({ json: { headers, unreadable } }),
+    },
+    {
+      method: 'PUT',
+      path: '/api/settings/remote-access-headers',
+      respond: (request) => {
+        const parsed = replaceRequestSchema.parse(request.body)
+        headers = parsed.headers.map((header) => ({
+          name: header.name,
+          hasValue: header.value !== undefined,
+        }))
+        return { json: { headers, unreadable: false } }
+      },
+    },
+    {
+      method: 'DELETE',
+      path: '/api/settings/remote-access-headers',
+      respond: () => {
+        headers = []
+        return { json: { headers, unreadable: false } }
+      },
+    },
+  ]
+
+  return { routes, headers: () => headers }
+}
+
+function renderSettings(initial: StoredHeader[] = [], unreadable = false) {
+  const server = createHeadersServer(initial, unreadable)
+  const result = renderWithProviders(<RemoteAccessHeadersSettings />, {
+    auth: false,
+    theme: false,
+    tts: false,
+    fetchRoutes: server.routes,
+  })
+  return { ...result, server }
 }
 
 describe('RemoteAccessHeadersSettings', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.getRemoteAccessHeaders.mockResolvedValue({ headers: [], unreadable: false })
-    mocks.replaceRemoteAccessHeaders.mockImplementation(
-      async (body: ReplaceRemoteAccessHeadersRequest) => ({
-        headers: body.headers.map((header) => ({ name: header.name, hasValue: true })),
-        unreadable: false,
-      }),
-    )
-    mocks.clearRemoteAccessHeaders.mockResolvedValue({ headers: [], unreadable: false })
-  })
-
   it('adds the Cloudflare service token rows and saves typed values only once', async () => {
     const user = userEvent.setup()
-    renderSettings()
+    const { fetchFake } = renderSettings()
 
     await user.click(
       await screen.findByRole('button', { name: /Cloudflare Access service token/i }),
     )
 
-    const nameInputs = screen.getAllByPlaceholderText('Header name')
-    expect(nameInputs.map((input) => (input as HTMLInputElement).value)).toEqual([
-      'CF-Access-Client-Id',
-      'CF-Access-Client-Secret',
-    ])
+    expect(await screen.findByLabelText('Header 1 name')).toHaveValue('CF-Access-Client-Id')
+    expect(screen.getByLabelText('Header 2 name')).toHaveValue('CF-Access-Client-Secret')
 
-    const valueInputs = screen.getAllByPlaceholderText('Value')
-    await user.type(valueInputs[0] as HTMLInputElement, 'id')
-    await user.type(valueInputs[1] as HTMLInputElement, 'secret')
+    await user.type(screen.getByLabelText('Header 1 value'), 'id')
+    await user.type(screen.getByLabelText('Header 2 value'), 'secret')
 
     await user.click(screen.getByRole('button', { name: /^Save$/i }))
 
-    await waitFor(() => {
-      expect(mocks.replaceRemoteAccessHeaders).toHaveBeenCalledWith({
-        headers: [
-          { name: 'CF-Access-Client-Id', value: 'id' },
-          { name: 'CF-Access-Client-Secret', value: 'secret' },
-        ],
-      })
-    })
-
-    await waitFor(() => {
-      expect(screen.queryByDisplayValue('secret')).not.toBeInTheDocument()
-    })
     expect(await screen.findAllByPlaceholderText(STORED_VALUE_PLACEHOLDER)).toHaveLength(2)
+    expect(fetchFake.lastRequest('PUT', '/api/settings/remote-access-headers')?.body).toEqual({
+      headers: [
+        { name: 'CF-Access-Client-Id', value: 'id' },
+        { name: 'CF-Access-Client-Secret', value: 'secret' },
+      ],
+    })
+    expect(screen.queryByDisplayValue('secret')).not.toBeInTheDocument()
   })
 
   it('keeps a stored value when its blank field is left untouched', async () => {
-    mocks.getRemoteAccessHeaders.mockResolvedValue({
-      headers: [{ name: 'CF-Access-Client-Secret', hasValue: true }],
-      unreadable: false,
-    })
     const user = userEvent.setup()
-    renderSettings()
+    const { fetchFake } = renderSettings([{ name: 'CF-Access-Client-Secret', hasValue: true }])
 
-    const valueInput = await screen.findByPlaceholderText(STORED_VALUE_PLACEHOLDER)
+    const valueInput = await screen.findByLabelText('Header 1 value')
     expect(valueInput).toHaveValue('')
 
     await user.click(screen.getByRole('button', { name: /^Save$/i }))
 
-    await waitFor(() => {
-      expect(mocks.replaceRemoteAccessHeaders).toHaveBeenCalledWith({
-        headers: [{ name: 'CF-Access-Client-Secret', value: undefined }],
-      })
+    expect(await screen.findByLabelText('Header 1 name')).toHaveValue('CF-Access-Client-Secret')
+    expect(fetchFake.lastRequest('PUT', '/api/settings/remote-access-headers')?.body).toEqual({
+      headers: [{ name: 'CF-Access-Client-Secret' }],
     })
   })
 
   it('shows the schema error for a reserved header name and blocks saving', async () => {
     const user = userEvent.setup()
-    renderSettings()
+    const { fetchFake } = renderSettings()
 
     await user.click(await screen.findByRole('button', { name: /Add header/i }))
-    await user.type(screen.getByPlaceholderText('Header name'), 'Cookie')
-    await user.type(screen.getByPlaceholderText('Value'), 'session')
+    await user.type(screen.getByLabelText('Header 1 name'), 'Cookie')
+    await user.type(screen.getByLabelText('Header 1 value'), 'session')
 
     expect(await screen.findByText('This header name is reserved')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /^Save$/i }))
 
-    expect(mocks.replaceRemoteAccessHeaders).not.toHaveBeenCalled()
+    expect(fetchFake.findRequests('PUT', '/api/settings/remote-access-headers')).toHaveLength(0)
   })
 
   it('requires a value after renaming a stored row to a name the server does not have', async () => {
-    mocks.getRemoteAccessHeaders.mockResolvedValue({
-      headers: [{ name: 'CF-Access-Client-Secret', hasValue: true }],
-      unreadable: false,
-    })
     const user = userEvent.setup()
-    renderSettings()
+    const { fetchFake } = renderSettings([{ name: 'CF-Access-Client-Secret', hasValue: true }])
 
-    expect(await screen.findByPlaceholderText(STORED_VALUE_PLACEHOLDER)).toBeInTheDocument()
-
-    const nameInput = screen.getByPlaceholderText('Header name')
+    const nameInput = await screen.findByLabelText('Header 1 name')
     await user.clear(nameInput)
     await user.type(nameInput, 'X-Custom-Secret')
 
     expect(screen.getByPlaceholderText('Value')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Save$/i })).toBeDisabled()
 
-    await user.type(screen.getByPlaceholderText('Value'), 'new-secret')
+    await user.type(screen.getByLabelText('Header 1 value'), 'new-secret')
     await user.click(screen.getByRole('button', { name: /^Save$/i }))
 
-    await waitFor(() => {
-      expect(mocks.replaceRemoteAccessHeaders).toHaveBeenCalledWith({
-        headers: [{ name: 'X-Custom-Secret', value: 'new-secret' }],
-      })
+    expect(await screen.findByLabelText('Header 1 name')).toHaveValue('X-Custom-Secret')
+    expect(fetchFake.lastRequest('PUT', '/api/settings/remote-access-headers')?.body).toEqual({
+      headers: [{ name: 'X-Custom-Secret', value: 'new-secret' }],
     })
   })
 
   it('shows the decrypt alert when the stored headers are unreadable', async () => {
-    mocks.getRemoteAccessHeaders.mockResolvedValue({ headers: [], unreadable: true })
-    renderSettings()
+    renderSettings([], true)
 
     expect(
       await screen.findByText(
@@ -156,18 +150,13 @@ describe('RemoteAccessHeadersSettings', () => {
   })
 
   it('clears all headers after confirmation', async () => {
-    mocks.getRemoteAccessHeaders.mockResolvedValue({
-      headers: [{ name: 'CF-Access-Client-Secret', hasValue: true }],
-      unreadable: false,
-    })
     const user = userEvent.setup()
-    renderSettings()
+    const { fetchFake } = renderSettings([{ name: 'CF-Access-Client-Secret', hasValue: true }])
 
     await user.click(await screen.findByRole('button', { name: /Clear all/i }))
     await user.click(await screen.findByRole('button', { name: /^Delete$/i }))
 
-    await waitFor(() => {
-      expect(mocks.clearRemoteAccessHeaders).toHaveBeenCalledTimes(1)
-    })
+    expect(await screen.findByText('No remote access headers are stored.')).toBeInTheDocument()
+    expect(fetchFake.findRequests('DELETE', '/api/settings/remote-access-headers')).toHaveLength(1)
   })
 })

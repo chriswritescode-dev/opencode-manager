@@ -3,6 +3,8 @@ import { Hono } from 'hono'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+import { BrowseDirectoryResponseSchema } from '@opencode-manager/shared/schemas'
+import { readJson } from '../../test/helpers/read-json'
 import { createFilesystemRoutes } from './filesystem'
 
 let tmpRoot: string
@@ -32,7 +34,7 @@ describe('GET /api/filesystem/browse', () => {
     const res = await app.request('/filesystem/browse')
     expect(res.status).toBe(200)
 
-    const body = await res.json() as { isRoot: boolean; entries: { name: string }[] }
+    const body = await readJson(res, BrowseDirectoryResponseSchema)
     expect(body.isRoot).toBe(true)
     expect(body.entries.map((e) => e.name)).toEqual(['projects'])
   })

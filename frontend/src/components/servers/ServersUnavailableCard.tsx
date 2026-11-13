@@ -5,10 +5,6 @@ interface ServersUnavailableCardProps {
   onRetry: () => void
 }
 
-/**
- * Shown on a linked-server screen while the server list is paused offline with no cached data, so
- * an unreachable server list is not mistaken for a server that was removed.
- */
 export function ServersUnavailableCard({ onRetry }: ServersUnavailableCardProps) {
   return (
     <LinkedServerStateCard

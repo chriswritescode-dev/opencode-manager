@@ -1,14 +1,10 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import type { PermissionRequest } from '@opencode-manager/shared/opencode'
+import type { PermissionReply, PermissionRequest } from '@opencode-manager/shared/opencode'
+import { renderWithProviders } from '@/test/render'
 import { PermissionRequestDialog } from './PermissionRequestDialog'
-
-vi.mock('@/lib/toast', () => ({
-  showToast: {
-    error: vi.fn(),
-  },
-}))
 
 const permission: PermissionRequest = {
   id: 'perm-1',
@@ -25,40 +21,36 @@ const secondPermission: PermissionRequest = {
   resources: ['git push origin main'],
 }
 
+function renderDialog(overrides: Partial<Parameters<typeof PermissionRequestDialog>[0]> = {}) {
+  const onRespond = overrides.onRespond ?? vi.fn<
+    (permissionID: string, sessionID: string, response: PermissionReply, message?: string) => Promise<void>
+  >(() => Promise.resolve())
+  const result = renderWithProviders(
+    <PermissionRequestDialog permission={permission} pendingCount={1} onRespond={onRespond} {...overrides} />,
+  )
+  return { ...result, onRespond }
+}
+
 describe('PermissionRequestDialog', () => {
   it('renders the action label and command detail', () => {
-    render(<PermissionRequestDialog permission={permission} pendingCount={1} onRespond={vi.fn()} />)
+    renderDialog()
 
     expect(screen.getByText('Run Command')).toBeInTheDocument()
     expect(screen.getByText('Command')).toBeInTheDocument()
     expect(screen.getByText('rm -rf node_modules')).toBeInTheDocument()
   })
 
-  it('phrases the allow question in lowercase while preserving acronyms', () => {
-    const { unmount } = render(
-      <PermissionRequestDialog permission={permission} pendingCount={1} onRespond={vi.fn()} />,
-    )
-    expect(screen.getByText('Allow run command?')).toBeInTheDocument()
-    unmount()
+  it.each([
+    ['shell', 'Allow run command?'],
+    ['webfetch', 'Allow fetch URL?'],
+  ] as const)('phrases the allow question in lowercase for %s', (action, question) => {
+    renderDialog({ permission: { ...permission, action, resources: [], metadata: { url: 'https://example.com' } } })
 
-    render(
-      <PermissionRequestDialog
-        permission={{ ...permission, action: 'webfetch', resources: [], metadata: { url: 'https://example.com' } }}
-        pendingCount={1}
-        onRespond={vi.fn()}
-      />,
-    )
-    expect(screen.getByText('Allow fetch URL?')).toBeInTheDocument()
+    expect(screen.getByText(question)).toBeInTheDocument()
   })
 
   it('labels multiple shell resources as commands', () => {
-    render(
-      <PermissionRequestDialog
-        permission={{ ...permission, resources: ['git status', 'git push origin main'] }}
-        pendingCount={1}
-        onRespond={vi.fn()}
-      />,
-    )
+    renderDialog({ permission: { ...permission, resources: ['git status', 'git push origin main'] } })
 
     expect(screen.getByText('Commands')).toBeInTheDocument()
     expect(screen.getByText(/git status/)).toBeInTheDocument()
@@ -66,37 +58,19 @@ describe('PermissionRequestDialog', () => {
   })
 
   it('shows the request message when present', () => {
-    render(
-      <PermissionRequestDialog
-        permission={{ ...permission, message: 'This command modifies tracked files.' }}
-        pendingCount={1}
-        onRespond={vi.fn()}
-      />,
-    )
+    renderDialog({ permission: { ...permission, message: 'This command modifies tracked files.' } })
 
     expect(screen.getByText('This command modifies tracked files.')).toBeInTheDocument()
   })
 
   it('describes a wildcard always scope', () => {
-    render(
-      <PermissionRequestDialog
-        permission={{ ...permission, save: ['*'] }}
-        pendingCount={1}
-        onRespond={vi.fn()}
-      />,
-    )
+    renderDialog({ permission: { ...permission, save: ['*'] } })
 
     expect(screen.getByText('This will always allow run command for this project.')).toBeInTheDocument()
   })
 
   it('lists the patterns an always decision approves', () => {
-    render(
-      <PermissionRequestDialog
-        permission={{ ...permission, save: ['printf *', 'echo *'] }}
-        pendingCount={1}
-        onRespond={vi.fn()}
-      />,
-    )
+    renderDialog({ permission: { ...permission, save: ['printf *', 'echo *'] } })
 
     expect(
       screen.getByText('This will always allow the following patterns for this project.'),
@@ -106,114 +80,96 @@ describe('PermissionRequestDialog', () => {
   })
 
   it('omits the always option when no save patterns are provided', () => {
-    render(
-      <PermissionRequestDialog
-        permission={{ ...permission, save: undefined }}
-        pendingCount={1}
-        onRespond={vi.fn()}
-      />,
-    )
+    renderDialog({ permission: { ...permission, save: undefined } })
 
     expect(screen.queryByRole('button', { name: 'Allow Always' })).not.toBeInTheDocument()
     expect(screen.queryByText(/This will always allow/)).not.toBeInTheDocument()
   })
 
   it('renders an open session control that triggers the handler', async () => {
+    const user = userEvent.setup()
     const onOpenSession = vi.fn()
-    render(
-      <PermissionRequestDialog
-        permission={permission}
-        pendingCount={1}
-        onRespond={vi.fn()}
-        onOpenSession={onOpenSession}
-      />,
-    )
+    renderDialog({ onOpenSession })
 
-    await userEvent.click(screen.getByRole('button', { name: 'Open session' }))
+    await user.click(screen.getByRole('button', { name: 'Open session' }))
 
     expect(onOpenSession).toHaveBeenCalledTimes(1)
   })
 
   it('omits the open session control without a handler', () => {
-    render(<PermissionRequestDialog permission={permission} pendingCount={1} onRespond={vi.fn()} />)
+    renderDialog()
 
     expect(screen.queryByRole('button', { name: 'Open session' })).not.toBeInTheDocument()
   })
 
   it('focuses the allow action instead of the optional reason field', async () => {
-    render(<PermissionRequestDialog permission={permission} pendingCount={1} onRespond={vi.fn()} />)
+    renderDialog()
 
     const allowOnce = screen.getByRole('button', { name: 'Allow Once' })
     await waitFor(() => expect(allowOnce).toHaveFocus())
     expect(screen.getByLabelText('Reason (optional)')).not.toHaveFocus()
   })
 
-  it('replies with the selected decision for the permission request', async () => {
-    const onRespond = vi.fn().mockResolvedValue(undefined)
-    render(<PermissionRequestDialog permission={permission} pendingCount={1} onRespond={onRespond} />)
+  it.each([
+    ['Allow Once', undefined, 'once', undefined],
+    ['Allow Always', 'not allowed', 'always', undefined],
+    ['Deny', 'not allowed', 'reject', 'not allowed'],
+    ['Deny', undefined, 'reject', undefined],
+  ] as const)(
+    'replies with %s and the expected reason',
+    async (button, typedReason, response, reason) => {
+      const user = userEvent.setup()
+      const { onRespond } = renderDialog()
 
-    await userEvent.click(screen.getByRole('button', { name: 'Allow Once' }))
+      if (typedReason) await user.type(screen.getByLabelText('Reason (optional)'), typedReason)
+      await user.click(screen.getByRole('button', { name: button }))
 
-    expect(onRespond).toHaveBeenCalledWith('perm-1', 'session-1', 'once', undefined)
-  })
-
-  it('forwards an optional rejection reason when denying', async () => {
-    const onRespond = vi.fn().mockResolvedValue(undefined)
-    render(<PermissionRequestDialog permission={permission} pendingCount={1} onRespond={onRespond} />)
-
-    await userEvent.type(screen.getByLabelText('Reason (optional)'), 'not allowed')
-    await userEvent.click(screen.getByRole('button', { name: 'Deny' }))
-
-    await waitFor(() =>
-      expect(onRespond).toHaveBeenCalledWith('perm-1', 'session-1', 'reject', 'not allowed'),
-    )
-  })
-
-  it('denies without a reason when none is supplied', async () => {
-    const onRespond = vi.fn().mockResolvedValue(undefined)
-    render(<PermissionRequestDialog permission={permission} pendingCount={1} onRespond={onRespond} />)
-
-    await userEvent.click(screen.getByRole('button', { name: 'Deny' }))
-
-    await waitFor(() => expect(onRespond).toHaveBeenCalledWith('perm-1', 'session-1', 'reject', undefined))
-  })
-
-  it('omits the reason for allow decisions', async () => {
-    const onRespond = vi.fn().mockResolvedValue(undefined)
-    render(<PermissionRequestDialog permission={permission} pendingCount={1} onRespond={onRespond} />)
-
-    await userEvent.type(screen.getByLabelText('Reason (optional)'), 'not allowed')
-    await userEvent.click(screen.getByRole('button', { name: 'Allow Always' }))
-
-    await waitFor(() =>
-      expect(onRespond).toHaveBeenCalledWith('perm-1', 'session-1', 'always', undefined),
-    )
-  })
+      await waitFor(() =>
+        expect(onRespond).toHaveBeenCalledWith('perm-1', 'session-1', response, reason),
+      )
+    },
+  )
 
   it('resets the rejection reason when the permission identity changes', async () => {
-    const onRespond = vi.fn().mockResolvedValue(undefined)
-    const { rerender } = render(
-      <PermissionRequestDialog permission={permission} pendingCount={2} onRespond={onRespond} />,
-    )
+    const user = userEvent.setup()
 
-    await userEvent.type(screen.getByLabelText('Reason (optional)'), 'not allowed')
-    expect((screen.getByLabelText('Reason (optional)') as HTMLTextAreaElement).value).toBe('not allowed')
+    function Host() {
+      const [current, setCurrent] = useState(permission)
+      return (
+        <>
+          <button type="button" onClick={() => setCurrent(secondPermission)}>
+            next permission
+          </button>
+          <PermissionRequestDialog
+            permission={current}
+            pendingCount={current.id === 'perm-1' ? 2 : 1}
+            onRespond={vi.fn(() => Promise.resolve())}
+          />
+        </>
+      )
+    }
 
-    rerender(<PermissionRequestDialog permission={secondPermission} pendingCount={1} onRespond={onRespond} />)
+    renderWithProviders(<Host />)
 
-    await waitFor(() =>
-      expect((screen.getByLabelText('Reason (optional)') as HTMLTextAreaElement).value).toBe(''),
-    )
+    await user.type(screen.getByLabelText('Reason (optional)'), 'not allowed')
+    expect(screen.getByLabelText('Reason (optional)')).toHaveValue('not allowed')
+
+    fireEvent.click(screen.getByText('next permission'))
+
+    await waitFor(() => expect(screen.getByLabelText('Reason (optional)')).toHaveValue(''))
   })
 
-  it('retains the rejection reason when the request fails', async () => {
-    const onRespond = vi.fn().mockRejectedValueOnce(new Error('network'))
-    render(<PermissionRequestDialog permission={permission} pendingCount={1} onRespond={onRespond} />)
+  it('retains the rejection reason and reports the failure', async () => {
+    const user = userEvent.setup()
+    const { onRespond } = renderDialog({ onRespond: vi.fn(() => Promise.reject(new Error('network'))) })
 
-    await userEvent.type(screen.getByLabelText('Reason (optional)'), 'not allowed')
-    await userEvent.click(screen.getByRole('button', { name: 'Deny' }))
+    await user.type(screen.getByLabelText('Reason (optional)'), 'not allowed')
+    await user.click(screen.getByRole('button', { name: 'Deny' }))
 
     await waitFor(() => expect(onRespond).toHaveBeenCalledTimes(1))
-    expect((screen.getByLabelText('Reason (optional)') as HTMLTextAreaElement).value).toBe('not allowed')
+    expect(screen.getByLabelText('Reason (optional)')).toHaveValue('not allowed')
+    expect(
+      await screen.findByText('Failed to respond to permission. Please try again.'),
+    ).toBeInTheDocument()
   })
 })

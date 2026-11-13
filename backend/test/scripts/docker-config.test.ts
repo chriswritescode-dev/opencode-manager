@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { z } from 'zod'
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, statSync, existsSync, chmodSync } from 'fs'
 import { execFileSync, execSync, spawnSync } from 'child_process'
 import { join } from 'path'
@@ -394,7 +395,7 @@ describe('sandbox guest image', () => {
         stdio: 'pipe',
       })
     } catch (error) {
-      status = (error as { status?: number }).status ?? 1
+      status = z.object({ status: z.number().optional() }).safeParse(error).data?.status ?? 1
     }
 
     expect(status, 'a failed cargo build must abort the verification script').not.toBe(0)

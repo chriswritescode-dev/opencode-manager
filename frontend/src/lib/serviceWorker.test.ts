@@ -1,7 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-
-vi.mock('../sw?worker', () => ({}))
-
 import { onNotificationClick } from './serviceWorker'
 
 function defineServiceWorkerTarget(target: EventTarget) {

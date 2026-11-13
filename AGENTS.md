@@ -11,13 +11,13 @@
 - `cd backend && pnpm exec vitest --ui` - Interactive test UI
 - `cd backend && pnpm exec vitest run --coverage` - Coverage report (80% threshold)
 - `cd backend && bun test <filename>` - Run a Bun-only suite, excluded from Vitest (`test/routes/internal-sandbox.test.ts`, `src/routes/repos.test.ts`)
-- `pnpm lint` - Lint CLI, frontend, and backend
-- `pnpm lint:backend` - Backend linting
-- `pnpm lint:frontend` - Frontend linting
+- `pnpm lint` - Lint the repository with Oxlint
+- `pnpm lint:backend` - Oxlint for the backend
+- `pnpm lint:frontend` - Oxlint for the frontend
 
 ## Code Style
 
-- Doc comments only in new and changed code: JSDoc/TSDoc attached to the declaration they document, in the language's native doc convention. No inline, explanatory, or section comments; code must be self-documenting
+- No comments of any kind, including JSDoc and lint-disable directives, enforced by `anti-slop/no-comments`; code must be self-documenting
 - No console logs (use Bun's logger or proper error handling)
 - Strict TypeScript everywhere, proper typing required
 - Named imports only: `import { Hono } from 'hono'`, `import { useState } from 'react'`
@@ -35,7 +35,7 @@
 - @/ alias for components: `import { Button } from '@/components/ui/button'`
 - Radix UI + Tailwind CSS, React Hook Form + Zod
 - React Query (@tanstack/react-query) for state management
-- ESLint TypeScript rules enforced
+- Oxlint TypeScript rules enforced
 - Use React hooks properly, no direct state mutations
 
 ### General

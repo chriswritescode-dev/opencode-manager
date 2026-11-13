@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { z } from 'zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Check, Download } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
@@ -6,6 +7,16 @@ import { Button } from '@/components/ui/button'
 import { settingsApi } from '@/api/settings'
 import { showToast } from '@/lib/toast'
 import { refreshOpenCodeServerCaches } from '@/lib/queryInvalidation'
+
+const installFailureSchema = z.object({
+  response: z.object({
+    data: z.object({
+      recovered: z.boolean().optional(),
+      recoveryMessage: z.string().optional(),
+      newVersion: z.string().optional(),
+    }),
+  }),
+})
 
 interface VersionSelectDialogProps {
   open: boolean
@@ -30,17 +41,16 @@ export function VersionSelectDialog({ open, onOpenChange }: VersionSelectDialogP
       showToast.success(result.message)
       onOpenChange(false)
     },
-    onError: (error) => {
-      if (error && typeof error === 'object' && 'response' in error) {
-        const response = (error as { response?: { data?: { recovered?: boolean; recoveryMessage?: string; newVersion?: string } } }).response
-        const data = response?.data
-        
-        if (data?.recovered && data.newVersion) {
-          refreshOpenCodeServerCaches(queryClient, data.newVersion)
-          showToast.success(`Install failed but server recovered at v${data.newVersion}`)
+    onError: (cause) => {
+      const parsed = installFailureSchema.safeParse(cause)
+      if (parsed.success) {
+        const { recovered, recoveryMessage, newVersion } = parsed.data.response.data
+        if (recovered && newVersion) {
+          refreshOpenCodeServerCaches(queryClient, newVersion)
+          showToast.success(`Install failed but server recovered at v${newVersion}`)
         } else {
           refreshOpenCodeServerCaches(queryClient)
-          showToast.error(data?.recoveryMessage || 'Failed to install version')
+          showToast.error(recoveryMessage || 'Failed to install version')
         }
       } else {
         refreshOpenCodeServerCaches(queryClient)

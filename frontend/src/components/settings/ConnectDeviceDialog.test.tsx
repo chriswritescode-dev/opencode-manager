@@ -1,17 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { act, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { DevicePairingLinksResponse } from '@opencode-manager/shared/schemas'
 import { ConnectDeviceDialog } from './ConnectDeviceDialog'
-
-const mocks = vi.hoisted(() => ({
-  createDevicePairingLinks: vi.fn(),
-}))
-
-vi.mock('@/api/devicePairing', () => ({
-  createDevicePairingLinks: mocks.createDevicePairingLinks,
-}))
+import { renderWithProviders } from '@/test/render'
+import type { FetchRoute, FetchRouteResult } from '@/test/fetchFake'
 
 const BASE_LINKS: DevicePairingLinksResponse = {
   appLink: 'ocm://link?v=2&kind=manager&name=studio&url=https%3A%2F%2Fstudio.example.com&code=abcdefghijklmnop',
@@ -22,37 +15,40 @@ const BASE_LINKS: DevicePairingLinksResponse = {
   warnings: ['plain-http'],
 }
 
-function renderDialog() {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  })
+interface PairingLinkServerOptions {
+  respond?: (call: number) => FetchRouteResult | Promise<FetchRouteResult>
+}
 
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <ConnectDeviceDialog open onOpenChange={vi.fn()} />
-    </QueryClientProvider>,
-  )
+function renderDialog(options: PairingLinkServerOptions = {}) {
+  let calls = 0
+  const linkRoute: FetchRoute = {
+    method: 'POST',
+    path: '/api/device-pairing/links',
+    respond: async () => {
+      calls += 1
+      return options.respond ? options.respond(calls) : { json: BASE_LINKS }
+    },
+  }
+  const result = renderWithProviders(<ConnectDeviceDialog open onOpenChange={vi.fn()} />, {
+    auth: false,
+    theme: false,
+    tts: false,
+    fetchRoutes: [linkRoute],
+  })
+  return { ...result, linkRequests: () => calls }
 }
 
 describe('ConnectDeviceDialog', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.createDevicePairingLinks.mockResolvedValue(BASE_LINKS)
-  })
-
   afterEach(() => {
     vi.useRealTimers()
   })
 
   it('requests pairing links once when it opens', async () => {
-    renderDialog()
+    const { linkRequests } = renderDialog()
 
     await screen.findByAltText('Mobile app pairing QR code')
 
-    expect(mocks.createDevicePairingLinks).toHaveBeenCalledTimes(1)
+    expect(linkRequests()).toBe(1)
   })
 
   it('hides the mobile app QR code until it is revealed', async () => {
@@ -91,11 +87,7 @@ describe('ConnectDeviceDialog', () => {
   })
 
   it('warns about a localhost address while still showing the mobile app QR code', async () => {
-    mocks.createDevicePairingLinks.mockResolvedValue({
-      ...BASE_LINKS,
-      warnings: ['plain-http', 'loopback'],
-    })
-    renderDialog()
+    renderDialog({ respond: () => ({ json: { ...BASE_LINKS, warnings: ['plain-http', 'loopback'] } }) })
 
     expect(await screen.findByAltText('Mobile app pairing QR code')).toBeInTheDocument()
     expect(
@@ -107,13 +99,11 @@ describe('ConnectDeviceDialog', () => {
   })
 
   it('explains how to unblock a plain-HTTP app link', async () => {
-    mocks.createDevicePairingLinks.mockResolvedValue({
-      ...BASE_LINKS,
-      appLink: null,
-      appLinkBlockedReason: 'insecure-origin',
-      warnings: ['plain-http'],
+    renderDialog({
+      respond: () => ({
+        json: { ...BASE_LINKS, appLink: null, appLinkBlockedReason: 'insecure-origin', warnings: ['plain-http'] },
+      }),
     })
-    renderDialog()
 
     expect(
       await screen.findByText(
@@ -123,17 +113,12 @@ describe('ConnectDeviceDialog', () => {
   })
 
   it('warns when the stored remote access headers are unreadable', async () => {
-    mocks.createDevicePairingLinks.mockResolvedValue({
-      ...BASE_LINKS,
-      headerNames: [],
-      warnings: ['plain-http', 'headers-unreadable'],
+    renderDialog({
+      respond: () => ({ json: { ...BASE_LINKS, headerNames: [], warnings: ['plain-http', 'headers-unreadable'] } }),
     })
-    renderDialog()
 
     expect(
-      await screen.findByText(
-        'Stored remote access headers could not be decrypted and are not included.',
-      ),
+      await screen.findByText('Stored remote access headers could not be decrypted and are not included.'),
     ).toBeInTheDocument()
   })
 
@@ -141,43 +126,38 @@ describe('ConnectDeviceDialog', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
 
-    renderDialog()
+    const { linkRequests } = renderDialog()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0)
     })
 
     expect(screen.getByText('Expires in 3:00')).toBeInTheDocument()
-    expect(mocks.createDevicePairingLinks).toHaveBeenCalledTimes(1)
+    expect(linkRequests()).toBe(1)
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(180_000)
     })
 
-    expect(mocks.createDevicePairingLinks).toHaveBeenCalledTimes(2)
+    expect(linkRequests()).toBe(2)
   })
 
   it('times expiry on the client clock when the client clock is ahead of the server', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
-    mocks.createDevicePairingLinks.mockImplementation(async () => ({
-      ...BASE_LINKS,
-      expiresAt: new Date(Date.now() - 600_000).toISOString(),
-    }))
 
-    renderDialog()
+    renderDialog({
+      respond: () => ({ json: { ...BASE_LINKS, expiresAt: new Date(Date.now() - 600_000).toISOString() } }),
+    })
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0)
     })
 
-    expect(mocks.createDevicePairingLinks).toHaveBeenCalledTimes(1)
-
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5_000)
     })
 
-    expect(mocks.createDevicePairingLinks).toHaveBeenCalledTimes(1)
     expect(screen.getByText('Expires in 2:55')).toBeInTheDocument()
   })
 
@@ -186,14 +166,9 @@ describe('ConnectDeviceDialog', () => {
     vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
 
     let rejectRequest: ((error: Error) => void) | undefined
-    mocks.createDevicePairingLinks.mockImplementation(
-      () =>
-        new Promise<DevicePairingLinksResponse>((_resolve, reject) => {
-          rejectRequest = reject
-        }),
-    )
-
-    renderDialog()
+    const { linkRequests } = renderDialog({
+      respond: () => new Promise<FetchRouteResult>((_resolve, reject) => { rejectRequest = reject }),
+    })
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5_000)
@@ -209,17 +184,20 @@ describe('ConnectDeviceDialog', () => {
 
     expect(screen.getByText('Failed to create pairing links')).toBeInTheDocument()
     expect(screen.queryByText(/^Expires in/)).not.toBeInTheDocument()
-    expect(mocks.createDevicePairingLinks).toHaveBeenCalledTimes(1)
+    expect(linkRequests()).toBe(1)
   })
 
   it('shows a failed request with a retry button', async () => {
     const user = userEvent.setup()
-    mocks.createDevicePairingLinks.mockRejectedValueOnce(new Error('Failed to create pairing links'))
-    renderDialog()
+    renderDialog({
+      respond: (call) => {
+        if (call === 1) throw new Error('Failed to create pairing links')
+        return { json: BASE_LINKS }
+      },
+    })
 
     expect(await screen.findByText('Failed to create pairing links')).toBeInTheDocument()
 
-    mocks.createDevicePairingLinks.mockResolvedValueOnce(BASE_LINKS)
     await user.click(screen.getByRole('button', { name: 'Try again' }))
 
     expect(await screen.findByAltText('Mobile app pairing QR code')).toBeInTheDocument()

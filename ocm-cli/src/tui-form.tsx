@@ -1,4 +1,3 @@
-/** @jsxImportSource @opentui/solid */
 import { TextAttributes, type KeyEvent, type TextareaRenderable } from '@opentui/core'
 import { useKeyboard } from '@opentui/solid'
 import { createEffect, createMemo, createSignal, For, Show, type JSX } from 'solid-js'
@@ -12,11 +11,6 @@ export type KeyHint = readonly [key: string, label: string]
 
 const PICKER_ROWS = 8
 
-/**
- * Row colors matching OpenCode's select dialogs: every text in the cursor row uses the
- * primary-action focused color on the focused background; a chosen row away from the
- * cursor uses the selected form-field color for its marker and title.
- */
 export function rowColors(theme: DialogTheme, state: { active: boolean; chosen?: boolean }) {
   if (state.active) {
     const text = theme.text.action.primary.focused
@@ -31,12 +25,10 @@ export function rowColors(theme: DialogTheme, state: { active: boolean; chosen?:
   }
 }
 
-/** True for the dialog-wide submit chord. */
 export function isSubmitKey(event: KeyEvent): boolean {
   return event.ctrl && event.name === 's'
 }
 
-/** Tab / Shift+Tab focus cycling over `count` fields; returns the focused index accessor. */
 export function useFieldFocus(count: () => number, enabled: () => boolean = () => true) {
   const [index, setIndex] = createSignal(0)
   createEffect(() => {
@@ -163,7 +155,6 @@ export function TextAreaField(props: {
   )
 }
 
-/** A two-way choice rendered as radio buttons; ←/→/space switch it while focused. */
 export function ChoiceField<Value>(props: {
   theme: DialogTheme
   label: string
@@ -198,10 +189,6 @@ export function ChoiceField<Value>(props: {
   )
 }
 
-/**
- * Filterable model list. Typing filters, ↑/↓ move, Enter toggles (multiple) or picks (single).
- * Selection state is owned by the caller.
- */
 export function ModelPicker(props: {
   theme: DialogTheme
   label: string

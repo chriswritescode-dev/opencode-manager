@@ -2,7 +2,7 @@ import type { Database } from 'bun:sqlite'
 import type { Repo } from '@opencode-manager/shared/types'
 import { isWorktreeSibling } from '@opencode-manager/shared/utils'
 import { logger } from '../utils/logger'
-import type { GitAuthService } from './git-auth'
+import type { GitAuthEnvironmentProvider } from './git-auth'
 import type { OpenCodeClient } from './opencode/client'
 import type { ProjectConfigService } from './project-config'
 import type { TerminalService } from './terminal'
@@ -10,17 +10,15 @@ import type { ScheduleService } from './schedules'
 import { findSiblingByDirectory, listRepoSiblings, removeWorktree, RepoWorkspaceError, resolveRepoProjectId } from './repo'
 import { getErrorMessage } from '../utils/error-utils'
 
-/**
- * Single owner of repo worktree lifecycle side effects: worktree setup on create (after an
- * optional caller-provided initializer), and terminal cleanup plus owner-specific removal on remove.
- */
+export type RepoWorkspaceProvider = Pick<RepoWorkspaceService, 'create' | 'remove'>
+
 export class RepoWorkspaceService {
   constructor(
     private readonly database: Database,
     private readonly openCodeClient: OpenCodeClient,
-    private readonly gitAuthService: GitAuthService,
-    private readonly projectConfigService: ProjectConfigService,
-    private readonly terminalService: TerminalService,
+    private readonly gitAuthService: GitAuthEnvironmentProvider,
+    private readonly projectConfigService: Pick<ProjectConfigService, 'runWorktreeSetupForRepo'>,
+    private readonly terminalService: Pick<TerminalService, 'removeAll' | 'list' | 'create'>,
     private readonly scheduleWorktrees: Pick<ScheduleService, 'removeWorktrees'>,
   ) {}
 
@@ -31,8 +29,8 @@ export class RepoWorkspaceService {
     const projectID = await resolveRepoProjectId(this.openCodeClient, repo.fullPath)
     const worktree = await this.openCodeClient.api.worktree.create({
       projectID,
-      ...(options.name ? { name: options.name } : {}),
-      ...(options.ref ? { branch: options.ref } : {}),
+      name: options.name,
+      branch: options.ref,
     })
 
     if (options.initialize) {
@@ -52,12 +50,6 @@ export class RepoWorkspaceService {
     return { ...worktree, worktreeSetup }
   }
 
-  /**
-   * Removes a worktree of the repo the way its owner expects: OpenCode worktrees through
-   * OpenCode, schedule worktrees through the schedule (which commits pending changes and
-   * removes their terminals first), and plain git worktrees with `git worktree remove`,
-   * which refuses uncommitted changes.
-   */
   async remove(repo: Repo, directory: string): Promise<void> {
     const worktree = findSiblingByDirectory(await this.listWorktreeSiblings(repo.id), directory)
     if (!worktree) throw new RepoWorkspaceError('Not a deletable worktree of this repo', 400)

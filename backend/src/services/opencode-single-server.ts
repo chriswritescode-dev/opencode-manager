@@ -1,8 +1,10 @@
 import { spawn, execSync, spawnSync } from 'child_process'
 import path from 'path'
 import os from 'os'
+import type { Readable } from 'node:stream'
 import { StringDecoder } from 'node:string_decoder'
 import { promises as fs, accessSync, constants } from 'fs'
+import { z } from 'zod'
 import { logger } from '../utils/logger'
 import {
   buildSSHCommandWithKnownHosts,
@@ -16,6 +18,7 @@ import {
 } from '../utils/ssh-key-manager'
 import { decryptSecret } from '../utils/crypto'
 import { BLOCKED_SERVER_ENV_KEYS } from '@opencode-manager/shared'
+import { JsonValueSchema } from '@opencode-manager/shared/utils'
 import {
   OPENCODE_PINNED_VERSION,
   describeUnsupportedOpenCodeVersion,
@@ -34,12 +37,14 @@ import {
   ENV,
 } from '@opencode-manager/shared/config/env'
 import type { Database } from 'bun:sqlite'
+import { getErrorCode } from './error-code'
 import type { OpenCodeClient } from './opencode/client'
 import { getOrCreateInternalToken } from './internal-token'
 import { installManagedPlugins } from './opencode/plugin-registry'
 import { getOpenCodeHome } from './opencode-home'
 import { restoreQuarantinedOpenCodePlugins } from './opencode-plugin-quarantine'
 import { resolveProcessIdentityProvider } from './opencode/process-identity'
+import type { ProcessIdentityProvider } from './opencode/process-identity'
 import { SandboxRuntimeService } from './sandbox/runtime'
 import { CredentialProvider } from './credential-provider'
 import { syncManagerGitIdentityConfig } from './git-identity'
@@ -86,15 +91,84 @@ export class OpenCodeOperationBusyError extends Error {
   }
 }
 
-// Helper getters to ensure values are computed at runtime (not module load time)
-// This allows proper mocking in tests
+export interface OpenCodeServerChild {
+  pid?: number
+  stdout: Readable | null
+  stderr: Readable | null
+  on(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): void
+  on(event: 'error', listener: (error: Error) => void): void
+  on(event: 'close', listener: () => void): void
+}
+
+export interface OpenCodeServerSpawnOptions {
+  cwd: string
+  detached: boolean
+  stdio: ['ignore', 'pipe', 'pipe']
+  env: NodeJS.ProcessEnv
+}
+
+export interface OpenCodeServerVersionOutput {
+  stdout: string
+  stderr: string
+}
+
+export interface OpenCodeServerSandboxRuntime {
+  isEnabled: () => boolean
+  stopAllSandboxesForToggle: () => Promise<void>
+  prepareSandboxOnBoot: () => Promise<void>
+}
+
+export interface OpenCodeServerTimings {
+  sigtermGraceMs: number
+  sigkillConfirmMs: number
+  exitPollMs: number
+}
+
+export interface OpenCodeServerManagerDeps {
+  timings: OpenCodeServerTimings
+  spawnServer: (executable: string, args: string[], options: OpenCodeServerSpawnOptions) => OpenCodeServerChild
+  runCommand: (command: string) => string
+  readVersionOutput: (executable: string) => OpenCodeServerVersionOutput
+  signalProcess: (pid: number, signal: NodeJS.Signals | number) => void
+  processIdentity: () => ProcessIdentityProvider
+  createOpenCodeClient: (password: string, host: string) => OpenCodeClient | Promise<OpenCodeClient>
+  createSandboxRuntime: (db: Database) => OpenCodeServerSandboxRuntime
+  installManagedPlugins: (configHome: string) => Promise<void>
+  restoreQuarantinedOpenCodePlugins: (configHome: string, configPath: string) => Promise<void>
+}
+
+export const openCodeServerManagerDeps: OpenCodeServerManagerDeps = {
+  timings: {
+    sigtermGraceMs: PROCESS_SIGTERM_GRACE_MS,
+    sigkillConfirmMs: PROCESS_SIGKILL_CONFIRM_MS,
+    exitPollMs: PROCESS_EXIT_POLL_MS,
+  },
+  spawnServer: (executable, args, options) => spawn(executable, args, options),
+  runCommand: (command) => execSync(command).toString(),
+  readVersionOutput: (executable) => {
+    const result = spawnSync(executable, ['--version'], { encoding: 'utf8' })
+    return { stdout: result.stdout ?? '', stderr: result.stderr ?? '' }
+  },
+  signalProcess: (pid, signal) => {
+    process.kill(pid, signal)
+  },
+  processIdentity: () => resolveProcessIdentityProvider(),
+  createOpenCodeClient: async (password, host) => {
+    const { createOpenCodeClient } = await import('./opencode/client')
+    return createOpenCodeClient(password, host)
+  },
+  createSandboxRuntime: (db) => new SandboxRuntimeService(db),
+  installManagedPlugins: (configHome) => installManagedPlugins(configHome),
+  restoreQuarantinedOpenCodePlugins: (configHome, configPath) => restoreQuarantinedOpenCodePlugins(configHome, configPath),
+}
+
 const getOpenCodeServerDirectory = () => getWorkspacePath()
 const getOpenCodeConfigPath = () => getOpenCodeConfigFilePath()
 const getOpenCodeServerPort = () => ENV.OPENCODE.PORT
 const getOpenCodeServerHost = () => ENV.OPENCODE.HOST
 
-function resolveManagerMicrosandboxEnv(): Record<string, string> {
-  const env: Record<string, string> = {
+function resolveManagerMicrosandboxEnv(): ManagerMicrosandboxEnv {
+  const env: ManagerMicrosandboxEnv = {
     MSB_BACKEND: process.env.MSB_BACKEND ?? 'local',
     MSB_HOME: process.env.MSB_HOME ?? path.join(process.env.HOME ?? os.homedir(), '.microsandbox'),
     MSB_PATH: ENV.SANDBOX?.MSB_PATH ?? process.env.MSB_PATH ?? 'msb',
@@ -104,20 +178,6 @@ function resolveManagerMicrosandboxEnv(): Record<string, string> {
   if (process.env.MSB_API_URL) env.MSB_API_URL = process.env.MSB_API_URL
   if (process.env.MSB_API_KEY) env.MSB_API_KEY = process.env.MSB_API_KEY
   return env
-}
-
-function readProcessGroupId(pid: number): number | null {
-  return resolveProcessIdentityProvider().readProcessStat(pid)?.pgrp ?? null
-}
-
-function processGroupExists(pgid: number): boolean {
-  try {
-    process.kill(-pgid, 0)
-    return true
-  } catch (error) {
-    const errorCode = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
-    return errorCode !== 'ESRCH'
-  }
 }
 
 const CHILD_STATE_MARKER_FILENAME = 'opencode-server-child.json'
@@ -133,27 +193,40 @@ type ChildStateMarker = {
   groupMembers: Array<{ pid: number; startToken: string }>
 }
 
-function readProcessStartToken(pid: number): string | null {
-  return resolveProcessIdentityProvider().readProcessStat(pid)?.startToken ?? null
+interface ManagerMicrosandboxEnv {
+  MSB_BACKEND: string
+  MSB_HOME: string
+  MSB_PATH: string
+  MSB_LIBKRUNFW_PATH?: string
+  MSB_PROFILE?: string
+  MSB_API_URL?: string
+  MSB_API_KEY?: string
 }
 
-async function readProcessStartTokenWithRetry(pid: number): Promise<string | null> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const token = readProcessStartToken(pid)
-    if (token !== null) return token
-    await new Promise((resolve) => setTimeout(resolve, 50))
-  }
-  return null
+interface AttestedProcessTarget {
+  pid: number
+  groupTarget: number | null
+  pidAttested: boolean
+  groupAttested: boolean
 }
 
-async function readProcessGroupIdWithRetry(pid: number): Promise<number | null> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const pgid = readProcessGroupId(pid)
-    if (pgid !== null) return pgid
-    await new Promise((resolve) => setTimeout(resolve, 50))
-  }
-  return null
-}
+const childStateGroupMemberSchema = z.object({
+  pid: z.number(),
+  startToken: z.string(),
+})
+
+const childStateMarkerSchema = z.object({
+  pid: z.number(),
+  pgid: JsonValueSchema.nullish(),
+  enforced: z.boolean(),
+  startToken: z.string(),
+  generation: z.number(),
+  groupMembers: z.array(JsonValueSchema).nullish(),
+})
+
+const restartGenerationRowSchema = z.object({ value: z.string() })
+
+const execErrorStatusSchema = z.object({ status: z.number().nullish() })
 
 type AbortRaceOutcome<T> = { completed: true; value: T } | { completed: false }
 
@@ -200,9 +273,9 @@ function waitForPollInterval(signal: AbortSignal, ms: number): Promise<boolean> 
 function readDurableRestartGeneration(db: Database | null): number {
   if (!db) return 0
   try {
-    const row = db.prepare('SELECT value FROM app_secrets WHERE key = ?').get(RESTART_GENERATION_KEY) as { value: string } | undefined
-    if (row === undefined) return 0
-    const parsed = Number(row.value)
+    const row = restartGenerationRowSchema.safeParse(db.prepare('SELECT value FROM app_secrets WHERE key = ?').get(RESTART_GENERATION_KEY))
+    if (!row.success) return 0
+    const parsed = Number(row.data.value)
     return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0
   } catch {
     return 0
@@ -229,37 +302,26 @@ async function writeChildStateMarker(marker: ChildStateMarker): Promise<void> {
 
 async function readChildStateMarker(): Promise<ChildStateMarker | null> {
   try {
-    const parsed = JSON.parse(await fs.readFile(getChildStateMarkerPath(), 'utf-8')) as Record<string, unknown>
-    if (
-      typeof parsed.pid === 'number' &&
-      typeof parsed.enforced === 'boolean' &&
-      typeof parsed.startToken === 'string' &&
-      typeof parsed.generation === 'number'
-    ) {
-      const pgid = typeof parsed.pgid === 'number' && parsed.pgid > 0 ? parsed.pgid : null
-      const groupMembers = Array.isArray(parsed.groupMembers)
-        ? parsed.groupMembers.filter(
-          (member): member is { pid: number; startToken: string } =>
-            member !== null &&
-            typeof member === 'object' &&
-            !Array.isArray(member) &&
-            typeof (member as { pid?: unknown }).pid === 'number' &&
-            typeof (member as { startToken?: unknown }).startToken === 'string',
-        )
-        : []
-      return {
-        pid: parsed.pid,
-        pgid,
-        enforced: parsed.enforced,
-        startToken: parsed.startToken,
-        generation: parsed.generation,
-        groupMembers,
-      }
+    const parsed = childStateMarkerSchema.safeParse(JSON.parse(await fs.readFile(getChildStateMarkerPath(), 'utf-8')))
+    if (!parsed.success) return null
+    const marker = parsed.data
+    const parsedPgid = z.number().safeParse(marker.pgid)
+    const pgid = parsedPgid.success && parsedPgid.data > 0 ? parsedPgid.data : null
+    const groupMembers = (marker.groupMembers ?? []).flatMap((member) => {
+      const parsedMember = childStateGroupMemberSchema.safeParse(member)
+      return parsedMember.success ? [parsedMember.data] : []
+    })
+    return {
+      pid: marker.pid,
+      pgid,
+      enforced: marker.enforced,
+      startToken: marker.startToken,
+      generation: marker.generation,
+      groupMembers,
     }
   } catch {
     return null
   }
-  return null
 }
 
 async function removeChildStateMarker(): Promise<void> {
@@ -276,21 +338,21 @@ export function resolveOpenCodeExecutable(): string | null {
     resolveOpenCodeBinaryPath(getOpenCodeHome()),
     '/usr/local/bin/opencode',
     '/opt/opencode/bin/opencode',
-  ].filter((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0)
+  ]
   for (const candidate of candidates) {
+    if (candidate === undefined || candidate === null || candidate.length === 0) continue
     try {
       accessSync(candidate, constants.X_OK)
       return candidate
     } catch {
-      // try the next candidate
     }
   }
   return null
 }
 
 class OpenCodeServerManager {
-  private static instance: OpenCodeServerManager
-  private serverProcess: ReturnType<typeof spawn> | null = null
+  private static instance: OpenCodeServerManager | null = null
+  private serverProcess: OpenCodeServerChild | null = null
   private serverPid: number | null = null
   private isHealthy: boolean = false
   private db: Database | null = null
@@ -307,8 +369,11 @@ class OpenCodeServerManager {
   private markerRefreshTimer: ReturnType<typeof setInterval> | null = null
   private processGeneration = 0
   private intentionalStop: { pid: number; generation: number } | null = null
+  private readonly deps: OpenCodeServerManagerDeps
 
-  private constructor() {}
+  constructor(deps: Partial<OpenCodeServerManagerDeps> = {}) {
+    this.deps = { ...openCodeServerManagerDeps, ...deps }
+  }
 
   setDatabase(db: Database) {
     this.db = db
@@ -320,8 +385,7 @@ class OpenCodeServerManager {
 
   async rebuildClient(): Promise<void> {
     const password = this.getResolvedPassword()
-    const { createOpenCodeClient } = await import('./opencode/client')
-    this.openCodeClient = createOpenCodeClient(password, getOpenCodeServerHost())
+    this.openCodeClient = await this.deps.createOpenCodeClient(password, getOpenCodeServerHost())
   }
 
   getEffectiveServerHost(): string {
@@ -337,22 +401,14 @@ class OpenCodeServerManager {
   }
 
   static getInstance(): OpenCodeServerManager {
-    if (!OpenCodeServerManager.instance) {
-      OpenCodeServerManager.instance = new OpenCodeServerManager()
-    }
-    return OpenCodeServerManager.instance
+    const instance = OpenCodeServerManager.instance ?? new OpenCodeServerManager()
+    OpenCodeServerManager.instance = instance
+    return instance
   }
 
-  /**
-   * Test-only method to reset the singleton instance.
-   * Should only be used in test setup/teardown.
-   */
   static resetInstance(): void {
-    const instance = OpenCodeServerManager.instance
-    if (instance) {
-      instance.stopChildStateMarkerRefresh()
-    }
-    OpenCodeServerManager.instance = null as unknown as OpenCodeServerManager
+    OpenCodeServerManager.instance?.stopChildStateMarkerRefresh()
+    OpenCodeServerManager.instance = null
   }
 
   private acquireOp(): boolean {
@@ -374,6 +430,41 @@ class OpenCodeServerManager {
     return this.opInProgress
   }
 
+  private readProcessGroupId(pid: number): number | null {
+    return this.deps.processIdentity().readProcessStat(pid)?.pgrp ?? null
+  }
+
+  private readProcessStartToken(pid: number): string | null {
+    return this.deps.processIdentity().readProcessStat(pid)?.startToken ?? null
+  }
+
+  private processGroupExists(pgid: number): boolean {
+    try {
+      this.deps.signalProcess(-pgid, 0)
+      return true
+    } catch (error) {
+      return getErrorCode(error) !== 'ESRCH'
+    }
+  }
+
+  private async readProcessStartTokenWithRetry(pid: number): Promise<string | null> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const token = this.readProcessStartToken(pid)
+      if (token !== null) return token
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    return null
+  }
+
+  private async readProcessGroupIdWithRetry(pid: number): Promise<number | null> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const pgid = this.readProcessGroupId(pid)
+      if (pgid !== null) return pgid
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    return null
+  }
+
   async start(allowNested = false): Promise<void> {
     const acquired = this.acquireOp()
     if (!acquired && !allowNested) {
@@ -391,7 +482,7 @@ class OpenCodeServerManager {
     let sandboxEnforced = false
     if (this.db) {
       try {
-        sandboxEnforced = new SandboxRuntimeService(this.db).isEnabled()
+        sandboxEnforced = this.deps.createSandboxRuntime(this.db).isEnabled()
       } catch (error) {
         sandboxEnforced = true
         this.sandboxEnforced = true
@@ -418,14 +509,14 @@ class OpenCodeServerManager {
       }
       if (!sandboxEnforced && this.sandboxEnforced) {
         try {
-          await new SandboxRuntimeService(this.db).stopAllSandboxesForToggle()
+          await this.deps.createSandboxRuntime(this.db).stopAllSandboxesForToggle()
           logger.info('Sandbox enforcement disabled: stopped all sandbox microVMs')
         } catch (error) {
           this.failNonRecoverable(`Failed to stop the workspace sandbox while disabling enforcement: ${error instanceof Error ? error.message : String(error)}`)
         }
       }
       if (sandboxEnforced && !this.sandboxEnforced) {
-        void new SandboxRuntimeService(this.db).prepareSandboxOnBoot().catch((error) => {
+        void this.deps.createSandboxRuntime(this.db).prepareSandboxOnBoot().catch((error) => {
           logger.warn('Sandbox enforcement enabled but preparing the guest image failed:', error)
         })
       }
@@ -450,7 +541,7 @@ class OpenCodeServerManager {
                 const normalizedKey = key.trim()
                 return (
                   normalizedKey !== '' &&
-                  !(BLOCKED_SERVER_ENV_KEYS as readonly string[]).includes(normalizedKey) &&
+                  !BLOCKED_SERVER_ENV_KEYS.some((blockedKey) => blockedKey === normalizedKey) &&
                   !normalizedKey.startsWith('MSB_')
                 )
               })
@@ -466,7 +557,7 @@ class OpenCodeServerManager {
     }
 
     this.sandboxEnforced = sandboxEnforced
-    if (sandboxEnforced && !resolveProcessIdentityProvider().attested) {
+    if (sandboxEnforced && !this.deps.processIdentity().attested) {
       this.failNonRecoverable(
         'Sandbox enforcement requires process identity attestation, which is unavailable on this platform; refusing to run an enforced server',
       )
@@ -507,7 +598,7 @@ class OpenCodeServerManager {
             && childState.enforced === false
             && childState.generation === durableRestartGeneration
             && childState.startToken !== ''
-            && childState.startToken === readProcessStartToken(childState.pid)
+            && childState.startToken === this.readProcessStartToken(childState.pid)
             && existingProcesses.some((proc) => proc.pid === childState.pid)
           if (attestedUnenforced) {
             this.isHealthy = true
@@ -589,14 +680,14 @@ class OpenCodeServerManager {
     await this.resetAgentTmpDirectory()
     const pluginConfigHome = getOpenCodeConfigHome()
     try {
-      await restoreQuarantinedOpenCodePlugins(pluginConfigHome, openCodeConfigPath)
+      await this.deps.restoreQuarantinedOpenCodePlugins(pluginConfigHome, openCodeConfigPath)
     } catch (error) {
       this.failNonRecoverable(
         `Failed to restore legacy quarantined OpenCode plugins before startup: ${error instanceof Error ? error.message : String(error)}`,
       )
     }
     try {
-      await installManagedPlugins(pluginConfigHome)
+      await this.deps.installManagedPlugins(pluginConfigHome)
     } catch (error) {
       if (sandboxEnforced) {
         logger.error('Failed to install a generated OpenCode plugin; refusing to start an enforced server', error)
@@ -631,17 +722,11 @@ class OpenCodeServerManager {
     delete userEnvVars.OPENCODE_CONFIG_DIR
     delete userEnvVars.OPENCODE_CONFIG_CONTENT
 
-    const serverEnv = {
+    const serverEnv: NodeJS.ProcessEnv = {
       ...cleanEnv,
       ...userEnvVars,
       ...microsandboxEnv,
       ...gitEnv,
-      ...(this.db
-        ? {
-          OCM_INTERNAL_API_URL: `http://localhost:${ENV.SERVER.PORT}/api/internal`,
-          OCM_INTERNAL_TOKEN: getOrCreateInternalToken(this.db),
-        }
-        : {}),
       OCM_SANDBOX_ENFORCED: sandboxEnforced ? 'true' : 'false',
       GIT_SSH_COMMAND: gitSshCommand,
       XDG_DATA_HOME: getOpenCodeStateHome(),
@@ -649,16 +734,23 @@ class OpenCodeServerManager {
       XDG_CONFIG_HOME: getOpenCodeConfigHome(),
       TMPDIR: getOpenCodeTmpHome(),
     }
+    if (this.db) {
+      serverEnv.OCM_INTERNAL_API_URL = `http://localhost:${ENV.SERVER.PORT}/api/internal`
+      serverEnv.OCM_INTERNAL_TOKEN = getOrCreateInternalToken(this.db)
+    }
 
     try {
-      await prepareOpenCodeServiceLaunch(serverEnv, password)
+      await prepareOpenCodeServiceLaunch({
+        XDG_CONFIG_HOME: getOpenCodeConfigHome(),
+        XDG_STATE_HOME: getOpenCodeStateHome(),
+      }, password)
     } catch (error) {
       const message = `Failed to prepare the OpenCode service settings: ${error instanceof Error ? error.message : String(error)}`
       this.recordStartupError(message)
       throw new Error(message)
     }
 
-    this.serverProcess = spawn(
+    this.serverProcess = this.deps.spawnServer(
       openCodeExecutable,
       [...OPENCODE_SERVICE_SERVE_ARGS, '--port', openCodeServerPort.toString(), '--hostname', openCodeServerHost],
       {
@@ -808,10 +900,10 @@ class OpenCodeServerManager {
     this.serverPid = this.serverProcess.pid ?? null
     if (this.serverPid !== null) {
       if (!isDevelopment) {
-        if (!resolveProcessIdentityProvider().attested) {
+        if (!this.deps.processIdentity().attested) {
           logger.warn('Process identity attestation is unavailable on this platform; tracking the OpenCode server as a direct child without PID-reuse attestation')
         } else {
-          const startToken = await readProcessStartTokenWithRetry(this.serverPid)
+          const startToken = await this.readProcessStartTokenWithRetry(this.serverPid)
           if (startToken === null) {
             const message = 'Failed to read the process identity of the freshly spawned OpenCode server; refusing to detach an unattestable child'
             this.recordStartupError(message)
@@ -819,9 +911,9 @@ class OpenCodeServerManager {
             throw new Error(message)
           }
           try {
-            const processGroup = await readProcessGroupIdWithRetry(this.serverPid)
+            const processGroup = await this.readProcessGroupIdWithRetry(this.serverPid)
             const groupMembers = processGroup !== null && processGroup === this.serverPid
-              ? resolveProcessIdentityProvider().readProcessGroupMembers(processGroup)
+              ? this.deps.processIdentity().readProcessGroupMembers(processGroup)
               : []
             await writeChildStateMarker({
               pid: this.serverPid,
@@ -923,7 +1015,7 @@ class OpenCodeServerManager {
         logger.warn(`Refusing to signal PID ${pid}: it does not match the child state marker PID ${marker.pid}`)
         return
       } else {
-        const pgid = readProcessGroupId(pid)
+        const pgid = this.readProcessGroupId(pid)
         if (pgid !== null && pgid === pid) {
           groupTarget = pid
         }
@@ -992,6 +1084,18 @@ class OpenCodeServerManager {
     return getOpenCodeServerPort()
   }
 
+  isChildStateMarkerRefreshActive(): boolean {
+    return this.markerRefreshTimer !== null
+  }
+
+  getServerPid(): number | null {
+    return this.serverPid
+  }
+
+  isServerHealthy(): boolean {
+    return this.isHealthy
+  }
+
   getVersion(): string | null {
     return this.version
   }
@@ -1037,10 +1141,6 @@ class OpenCodeServerManager {
     return this.sandboxEnforced
   }
 
-  /**
-   * Sets the lifecycle gate and, when it transitions from closed to open, notifies the registered
-   * listeners that the proxy is now serving requests. Listener failures are logged, not propagated.
-   */
   setLifecycleInitialized(initialized: boolean): void {
     const opened = initialized && !this.lifecycleInitialized
     this.lifecycleInitialized = initialized
@@ -1054,7 +1154,6 @@ class OpenCodeServerManager {
     })
   }
 
-  /** Calls `listener` each time the lifecycle gate opens, i.e. the proxy starts accepting requests. */
   onLifecycleInitialized(listener: () => void): () => void {
     this.lifecycleOpenedListeners.add(listener)
     return () => { this.lifecycleOpenedListeners.delete(listener) }
@@ -1089,8 +1188,8 @@ class OpenCodeServerManager {
   async fetchVersion(): Promise<string | null> {
     try {
       const executable = resolveOpenCodeExecutable() ?? 'opencode'
-      const result = spawnSync(executable, ['--version'], { encoding: 'utf8' })
-      const version = parseOpenCodeVersionOutput(`${result.stdout ?? ''}${result.stderr ?? ''}`)
+      const result = this.deps.readVersionOutput(executable)
+      const version = parseOpenCodeVersionOutput(`${result.stdout}${result.stderr}`)
       if (version) {
         this.version = version
         return this.version
@@ -1103,21 +1202,19 @@ class OpenCodeServerManager {
 
   private processExists(pid: number): boolean {
     try {
-      process.kill(pid, 0)
+      this.deps.signalProcess(pid, 0)
       return true
     } catch (error) {
-      const errorCode = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
-      return errorCode !== 'ESRCH'
+      return getErrorCode(error) !== 'ESRCH'
     }
   }
 
   private signalProcessOrGroup(pid: number, groupTarget: number | null, signal: NodeJS.Signals): void {
     const target = groupTarget !== null ? -groupTarget : pid
     try {
-      process.kill(target, signal)
+      this.deps.signalProcess(target, signal)
     } catch (error) {
-      const errorCode = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
-      if (errorCode === 'ESRCH') {
+      if (getErrorCode(error) === 'ESRCH') {
         logger.debug(`Process ${pid} already stopped`)
       } else {
         logger.warn(`Failed to send ${signal} to ${groupTarget !== null ? `process group ${groupTarget}` : `process ${pid}`}:`, error)
@@ -1128,11 +1225,11 @@ class OpenCodeServerManager {
   private async waitForProcessOrGroupExit(pid: number, groupTarget: number | null, timeoutMs: number): Promise<boolean> {
     const start = Date.now()
     while (Date.now() - start < timeoutMs) {
-      const alive = groupTarget !== null ? processGroupExists(groupTarget) : this.processExists(pid)
+      const alive = groupTarget !== null ? this.processGroupExists(groupTarget) : this.processExists(pid)
       if (!alive) {
         return true
       }
-      await new Promise(r => setTimeout(r, PROCESS_EXIT_POLL_MS))
+      await new Promise(r => setTimeout(r, this.deps.timings.exitPollMs))
     }
     return false
   }
@@ -1144,10 +1241,10 @@ class OpenCodeServerManager {
     failurePhrase: string,
   ): Promise<void> {
     this.signalProcessOrGroup(pid, groupTarget, 'SIGTERM')
-    const exited = await this.waitForProcessOrGroupExit(pid, groupTarget, PROCESS_SIGTERM_GRACE_MS)
+    const exited = await this.waitForProcessOrGroupExit(pid, groupTarget, this.deps.timings.sigtermGraceMs)
     if (exited) return
     this.signalProcessOrGroup(pid, groupTarget, 'SIGKILL')
-    const killed = await this.waitForProcessOrGroupExit(pid, groupTarget, PROCESS_SIGKILL_CONFIRM_MS)
+    const killed = await this.waitForProcessOrGroupExit(pid, groupTarget, this.deps.timings.sigkillConfirmMs)
     if (!killed) {
       const message = `${context} (PID ${pid}${groupTarget !== null ? `, process group ${groupTarget}` : ''}) ${failurePhrase}`
       this.recordStartupError(message)
@@ -1157,7 +1254,7 @@ class OpenCodeServerManager {
 
   private async terminatePortOwners(processes: Array<{pid: number}>): Promise<void> {
     const targets = processes.map((proc) => {
-      const pgid = readProcessGroupId(proc.pid)
+      const pgid = this.readProcessGroupId(proc.pid)
       return { pid: proc.pid, groupTarget: pgid !== null && pgid === proc.pid ? proc.pid : null }
     })
     for (const target of targets) {
@@ -1165,7 +1262,7 @@ class OpenCodeServerManager {
     }
     const survivors: number[] = []
     for (const target of targets) {
-      const exited = await this.waitForProcessOrGroupExit(target.pid, target.groupTarget, PROCESS_SIGKILL_CONFIRM_MS)
+      const exited = await this.waitForProcessOrGroupExit(target.pid, target.groupTarget, this.deps.timings.sigkillConfirmMs)
       if (!exited) {
         survivors.push(target.pid)
       }
@@ -1177,23 +1274,18 @@ class OpenCodeServerManager {
     }
   }
 
-  private resolveAttestedProcessTarget(marker: ChildStateMarker): {
-    pid: number
-    groupTarget: number | null
-    pidAttested: boolean
-    groupAttested: boolean
-  } {
+  private resolveAttestedProcessTarget(marker: ChildStateMarker): AttestedProcessTarget {
     const pid = marker.pid
-    const pidAttested = marker.startToken !== '' && readProcessStartToken(pid) === marker.startToken
+    const pidAttested = marker.startToken !== '' && this.readProcessStartToken(pid) === marker.startToken
     let groupTarget: number | null = null
     let groupAttested = false
     if (pidAttested) {
-      const livePgid = readProcessGroupId(pid)
+      const livePgid = this.readProcessGroupId(pid)
       if (livePgid !== null && livePgid === pid) {
         groupTarget = pid
       }
     } else if (marker.pgid !== null) {
-      const currentMembers = resolveProcessIdentityProvider().readProcessGroupMembers(marker.pgid)
+      const currentMembers = this.deps.processIdentity().readProcessGroupMembers(marker.pgid)
       groupAttested = marker.groupMembers.length > 0 && currentMembers.some(
         (member) => marker.groupMembers.some(
           (recorded) => recorded.pid === member.pid && recorded.startToken === member.startToken,
@@ -1211,7 +1303,7 @@ class OpenCodeServerManager {
     if (marker === null) return
     const target = this.resolveAttestedProcessTarget(marker)
     if (!target.pidAttested && marker.pgid !== null) {
-      const currentMembers = resolveProcessIdentityProvider().readProcessGroupMembers(marker.pgid)
+      const currentMembers = this.deps.processIdentity().readProcessGroupMembers(marker.pgid)
       if (currentMembers.length > 0 && !target.groupAttested) {
         const message = `Previous OpenCode server process (PID ${marker.pid}) has exited but process group ${marker.pgid} still exists and cannot be proven to belong to it; refusing to signal an unverified process group before starting an enforced server`
         this.recordStartupError(message)
@@ -1219,7 +1311,7 @@ class OpenCodeServerManager {
       }
     }
     const pidAlive = target.pidAttested
-    const groupAlive = target.groupTarget !== null && processGroupExists(target.groupTarget)
+    const groupAlive = target.groupTarget !== null && this.processGroupExists(target.groupTarget)
     if (!pidAlive && !groupAlive) return
     logger.warn(`Sandbox enforcement enabled: terminating the previous OpenCode process group (leader PID ${marker.pid}) so host-executed descendants cannot survive`)
     await this.terminateAndConfirm(
@@ -1250,7 +1342,7 @@ class OpenCodeServerManager {
       return
     }
     if (marker.pgid !== null) {
-      const currentMembers = resolveProcessIdentityProvider().readProcessGroupMembers(marker.pgid)
+      const currentMembers = this.deps.processIdentity().readProcessGroupMembers(marker.pgid)
       if (currentMembers.length > 0) {
         if (!target.groupAttested || target.groupTarget === null) {
           const message = `Previous OpenCode server leader (PID ${marker.pid}) has exited but process group ${marker.pgid} still exists and cannot be proven to belong to it; refusing to replace the child state marker while live processes may survive`
@@ -1271,30 +1363,30 @@ class OpenCodeServerManager {
     await removeChildStateMarker()
   }
 
-  private startChildStateMarkerRefresh(): void {
+  startChildStateMarkerRefresh(): void {
     this.stopChildStateMarkerRefresh()
     this.markerRefreshTimer = setInterval(() => {
       void this.refreshChildStateMarkerMembers()
     }, CHILD_STATE_MARKER_REFRESH_MS)
   }
 
-  private stopChildStateMarkerRefresh(): void {
+  stopChildStateMarkerRefresh(): void {
     if (this.markerRefreshTimer !== null) {
       clearInterval(this.markerRefreshTimer)
       this.markerRefreshTimer = null
     }
   }
 
-  private async refreshChildStateMarkerMembers(): Promise<void> {
+  async refreshChildStateMarkerMembers(): Promise<void> {
     try {
       const marker = await readChildStateMarker()
       if (marker === null || marker.pgid === null) return
-      const leaderStat = resolveProcessIdentityProvider().readProcessStat(marker.pid)
+      const leaderStat = this.deps.processIdentity().readProcessStat(marker.pid)
       if (leaderStat === null || leaderStat.startToken !== marker.startToken || leaderStat.pgrp !== marker.pgid) {
         this.stopChildStateMarkerRefresh()
         return
       }
-      const groupMembers = resolveProcessIdentityProvider().readProcessGroupMembers(marker.pgid)
+      const groupMembers = this.deps.processIdentity().readProcessGroupMembers(marker.pgid)
       const unchanged =
         groupMembers.length === marker.groupMembers.length &&
         groupMembers.every((member, index) => {
@@ -1332,10 +1424,10 @@ class OpenCodeServerManager {
   private async findProcessesByPort(port: number): Promise<Array<{pid: number}>> {
     let output: string
     try {
-      output = execSync(`lsof -nP -t -iTCP:${port} -sTCP:LISTEN`).toString().trim()
+      output = this.deps.runCommand(`lsof -nP -t -iTCP:${port} -sTCP:LISTEN`).trim()
     } catch (error) {
-      const status = error && typeof error === 'object' && 'status' in error ? (error as { status: number | null }).status : null
-      if (status === 1) {
+      const status = execErrorStatusSchema.safeParse(error)
+      if (status.success && status.data.status === 1) {
         return []
       }
       throw new Error(`lsof failed to inspect port ${port}: ${error instanceof Error ? error.message : String(error)}`)

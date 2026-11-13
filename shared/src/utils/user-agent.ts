@@ -1,7 +1,6 @@
 const UNKNOWN_DEVICE = 'Unknown device'
 const RAW_USER_AGENT_MAX_LENGTH = 80
 
-/** Describes a user agent as "browser on platform", falling back to the raw string. */
 export function describeUserAgent(userAgent: string | null | undefined): string {
   const value = userAgent?.trim()
   if (!value) return UNKNOWN_DEVICE

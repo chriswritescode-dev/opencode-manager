@@ -1,89 +1,85 @@
-import { renderHook, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { waitFor } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import type { CommandInfo } from '@opencode-manager/shared/opencode'
 import { useCommands } from './useCommands'
-import { listCommands } from '../api/opencode'
 import { BUILTIN_COMMANDS } from '@/lib/builtinCommands'
-import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
 import { useRecentCommandsStore } from '@/stores/recentCommandsStore'
+import { renderHookWithProviders } from '@/test/render'
+import type { FetchRoute } from '@/test/fetchFake'
 
-vi.mock('../api/opencode', () => ({
-  listCommands: vi.fn(),
-}))
+const hookProviders = {
+  auth: false,
+  theme: false,
+  tts: false,
+  toaster: false,
+} as const
 
-const createWrapper = (serverId?: string) => {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-    },
-  })
-  return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={queryClient}>
-      {serverId ? <OpenCodeServerProvider serverId={serverId}>{children}</OpenCodeServerProvider> : children}
-    </QueryClientProvider>
-  )
+function commandsRoute(
+  resolve: (directory: string | undefined) => CommandInfo[],
+  prefix = '/api/opencode/api',
+): FetchRoute {
+  return {
+    method: 'GET',
+    path: `${prefix}/command`,
+    respond: (request) => ({
+      json: { data: resolve(request.searchParams.get('location[directory]') ?? undefined) },
+    }),
+  }
+}
+
+function renderCommands(options: { directory?: string, enabled?: boolean }, routes: FetchRoute[] = []) {
+  return renderHookWithProviders(() => useCommands(options), { ...hookProviders, fetchRoutes: routes })
+}
+
+function names(commands: Array<{ item: { name: string } }>): string[] {
+  return commands.map(({ item }) => item.name)
 }
 
 describe('useCommands', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    useRecentCommandsStore.setState({ names: [] })
-  })
-
   it('returns the built-in commands sorted by name when disabled', () => {
-    const { result } = renderHook(() => useCommands({ enabled: false }), { wrapper: createWrapper() })
+    const { result, fetchFake } = renderCommands({ enabled: false })
 
-    const names = result.current.searchCommands('').map(({ item }) => item.name)
+    const commandNames = names(result.current.searchCommands(''))
 
-    expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b)))
+    expect(commandNames).toEqual([...commandNames].sort((a, b) => a.localeCompare(b)))
     for (const command of BUILTIN_COMMANDS) {
-      expect(names).toContain(command.name)
+      expect(commandNames).toContain(command.name)
     }
-    expect(names).not.toContain('themes')
-    expect(names).not.toContain('share')
-    expect(names).not.toContain('unshare')
-    expect(names).not.toContain('editor')
-    expect(listCommands).not.toHaveBeenCalled()
+    expect(commandNames).not.toContain('themes')
+    expect(commandNames).not.toContain('share')
+    expect(commandNames).not.toContain('unshare')
+    expect(commandNames).not.toContain('editor')
+    expect(fetchFake.requests).toHaveLength(0)
   })
 
   it('prioritizes exact and prefix matches before other matches', () => {
-    const { result } = renderHook(() => useCommands({ enabled: false }), { wrapper: createWrapper() })
+    const { result } = renderCommands({ enabled: false })
 
-    expect(result.current.searchCommands('co').map(({ item }) => item.name)).toEqual([
-      'compact',
-      'connect',
-      'continue',
-      'copy',
-    ])
-    expect(result.current.searchCommands('do').map(({ item }) => item.name)).toEqual([
-      'redo',
-      'undo',
-    ])
+    expect(names(result.current.searchCommands('co'))).toEqual(['compact', 'connect', 'continue', 'copy'])
+    expect(names(result.current.searchCommands('do'))).toEqual(['redo', 'undo'])
   })
 
   it('sorts loaded custom commands with built-in commands', async () => {
-    vi.mocked(listCommands).mockResolvedValue([
-      { name: 'zebra', description: 'Zebra' },
-      { name: 'alpha', description: 'Alpha' },
+    const { result, fetchFake } = renderCommands({ directory: '/repo' }, [
+      commandsRoute(() => [
+        { name: 'zebra', description: 'Zebra' },
+        { name: 'alpha', description: 'Alpha' },
+      ]),
     ])
 
-    const { result } = renderHook(() => useCommands({ directory: '/repo' }), { wrapper: createWrapper() })
-
     await waitFor(() => {
-      expect(result.current.searchCommands('').map(({ item }) => item.name).slice(0, 3)).toEqual([
-        'agent',
-        'alpha',
-        'btw',
-      ])
+      expect(names(result.current.searchCommands('')).slice(0, 3)).toEqual(['agent', 'alpha', 'btw'])
     })
 
-    expect(listCommands).toHaveBeenCalledWith('/repo', 'local')
+    expect(fetchFake.lastRequest('GET', '/api/opencode/api/command')?.searchParams.get('location[directory]')).toBe(
+      '/repo',
+    )
   })
 
   it('lets a loaded command override a built-in command with the same name', async () => {
-    vi.mocked(listCommands).mockResolvedValue([{ name: 'copy', description: 'server copy' }])
-
-    const { result } = renderHook(() => useCommands({ directory: '/repo' }), { wrapper: createWrapper() })
+    const { result } = renderCommands({ directory: '/repo' }, [
+      commandsRoute(() => [{ name: 'copy', description: 'server copy' }]),
+    ])
 
     await waitFor(() => {
       expect(result.current.searchCommands('copy').map(({ item }) => item)).toEqual([
@@ -91,104 +87,99 @@ describe('useCommands', () => {
       ])
     })
 
-    const copy = result.current.findCommand('copy')!
+    const copy = result.current.findCommand('copy')
+    if (copy === undefined) throw new Error('expected the loaded copy command')
     expect('action' in copy).toBe(false)
   })
 
   it('ranks an exact built-in match ahead of a server command that contains it', async () => {
-    vi.mocked(listCommands).mockResolvedValue([{ name: 'xundo', description: 'X undo' }])
-
-    const { result } = renderHook(() => useCommands({ directory: '/repo' }), { wrapper: createWrapper() })
+    const { result } = renderCommands({ directory: '/repo' }, [
+      commandsRoute(() => [{ name: 'xundo', description: 'X undo' }]),
+    ])
 
     await waitFor(() => {
-      expect(result.current.commands.some(command => command.name === 'xundo')).toBe(true)
+      expect(result.current.findCommand('xundo')).toBeDefined()
     })
 
-    expect(result.current.searchCommands('undo').map(({ item }) => item.name)).toEqual([
-      'undo',
-      'xundo',
-      'redo',
-    ])
+    expect(names(result.current.searchCommands('undo'))).toEqual(['undo', 'xundo', 'redo'])
   })
 
   it('lists recent commands first for an empty query and uses recency to break ties', () => {
     useRecentCommandsStore.setState({ names: ['copy', 'undo'] })
-    const { result } = renderHook(() => useCommands({ enabled: false }), { wrapper: createWrapper() })
+    const { result } = renderCommands({ enabled: false })
 
-    expect(result.current.searchCommands('').map(({ item }) => item.name).slice(0, 2)).toEqual(['copy', 'undo'])
-    expect(result.current.searchCommands('co').map(({ item }) => item.name)).toEqual([
-      'copy',
-      'compact',
-      'connect',
-      'continue',
-    ])
+    expect(names(result.current.searchCommands('')).slice(0, 2)).toEqual(['copy', 'undo'])
+    expect(names(result.current.searchCommands('co'))).toEqual(['copy', 'compact', 'connect', 'continue'])
   })
 
   it('matches command descriptions after name matches', async () => {
-    vi.mocked(listCommands).mockResolvedValue([{ name: 'ship', description: 'Deploy a preview build' }])
-    const { result } = renderHook(() => useCommands({ directory: '/repo' }), { wrapper: createWrapper() })
+    const { result } = renderCommands({ directory: '/repo' }, [
+      commandsRoute(() => [{ name: 'ship', description: 'Deploy a preview build' }]),
+    ])
 
     await waitFor(() => {
-      expect(result.current.searchCommands('preview').map(({ item }) => item.name)).toEqual(['ship'])
+      expect(names(result.current.searchCommands('preview'))).toEqual(['ship'])
     })
   })
 
   it('loads commands for a newly selected directory even when queries have a stale time', async () => {
-    vi.mocked(listCommands).mockImplementation(async (directory) => [
-      { name: directory === '/repo-b' ? 'from-b' : 'from-a', description: '' },
-    ])
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 60_000 } } })
-    const wrapper = ({ children }: { children: React.ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
-
-    const { result, rerender } = renderHook(({ directory }) => useCommands({ directory }), {
-      wrapper,
-      initialProps: { directory: '/repo-a' },
+    let directory = '/repo-a'
+    const { result, rerender, fetchFake } = renderHookWithProviders(() => useCommands({ directory }), {
+      ...hookProviders,
+      fetchRoutes: [
+        commandsRoute((selected) => [
+          { name: selected === '/repo-b' ? 'from-b' : 'from-a', description: '' },
+        ]),
+      ],
     })
+
     await waitFor(() => expect(result.current.findCommand('from-a')).toBeDefined())
 
-    rerender({ directory: '/repo-b' })
+    directory = '/repo-b'
+    rerender()
 
     await waitFor(() => expect(result.current.findCommand('from-b')).toBeDefined())
-    expect(listCommands).toHaveBeenCalledWith('/repo-b', 'local')
+    expect(
+      fetchFake.findRequests('GET', '/api/opencode/api/command').map(
+        (request) => request.searchParams.get('location[directory]'),
+      ),
+    ).toEqual(['/repo-a', '/repo-b'])
   })
 
   it('finds only exact command names, ignoring case', () => {
-    const { result } = renderHook(() => useCommands({ enabled: false }), { wrapper: createWrapper() })
+    const { result } = renderCommands({ enabled: false })
 
     expect(result.current.findCommand('UNDO')?.name).toBe('undo')
     expect(result.current.findCommand('und')).toBeUndefined()
   })
 
-  it('keeps remote-capable built-ins and omits Manager-only ones for a linked server', () => {
-    const { result } = renderHook(() => useCommands({ enabled: false }), {
-      wrapper: createWrapper('srv_kitchen'),
+  it.each([
+    {
+      title: 'a linked server',
+      serverId: 'srv_kitchen',
+      present: ['sessions', 'resume', 'continue', 'mcp', 'skills', 'models', 'compact'],
+      absent: ['walkthrough'],
+    },
+    {
+      title: 'the local server',
+      serverId: 'local',
+      present: ['sessions', 'mcp', 'skills', 'walkthrough'],
+      absent: [],
+    },
+  ])('keeps the right built-ins for $title', ({ serverId, present, absent }) => {
+    const { result } = renderHookWithProviders(() => useCommands({ enabled: false }), {
+      ...hookProviders,
+      serverId,
     })
 
-    const names = result.current.searchCommands('').map(({ item }) => item.name)
+    const commandNames = names(result.current.searchCommands(''))
 
-    expect(names).toContain('sessions')
-    expect(names).toContain('resume')
-    expect(names).toContain('continue')
-    expect(names).not.toContain('walkthrough')
-    expect(names).toContain('mcp')
-    expect(names).toContain('skills')
-    expect(names).toContain('models')
-    expect(names).toContain('compact')
+    for (const name of present) {
+      expect(commandNames).toContain(name)
+    }
+    for (const name of absent) {
+      expect(commandNames).not.toContain(name)
+    }
     expect(result.current.findCommand('mcp')).toBeDefined()
-  })
-
-  it('keeps Manager-only built-ins for the local server', () => {
-    const { result } = renderHook(() => useCommands({ enabled: false }), {
-      wrapper: createWrapper('local'),
-    })
-
-    const names = result.current.searchCommands('').map(({ item }) => item.name)
-
-    expect(names).toContain('sessions')
-    expect(names).toContain('mcp')
-    expect(names).toContain('skills')
-    expect(names).toContain('walkthrough')
   })
 })

@@ -3,6 +3,7 @@ import { spawnSync } from 'child_process'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import type { JsonObject } from '@opencode-manager/shared/utils'
 import {
   clearOpenCodeVersionCache,
   installOpenCodeVersion,
@@ -11,6 +12,7 @@ import {
   resolveOpenCodeBinaryPath,
   resolveOpenCodeInstallTarget,
 } from '../../src/services/opencode-installer'
+import { createFetchStub } from '../helpers/fetch-stub'
 
 const linuxTarget = { platform: 'linux' as const, arch: 'x64', musl: false }
 
@@ -77,22 +79,22 @@ function crc32(buffer: Uint8Array): number {
 
 function createFetch(archivePath: string | null, status = 200) {
   const calls: string[] = []
-  const fetchFn = (async (input: Parameters<typeof fetch>[0]) => {
+  const fetchFn = createFetchStub(async (input) => {
     calls.push(String(input))
     if (status !== 200 || archivePath === null) {
       return new Response('unavailable', { status })
     }
     return new Response(new Uint8Array(readFileSync(archivePath)), { status })
-  }) as typeof fetch
+  })
   return { calls, fetchFn }
 }
 
-function createRegistryFetch(payload: unknown, status = 200) {
+function createRegistryFetch(payload: JsonObject, status = 200) {
   const calls: string[] = []
-  const fetchFn = (async (input: Parameters<typeof fetch>[0]) => {
+  const fetchFn = createFetchStub(async (input) => {
     calls.push(String(input))
     return new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } })
-  }) as typeof fetch
+  })
   return { calls, fetchFn }
 }
 
@@ -121,9 +123,7 @@ describe('resolveOpenCodeBinaryPath', () => {
 describe('resolveOpenCodeInstallTarget', () => {
   it('reports the running platform and architecture', () => {
     const target = resolveOpenCodeInstallTarget()
-    expect(target.platform).toBe(process.platform)
-    expect(target.arch).toBe(process.arch)
-    expect(typeof target.musl).toBe('boolean')
+    expect(target).toEqual({ platform: process.platform, arch: process.arch, musl: expect.any(Boolean) })
     expect(target.musl && process.platform !== 'linux').toBe(false)
   })
 })

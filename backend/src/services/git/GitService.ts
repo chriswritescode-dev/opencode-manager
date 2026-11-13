@@ -645,24 +645,13 @@ export class GitService {
   }
 
   private getEnvironmentForRepo(repo: { id?: number; repoUrl?: string; fullPath: string }, silent: boolean = false): Record<string, string> {
-    const repoContextEnv = {
-      ...(repo.id ? { OCM_GIT_REPO_ID: String(repo.id) } : {}),
-      OCM_GIT_REPO_CWD: repo.fullPath,
+    const env = this.gitAuthService.getGitEnvironment(silent)
+    if (repo.id) env.OCM_GIT_REPO_ID = String(repo.id)
+    env.OCM_GIT_REPO_CWD = repo.fullPath
+    if (repo.repoUrl && isSSHUrl(repo.repoUrl)) {
+      Object.assign(env, this.gitAuthService.getSSHEnvironment())
     }
-
-    if (!repo.repoUrl) {
-      return { ...this.gitAuthService.getGitEnvironment(silent), ...repoContextEnv }
-    }
-
-    const isSSH = isSSHUrl(repo.repoUrl)
-    const baseEnv = { ...this.gitAuthService.getGitEnvironment(silent), ...repoContextEnv }
-
-    if (!isSSH) {
-      return baseEnv
-    }
-
-    const sshEnv = this.gitAuthService.getSSHEnvironment()
-    return { ...baseEnv, ...sshEnv }
+    return env
   }
 
   private async withRemoteAuth<T>(
@@ -716,7 +705,7 @@ export class GitService {
         const args = ['git', '-C', fullPath, 'push']
         return await executeCommand(args, { env })
       } catch (error) {
-        if (isNoUpstreamError(error as Error)) {
+        if (error instanceof Error && isNoUpstreamError(error)) {
           return this.pushWithUpstream(repoId, fullPath, env)
         }
         throw error
@@ -859,7 +848,7 @@ export class GitService {
 
       return { ahead: ahead || 0, behind: behind || 0 }
     } catch (error) {
-      if (isNoUpstreamError(error as Error)) {
+      if (error instanceof Error && isNoUpstreamError(error)) {
         return { ahead: 0, behind: 0 }
       }
       logger.warn(`Could not get branch status for repo ${repoId}, returning zeros:`, error)
@@ -1338,8 +1327,8 @@ export class GitService {
     for (const line of lines) {
       if (line.length < 3) continue
 
-      const stagedStatus = line[0] as string
-      const unstagedStatus = line[1] as string
+      const stagedStatus = line.charAt(0)
+      const unstagedStatus = line.charAt(1)
       let filePath = line.substring(3)
       let oldPath: string | undefined
 
@@ -1424,11 +1413,7 @@ export class GitService {
       'git', '-C', repoPath, 'diff', '--no-index', '--', '/dev/null', filePath
     ], { env, ignoreExitCode: true })
 
-    if (typeof result === 'string') {
-      return this.parseDiffOutput(result, 'untracked', filePath)
-    }
-
-    return this.parseDiffOutput((result as { stdout: string }).stdout, 'untracked', filePath)
+    return this.parseDiffOutput(result.stdout, 'untracked', filePath)
   }
 
   private async getTrackedFileDiff(repoPath: string, filePath: string, env: Record<string, string>, includeStaged: boolean, options?: GitDiffOptions): Promise<FileDiffResponse> {
@@ -1473,25 +1458,23 @@ export class GitService {
     }
   }
 
-  private parseDiffOutput(diff: string, status: string, filePath?: string): FileDiffResponse {
+  private parseDiffOutput(diff: string, status: GitFileStatusType, filePath?: string): FileDiffResponse {
     let additions = 0
     let deletions = 0
     let isBinary = false
     const MAX_DIFF_SIZE = 500 * 1024
 
-    if (typeof diff === 'string') {
-      if (diff.includes('Binary files') || diff.includes('GIT binary patch')) {
-        isBinary = true
-      } else {
-        const lines = diff.split('\n')
-        for (const line of lines) {
-          if (line.startsWith('+') && !line.startsWith('+++')) additions++
-          if (line.startsWith('-') && !line.startsWith('---')) deletions++
-        }
+    if (diff.includes('Binary files') || diff.includes('GIT binary patch')) {
+      isBinary = true
+    } else {
+      const lines = diff.split('\n')
+      for (const line of lines) {
+        if (line.startsWith('+') && !line.startsWith('+++')) additions++
+        if (line.startsWith('-') && !line.startsWith('---')) deletions++
       }
     }
 
-    let diffOutput = typeof diff === 'string' ? diff : ''
+    let diffOutput = diff
     let truncated = false
     if (diffOutput.length > MAX_DIFF_SIZE) {
       diffOutput = diffOutput.substring(0, MAX_DIFF_SIZE) + '\n\n... (diff truncated due to size)'
@@ -1500,7 +1483,7 @@ export class GitService {
 
     return {
       path: filePath || '',
-      status: status as GitFileStatusType,
+      status,
       diff: diffOutput,
       additions,
       deletions,

@@ -8,11 +8,42 @@ import { prepareMirror, MirrorAbort, mirrorDown, mirrorDownFast, mirrorUp, mirro
 import { getBranchName } from '../src/local-repo'
 import { ManagerApi, ManagerApiError, MANAGER_FEATURE_MISSING, isManagerRouteMissing } from '../src/manager-api'
 import type { MirrorCheckoutState, MirrorCheckoutsResponse } from '@opencode-manager/shared/schemas'
+import type { JsonValue } from '@opencode-manager/shared/utils'
 import { gitRemoteProjectId } from '@opencode-manager/shared/project-id'
-import { mockStateModule, mockTokenStoreModule } from './helpers/token-store-mocks.js'
+import type {
+  MirrorUpOpts,
+  MirrorCheckoutsApi,
+  MirrorDownFastApi,
+  MirrorDownloadApi,
+  MirrorHeadApi,
+  MirrorPatchApi,
+  MirrorPullApi,
+  MirrorUpFastApi,
+  MirrorUploadApi,
+} from '../src/mirror'
+import { createCliHome, type CliHome } from './helpers/cli-home.js'
 
 const ME_REPO_ID = gitRemoteProjectId('https://github.com/me/repo.git')!
 const OTHER_REPO_ID = gitRemoteProjectId('https://github.com/other/repo.git')!
+
+type FetchEmbedded = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+
+function jsonResponse(body: JsonValue, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+}
+
+function stubFetchRoutes(respond: FetchEmbedded) {
+  const fetchMock = vi.fn<FetchEmbedded>(respond)
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+async function expectApiError(request: Promise<unknown>): Promise<ManagerApiError> {
+  const failure = await request.then(() => null, (cause) => cause)
+  expect(failure).toBeInstanceOf(ManagerApiError)
+  if (!(failure instanceof ManagerApiError)) throw new Error('expected a ManagerApiError')
+  return failure
+}
 
 describe('prepareMirror', () => {
   let tmpDir: string
@@ -123,23 +154,24 @@ describe('cmdPush', () => {
 
     let stderrOutput = ''
     vi.spyOn(process.stderr, 'write').mockImplementation((msg: string | Uint8Array) => {
-      stderrOutput += typeof msg === 'string' ? msg : new TextDecoder().decode(msg)
+      stderrOutput += String(msg)
       return true
     })
     vi.spyOn(process, 'exit').mockImplementation((_code?: string | number | null) => {
       throw new Error(stderrOutput.trim())
     })
 
-    mockStateModule({ managerUrl: 'http://localhost:5003' })
-    mockTokenStoreModule({ token: 'test-token' })
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ workspaces: [] }),
-    }))
+    const managerUrl = 'http://localhost:5003'
+    const home = createCliHome({ state: { managerUrl }, token: 'test-token', account: managerUrl })
+    stubFetchRoutes(async () => jsonResponse({ workspaces: [] }))
+    vi.resetModules()
 
-    const { cmdPush } = await import('../bin/ocm')
-
-    await expect(cmdPush(['--create'])).rejects.toThrow('stdin is not a TTY; pass --yes to confirm creation')
+    try {
+      const { cmdPush } = await import('../bin/ocm')
+      await expect(cmdPush(['--create'])).rejects.toThrow('stdin is not a TTY; pass --yes to confirm creation')
+    } finally {
+      home.restore()
+    }
   })
 })
 
@@ -179,9 +211,9 @@ describe('mirrorDown', () => {
 
     const tarData = createGzipTarball(contentDir)
 
-    const mockApi = {
+    const mockApi: MirrorDownloadApi = {
       mirrorDown: vi.fn().mockResolvedValue(streamOf(tarData)),
-    } as any
+    }
 
     await mirrorDown(1, repoRoot, mockApi, { force: true })
 
@@ -203,9 +235,9 @@ describe('mirrorDown', () => {
 
     const tarData = createGzipTarball(contentDir)
 
-    const mockApi = {
+    const mockApi: MirrorDownloadApi = {
       mirrorDown: vi.fn().mockResolvedValue(streamOf(tarData)),
-    } as any
+    }
 
     try {
       await mirrorDown(1, repoRoot, mockApi, { force: true })
@@ -232,9 +264,9 @@ describe('mirrorDown', () => {
     spawnSync('git', ['commit', '-m', 'initial'], { cwd: repoRoot, stdio: 'ignore' })
     writeFileSync(join(repoRoot, 'dirty.txt'), 'dirty-modified')
 
-    const mockApi = {
+    const mockApi: MirrorDownloadApi = {
       mirrorDown: vi.fn(),
-    } as any
+    }
 
     await expect(mirrorDown(1, repoRoot, mockApi, { force: false })).rejects.toThrow(MirrorAbort)
     await expect(mirrorDown(1, repoRoot, mockApi, { force: false })).rejects.toThrow('working tree has uncommitted changes; rerun with --force')
@@ -253,9 +285,9 @@ describe('mirrorDown', () => {
 
     const tarData = createGzipTarball(contentDir)
 
-    const mockApi = {
+    const mockApi: MirrorDownloadApi = {
       mirrorDown: vi.fn().mockResolvedValue(streamOf(tarData)),
-    } as any
+    }
 
     const originalCwd = process.cwd()
     process.chdir(repoRoot)
@@ -286,9 +318,9 @@ describe('mirrorDown', () => {
 
     const tarData = createGzipTarball(contentDir)
 
-    const mockApi = {
+    const mockApi: MirrorDownloadApi = {
       mirrorDown: vi.fn().mockResolvedValue(streamOf(tarData)),
-    } as any
+    }
 
     await mirrorDown(1, repoRoot, mockApi, { force: true })
 
@@ -323,9 +355,9 @@ describe('mirrorDown', () => {
 
     const tarData = createGzipTarball(contentDir)
 
-    const mockApi = {
+    const mockApi: MirrorDownloadApi = {
       mirrorDown: vi.fn().mockResolvedValue(streamOf(tarData)),
-    } as any
+    }
 
     await mirrorDown(1, repoRoot, mockApi, { force: true })
 
@@ -350,16 +382,16 @@ describe('mirrorDown', () => {
 
     const tarData = createGzipTarball(contentDir)
 
-    const mockApi = {
+    const mockApi: MirrorDownloadApi = {
       mirrorDown: vi.fn().mockResolvedValue(streamOf(tarData)),
-    } as any
+    }
 
-    const onProgress = vi.fn()
+    const onProgress = vi.fn<(bytesReceived: number) => void>()
 
     await mirrorDown(1, repoRoot, mockApi, { force: true, onProgress })
 
     expect(onProgress).toHaveBeenCalled()
-    const calls = onProgress.mock.calls.map((args: any[]) => args[0] as number)
+    const calls = onProgress.mock.calls.map(([bytesReceived]) => bytesReceived)
     expect(calls[calls.length - 1]).toBe(tarData.length)
 
     let prev = -1
@@ -380,9 +412,9 @@ describe('mirrorDown', () => {
 
     const tarData = createGzipTarball(contentDir)
 
-    const mockApi = {
+    const mockApi: MirrorDownloadApi = {
       mirrorDown: vi.fn().mockResolvedValue(streamOf(tarData)),
-    } as any
+    }
 
     await mirrorDown(1, repoRoot, mockApi, { force: true })
 
@@ -411,24 +443,27 @@ describe('mirrorUp chunked upload', () => {
     const chunkSize = opts.chunkSize ?? 8 * 1024 * 1024
     let committed = false
     let commitTotalParts = 0
-    const api = {
-      mirrorBegin: vi.fn().mockResolvedValue({ uploadId: 'upload-1', repoId: 1, chunkSize, created: false }),
-      mirrorUploadPart: vi.fn().mockImplementation(async (_repoId: number, _uploadId: string, index: number, chunk: Buffer) => {
+    const mirrorBegin = vi.fn<MirrorUploadApi['mirrorBegin']>().mockResolvedValue({ uploadId: 'upload-1', repoId: 1, chunkSize, created: false })
+    const mirrorUploadPart = vi.fn<MirrorUploadApi['mirrorUploadPart']>().mockImplementation(async (_repoId, _uploadId, index, chunk) => {
         if (partFailures[index] && partFailures[index] > 0) {
           partFailures[index] -= 1
           throw new Error(`simulated transient failure on part ${index}`)
         }
         partsReceived[index] = Buffer.from(chunk)
-      }),
-      mirrorCommit: vi.fn().mockImplementation(async (_repoId: number, _uploadId: string, totalParts: number, _gzip: boolean) => {
-        committed = true
-        commitTotalParts = totalParts
-        return { repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false }
-      }),
-      mirrorAbort: vi.fn().mockResolvedValue(undefined),
-    }
+    })
+    const mirrorCommit = vi.fn<MirrorUploadApi['mirrorCommit']>().mockImplementation(async (_repoId, _uploadId, totalParts) => {
+      committed = true
+      commitTotalParts = totalParts
+      return { repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false }
+    })
+    const mirrorAbort = vi.fn<MirrorUploadApi['mirrorAbort']>().mockResolvedValue(undefined)
+    const api: MirrorUploadApi = { mirrorBegin, mirrorUploadPart, mirrorCommit, mirrorAbort }
     return {
       api,
+      mirrorBegin,
+      mirrorUploadPart,
+      mirrorCommit,
+      mirrorAbort,
       partsReceived,
       get committed() { return committed },
       get commitTotalParts() { return commitTotalParts },
@@ -448,11 +483,11 @@ describe('mirrorUp chunked upload', () => {
       matched: [{ repoId: 1, name: 'test-repo', projectId: 'test-project', branch: 'main' }],
     }
 
-    await mirrorUp(plan, { api: ctx.api as any, force: false })
+    await mirrorUp(plan, { api: ctx.api, force: false })
 
-    expect(ctx.api.mirrorBegin).toHaveBeenCalledTimes(1)
-    expect(ctx.api.mirrorUploadPart).toHaveBeenCalled()
-    expect(ctx.api.mirrorCommit).toHaveBeenCalledTimes(1)
+    expect(ctx.mirrorBegin).toHaveBeenCalledTimes(1)
+    expect(ctx.mirrorUploadPart).toHaveBeenCalled()
+    expect(ctx.mirrorCommit).toHaveBeenCalledTimes(1)
     expect(ctx.committed).toBe(true)
     expect(ctx.commitTotalParts).toBeGreaterThan(0)
   })
@@ -471,10 +506,10 @@ describe('mirrorUp chunked upload', () => {
       matched: [{ repoId: 1, name: 'test-repo', projectId: 'test-project', branch: 'main' }],
     }
 
-    await mirrorUp(plan, { api: ctx.api as any, force: false })
+    await mirrorUp(plan, { api: ctx.api, force: false })
 
-    expect(ctx.api.mirrorUploadPart.mock.calls.length).toBeGreaterThanOrEqual(2)
-    expect(ctx.commitTotalParts).toBe(ctx.api.mirrorUploadPart.mock.calls.length)
+    expect(ctx.mirrorUploadPart.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(ctx.commitTotalParts).toBe(ctx.mirrorUploadPart.mock.calls.length)
   })
 
   it('retries a failing part and still commits', async () => {
@@ -490,9 +525,9 @@ describe('mirrorUp chunked upload', () => {
       matched: [{ repoId: 1, name: 'test-repo', projectId: 'test-project', branch: 'main' }],
     }
 
-    await mirrorUp(plan, { api: ctx.api as any, force: false })
+    await mirrorUp(plan, { api: ctx.api, force: false })
 
-    const part0Calls = ctx.api.mirrorUploadPart.mock.calls.filter((c) => c[2] === 0)
+    const part0Calls = ctx.mirrorUploadPart.mock.calls.filter((call) => call[2] === 0)
     expect(part0Calls.length).toBe(3)
     expect(ctx.committed).toBe(true)
   })
@@ -504,7 +539,7 @@ describe('mirrorUp chunked upload', () => {
     writeFileSync(join(repoRoot, 'tracked.txt'), 'tracked content')
 
     const ctx = makeMockApi()
-    ctx.api.mirrorCommit.mockRejectedValueOnce(new Error('boom'))
+    ctx.mirrorCommit.mockRejectedValueOnce(new Error('boom'))
 
     const plan = {
       repoRoot,
@@ -512,8 +547,8 @@ describe('mirrorUp chunked upload', () => {
       matched: [{ repoId: 1, name: 'test-repo', projectId: 'test-project', branch: 'main' }],
     }
 
-    await expect(mirrorUp(plan, { api: ctx.api as any, force: false })).rejects.toThrow('boom')
-    expect(ctx.api.mirrorAbort).toHaveBeenCalledWith(1, 'upload-1')
+    await expect(mirrorUp(plan, { api: ctx.api, force: false })).rejects.toThrow('boom')
+    expect(ctx.mirrorAbort).toHaveBeenCalledWith(1, 'upload-1')
   })
 
   it('calls onProgress with monotonically non-decreasing bytesSent', async () => {
@@ -523,21 +558,21 @@ describe('mirrorUp chunked upload', () => {
     writeFileSync(join(repoRoot, 'tracked.txt'), 'tracked content')
 
     const ctx = makeMockApi()
-    const onProgress = vi.fn()
+    const onProgress = vi.fn<NonNullable<MirrorUpOpts['onProgress']>>()
     const plan = {
       repoRoot,
       localProjectId: 'test-project',
       matched: [{ repoId: 1, name: 'test-repo', projectId: 'test-project', branch: 'main' }],
     }
 
-    await mirrorUp(plan, { api: ctx.api as any, force: false, onProgress })
+    await mirrorUp(plan, { api: ctx.api, force: false, onProgress })
 
     expect(onProgress).toHaveBeenCalled()
 
     let prevBytes = -1
-    for (const [p] of onProgress.mock.calls) {
-      expect(p.bytesSent).toBeGreaterThanOrEqual(prevBytes)
-      prevBytes = p.bytesSent
+    for (const [progress] of onProgress.mock.calls) {
+      expect(progress.bytesSent).toBeGreaterThanOrEqual(prevBytes)
+      prevBytes = progress.bytesSent
     }
   })
 
@@ -554,9 +589,9 @@ describe('mirrorUp chunked upload', () => {
       matched: [{ repoId: 1, name: 'test-repo', projectId: 'test-project', branch: 'main' }],
     }
 
-    await mirrorUp(plan, { api: ctx.api as any, force: false })
+    await mirrorUp(plan, { api: ctx.api, force: false })
 
-    expect(ctx.api.mirrorCommit.mock.calls[0]![3]).toBe(true)
+    expect(ctx.mirrorCommit.mock.calls[0]![3]).toBe(true)
 
     const combined = Buffer.concat(ctx.partsReceived)
     expect(combined[0]).toBe(0x1f)
@@ -591,9 +626,9 @@ describe('checkPushDivergence', () => {
     return execSync('git rev-parse HEAD', { cwd: repoRoot, encoding: 'utf-8' }).trim()
   }
 
-  const apiWith = (head: string | null, dirty = false) => ({
+  const apiWith = (head: string | null, dirty = false): MirrorHeadApi => ({
     mirrorHead: vi.fn().mockResolvedValue({ repoId: 1, branch: 'main', head, dirty }),
-  }) as any
+  })
 
   it('reports no divergence when server head equals local head', async () => {
     const repoRoot = initRepo('equal')
@@ -928,7 +963,10 @@ describe('checkPullDivergence', () => {
     const repoRoot = initRepo('behind')
     commit(repoRoot, 'a.txt', 'a')
 
-    const api = { mirrorContains: vi.fn().mockResolvedValue({ contained: true }) } as any
+    const api: MirrorPullApi = {
+      mirrorContains: vi.fn().mockResolvedValue({ contained: true }),
+      mirrorHead: vi.fn(),
+    }
     const result = await checkPullDivergence(repoRoot, api, 1)
 
     expect(result.diverged).toBe(false)
@@ -940,10 +978,10 @@ describe('checkPullDivergence', () => {
     const base = commit(repoRoot, 'a.txt', 'a')
     commit(repoRoot, 'b.txt', 'b')
 
-    const api = {
+    const api: MirrorPullApi = {
       mirrorContains: vi.fn().mockResolvedValue({ contained: false }),
       mirrorHead: vi.fn().mockResolvedValue({ repoId: 1, branch: 'main', head: base, dirty: false }),
-    } as any
+    }
     const result = await checkPullDivergence(repoRoot, api, 1)
 
     expect(result.diverged).toBe(true)
@@ -954,10 +992,10 @@ describe('checkPullDivergence', () => {
     const repoRoot = initRepo('unknown')
     commit(repoRoot, 'a.txt', 'a')
 
-    const api = {
+    const api: MirrorPullApi = {
       mirrorContains: vi.fn().mockResolvedValue({ contained: false }),
       mirrorHead: vi.fn().mockResolvedValue({ repoId: 1, branch: 'main', head: '0000000000000000000000000000000000000000', dirty: false }),
-    } as any
+    }
     const result = await checkPullDivergence(repoRoot, api, 1)
 
     expect(result.diverged).toBe(true)
@@ -967,7 +1005,7 @@ describe('checkPullDivergence', () => {
   it('reports no divergence for an empty local repo with no commits', async () => {
     const repoRoot = initRepo('empty')
 
-    const api = { mirrorContains: vi.fn() } as any
+    const api: MirrorPullApi = { mirrorContains: vi.fn(), mirrorHead: vi.fn() }
     const result = await checkPullDivergence(repoRoot, api, 1)
 
     expect(result.diverged).toBe(false)
@@ -998,14 +1036,14 @@ describe('mirror patch helpers', () => {
     writeFileSync(join(repoRoot, 'tracked.txt'), 'after\n')
 
     const api = {
-      mirrorPatch: vi.fn().mockResolvedValue({ repoId: 1, fullPath: '/tmp/remote', branch: 'main', head: 'abc', created: false, applied: true }),
+      mirrorPatch: vi.fn<MirrorPatchApi['mirrorPatch']>().mockResolvedValue({ repoId: 1, fullPath: '/tmp/remote', branch: 'main', head: 'abc', created: false, applied: true }),
     }
 
     await mirrorUpPatch({
       repoRoot,
       localProjectId: 'test-project',
       matched: [{ repoId: 1, name: 'test-repo', projectId: 'test-project', branch: 'main' }],
-    }, { api: api as any, force: false })
+    }, { api, force: false })
 
     expect(api.mirrorPatch).toHaveBeenCalledTimes(1)
     const body = api.mirrorPatch.mock.calls[0]![1]
@@ -1038,8 +1076,9 @@ describe('mirrorUpFast targets the selected repo', () => {
     writeFileSync(join(repoRoot, 'tracked.txt'), 'updated\n')
 
     const api = {
-      mirrorUploadBundle: vi.fn().mockResolvedValue(undefined),
-      mirrorPatch: vi.fn().mockResolvedValue({ repoId: 99, fullPath: '/tmp/x', branch: 'main', head: 'def', created: false, applied: true }),
+      mirrorUploadBundle: vi.fn<MirrorUpFastApi['mirrorUploadBundle']>().mockResolvedValue({ repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false }),
+      mirrorPatch: vi.fn<MirrorUpFastApi['mirrorPatch']>().mockResolvedValue({ repoId: 99, fullPath: '/tmp/x', branch: 'main', head: 'def', created: false, applied: true }),
+      mirrorCreateWorktree: vi.fn<MirrorUpFastApi['mirrorCreateWorktree']>(),
     }
 
     const plan = {
@@ -1052,7 +1091,7 @@ describe('mirrorUpFast targets the selected repo', () => {
     }
 
     const selectedPlan = { ...plan, matched: [plan.matched[1]!] }
-    const result = await mirrorUpFast(selectedPlan, { api: api as any, force: false })
+    const result = await mirrorUpFast(selectedPlan, { api, force: false })
 
     expect(api.mirrorUploadBundle).toHaveBeenCalledTimes(1)
     expect(api.mirrorUploadBundle.mock.calls[0]![0]).toBe(99)
@@ -1072,8 +1111,9 @@ describe('mirrorUpFast targets the selected repo', () => {
     spawnSync('git', ['commit', '-m', 'initial'], { cwd: repoRoot, stdio: 'ignore' })
 
     const api = {
-      mirrorUploadBundle: vi.fn().mockResolvedValue(undefined),
-      mirrorPatch: vi.fn().mockResolvedValue({ repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false, applied: true }),
+      mirrorUploadBundle: vi.fn<MirrorUpFastApi['mirrorUploadBundle']>().mockResolvedValue({ repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false }),
+      mirrorPatch: vi.fn<MirrorUpFastApi['mirrorPatch']>().mockResolvedValue({ repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false, applied: true }),
+      mirrorCreateWorktree: vi.fn<MirrorUpFastApi['mirrorCreateWorktree']>(),
     }
 
     const plan = {
@@ -1082,7 +1122,7 @@ describe('mirrorUpFast targets the selected repo', () => {
       matched: [{ repoId: 1, name: 'repo-A', projectId: 'proj', branch: 'main' }],
     }
 
-    await mirrorUpFast(plan, { api: api as any, force: false, requireCurrentBranch: true })
+    await mirrorUpFast(plan, { api, force: false, requireCurrentBranch: true })
 
     expect(api.mirrorUploadBundle.mock.calls[0]![2].requireCurrentBranch).toBe(true)
   })
@@ -1098,8 +1138,9 @@ describe('mirrorUpFast targets the selected repo', () => {
     spawnSync('git', ['commit', '-m', 'initial'], { cwd: repoRoot, stdio: 'ignore' })
 
     const api = {
-      mirrorUploadBundle: vi.fn().mockResolvedValue(undefined),
-      mirrorPatch: vi.fn().mockResolvedValue({ repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false, applied: true }),
+      mirrorUploadBundle: vi.fn<MirrorUpFastApi['mirrorUploadBundle']>().mockResolvedValue({ repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false }),
+      mirrorPatch: vi.fn<MirrorUpFastApi['mirrorPatch']>().mockResolvedValue({ repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false, applied: true }),
+      mirrorCreateWorktree: vi.fn<MirrorUpFastApi['mirrorCreateWorktree']>(),
     }
 
     const plan = {
@@ -1108,7 +1149,7 @@ describe('mirrorUpFast targets the selected repo', () => {
       matched: [{ repoId: 1, name: 'repo-A', projectId: 'proj', branch: 'main' }],
     }
 
-    await mirrorUpFast(plan, { api: api as any, force: false })
+    await mirrorUpFast(plan, { api, force: false })
 
     expect(api.mirrorUploadBundle.mock.calls[0]![2].requireCurrentBranch).toBeUndefined()
   })
@@ -1124,8 +1165,9 @@ describe('mirrorUpFast targets the selected repo', () => {
     spawnSync('git', ['commit', '-m', 'init'], { cwd: repoRoot, stdio: 'ignore' })
 
     const api = {
-      mirrorUploadBundle: vi.fn().mockResolvedValue(undefined),
-      mirrorPatch: vi.fn().mockResolvedValue({ repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false, applied: true }),
+      mirrorUploadBundle: vi.fn<MirrorUpFastApi['mirrorUploadBundle']>().mockResolvedValue({ repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false }),
+      mirrorPatch: vi.fn<MirrorUpFastApi['mirrorPatch']>().mockResolvedValue({ repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false, applied: true }),
+      mirrorCreateWorktree: vi.fn<MirrorUpFastApi['mirrorCreateWorktree']>(),
     }
 
     const plan = {
@@ -1135,12 +1177,12 @@ describe('mirrorUpFast targets the selected repo', () => {
     }
 
     const phases: MirrorUpFastPhase[] = []
-    await mirrorUpFast(plan, { api: api as any, force: false, onPhase: (p) => phases.push(p) })
+    await mirrorUpFast(plan, { api, force: false, onPhase: (p) => phases.push(p) })
 
     expect(phases.map((p) => p.kind)).toEqual(['bundling', 'uploading', 'patching'])
-    const uploading = phases[1] as Extract<MirrorUpFastPhase, { kind: 'uploading' }>
-    expect(uploading.bytesSent).toBe(0)
-    expect(uploading.totalBytes).toBeGreaterThan(0)
+    const uploading = phases.find((phase): phase is Extract<MirrorUpFastPhase, { kind: 'uploading' }> => phase.kind === 'uploading')
+    expect(uploading?.bytesSent).toBe(0)
+    expect(uploading?.totalBytes).toBeGreaterThan(0)
   })
 
   it('emits cumulative upload progress and a processing phase when the api reports sent bytes', async () => {
@@ -1154,14 +1196,14 @@ describe('mirrorUpFast targets the selected repo', () => {
     spawnSync('git', ['commit', '-m', 'init'], { cwd: repoRoot, stdio: 'ignore' })
 
     const api = {
-      mirrorUploadBundle: vi.fn().mockImplementation(
-        async (_repoId: number, bundlePath: string, opts: { onProgress?: (bytesSent: number) => void }) => {
-          const { size } = statSync(bundlePath)
-          opts.onProgress?.(Math.floor(size / 2))
-          opts.onProgress?.(size)
-        },
-      ),
-      mirrorPatch: vi.fn().mockResolvedValue({ repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false, applied: true }),
+      mirrorUploadBundle: vi.fn<MirrorUpFastApi['mirrorUploadBundle']>().mockImplementation(async (_repoId, bundlePath, opts) => {
+        const { size } = statSync(bundlePath)
+        opts.onProgress?.(Math.floor(size / 2))
+        opts.onProgress?.(size)
+        return { repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false }
+      }),
+      mirrorPatch: vi.fn<MirrorUpFastApi['mirrorPatch']>().mockResolvedValue({ repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false, applied: true }),
+      mirrorCreateWorktree: vi.fn<MirrorUpFastApi['mirrorCreateWorktree']>(),
     }
 
     const plan = {
@@ -1171,7 +1213,7 @@ describe('mirrorUpFast targets the selected repo', () => {
     }
 
     const phases: MirrorUpFastPhase[] = []
-    await mirrorUpFast(plan, { api: api as any, force: false, onPhase: (p) => phases.push(p) })
+    await mirrorUpFast(plan, { api, force: false, onPhase: (p) => phases.push(p) })
 
     expect(phases.map((p) => p.kind)).toEqual(['bundling', 'uploading', 'uploading', 'uploading', 'processing', 'patching'])
     const sent = phases.filter((p): p is Extract<MirrorUpFastPhase, { kind: 'uploading' }> => p.kind === 'uploading').map((p) => p.bytesSent)
@@ -1195,11 +1237,15 @@ describe('mirrorUpFast targets the selected repo', () => {
     const patchCalls: number[] = []
 
     const api = {
-      mirrorUploadBundle: vi.fn().mockImplementation(async (repoId: number) => { uploadCalls.push(repoId) }),
-      mirrorPatch: vi.fn().mockImplementation(async (repoId: number) => {
+      mirrorUploadBundle: vi.fn<MirrorUpFastApi['mirrorUploadBundle']>().mockImplementation(async (repoId) => {
+        uploadCalls.push(repoId)
+        return { repoId, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false }
+      }),
+      mirrorPatch: vi.fn<MirrorUpFastApi['mirrorPatch']>().mockImplementation(async (repoId) => {
         patchCalls.push(repoId)
         return { repoId, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false, applied: true }
       }),
+      mirrorCreateWorktree: vi.fn<MirrorUpFastApi['mirrorCreateWorktree']>(),
     }
 
     const multiPlan = {
@@ -1213,7 +1259,7 @@ describe('mirrorUpFast targets the selected repo', () => {
     }
 
     const selectedPlan = { ...multiPlan, matched: [multiPlan.matched[2]!] }
-    await mirrorUpFast(selectedPlan, { api: api as any, force: false })
+    await mirrorUpFast(selectedPlan, { api, force: false })
 
     expect(uploadCalls).toEqual([3])
     expect(patchCalls).toEqual([3])
@@ -1231,8 +1277,9 @@ describe('mirrorUpFast targets the selected repo', () => {
     writeFileSync(join(repoRoot, 'a.txt'), 'a-updated\n')
 
     const api = {
-      mirrorUploadBundle: vi.fn().mockResolvedValue(undefined),
-      mirrorPatch: vi.fn().mockResolvedValue({ repoId: 1, fullPath: '/repos/repo-feature-ocm', branch: 'feature-ocm', head: 'abc', created: false, applied: true }),
+      mirrorUploadBundle: vi.fn<MirrorUpFastApi['mirrorUploadBundle']>().mockResolvedValue({ repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false }),
+      mirrorPatch: vi.fn<MirrorUpFastApi['mirrorPatch']>().mockResolvedValue({ repoId: 1, fullPath: '/repos/repo-feature-ocm', branch: 'feature-ocm', head: 'abc', created: false, applied: true }),
+      mirrorCreateWorktree: vi.fn<MirrorUpFastApi['mirrorCreateWorktree']>(),
     }
 
     const plan = {
@@ -1241,7 +1288,7 @@ describe('mirrorUpFast targets the selected repo', () => {
       matched: [{ repoId: 1, name: 'repo-A', projectId: 'proj', branch: 'main' }],
     }
 
-    await mirrorUpFast(plan, { api: api as any, force: true, directory: '/repos/repo-feature-ocm', targetBranch: 'feature-ocm' })
+    await mirrorUpFast(plan, { api, force: true, directory: '/repos/repo-feature-ocm', targetBranch: 'feature-ocm' })
 
     const bundleOpts = api.mirrorUploadBundle.mock.calls[0]![2]
     expect(bundleOpts.directory).toBe('/repos/repo-feature-ocm')
@@ -1296,8 +1343,8 @@ describe('mirrorDownFast preflight', () => {
       },
     })
 
-  const fastApi = (branch: string | null, bundle: Buffer) => ({
-    mirrorPatchSnapshot: vi.fn().mockResolvedValue({ branch, patch: '' }),
+  const fastApi = (branch: string | null, bundle: Buffer): MirrorDownFastApi => ({
+    mirrorPatchSnapshot: vi.fn().mockResolvedValue({ repoId: 1, branch, head: null, patch: '' }),
     mirrorDownloadBundle: vi.fn().mockResolvedValue(streamOf(bundle)),
   })
 
@@ -1318,7 +1365,7 @@ describe('mirrorDownFast preflight', () => {
     const local = initRepo('local-same')
     commitFile(local, 'tracked.txt', 'local-head\n')
 
-    await mirrorDownFast(1, local, fastApi('main', bundle) as any, { force: false })
+    await mirrorDownFast(1, local, fastApi('main', bundle), { force: false })
 
     expect(getBranchName(local)).toBe('main')
     expect(revRef(local, 'HEAD')).toBe(serverMainSha)
@@ -1341,7 +1388,7 @@ describe('mirrorDownFast preflight', () => {
     commitFile(local, 'main.txt', 'local-main\n')
     execSync('git branch topic', { cwd: local, stdio: 'ignore' })
 
-    await mirrorDownFast(1, local, fastApi('topic', bundle) as any, { force: false })
+    await mirrorDownFast(1, local, fastApi('topic', bundle), { force: false })
 
     expect(getBranchName(local)).toBe('topic')
     expect(revRef(local, 'HEAD')).toBe(topicSha)
@@ -1366,7 +1413,7 @@ describe('mirrorDownFast preflight', () => {
     commitFile(local, 'local-feature.txt', 'local-feature\n')
     execSync('git checkout main', { cwd: local, stdio: 'ignore' })
 
-    await mirrorDownFast(1, local, fastApi(null, bundle) as any, { force: false })
+    await mirrorDownFast(1, local, fastApi(null, bundle), { force: false })
 
     expect(getBranchName(local)).toBe('main')
     expect(revRef(local, 'main')).toBe(localMainSha)
@@ -1392,12 +1439,8 @@ describe('mirrorDownFast preflight', () => {
     const localCheckedSha = revRef(local, 'checked')
     writeFileSync(join(local, 'untracked.txt'), 'keep-me\n')
 
-    const thrown = await mirrorDownFast(1, local, fastApi('checked', bundle) as any, { force: true }).then(
-      () => null,
-      (err: unknown) => err,
-    )
-    expect(thrown).toBeInstanceOf(MirrorAbort)
-    expect((thrown as MirrorAbort).message).toContain('checked out in another worktree')
+    await expect(mirrorDownFast(1, local, fastApi('checked', bundle), { force: true }))
+      .rejects.toThrow('checked out in another worktree')
 
     expect(getBranchName(local)).toBe('main')
     expect(existsSync(join(local, 'untracked.txt'))).toBe(true)
@@ -1416,12 +1459,8 @@ describe('mirrorDownFast preflight', () => {
     const localMainSha = commitFile(local, 'main.txt', 'local-main\n')
     writeFileSync(join(local, 'untracked.txt'), 'keep-me\n')
 
-    const thrown = await mirrorDownFast(1, local, fastApi('ghost', bundle) as any, { force: true }).then(
-      () => null,
-      (err: unknown) => err,
-    )
-    expect(thrown).toBeInstanceOf(MirrorAbort)
-    expect((thrown as MirrorAbort).message).toContain("no incoming branch 'ghost'")
+    await expect(mirrorDownFast(1, local, fastApi('ghost', bundle), { force: true }))
+      .rejects.toThrow("no incoming branch 'ghost'")
 
     expect(getBranchName(local)).toBe('main')
     expect(revRef(local, 'main')).toBe(localMainSha)
@@ -1443,7 +1482,7 @@ describe('mirrorDownFast preflight', () => {
     execSync('git checkout -b feature', { cwd: local, stdio: 'ignore' })
     commitFile(local, 'feature.txt', 'local-feature\n')
 
-    await mirrorDownFast(1, local, fastApi('feature-ocm', bundle) as any, {
+    await mirrorDownFast(1, local, fastApi('feature-ocm', bundle), {
       force: true,
       directory: '/repos/repo-feature-ocm',
       sourceBranch: 'feature-ocm',
@@ -1475,7 +1514,7 @@ describe('ManagerApi mirror checkouts and worktree', () => {
 
   const checkout = (directory: string, branch: string | null, head: string | null, dirty = false) => ({ directory, branch, head, dirty })
 
-  const checkoutsBody = {
+  const checkoutsBody: MirrorCheckoutsResponse = {
     main: checkout('/repos/repo', 'main', 'abc'),
     worktrees: [checkout('/repos/repo-feature', 'feature', 'def')],
     branchHead: 'def',
@@ -1484,8 +1523,7 @@ describe('ManagerApi mirror checkouts and worktree', () => {
   }
 
   it('parses a checkouts response and requests the branch', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(checkoutsBody) })
-    vi.stubGlobal('fetch', fetchMock)
+    const fetchMock = stubFetchRoutes(async () => jsonResponse(checkoutsBody))
 
     const result = await api.mirrorCheckouts(1, 'feature')
 
@@ -1496,80 +1534,75 @@ describe('ManagerApi mirror checkouts and worktree', () => {
   })
 
   it('rejects a checkouts response that fails schema validation', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ main: checkout('/repos/repo', 'main', 'abc') }) }))
+    stubFetchRoutes(async () => jsonResponse({ main: checkout('/repos/repo', 'main', 'abc') }))
 
     await expect(api.mirrorCheckouts(1, 'feature')).rejects.toThrow()
   })
 
   it('maps an old Manager 401 to MANAGER_FEATURE_MISSING for checkouts', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ ok: false, status: 401, text: () => Promise.resolve(JSON.stringify({ error: 'Unauthorized' })) })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ workspaces: [] }) })
-    vi.stubGlobal('fetch', fetchMock)
+    stubFetchRoutes(async (input) =>
+      String(input).endsWith('/api/internal/opencode-workspaces')
+        ? jsonResponse({ workspaces: [] })
+        : jsonResponse({ error: 'Unauthorized' }, 401),
+    )
 
-    const error = await api.mirrorCheckouts(1, 'feature').catch((err) => err)
+    const error = await expectApiError(api.mirrorCheckouts(1, 'feature'))
 
-    expect(error).toBeInstanceOf(ManagerApiError)
-    expect((error as ManagerApiError).code).toBe(MANAGER_FEATURE_MISSING)
+    expect(error.code).toBe(MANAGER_FEATURE_MISSING)
     expect(isManagerRouteMissing(error)).toBe(true)
-    expect((error as ManagerApiError).message).toContain('too old for /ocm-move worktrees')
+    expect(error.message).toContain('too old for /ocm-move worktrees')
   })
 
   it('uploads a bundle prefixed with the patch to the worktree route with branch headers', async () => {
     const bundlePath = join(tmpDir, 'repo.bundle')
     writeFileSync(bundlePath, 'bundle bytes')
     const patch = 'diff --git a/a.txt b/a.txt\n+patched\n'
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({
-        repoId: 1,
-        fullPath: '/repos/repo-feature-ocm',
-        branch: 'feature-ocm',
-        head: 'abc',
-        created: true,
-        worktreeSetup: { status: 'none' },
-      }),
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    const fetchMock = stubFetchRoutes(async () => jsonResponse({
+      repoId: 1,
+      fullPath: '/repos/repo-feature-ocm',
+      branch: 'feature-ocm',
+      head: 'abc',
+      created: true,
+      worktreeSetup: { status: 'none' },
+    }))
 
     const created = await api.mirrorCreateWorktree(1, bundlePath, { branch: 'feature', targetBranch: 'feature-ocm', patch })
 
     expect(created.fullPath).toBe('/repos/repo-feature-ocm')
     expect(created.created).toBe(true)
     expect(created.worktreeSetup).toEqual({ status: 'none' })
-    const init = fetchMock.mock.calls[0]![1] as RequestInit
-    expect(init.method).toBe('POST')
-    expect(init.headers).toMatchObject({
-      'X-OCM-Branch': 'feature',
-      'X-OCM-Target-Branch': 'feature-ocm',
-      'X-OCM-Patch-Bytes': String(Buffer.byteLength(patch, 'utf-8')),
-    })
-    expect(init.duplex).toBe('half')
-    const body = await new Response(init.body as ReadableStream<Uint8Array>).text()
+    const init = fetchMock.mock.calls[0]![1]
+    expect(init?.method).toBe('POST')
+    const headers = new Headers(init?.headers)
+    expect(headers.get('X-OCM-Branch')).toBe('feature')
+    expect(headers.get('X-OCM-Target-Branch')).toBe('feature-ocm')
+    expect(headers.get('X-OCM-Patch-Bytes')).toBe(String(Buffer.byteLength(patch, 'utf-8')))
+    expect(init).toMatchObject({ duplex: 'half' })
+    const body = await new Response(init?.body).text()
     expect(body).toBe(patch + 'bundle bytes')
   })
 
   it('maps an old Manager 401 to MANAGER_FEATURE_MISSING for worktree creation', async () => {
     const bundlePath = join(tmpDir, 'repo.bundle')
     writeFileSync(bundlePath, 'bundle bytes')
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ ok: false, status: 401, text: () => Promise.resolve(JSON.stringify({ error: 'Unauthorized' })) })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ workspaces: [] }) })
-    vi.stubGlobal('fetch', fetchMock)
+    stubFetchRoutes(async (input) =>
+      String(input).endsWith('/api/internal/opencode-workspaces')
+        ? jsonResponse({ workspaces: [] })
+        : jsonResponse({ error: 'Unauthorized' }, 401),
+    )
 
-    const error = await api.mirrorCreateWorktree(1, bundlePath, { branch: 'feature', targetBranch: 'feature-ocm', patch: '' }).catch((err) => err)
+    const error = await expectApiError(api.mirrorCreateWorktree(1, bundlePath, { branch: 'feature', targetBranch: 'feature-ocm', patch: '' }))
 
-    expect(error).toBeInstanceOf(ManagerApiError)
-    expect((error as ManagerApiError).code).toBe(MANAGER_FEATURE_MISSING)
-    expect((error as ManagerApiError).message).toContain('too old for /ocm-move worktrees')
+    expect(error.code).toBe(MANAGER_FEATURE_MISSING)
+    expect(error.message).toContain('too old for /ocm-move worktrees')
   })
 
   it('sends the directory query on head, contains, bundle, and patch requests', async () => {
     const calls: string[] = []
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: unknown) => {
-      calls.push(String(url))
-      return { ok: true, json: () => Promise.resolve({}), body: null }
-    }))
+    stubFetchRoutes(async (input) => {
+      calls.push(String(input))
+      return jsonResponse({ repoId: 1, branch: null, head: null, dirty: false, patch: '', contained: false })
+    })
 
     await api.mirrorHead(1, '/repos/work trees/repo')
     await api.mirrorContains(1, 'abc1234', '/repos/work trees/repo')
@@ -1597,41 +1630,38 @@ describe('ManagerApi mirrorUploadBundle strict branch header', () => {
 
   const api = new ManagerApi('http://localhost:5003', 'test-token')
 
-  async function captureUpload(opts: { branch: string | null; requireCurrentBranch?: boolean }): Promise<Record<string, string>> {
+  async function captureUpload(opts: { branch: string | null; requireCurrentBranch?: boolean }): Promise<Headers> {
     const bundlePath = join(tmpDir, 'repo.bundle')
     writeFileSync(bundlePath, 'bundle bytes')
-    let capturedHeaders: Record<string, string> | undefined
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url: unknown, init?: RequestInit) => {
-      capturedHeaders = init!.headers as Record<string, string>
-      return { ok: true, json: () => Promise.resolve({ repoId: 1, fullPath: '/repos/x', branch: 'main', head: 'abc', created: false }) }
-    }))
+    let capturedHeaders: Headers | undefined
+    stubFetchRoutes(async (_input, init) => {
+      capturedHeaders = new Headers(init?.headers)
+      return jsonResponse({ repoId: 1, fullPath: '/repos/x', branch: 'main', head: 'abc', created: false })
+    })
     await api.mirrorUploadBundle(1, bundlePath, opts)
     expect(capturedHeaders).toBeDefined()
-    return capturedHeaders!
+    if (!capturedHeaders) throw new Error('the bundle upload did not send headers')
+    return capturedHeaders
   }
 
   it('sends the require-current-branch header when requested', async () => {
     const headers = await captureUpload({ branch: 'main', requireCurrentBranch: true })
-    expect(headers['X-OCM-Require-Current-Branch']).toBe('1')
-    expect(headers['X-OCM-Branch']).toBe('main')
+    expect(headers.get('X-OCM-Require-Current-Branch')).toBe('1')
+    expect(headers.get('X-OCM-Branch')).toBe('main')
   })
 
   it('omits the require-current-branch header for normal push', async () => {
     const headers = await captureUpload({ branch: 'main' })
-    expect(headers['X-OCM-Require-Current-Branch']).toBeUndefined()
-    expect(headers['X-OCM-Branch']).toBe('main')
+    expect(headers.get('X-OCM-Require-Current-Branch')).toBeNull()
+    expect(headers.get('X-OCM-Branch')).toBe('main')
   })
 
   it('sends the target branch header and URL-encoded directory query', async () => {
     const bundlePath = join(tmpDir, 'repo.bundle')
     writeFileSync(bundlePath, 'bundle bytes')
-    let capturedUrl: string | undefined
-    let capturedHeaders: Record<string, string> | undefined
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: unknown, init?: RequestInit) => {
-      capturedUrl = String(url)
-      capturedHeaders = init!.headers as Record<string, string>
-      return { ok: true, json: () => Promise.resolve({ repoId: 1, fullPath: '/repos/x', branch: 'feature-ocm', head: 'abc', created: false }) }
-    }))
+    const fetchMock = stubFetchRoutes(async () =>
+      jsonResponse({ repoId: 1, fullPath: '/repos/x', branch: 'feature-ocm', head: 'abc', created: false }),
+    )
 
     await api.mirrorUploadBundle(1, bundlePath, {
       branch: 'feature',
@@ -1640,11 +1670,13 @@ describe('ManagerApi mirrorUploadBundle strict branch header', () => {
       targetBranch: 'feature-ocm',
     })
 
-    const parsed = new URL(capturedUrl!)
+    const [, init] = fetchMock.mock.calls[0]!
+    const parsed = new URL(String(fetchMock.mock.calls[0]![0]))
     expect(parsed.searchParams.get('force')).toBe('1')
     expect(parsed.searchParams.get('directory')).toBe('/repos/work trees/repo')
-    expect(capturedHeaders!['X-OCM-Target-Branch']).toBe('feature-ocm')
-    expect(capturedHeaders!['X-OCM-Branch']).toBe('feature')
+    const headers = new Headers(init?.headers)
+    expect(headers.get('X-OCM-Target-Branch')).toBe('feature-ocm')
+    expect(headers.get('X-OCM-Branch')).toBe('feature')
   })
 })
 
@@ -1685,7 +1717,7 @@ describe('resolveBranchCheckout', () => {
   it('returns nothing when the local HEAD is detached', async () => {
     const repoRoot = initRepo('detached')
     execSync('git checkout --detach', { cwd: repoRoot, stdio: 'ignore' })
-    const api = { mirrorCheckouts: vi.fn() } as any
+    const api: MirrorCheckoutsApi = { mirrorCheckouts: vi.fn() }
 
     await expect(resolveBranchCheckout(api, 1, repoRoot)).resolves.toEqual({})
     expect(api.mirrorCheckouts).not.toHaveBeenCalled()
@@ -1693,7 +1725,7 @@ describe('resolveBranchCheckout', () => {
 
   it('returns nothing when the main checkout is already on the local branch', async () => {
     const repoRoot = initRepo('main-branch')
-    const api = { mirrorCheckouts: vi.fn().mockResolvedValue(body()) } as any
+    const api: MirrorCheckoutsApi = { mirrorCheckouts: vi.fn().mockResolvedValue(body()) }
 
     await expect(resolveBranchCheckout(api, 1, repoRoot)).resolves.toEqual({})
   })
@@ -1701,11 +1733,11 @@ describe('resolveBranchCheckout', () => {
   it('selects the first worktree and its branch when main is elsewhere', async () => {
     const repoRoot = initRepo('worktree')
     execSync('git checkout -b feature', { cwd: repoRoot, stdio: 'ignore' })
-    const api = {
+    const api: MirrorCheckoutsApi = {
       mirrorCheckouts: vi.fn().mockResolvedValue(body({
         worktrees: [checkout('/repos/repo-feature-ocm', 'feature-ocm', 'def')],
       })),
-    } as any
+    }
 
     await expect(resolveBranchCheckout(api, 1, repoRoot)).resolves.toEqual({
       directory: '/repos/repo-feature-ocm',
@@ -1716,11 +1748,11 @@ describe('resolveBranchCheckout', () => {
   it('omits the target branch when the worktree is on the local branch', async () => {
     const repoRoot = initRepo('worktree-exact')
     execSync('git checkout -b feature', { cwd: repoRoot, stdio: 'ignore' })
-    const api = {
+    const api: MirrorCheckoutsApi = {
       mirrorCheckouts: vi.fn().mockResolvedValue(body({
         worktrees: [checkout('/repos/repo-feature', 'feature', 'def')],
       })),
-    } as any
+    }
 
     await expect(resolveBranchCheckout(api, 1, repoRoot)).resolves.toEqual({
       directory: '/repos/repo-feature',
@@ -1731,7 +1763,7 @@ describe('resolveBranchCheckout', () => {
   it('returns nothing when no worktree matches', async () => {
     const repoRoot = initRepo('no-worktree')
     execSync('git checkout -b feature', { cwd: repoRoot, stdio: 'ignore' })
-    const api = { mirrorCheckouts: vi.fn().mockResolvedValue(body()) } as any
+    const api: MirrorCheckoutsApi = { mirrorCheckouts: vi.fn().mockResolvedValue(body()) }
 
     await expect(resolveBranchCheckout(api, 1, repoRoot)).resolves.toEqual({})
   })
@@ -1739,9 +1771,9 @@ describe('resolveBranchCheckout', () => {
   it('falls back silently when the route is missing on an older Manager', async () => {
     const repoRoot = initRepo('route-missing')
     execSync('git checkout -b feature', { cwd: repoRoot, stdio: 'ignore' })
-    const api = {
+    const api: MirrorCheckoutsApi = {
       mirrorCheckouts: vi.fn().mockRejectedValue(new ManagerApiError('missing', 401, MANAGER_FEATURE_MISSING, 'op')),
-    } as any
+    }
 
     await expect(resolveBranchCheckout(api, 1, repoRoot)).resolves.toEqual({})
   })
@@ -1749,9 +1781,9 @@ describe('resolveBranchCheckout', () => {
   it('falls back silently on the old target protocol 410', async () => {
     const repoRoot = initRepo('gone')
     execSync('git checkout -b feature', { cwd: repoRoot, stdio: 'ignore' })
-    const api = {
+    const api: MirrorCheckoutsApi = {
       mirrorCheckouts: vi.fn().mockRejectedValue(new ManagerApiError('gone', 410, 'cli_too_old', 'op')),
-    } as any
+    }
 
     await expect(resolveBranchCheckout(api, 1, repoRoot)).resolves.toEqual({})
   })
@@ -1759,7 +1791,7 @@ describe('resolveBranchCheckout', () => {
   it('rethrows unrelated failures', async () => {
     const repoRoot = initRepo('boom')
     execSync('git checkout -b feature', { cwd: repoRoot, stdio: 'ignore' })
-    const api = { mirrorCheckouts: vi.fn().mockRejectedValue(new Error('boom')) } as any
+    const api: MirrorCheckoutsApi = { mirrorCheckouts: vi.fn().mockRejectedValue(new Error('boom')) }
 
     await expect(resolveBranchCheckout(api, 1, repoRoot)).rejects.toThrow('boom')
   })
@@ -1789,7 +1821,7 @@ describe('mirrorUpFast worktree creation', () => {
     writeFileSync(join(repoRoot, 'b.txt'), 'untracked\n')
 
     const api = {
-      mirrorCreateWorktree: vi.fn().mockResolvedValue({
+      mirrorCreateWorktree: vi.fn<MirrorUpFastApi['mirrorCreateWorktree']>().mockResolvedValue({
         repoId: 1,
         fullPath: '/repos/repo-feature-ocm',
         branch: 'feature-ocm',
@@ -1797,8 +1829,8 @@ describe('mirrorUpFast worktree creation', () => {
         created: true,
         worktreeSetup: { status: 'none' },
       }),
-      mirrorUploadBundle: vi.fn(),
-      mirrorPatch: vi.fn(),
+      mirrorUploadBundle: vi.fn<MirrorUpFastApi['mirrorUploadBundle']>(),
+      mirrorPatch: vi.fn<MirrorUpFastApi['mirrorPatch']>(),
     }
 
     const plan = {
@@ -1809,7 +1841,7 @@ describe('mirrorUpFast worktree creation', () => {
 
     const phases: MirrorUpFastPhase[] = []
     const result = await mirrorUpFast(plan, {
-      api: api as any,
+      api,
       force: true,
       createWorktree: { targetBranch: 'feature-ocm' },
       onPhase: (p) => phases.push(p),
@@ -1842,7 +1874,7 @@ describe('divergence checks target the selected directory', () => {
   })
 
   it('passes the directory to mirrorHead for push divergence', async () => {
-    const api = { mirrorHead: vi.fn().mockResolvedValue({ repoId: 1, branch: 'feature-ocm', head: null, dirty: false }) } as any
+    const api: MirrorHeadApi = { mirrorHead: vi.fn().mockResolvedValue({ repoId: 1, branch: 'feature-ocm', head: null, dirty: false }) }
 
     await checkPushDivergence('/repo', api, 1, '/repos/repo-feature-ocm')
 
@@ -1859,10 +1891,10 @@ describe('divergence checks target the selected directory', () => {
     spawnSync('git', ['add', '.'], { cwd: repoRoot, stdio: 'ignore' })
     spawnSync('git', ['commit', '-m', 'init'], { cwd: repoRoot, stdio: 'ignore' })
 
-    const api = {
+    const api: MirrorPullApi = {
       mirrorContains: vi.fn().mockResolvedValue({ contained: false }),
       mirrorHead: vi.fn().mockResolvedValue({ repoId: 1, branch: 'feature-ocm', head: null, dirty: false }),
-    } as any
+    }
 
     await checkPullDivergence(repoRoot, api, 1, '/repos/repo-feature-ocm')
 
@@ -1927,31 +1959,35 @@ describe('cmdPush and cmdPull checkout selection', () => {
 
   afterEach(() => {
     process.chdir(originalCwd)
+    for (const home of homes.splice(0)) home.restore()
     rmSync(tmpDir, { recursive: true, force: true })
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
 
+  const homes: CliHome[] = []
+
   async function loadCli() {
+    const managerUrl = 'http://localhost:5003'
+    const home = createCliHome({ state: { managerUrl }, token: 'tok', account: managerUrl })
+    homes.push(home)
     vi.resetModules()
-    mockStateModule({ managerUrl: 'http://localhost:5003' })
-    mockTokenStoreModule({ token: 'tok' })
     return import('../bin/ocm')
   }
 
   it('threads the selected worktree directory into a fast push', async () => {
     const calls: { url: string; init?: RequestInit }[] = []
     const localHead = execSync('git rev-parse HEAD', { cwd: repoRoot, encoding: 'utf-8' }).trim()
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: unknown, init?: RequestInit) => {
-      const u = String(url)
-      calls.push({ url: u, init })
-      if (u.includes('/opencode-workspaces')) return { ok: true, status: 200, json: () => Promise.resolve({ workspaces: [REPO] }) }
-      if (u.includes('/mirror/checkouts')) return { ok: true, status: 200, json: () => Promise.resolve(suffixedCheckouts) }
-      if (u.includes('/mirror/head')) return { ok: true, status: 200, json: () => Promise.resolve({ repoId: 1, branch: 'feature-ocm', head: localHead, dirty: false }) }
-      if (u.includes('/mirror/bundle')) return { ok: true, status: 200, json: () => Promise.resolve({ repoId: 1, fullPath: '/repos/repo-feature-ocm', branch: 'feature-ocm', head: 'abc', created: false }) }
-      if (u.includes('/mirror/patch')) return { ok: true, status: 200, json: () => Promise.resolve({ repoId: 1, fullPath: '/repos/repo-feature-ocm', branch: 'feature-ocm', head: 'abc', created: false, applied: true }) }
-      throw new Error(`unexpected fetch: ${u}`)
-    }))
+    stubFetchRoutes(async (input, init) => {
+      const url = String(input)
+      calls.push({ url, init })
+      if (url.includes('/opencode-workspaces')) return jsonResponse({ workspaces: [REPO] })
+      if (url.includes('/mirror/checkouts')) return jsonResponse(suffixedCheckouts)
+      if (url.includes('/mirror/head')) return jsonResponse({ repoId: 1, branch: 'feature-ocm', head: localHead, dirty: false })
+      if (url.includes('/mirror/bundle')) return jsonResponse({ repoId: 1, fullPath: '/repos/repo-feature-ocm', branch: 'feature-ocm', head: 'abc', created: false })
+      if (url.includes('/mirror/patch')) return jsonResponse({ repoId: 1, fullPath: '/repos/repo-feature-ocm', branch: 'feature-ocm', head: 'abc', created: false, applied: true })
+      throw new Error(`unexpected fetch: ${url}`)
+    })
 
     const { cmdPush } = await loadCli()
     await cmdPush([])
@@ -1960,7 +1996,7 @@ describe('cmdPush and cmdPull checkout selection', () => {
     expect(new URL(headCall!.url).searchParams.get('directory')).toBe('/repos/repo-feature-ocm')
     const bundleCall = calls.find((c) => c.url.includes('/mirror/bundle'))
     expect(new URL(bundleCall!.url).searchParams.get('directory')).toBe('/repos/repo-feature-ocm')
-    expect((bundleCall!.init!.headers as Record<string, string>)['X-OCM-Target-Branch']).toBe('feature-ocm')
+    expect(new Headers(bundleCall?.init?.headers).get('X-OCM-Target-Branch')).toBe('feature-ocm')
     expect(calls.some((c) => c.url.includes('/mirror/begin'))).toBe(false)
   })
 
@@ -1968,20 +2004,22 @@ describe('cmdPush and cmdPull checkout selection', () => {
     const calls: { url: string }[] = []
     const stderr: string[] = []
     const localHead = execSync('git rev-parse HEAD', { cwd: repoRoot, encoding: 'utf-8' }).trim()
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: unknown) => {
-      const u = String(url)
-      calls.push({ url: u })
-      if (u.includes('/opencode-workspaces')) return { ok: true, status: 200, json: () => Promise.resolve({ workspaces: [REPO] }) }
-      if (u.includes('/mirror/checkouts')) return { ok: true, status: 200, json: () => Promise.resolve(suffixedCheckouts) }
-      if (u.includes('/mirror/head')) return { ok: true, status: 200, json: () => Promise.resolve({ repoId: 1, branch: 'feature-ocm', head: localHead, dirty: false }) }
-      if (u.includes('/mirror/bundle')) return { ok: false, status: 409, text: () => Promise.resolve(JSON.stringify({ error: 'branch_in_use' })) }
-      throw new Error(`unexpected fetch: ${u}`)
-    }))
+    stubFetchRoutes(async (input) => {
+      const url = String(input)
+      calls.push({ url })
+      if (url.includes('/opencode-workspaces')) return jsonResponse({ workspaces: [REPO] })
+      if (url.includes('/mirror/checkouts')) return jsonResponse(suffixedCheckouts)
+      if (url.includes('/mirror/head')) return jsonResponse({ repoId: 1, branch: 'feature-ocm', head: localHead, dirty: false })
+      if (url.includes('/mirror/bundle')) return jsonResponse({ error: 'branch_in_use' }, 409)
+      throw new Error(`unexpected fetch: ${url}`)
+    })
     vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
       stderr.push(String(chunk))
       return true
     })
-    vi.spyOn(process, 'exit').mockImplementation((() => { throw new Error('exit') }) as never)
+    vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('exit')
+    })
 
     const { cmdPush } = await loadCli()
     await expect(cmdPush([])).rejects.toThrow('exit')
@@ -2005,17 +2043,17 @@ describe('cmdPush and cmdPull checkout selection', () => {
     const bundleBytes = readFileSync(bundleFile)
 
     const calls: { url: string }[] = []
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: unknown) => {
-      const u = String(url)
-      calls.push({ url: u })
-      if (u.includes('/opencode-workspaces')) return { ok: true, status: 200, json: () => Promise.resolve({ workspaces: [REPO] }) }
-      if (u.includes('/mirror/checkouts')) return { ok: true, status: 200, json: () => Promise.resolve(exactCheckouts) }
-      if (u.includes('/mirror/contains')) return { ok: true, status: 200, json: () => Promise.resolve({ repoId: 1, contained: true }) }
-      if (u.includes('/mirror/head')) return { ok: true, status: 200, json: () => Promise.resolve({ repoId: 1, branch: 'feature', head: serverSha, dirty: false }) }
-      if (u.includes('/mirror/patch')) return { ok: true, status: 200, json: () => Promise.resolve({ repoId: 1, branch: 'feature', head: serverSha, patch: '' }) }
-      if (u.includes('/mirror/bundle')) return { ok: true, status: 200, body: streamOf(bundleBytes) }
-      throw new Error(`unexpected fetch: ${u}`)
-    }))
+    stubFetchRoutes(async (input) => {
+      const url = String(input)
+      calls.push({ url })
+      if (url.includes('/opencode-workspaces')) return jsonResponse({ workspaces: [REPO] })
+      if (url.includes('/mirror/checkouts')) return jsonResponse(exactCheckouts)
+      if (url.includes('/mirror/contains')) return jsonResponse({ repoId: 1, contained: true })
+      if (url.includes('/mirror/head')) return jsonResponse({ repoId: 1, branch: 'feature', head: serverSha, dirty: false })
+      if (url.includes('/mirror/patch')) return jsonResponse({ repoId: 1, branch: 'feature', head: serverSha, patch: '' })
+      if (url.includes('/mirror/bundle')) return new Response(streamOf(bundleBytes))
+      throw new Error(`unexpected fetch: ${url}`)
+    })
 
     const { cmdPull } = await loadCli()
     await cmdPull([])
@@ -2032,19 +2070,21 @@ describe('cmdPush and cmdPull checkout selection', () => {
   it('dies without falling back to a full pull when the worktree pull fails', async () => {
     const calls: { url: string }[] = []
     const stderr: string[] = []
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: unknown) => {
-      const u = String(url)
-      calls.push({ url: u })
-      if (u.includes('/opencode-workspaces')) return { ok: true, status: 200, json: () => Promise.resolve({ workspaces: [REPO] }) }
-      if (u.includes('/mirror/checkouts')) return { ok: true, status: 200, json: () => Promise.resolve(exactCheckouts) }
-      if (u.includes('/mirror/patch')) return { ok: false, status: 500, text: () => Promise.resolve('boom') }
-      throw new Error(`unexpected fetch: ${u}`)
-    }))
+    stubFetchRoutes(async (input) => {
+      const url = String(input)
+      calls.push({ url })
+      if (url.includes('/opencode-workspaces')) return jsonResponse({ workspaces: [REPO] })
+      if (url.includes('/mirror/checkouts')) return jsonResponse(exactCheckouts)
+      if (url.includes('/mirror/patch')) return new Response('boom', { status: 500 })
+      throw new Error(`unexpected fetch: ${url}`)
+    })
     vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
       stderr.push(String(chunk))
       return true
     })
-    vi.spyOn(process, 'exit').mockImplementation((() => { throw new Error('exit') }) as never)
+    vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('exit')
+    })
 
     const { cmdPull } = await loadCli()
     await expect(cmdPull(['--force'])).rejects.toThrow('exit')
