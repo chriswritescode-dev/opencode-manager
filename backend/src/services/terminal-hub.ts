@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import {
   MAX_PEER_BUFFERED_BYTES,
   MAX_UPSTREAM_BUFFERED_BYTES,
@@ -23,6 +24,7 @@ const GRACEFUL_CLOSE_CODES: ReadonlySet<number> = new Set([DEFAULT_EXIT_CODE, 44
 type HubState = 'connecting' | 'open' | 'closed' | 'failed'
 
 const META_DECODER = new TextDecoder()
+const terminalMetaFrameSchema = z.object({ cursor: z.number().optional() })
 const META_ENCODER = new TextEncoder()
 const DETACHED_BRIDGE: WebSocketBridge = { send: () => {}, close: () => {} }
 
@@ -128,10 +130,10 @@ export class TerminalHub {
     this.socket = socket
     socket.binaryType = 'arraybuffer'
     socket.addEventListener('open', () => this.handleOpen(socket))
-    socket.addEventListener('message', (event) => this.handleMessage(event as MessageEvent))
+    socket.addEventListener('message', (event) => this.handleMessage(event))
     socket.addEventListener('close', (event) => this.handleUpstreamClosed(socket, closeCodeOf(event)))
     socket.addEventListener('error', () => this.handleUpstreamError(socket))
-    const readyState = (socket as { readyState?: number }).readyState
+    const readyState = socket.readyState
     if (readyState === WEBSOCKET_OPEN) {
       this.handleOpen(socket)
       return
@@ -186,8 +188,9 @@ export class TerminalHub {
 
   private handleMessage(event: MessageEvent): void {
     const data: unknown = event.data
-    if (typeof data === 'string') {
-      this.appendOutput(data)
+    const text = z.string().safeParse(data)
+    if (text.success) {
+      this.appendOutput(text.data)
       return
     }
     let bytes: Uint8Array
@@ -281,11 +284,13 @@ export class TerminalHub {
 
   private alignToCursor(payload: Uint8Array): void {
     try {
-      const parsed = JSON.parse(META_DECODER.decode(payload)) as { cursor?: unknown }
-      if (typeof parsed.cursor !== 'number' || !Number.isSafeInteger(parsed.cursor)) return
-      if (parsed.cursor < this.cursor) return
-      this.cursor = parsed.cursor
-      this.bufferStart = Math.max(0, parsed.cursor - this.buffer.length)
+      const parsed = terminalMetaFrameSchema.safeParse(JSON.parse(META_DECODER.decode(payload)))
+      if (!parsed.success) return
+      const cursor = parsed.data.cursor
+      if (cursor === undefined || !Number.isSafeInteger(cursor)) return
+      if (cursor < this.cursor) return
+      this.cursor = cursor
+      this.bufferStart = Math.max(0, cursor - this.buffer.length)
     } catch {
       return
     }
@@ -322,7 +327,7 @@ export class TerminalHub {
   private write(data: string | ArrayBuffer | Uint8Array<ArrayBuffer>): void {
     if (this.state === 'closed' || this.state === 'failed') return
     const payload: string | Uint8Array<ArrayBuffer> =
-      typeof data === 'string' ? data : data instanceof Uint8Array ? data : new Uint8Array(data)
+      data instanceof Uint8Array ? data : data instanceof ArrayBuffer ? new Uint8Array(data) : data
     if (this.state === 'open' && this.socket) {
       try {
         this.socket.send(payload)
@@ -360,9 +365,8 @@ export class TerminalHub {
   }
 }
 
-function closeCodeOf(event: unknown): number {
-  const code = (event as Partial<CloseEvent> | undefined)?.code
-  return typeof code === 'number' ? code : DEFAULT_EXIT_CODE
+function closeCodeOf(event: CloseEvent): number {
+  return Number.isFinite(event.code) ? event.code : DEFAULT_EXIT_CODE
 }
 
 function closeSocketQuietly(socket: { close: () => void } | null | undefined): void {
@@ -375,7 +379,7 @@ function closeSocketQuietly(socket: { close: () => void } | null | undefined): v
 }
 
 function byteLengthOf(data: string | Uint8Array<ArrayBuffer>): number {
-  return typeof data === 'string' ? Buffer.byteLength(data) : data.byteLength
+  return data instanceof Uint8Array ? data.byteLength : Buffer.byteLength(data)
 }
 
 export class TerminalHubRegistry {

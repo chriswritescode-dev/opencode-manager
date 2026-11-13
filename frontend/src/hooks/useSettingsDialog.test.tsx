@@ -341,7 +341,6 @@ describe('useSettingsDialog', () => {
       expect(screen.getByTestId('active-tab').textContent).toBe('git')
 
       act(() => { screen.getByText('back').click() })
-      // navigate(-1) goes directly to / (pre-settings page), not through old tab
       expect(screen.getByTestId('dialog-state').textContent).toBe('closed')
       expect(screen.getByTestId('active-tab').textContent).toBe('account')
     })

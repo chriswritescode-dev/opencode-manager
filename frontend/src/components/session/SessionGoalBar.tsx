@@ -6,15 +6,14 @@ import { useSessionGoal, useSessionGoalCommand } from '@/hooks/useSessionGoals'
 import { getGoalRoundsLabel, getGoalStatusTitle } from '@opencode-manager/shared/notifications'
 import type { GoalStatus } from '@opencode-manager/shared/opencode'
 
-const STATUS_CHIP_CLASSES: Record<GoalStatus, string> = {
+const STATUS_CHIP_CLASSES = {
   active: 'bg-highlight text-highlight-foreground border-highlight',
   paused: 'bg-warning/15 text-warning border-warning/40',
   complete: 'bg-success/15 text-success border-success/40',
-}
+} satisfies Record<GoalStatus, string>
 
 const GOAL_BUTTON_CLASSES = 'h-6 px-2 text-xs'
 
-/** Renders the session's OpenCode goal with pause, resume and clear controls. */
 export function SessionGoalBar({ sessionID, directory }: { sessionID: string; directory: string | undefined }) {
   const { data } = useSessionGoal(sessionID, directory)
   const goalCommand = useSessionGoalCommand(directory)

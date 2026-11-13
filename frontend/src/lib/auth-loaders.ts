@@ -11,13 +11,8 @@ export interface AuthConfig {
 
 const DEFAULT_REDIRECT_TARGET = '/'
 
-/**
- * Returns `value` when it is a same-origin relative path, otherwise the app root. Protocol-relative
- * paths, absolute URLs and backslash-escaped variants are rejected so the login redirect cannot be
- * used as an open redirect.
- */
-export function resolveRedirectTarget(value: unknown): string {
-  if (typeof value !== 'string') return DEFAULT_REDIRECT_TARGET
+export function resolveRedirectTarget(value: string | null): string {
+  if (value === null) return DEFAULT_REDIRECT_TARGET
   if (!value.startsWith('/') || value.startsWith('//')) return DEFAULT_REDIRECT_TARGET
   if (value.includes('\\') || value.includes(':')) return DEFAULT_REDIRECT_TARGET
   return value
@@ -27,11 +22,7 @@ export function getLoginRedirectTarget(search: string): string {
   return resolveRedirectTarget(new URLSearchParams(search).get('redirect'))
 }
 
-/**
- * Builds the login URL that returns the visitor to `target` after signing in. The root target omits
- * the query parameter so a plain login URL stays unchanged.
- */
-export function loginRedirectPath(target: unknown): string {
+export function loginRedirectPath(target: string | null): string {
   const resolved = resolveRedirectTarget(target)
   return resolved === DEFAULT_REDIRECT_TARGET
     ? '/login'
@@ -111,20 +102,14 @@ export async function registerLoader() {
   return { config }
 }
 
-/**
- * Guards a signed-in route through {@link reconcileStoredAuthUser}: a validated user is let through
- * and remembered for the next cold start, a transient session failure is let through while a
- * remembered user stands in for it, and an authoritative empty or rejected session is redirected to
- * login with the requested location.
- */
 export async function protectedLoader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url)
   let session: Awaited<ReturnType<typeof getSession>> | null = null
-  let failure: unknown = null
+  let failure: Error | null = null
   try {
     session = await getSession()
-  } catch (error) {
-    failure = error
+  } catch (cause) {
+    failure = cause instanceof Error ? cause : new Error(String(cause))
   }
 
   const storedUser = reconcileStoredAuthUser(

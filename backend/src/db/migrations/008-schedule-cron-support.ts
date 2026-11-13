@@ -1,10 +1,5 @@
+import { selectTableColumns } from '../rows'
 import type { Migration } from '../migration-runner'
-
-interface ColumnInfo {
-  name: string
-  notnull: number
-  dflt_value: string | null
-}
 
 const migration: Migration = {
   id: '008-schedule-cron-support',
@@ -62,7 +57,7 @@ const migration: Migration = {
       db.run('CREATE INDEX IF NOT EXISTS idx_schedule_runs_repo ON schedule_runs(repo_id, started_at DESC)')
     }
 
-    const tableInfo = db.prepare('PRAGMA table_info(schedule_jobs)').all() as ColumnInfo[]
+    const tableInfo = selectTableColumns(db, 'schedule_jobs')
     const existingColumns = new Set(tableInfo.map((column) => column.name))
     const intervalMinutesColumn = tableInfo.find((column) => column.name === 'interval_minutes')
     const scheduleModeColumn = tableInfo.find((column) => column.name === 'schedule_mode')

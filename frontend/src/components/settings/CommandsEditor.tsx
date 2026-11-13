@@ -13,21 +13,17 @@ import { DirectoryFilesList } from './DirectoryFilesList'
 interface CommandsEditorProps {
   commands: Record<string, OpenCodeCommandConfig>
   directoryCommands?: OpenCodeDirectoryFileInfo[]
-  onSave: (name: string, command: OpenCodeCommandPatch, previousName?: string) => void
+  onSave: (name: string, command: OpenCodeCommandPatch) => void
   onDelete: (name: string) => void
 }
 
-/**
- * Renders configured commands alongside command files discovered in the workspace directory,
- * providing add, edit and delete entry points against the managed config.
- */
 export function CommandsEditor({ commands, directoryCommands = [], onSave, onDelete }: CommandsEditorProps) {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [editingCommand, setEditingCommand] = useState<{ name: string; command: OpenCodeCommandConfig } | null>(null)
   const hasCommands = Object.keys(commands).length > 0 || directoryCommands.length > 0
 
   const handleCommandSubmit = (name: string, command: OpenCodeCommandPatch) => {
-    onSave(name, command, editingCommand?.name)
+    onSave(name, command)
     setEditingCommand(null)
     setIsCreateDialogOpen(false)
   }

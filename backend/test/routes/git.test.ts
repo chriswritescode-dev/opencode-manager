@@ -1,512 +1,363 @@
-import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { writeFileSync } from 'node:fs'
+import path from 'node:path'
+import { Hono } from 'hono'
+import { z } from 'zod'
 import { createRepoRoutes } from '../../src/routes/repos'
-import type { Hono } from 'hono'
-import { getRepoById } from '../../src/db/queries'
-import type { Database } from 'bun:sqlite'
-import type { Repo } from '../../../shared/src/types'
-import type { GitAuthService } from '../../src/services/git-auth'
-import type { ScheduleService } from '../../src/services/schedules'
-import type { TerminalService } from '../../src/services/terminal'
-import type { ProjectConfigService } from '../../src/services/project-config'
-import type { SecretsService } from '../../src/services/secrets'
-import type { RepoWorkspaceService } from '../../src/services/repo-workspace'
+import { createGitService } from '../../src/services/git/GitService'
+import { ScheduleService } from '../../src/services/schedules'
+import { ScheduleWorktreeManager } from '../../src/services/schedule-worktree'
+import { TerminalService } from '../../src/services/terminal'
+import { ProjectConfigService } from '../../src/services/project-config'
+import { SecretsService } from '../../src/services/secrets'
+import { RepoWorkspaceService } from '../../src/services/repo-workspace'
+import { CredentialProvider } from '../../src/services/credential-provider'
+import { createCommittedRepo, createGitAuthService, createOrigin, cloneOrigin, git } from '../helpers/git-fixtures'
 import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
+import { createStubRepoEnvService } from '../helpers/stub-repo-env-service'
+import { createTestDatabase, seedRepo } from '../helpers/test-database'
+import { createTempWorkspace } from '../helpers/test-env'
+import type { TempWorkspace } from '../helpers/test-env'
+import type { Database } from 'bun:sqlite'
+import type { Repo } from '@opencode-manager/shared/types'
+import { readJson } from '../helpers/read-json'
 
-vi.mock('bun:sqlite', () => ({
-  Database: vi.fn(),
-}))
+const ErrorResponseSchema = z.object({ error: z.string() })
 
-vi.mock('../../src/utils/logger', () => ({
-  logger: {
-    info: vi.fn(),
-    error: vi.fn(),
-    warn: vi.fn(),
-  },
-}))
+const GitFileStatusSchema = z.object({
+  path: z.string(),
+  status: z.enum(['modified', 'added', 'deleted', 'renamed', 'untracked', 'copied']),
+  staged: z.boolean(),
+  oldPath: z.string().optional(),
+})
 
-vi.mock('../../src/db/queries', () => ({
-  getRepoById: vi.fn(),
-}))
+const GitStatusSchema = z.object({
+  branch: z.string(),
+  ahead: z.number(),
+  behind: z.number(),
+  files: z.array(GitFileStatusSchema),
+  hasChanges: z.boolean(),
+  operation: z.union([
+    z.null(),
+    z.object({ kind: z.string(), conflictedFiles: z.array(z.string()) }),
+  ]),
+})
 
-const getRepoByIdMock = getRepoById as MockedFunction<typeof getRepoById>
+const GitLogSchema = z.object({
+  commits: z.array(z.object({
+    hash: z.string(),
+    authorName: z.string(),
+    authorEmail: z.string(),
+    date: z.string(),
+    message: z.string(),
+    unpushed: z.boolean().optional(),
+  })),
+})
 
-const createMockRepo = (overrides: Partial<Repo> = {}): Repo => ({
-  id: 1,
-  localPath: 'test-repo',
-  fullPath: '/nonexistent/path',
-  defaultBranch: 'main',
-  cloneStatus: 'ready' as const,
-  clonedAt: Date.now(),
-  ...overrides,
-} as Repo)
+const FileDiffSchema = z.object({
+  path: z.string(),
+  status: z.string(),
+  diff: z.string(),
+  additions: z.number(),
+  deletions: z.number(),
+  isBinary: z.boolean(),
+  truncated: z.boolean().optional(),
+})
 
-describe('Git Routes', () => {
+type GitStatus = z.infer<typeof GitStatusSchema>
+
+function fileStatus(status: GitStatus, filePath: string): z.infer<typeof GitFileStatusSchema> | undefined {
+  return status.files.find((file) => file.path === filePath)
+}
+
+describe('git routes', () => {
+  let workspace: TempWorkspace
+  let db: Database
+  let repo: Repo
+  let repoPath: string
+  let originPath: string
+  let workPath: string
   let app: Hono
-  let mockDatabase: Database
-  let mockGitAuthService: GitAuthService
+
+  function jsonHeaders() {
+    return { 'Content-Type': 'application/json' }
+  }
 
   beforeEach(() => {
-    vi.clearAllMocks()
-    mockDatabase = {
-      run: vi.fn(),
-      prepare: vi.fn(() => ({
-        run: vi.fn(),
-        get: vi.fn(),
-        all: vi.fn(),
-        iterate: vi.fn(),
-        values: vi.fn(),
-      })),
-      exec: vi.fn(),
-      query: vi.fn(),
-      inTransaction: vi.fn(),
-      close: vi.fn(),
-    } as unknown as Database
-    mockGitAuthService = {
-      getGitEnvironment: vi.fn().mockReturnValue({}),
-    } as unknown as GitAuthService
-    app = createRepoRoutes(mockDatabase, mockGitAuthService, {} as unknown as ScheduleService, createStubOpenCodeClient(), {} as unknown as TerminalService, {} as unknown as ProjectConfigService, {} as unknown as RepoWorkspaceService, {} as unknown as SecretsService)
+    workspace = createTempWorkspace('ocm-git-routes-')
+    db = createTestDatabase()
+    originPath = path.join(workspace.path, 'origin.git')
+    workPath = path.join(workspace.path, 'work')
+    createOrigin(originPath, workPath)
+    repoPath = path.join(workspace.path, 'git-test-repo')
+    cloneOrigin(originPath, repoPath)
+    repo = seedRepo(db, { localPath: 'git-test-repo', sourcePath: repoPath, isLocal: true })
+
+    const gitAuthService = createGitAuthService()
+    const openCodeClient = createStubOpenCodeClient()
+    const gitService = createGitService(gitAuthService)
+    const projectConfigService = new ProjectConfigService(db, gitService, gitAuthService)
+    const terminalService = new TerminalService(
+      { client: openCodeClient, baseUrl: () => 'http://127.0.0.1:5551', includeLocalEnv: false },
+      new CredentialProvider(db),
+      createStubRepoEnvService(),
+    )
+    const scheduleService = new ScheduleService(db, openCodeClient, new ScheduleWorktreeManager(gitAuthService, db))
+    const repoWorkspaces = new RepoWorkspaceService(
+      db,
+      openCodeClient,
+      gitAuthService,
+      projectConfigService,
+      terminalService,
+      scheduleService,
+    )
+    app = new Hono()
+    app.route('/repos', createRepoRoutes(
+      db,
+      gitAuthService,
+      scheduleService,
+      openCodeClient,
+      terminalService,
+      projectConfigService,
+      repoWorkspaces,
+      new SecretsService(db),
+    ))
   })
 
-  describe('GET /:id/git/status', () => {
-    it('should return 404 when repo does not exist', async () => {
-      getRepoByIdMock.mockReturnValue(null)
-      const response = await app.request('/999/git/status')
-      const body = await response.json()
+  afterEach(() => {
+    db.close()
+    workspace.restore()
+  })
+
+  it('returns 404 for every git endpoint when the repo does not exist', async () => {
+    const endpoints = [
+      { method: 'GET', path: '/repos/999/git/status' },
+      { method: 'GET', path: '/repos/999/git/log' },
+      { method: 'GET', path: '/repos/999/git/diff?path=file.ts' },
+      { method: 'POST', path: '/repos/999/git/fetch' },
+      { method: 'POST', path: '/repos/999/git/pull' },
+      { method: 'POST', path: '/repos/999/git/push' },
+    ]
+
+    for (const endpoint of endpoints) {
+      const response = await app.request(endpoint.path, { method: endpoint.method })
+      const body = await readJson(response, ErrorResponseSchema)
 
       expect(response.status).toBe(404)
-      expect(body).toHaveProperty('error', 'Repo not found')
-    })
-
-    it('should return 500 when git operation fails for non-existent path', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/status')
-      const body = await response.json()
-
-      expect(response.status).toBe(500)
-      expect(body).toHaveProperty('error')
-    })
+      expect(body.error).toBe('Repo not found')
+    }
   })
 
-  describe('POST /discover', () => {
-    it('should reject invalid maxDepth values', async () => {
-      const response = await app.request('/discover', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rootPath: '/Users/test/projects', maxDepth: 99 }),
-      })
-      const body = await response.json()
+  it('reports a clean checkout on the cloned branch', async () => {
+    const response = await app.request(`/repos/${repo.id}/git/status`)
+    const body = await readJson(response, GitStatusSchema)
 
-      expect(response.status).toBe(400)
-      expect(body).toHaveProperty('error')
-    })
+    expect(response.status).toBe(200)
+    expect(body.branch).toBe('main')
+    expect(body.hasChanges).toBe(false)
+    expect(body.files).toEqual([])
   })
 
-  describe('POST /:id/git/fetch', () => {
-    it('should return 404 when repo does not exist', async () => {
-      getRepoByIdMock.mockReturnValue(null)
-      const response = await app.request('/999/git/fetch', { method: 'POST' })
-      const body = await response.json()
+  it('stages and unstages a new file', async () => {
+    writeFileSync(path.join(repoPath, 'notes.txt'), 'hello\n')
 
-      expect(response.status).toBe(404)
-      expect(body).toHaveProperty('error', 'Repo not found')
+    const untrackedStatus = await readJson(
+      await app.request(`/repos/${repo.id}/git/status`),
+      GitStatusSchema,
+    )
+    expect(fileStatus(untrackedStatus, 'notes.txt')).toEqual({ path: 'notes.txt', status: 'untracked', staged: false })
+
+    const stagedResponse = await app.request(`/repos/${repo.id}/git/stage`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ paths: ['notes.txt'] }),
     })
+    const staged = await readJson(stagedResponse, GitStatusSchema)
 
-    it('should return 500 when git operation fails', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/fetch', { method: 'POST' })
-      const body = await response.json()
+    expect(stagedResponse.status).toBe(200)
+    expect(fileStatus(staged, 'notes.txt')).toEqual({ path: 'notes.txt', status: 'added', staged: true })
 
-      expect(response.status).toBe(500)
-      expect(body).toHaveProperty('error')
+    const unstagedResponse = await app.request(`/repos/${repo.id}/git/unstage`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ paths: ['notes.txt'] }),
     })
+    const unstaged = await readJson(unstagedResponse, GitStatusSchema)
+
+    expect(unstagedResponse.status).toBe(200)
+    expect(fileStatus(unstaged, 'notes.txt')).toEqual({ path: 'notes.txt', status: 'untracked', staged: false })
   })
 
-  describe('POST /:id/git/pull', () => {
-    it('should return 404 when repo does not exist', async () => {
-      getRepoByIdMock.mockReturnValue(null)
-      const response = await app.request('/999/git/pull', { method: 'POST' })
-      const body = await response.json()
-
-      expect(response.status).toBe(404)
-      expect(body).toHaveProperty('error', 'Repo not found')
+  it('commits staged paths and reports the commit in the log', async () => {
+    writeFileSync(path.join(repoPath, 'notes.txt'), 'hello\n')
+    await app.request(`/repos/${repo.id}/git/stage`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ paths: ['notes.txt'] }),
     })
 
-    it('should return 500 when git operation fails', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/pull', { method: 'POST' })
-      const body = await response.json()
-
-      expect(response.status).toBe(500)
-      expect(body).toHaveProperty('error')
+    const commitResponse = await app.request(`/repos/${repo.id}/git/commit`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ message: 'Add notes' }),
     })
+    const status = await readJson(commitResponse, GitStatusSchema)
+
+    expect(commitResponse.status).toBe(200)
+    expect(status.hasChanges).toBe(false)
+
+    const log = await readJson(await app.request(`/repos/${repo.id}/git/log`), GitLogSchema)
+    expect(log.commits[0]?.message).toBe('Add notes')
+    expect(log.commits[0]?.unpushed).toBe(true)
   })
 
-  describe('POST /:id/git/push', () => {
-    it('should return 404 when repo does not exist', async () => {
-      getRepoByIdMock.mockReturnValue(null)
-      const response = await app.request('/999/git/push', { method: 'POST' })
-      const body = await response.json()
+  it('applies the requested log limit and returns the newest commits first', async () => {
+    git(['commit', '--allow-empty', '-m', 'second'], repoPath)
+    git(['commit', '--allow-empty', '-m', 'third'], repoPath)
 
-      expect(response.status).toBe(404)
-      expect(body).toHaveProperty('error', 'Repo not found')
-    })
+    const response = await app.request(`/repos/${repo.id}/git/log?limit=2`)
+    const body = await readJson(response, GitLogSchema)
 
-    it('should accept setUpstream parameter', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ setUpstream: true }),
-      })
-      const body = await response.json()
-
-      expect(response.status).toBe(500)
-      expect(body).toHaveProperty('error')
-    })
-
-    it('should work without setUpstream parameter', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      })
-      const body = await response.json()
-
-      expect(response.status).toBe(500)
-      expect(body).toHaveProperty('error')
-    })
-
-    it('should return 500 when git operation fails', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      })
-      const body = await response.json()
-
-      expect(response.status).toBe(500)
-      expect(body).toHaveProperty('error')
-    })
+    expect(response.status).toBe(200)
+    expect(body.commits.map((commit) => commit.message)).toEqual(['third', 'second'])
   })
 
-  describe('POST /:id/git/commit', () => {
-    it('should return 404 when repo does not exist', async () => {
-      getRepoByIdMock.mockReturnValue(null)
-      const response = await app.request('/999/git/commit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: 'Test' }),
-      })
-      const body = await response.json()
+  it('returns the working tree diff for a modified file', async () => {
+    writeFileSync(path.join(repoPath, 'greeting.txt'), 'old line\n')
+    git(['add', 'greeting.txt'], repoPath)
+    git(['commit', '-m', 'add greeting'], repoPath)
+    writeFileSync(path.join(repoPath, 'greeting.txt'), 'new line\n')
 
-      expect(response.status).toBe(404)
-      expect(body).toHaveProperty('error', 'Repo not found')
-    })
+    const diffResponse = await app.request(`/repos/${repo.id}/git/diff?path=greeting.txt`)
+    const diff = await readJson(diffResponse, z.string())
 
-    it('should return 400 when message is missing', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/commit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      })
-      const body = await response.json()
+    expect(diffResponse.status).toBe(200)
+    expect(diff).toContain('-old line')
+    expect(diff).toContain('+new line')
 
-      expect(response.status).toBe(400)
-      expect(body).toHaveProperty('error', 'message is required')
-    })
+    const fullDiffResponse = await app.request(`/repos/${repo.id}/git/diff-full?path=greeting.txt`)
+    const fullDiff = await readJson(fullDiffResponse, FileDiffSchema)
 
-    it('should accept message and stagedPaths', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/commit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: 'Test commit', stagedPaths: ['file1.ts'] }),
-      })
-      const body = await response.json()
-
-      expect(response.status).toBe(500)
-      expect(body).toHaveProperty('error')
-    })
-
-    it('should return 500 when git operation fails', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/commit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: 'Test' }),
-      })
-      const body = await response.json()
-
-      expect(response.status).toBe(500)
-      expect(body).toHaveProperty('error')
-    })
+    expect(fullDiffResponse.status).toBe(200)
+    expect(fullDiff.status).toBe('modified')
+    expect(fullDiff.additions).toBe(1)
+    expect(fullDiff.deletions).toBe(1)
   })
 
-  describe('POST /:id/git/stage', () => {
-    it('should return 404 when repo does not exist', async () => {
-      getRepoByIdMock.mockReturnValue(null)
-      const response = await app.request('/999/git/stage', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths: ['file1.ts'] }),
-      })
-      const body = await response.json()
+  it('fetches from the origin', async () => {
+    const response = await app.request(`/repos/${repo.id}/git/fetch`, { method: 'POST' })
+    const body = await readJson(response, GitStatusSchema)
 
-      expect(response.status).toBe(404)
-      expect(body).toHaveProperty('error', 'Repo not found')
-    })
-
-    it('should return 400 when paths is not an array', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/stage', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths: 'not-an-array' }),
-      })
-      const body = await response.json()
-
-      expect(response.status).toBe(400)
-      expect(body).toHaveProperty('error', 'paths is required and must be an array')
-    })
-
-    it('should return 400 when paths is missing', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/stage', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      })
-      const body = await response.json()
-
-      expect(response.status).toBe(400)
-      expect(body).toHaveProperty('error', 'paths is required and must be an array')
-    })
-
-    it('should accept array of paths', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/stage', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths: ['file1.ts', 'file2.ts'] }),
-      })
-      const body = await response.json()
-
-      expect(response.status).toBe(500)
-      expect(body).toHaveProperty('error')
-    })
-
-    it('should return 500 when git operation fails', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/stage', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths: ['file1.ts'] }),
-      })
-      const body = await response.json()
-
-      expect(response.status).toBe(500)
-      expect(body).toHaveProperty('error')
-    })
+    expect(response.status).toBe(200)
+    expect(body.branch).toBe('main')
   })
 
-  describe('POST /:id/git/unstage', () => {
-    it('should return 404 when repo does not exist', async () => {
-      getRepoByIdMock.mockReturnValue(null)
-      const response = await app.request('/999/git/unstage', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths: ['file1.ts'] }),
-      })
-      const body = await response.json()
-
-      expect(response.status).toBe(404)
-      expect(body).toHaveProperty('error', 'Repo not found')
+  it('pushes a new commit to the origin', async () => {
+    writeFileSync(path.join(repoPath, 'notes.txt'), 'hello\n')
+    await app.request(`/repos/${repo.id}/git/stage`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ paths: ['notes.txt'] }),
+    })
+    await app.request(`/repos/${repo.id}/git/commit`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ message: 'Pushed from the manager' }),
     })
 
-    it('should return 400 when paths is not an array', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/unstage', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths: 'not-an-array' }),
-      })
-      const body = await response.json()
-
-      expect(response.status).toBe(400)
-      expect(body).toHaveProperty('error', 'paths is required and must be an array')
+    const response = await app.request(`/repos/${repo.id}/git/push`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({}),
     })
 
-    it('should return 400 when paths is missing', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/unstage', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      })
-      const body = await response.json()
-
-      expect(response.status).toBe(400)
-      expect(body).toHaveProperty('error', 'paths is required and must be an array')
-    })
-
-    it('should accept array of paths', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/unstage', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths: ['file1.ts', 'file2.ts'] }),
-      })
-      const body = await response.json()
-
-      expect(response.status).toBe(500)
-      expect(body).toHaveProperty('error')
-    })
-
-    it('should return 500 when git operation fails', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/unstage', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths: ['file1.ts'] }),
-      })
-      const body = await response.json()
-
-      expect(response.status).toBe(500)
-      expect(body).toHaveProperty('error')
-    })
+    expect(response.status).toBe(200)
+    expect(git(['log', '--format=%s', '-1', 'main'], originPath)).toBe('Pushed from the manager')
   })
 
-  describe('GET /:id/git/log', () => {
-    it('should return 404 when repo does not exist', async () => {
-      getRepoByIdMock.mockReturnValue(null)
-      const response = await app.request('/999/git/log')
-      const body = await response.json()
+  it('pulls a commit pushed to the origin from another checkout', async () => {
+    git(['commit', '--allow-empty', '-m', 'Remote change'], workPath)
+    git(['push', 'origin', 'main'], workPath)
 
-      expect(response.status).toBe(404)
-      expect(body).toHaveProperty('error', 'Repo not found')
-    })
+    const response = await app.request(`/repos/${repo.id}/git/pull`, { method: 'POST' })
+    const status = await readJson(response, GitStatusSchema)
 
-    it('should use default limit when not provided', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/log')
-      const body = await response.json()
-
-      expect(response.status).toBe(500)
-      expect(body).toHaveProperty('error')
-    })
-
-    it('should use custom limit when provided', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/log?limit=5')
-      const body = await response.json()
-
-      expect(response.status).toBe(500)
-      expect(body).toHaveProperty('error')
-    })
-
-    it('should return 500 when git operation fails', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/log')
-      const body = await response.json()
-
-      expect(response.status).toBe(500)
-      expect(body).toHaveProperty('error')
-    })
+    expect(response.status).toBe(200)
+    expect(status.branch).toBe('main')
+    expect(git(['log', '--format=%s', '-1', 'main'], repoPath)).toBe('Remote change')
   })
 
-  describe('GET /:id/git/diff', () => {
-    it('should return 404 when repo does not exist', async () => {
-      getRepoByIdMock.mockReturnValue(null)
-      const response = await app.request('/999/git/diff?path=file.ts')
-      const body = await response.json()
+  it('resets the branch to the requested commit', async () => {
+    const baseHash = git(['rev-parse', 'HEAD'], repoPath)
+    git(['commit', '--allow-empty', '-m', 'later'], repoPath)
 
-      expect(response.status).toBe(404)
-      expect(body).toHaveProperty('error', 'Repo not found')
+    const response = await app.request(`/repos/${repo.id}/git/reset`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ commitHash: baseHash }),
     })
+    const status = await readJson(response, GitStatusSchema)
 
-    it('should return 400 when path parameter is missing', async () => {
-      const response = await app.request('/1/git/diff')
-      const body = await response.json()
-
-      expect(response.status).toBe(400)
-      expect(body).toHaveProperty('error', 'path query parameter is required')
-    })
-
-    it('should accept path parameter', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/diff?path=file.ts')
-      await response.text()
-
-      expect([200, 500]).toContain(response.status)
-    })
-
-    it('should handle special characters in path', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/diff?path=src%2Fcomponents%2FButton.tsx')
-      expect([200, 500]).toContain(response.status)
-    })
-
-    it('should return 500 when git operation fails', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/diff?path=file.ts')
-      expect([200, 500]).toContain(response.status)
-    })
+    expect(response.status).toBe(200)
+    expect(status.hasChanges).toBe(false)
+    const log = await readJson(await app.request(`/repos/${repo.id}/git/log`), GitLogSchema)
+    expect(log.commits.map((commit) => commit.message)).toEqual(['init'])
   })
 
-  describe('POST /:id/git/reset', () => {
-    it('should return 404 when repo does not exist', async () => {
-      getRepoByIdMock.mockReturnValue(null)
-      const response = await app.request('/999/git/reset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ commitHash: 'abc123' }),
-      })
-      const body = await response.json()
-
-      expect(response.status).toBe(404)
-      expect(body).toHaveProperty('error', 'Repo not found')
+  it.each([
+    { label: 'commit without a message', path: 'commit', body: {}, error: 'message is required' },
+    { label: 'stage with a non-array paths', path: 'stage', body: { paths: 'not-an-array' }, error: 'paths is required and must be an array' },
+    { label: 'unstage without paths', path: 'unstage', body: {}, error: 'paths is required and must be an array' },
+    { label: 'reset without a commit hash', path: 'reset', body: {}, error: 'commitHash is required' },
+  ])('rejects $label', async ({ path: endpoint, body: requestBody, error }) => {
+    const response = await app.request(`/repos/${repo.id}/git/${endpoint}`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify(requestBody),
     })
+    const body = await readJson(response, ErrorResponseSchema)
 
-    it('should return 400 when commitHash is missing', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/reset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      })
-      const body = await response.json()
+    expect(response.status).toBe(400)
+    expect(body.error).toBe(error)
+  })
 
-      expect(response.status).toBe(400)
-      expect(body).toHaveProperty('error', 'commitHash is required')
+  it('rejects a diff request without a path', async () => {
+    const response = await app.request(`/repos/${repo.id}/git/diff`)
+    const body = await readJson(response, ErrorResponseSchema)
+
+    expect(response.status).toBe(400)
+    expect(body.error).toBe('path query parameter is required')
+  })
+
+  it('rejects an out-of-range discovery depth', async () => {
+    const response = await app.request('/repos/discover', {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ rootPath: '/tmp/projects', maxDepth: 99 }),
     })
+    const body = await readJson(response, ErrorResponseSchema)
 
-    it('should accept commitHash parameter', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/reset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ commitHash: 'abc123' }),
-      })
-      const body = await response.json()
+    expect(response.status).toBe(400)
+    expect(body.error).not.toBe('')
+  })
 
-      expect(response.status).toBe(500)
-      expect(body).toHaveProperty('error')
+  it('discovers local repositories under the requested root', async () => {
+    const localRepoPath = path.join(workspace.path, 'discovered', 'sample-repo')
+    createCommittedRepo(localRepoPath)
+
+    const response = await app.request('/repos/discover', {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ rootPath: path.join(workspace.path, 'discovered'), maxDepth: 2 }),
     })
+    const body = await readJson(response, z.object({
+      discoveredCount: z.number(),
+      existingCount: z.number(),
+      repos: z.array(z.object({ localPath: z.string() })),
+    }))
 
-    it('should return 500 when git operation fails', async () => {
-      getRepoByIdMock.mockReturnValue(createMockRepo())
-      const response = await app.request('/1/git/reset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ commitHash: 'abc123' }),
-      })
-      const body = await response.json()
-
-      expect(response.status).toBe(500)
-      expect(body).toHaveProperty('error')
-    })
+    expect(response.status).toBe(200)
+    expect(body.discoveredCount).toBe(1)
+    expect(body.repos[0]?.localPath).toBe('sample-repo')
   })
 })

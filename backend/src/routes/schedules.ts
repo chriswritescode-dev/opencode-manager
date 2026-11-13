@@ -6,8 +6,41 @@ import {
   UpdateScheduleJobRequestSchema,
 } from '@opencode-manager/shared/schemas'
 import type { ScheduleRunWorktreesMode } from '@opencode-manager/shared/types'
-import { ScheduleService, ScheduleServiceError } from '../services/schedules'
+import { type ScheduleService, ScheduleServiceError } from '../services/schedules'
 import { parseId, handleServiceError } from '../utils/route-helpers'
+
+export type ScheduleRoutesService = Pick<ScheduleService,
+  | 'cancelRun'
+  | 'cancelServerRun'
+  | 'clearRunHistory'
+  | 'clearServerRunHistory'
+  | 'countUnreadRuns'
+  | 'createJob'
+  | 'createServerJob'
+  | 'deleteJob'
+  | 'deleteRun'
+  | 'deleteServerJob'
+  | 'deleteServerRun'
+  | 'getJob'
+  | 'getRun'
+  | 'getServerJob'
+  | 'getServerRun'
+  | 'listAllJobsWithRepos'
+  | 'listAllRuns'
+  | 'listJobs'
+  | 'listRuns'
+  | 'listServerJobs'
+  | 'listServerRuns'
+  | 'listUnreadRuns'
+  | 'listWorktrees'
+  | 'markAllRunsViewed'
+  | 'markRunViewed'
+  | 'removeWorktrees'
+  | 'runJob'
+  | 'runServerJob'
+  | 'updateJob'
+  | 'updateServerJob'
+>
 
 function parseServerId(value: string | undefined): string {
   if (!value) {
@@ -54,7 +87,7 @@ function parseWorktreesMode(value: string | undefined): ScheduleRunWorktreesMode
   return result.data
 }
 
-export function createScheduleRoutes(scheduleService: ScheduleService) {
+export function createScheduleRoutes(scheduleService: ScheduleRoutesService) {
   const app = new Hono()
 
   app.get('/all', (c) => {
@@ -277,11 +310,7 @@ export function createScheduleRoutes(scheduleService: ScheduleService) {
   return app
 }
 
-/**
- * Schedule routes for a project directory on a linked OpenCode server. They mirror the
- * repo routes without worktree endpoints, because remote runs execute in place.
- */
-export function createServerScheduleRoutes(scheduleService: ScheduleService) {
+export function createServerScheduleRoutes(scheduleService: ScheduleRoutesService) {
   const app = new Hono()
 
   app.get('/', (c) => {

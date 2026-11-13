@@ -1,5 +1,4 @@
-/* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient, useQuery, useQueries } from '@tanstack/react-query'
 import {
@@ -21,10 +20,18 @@ import {
   type OpenCodeStreamEvent,
   type SSHHostKeyRequest,
 } from '@opencode-manager/shared/schemas'
-import { isLocalOpenCodeServer } from '@/contexts/OpenCodeServerContext'
+import { isLocalOpenCodeServer } from '@/contexts/opencode-server-context'
 import { useAuth } from '@/hooks/useAuth'
 import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
 import { remoteProjectsQueryOptions } from '@/hooks/useRemoteProjects'
+import {
+  EventContext,
+  selectActiveSessionDirectoriesKey,
+  type EventContextValue,
+  type PendingForm,
+  type PendingPermission,
+  type SSEHealthState,
+} from '@/contexts/event-context'
 import type { FormAnswer, FormInfo, PermissionReply, PermissionRequest } from '@opencode-manager/shared/opencode'
 import type { Repo } from '@/api/types'
 import { showToast } from '@/lib/toast'
@@ -44,8 +51,30 @@ import {
   invalidateSessionListCachesDebounced,
   OPEN_CODE_MANAGED_CONFIG_QUERY_KEY,
 } from '@/lib/queryInvalidation'
+import { z } from 'zod'
 
 const STATUS_POLL_INTERVAL_MS = 5000
+
+const cachedSessionLocationSchema = z.object({
+  location: z.object({ directory: z.string().optional() }).optional(),
+})
+
+const cachedSessionsPageSchema = z.object({
+  pages: z
+    .array(
+      z.object({
+        items: z
+          .array(
+            z.object({
+              id: z.string(),
+              location: z.object({ directory: z.string().optional() }).optional(),
+            }),
+          )
+          .optional(),
+      }),
+    )
+    .optional(),
+})
 
 const LOCATION_CATALOG_QUERY_KEYS = [
   ['opencode', 'commands'],
@@ -54,21 +83,13 @@ const LOCATION_CATALOG_QUERY_KEYS = [
   ['opencode', 'providers'],
 ] as const
 
-type ServerScoped<T> = T & { serverId: string }
-type PendingPermission = ServerScoped<PermissionRequest>
-type PendingForm = ServerScoped<FormInfo>
 type PermissionsBySession = Record<string, PendingPermission[]>
 type FormsBySession = Record<string, PendingForm[]>
-type SSEHealthState = Pick<EventStreamHealthState, 'isConnected' | 'isHealthy' | 'isStalled'>
 
 type SessionScopedItem = { id: string; sessionID: string }
 
 const EMPTY_SESSION_IDS: string[] = []
 
-/**
- * Session ids whose queued item list is non-empty. The array reference is stable across renders
- * while the set of ids is unchanged, even when the backing record is replaced.
- */
 function usePendingSessionIDs(bySession: Record<string, unknown[]>): string[] {
   const idsKey = useMemo(
     () => Object.keys(bySession).filter((sessionID) => (bySession[sessionID]?.length ?? 0) > 0).join('\u0000'),
@@ -78,13 +99,13 @@ function usePendingSessionIDs(bySession: Record<string, unknown[]>): string[] {
 }
 
 function groupBySession<T extends SessionScopedItem>(items: T[]): Record<string, T[]> {
-  return items.reduce<Record<string, T[]>>((grouped, item) => {
-    const existing = grouped[item.sessionID] ?? []
-    return {
-      ...grouped,
-      [item.sessionID]: [...existing, item],
-    }
-  }, {})
+  const groups = new Map<string, T[]>()
+  for (const item of items) {
+    const existing = groups.get(item.sessionID)
+    if (existing) existing.push(item)
+    else groups.set(item.sessionID, [item])
+  }
+  return Object.fromEntries(groups)
 }
 
 function sortById<T extends SessionScopedItem>(items: T[]): T[] {
@@ -108,12 +129,6 @@ function isSessionWithinView(
   return false
 }
 
-/**
- * Selects the pinned item while it belongs to the viewed session or no session is viewed,
- * otherwise the first item within the viewed session, otherwise the pinned item while it is still
- * present, otherwise the first item. The selection is derived during render so a newly arriving
- * item never displaces a shown item that is within the view.
- */
 function usePinnedViewedItem<T extends SessionScopedItem>(
   items: T[],
   viewedSessionId: string | null,
@@ -145,7 +160,7 @@ function reconcileBySessionForDirectory<T extends SessionScopedItem & { serverId
   serverId: string,
   items: T[],
   sessionDirectories: ReadonlyMap<string, string>,
-): Record<string, T[]> {
+) {
   const grouped = groupBySession(items)
   const next = { ...prev }
 
@@ -164,17 +179,13 @@ function reconcileBySessionForDirectory<T extends SessionScopedItem & { serverId
   return next
 }
 
-function withoutSessionKey<T>(bySession: Record<string, T[]>, sessionID: string): Record<string, T[]> {
+function withoutSessionKey<T>(bySession: Record<string, T[]>, sessionID: string) {
   if (!(sessionID in bySession)) return bySession
   const next = { ...bySession }
   delete next[sessionID]
   return next
 }
 
-/**
- * Drops every item matched by `shouldRemove` and deletes a session key left empty. Returns the
- * input record itself when no item matched.
- */
 function withoutMatchingItems<T>(
   bySession: Record<string, T[]>,
   shouldRemove: (item: NoInfer<T>) => boolean,
@@ -195,98 +206,11 @@ function withoutMatchingItems<T>(
   return changed ? next : bySession
 }
 
-/**
- * True when the failure means the server could not be reached: a `FetchError` with status 0 (no
- * response) or a gateway status (502, 504).
- */
-function isUnreachableServerError(error: unknown): boolean {
-  return error instanceof FetchError
-    && (error.statusCode === 0 || error.statusCode === 502 || error.statusCode === 504)
+function isUnreachableServerError(cause: unknown): boolean {
+  return cause instanceof FetchError
+    && (cause.statusCode === 0 || cause.statusCode === 502 || cause.statusCode === 504)
 }
 
-interface SSHHostKeyState {
-  request: SSHHostKeyRequest | null
-  respond: (requestId: string, approved: boolean) => Promise<void>
-}
-
-interface EventContextValue {
-  sshHostKey: SSHHostKeyState
-  permissions: {
-    current: PendingPermission | null
-    pendingCount: number
-    /**
-     * Ids of sessions with at least one pending permission request, stable while the queue is unchanged.
-     */
-    pendingSessionIDs: string[]
-    /**
-     * Session currently being viewed from the route, or null when no session route is active.
-     */
-    viewedSessionId: string | null
-    /**
-     * Directory of the current permission's session, resolved from tracked events and the query cache.
-     */
-    currentDirectory: string | null
-    /**
-     * True when a session is being viewed and the current permission belongs to neither that session
-     * nor one of its descendants.
-     */
-    currentIsFromDifferentSession: boolean
-    /**
-     * Replies to a permission request and removes it from the queue. Resolves, after showing an
-     * "expired" toast, when the server no longer knows the request (`PermissionNotFoundError`);
-     * rejects on any other failure and keeps the request queued.
-     */
-    respond: (
-      permissionID: string,
-      sessionID: string,
-      response: PermissionReply,
-      message?: string,
-    ) => Promise<void>
-    dismiss: (permissionID: string, sessionID?: string) => void
-    getForToolCall: (toolCallID: string, messageID?: string) => PermissionRequest | null
-    hasForSession: (sessionID: string) => boolean
-    showDialog: boolean
-    setShowDialog: (show: boolean) => void
-    navigateToCurrent: () => void
-    syncForSession: (directory: string, sessionID: string, serverId?: string) => Promise<void>
-  }
-  forms: {
-    current: PendingForm | null
-    pendingCount: number
-    /**
-     * Ids of sessions with at least one pending form, stable while the queue is unchanged.
-     */
-    pendingSessionIDs: string[]
-    /**
-     * Answers a form and removes it from the queue. Resolves, after showing an "expired" toast,
-     * when the server no longer knows the form (`FormNotFoundError`); rejects on any other failure.
-     */
-    reply: (formID: string, answer: FormAnswer) => Promise<void>
-    /**
-     * Dismisses a form on the server and removes it from the queue, with the same
-     * resolve-on-`FormNotFoundError` contract as `reply`.
-     */
-    cancel: (formID: string) => Promise<void>
-    dismiss: (formID: string, sessionID?: string) => void
-    getForSession: (sessionID: string) => FormInfo | null
-    hasForSession: (sessionID: string) => boolean
-    navigateToCurrent: () => void
-    syncForSession: (directory: string, sessionID: string, serverId?: string) => Promise<void>
-    /**
-     * Drops every pending form and permission recorded for the session, used when the session no
-     * longer exists on its server.
-     */
-    forgetPendingActionsForSession: (sessionID: string) => void
-  }
-  sseHealth: SSEHealthState
-  getRepoIdForSession: (sessionID: string) => number | null
-}
-
-/**
- * Sends a reply to a pending server request and treats the request as settled when the server
- * reports it no longer exists (`goneCode`), showing `expiredMessage` instead of rejecting.
- * Every other failure is rethrown.
- */
 async function settlePendingReply(
   reply: () => Promise<void>,
   goneCode: string,
@@ -300,33 +224,6 @@ async function settlePendingReply(
   }
 }
 
-/**
- * Primitive key of every directory that hosts an active session: the recorded directory of each
- * session whose status is not `idle`, plus each running shell's directory, sorted and de-duplicated.
- * A string keeps the zustand subscription stable across store updates that do not change the set.
- */
-export function selectActiveSessionDirectoriesKey(
-  state: Pick<ReturnType<typeof useSessionStatus.getState>, 'statuses' | 'directories' | 'runningShells'>,
-): string {
-  const directories = new Set<string>()
-  for (const [sessionID, status] of state.statuses.entries()) {
-    if (status.type === 'idle') continue
-    const directory = state.directories.get(sessionID)
-    if (directory) directories.add(directory)
-  }
-  for (const shell of state.runningShells.values()) {
-    if (shell.directory) directories.add(shell.directory)
-  }
-  return [...directories].sort().join('\n')
-}
-
-const EventContext = createContext<EventContextValue | null>(null)
-
-/**
- * Provides stream-derived state to the page tree — SSH host key prompts, permission and form
- * queues, stream health, and session-to-repo lookup — and routes stream events, status changes,
- * and resyncs into React Query, session status, and running-shell state.
- */
 export function EventProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -480,9 +377,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       const key = query.queryKey
       if (key[0] !== 'opencode' || key[1] !== 'session' || key[2] !== sessionID) continue
 
-      const sessionData = query.state.data as { location?: { directory?: string } } | undefined
-      const resolvedDirectory = sessionData?.location?.directory
-        ?? (typeof key[3] === 'string' ? key[3] : undefined)
+      const sessionData = cachedSessionLocationSchema.safeParse(query.state.data)
+      const keyDirectory = z.string().safeParse(key[3])
+      const resolvedDirectory = (sessionData.success ? sessionData.data.location?.directory : undefined)
+        ?? (keyDirectory.success ? keyDirectory.data : undefined)
       if (resolvedDirectory) {
         directory = resolvedDirectory
         break
@@ -494,12 +392,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         const key = query.queryKey
         if (key[0] !== 'opencode' || key[1] !== 'sessions') continue
 
-        const sessionsData = query.state.data
-        if (!sessionsData || typeof sessionsData !== 'object' || !('pages' in sessionsData)) continue
+        const sessionsData = cachedSessionsPageSchema.safeParse(query.state.data)
+        if (!sessionsData.success) continue
 
-        const pages = (sessionsData as {
-          pages?: Array<{ items?: Array<{ id: string; location?: { directory?: string } }> }>
-        }).pages
+        const pages = sessionsData.data.pages
         if (!Array.isArray(pages)) continue
 
         for (const page of pages) {
@@ -746,11 +642,6 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     return keys
   }, [resolveViewedRemoteDirectoryKey])
 
-  /**
-   * Limits directory-scoped work on a linked server to the directories that can hold pending work,
-   * because every directory-scoped request boots that server's location and stamps project activity.
-   * Local directories are always kept.
-   */
   const filterTrackedDirectories = useCallback((directories: string[]): string[] => {
     const activeRemoteDirectories = collectActiveRemoteDirectoryKeys()
     return directories.filter((key) => {
@@ -882,9 +773,9 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       try {
         const shells = await listShells(directory, serverId)
         const runningShells = shells.flatMap((shell) => {
-          const sessionID = shell.metadata.sessionID
-          if (shell.status !== 'running' || typeof sessionID !== 'string') return []
-          return [{ id: shell.id, sessionID }]
+          const sessionID = z.string().safeParse(shell.metadata.sessionID)
+          if (shell.status !== 'running' || !sessionID.success) return []
+          return [{ id: shell.id, sessionID: sessionID.data }]
         })
         useSessionStatus.getState().replaceRunningShells(key, runningShells, token)
         await resolveSessionAncestry(runningShells.map((shell) => shell.sessionID), serverId)
@@ -1055,11 +946,6 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isAuthenticated) return
 
-    /**
-     * Routes one stream event by type into the session status, permission, form, shell and cache
-     * stores. Goal events are offered to `applySessionGoalEvent` first and skip the switch when it
-     * consumes them.
-     */
     const handleSSEMessage = (event: OpenCodeStreamEvent) => {
       const serverId = event.serverId ?? LOCAL_OPENCODE_SERVER_ID
 
@@ -1158,7 +1044,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         case 'session.created': {
           useSessionStatus.getState().setSessionServer(event.data.sessionID, serverId)
           invalidateSessionListCachesDebounced(queryClient, event.directory, serverId)
-          if (typeof event.data.parentID === 'string') {
+          if (event.data.parentID !== undefined) {
             useSessionStatus.getState().setSessionParent(event.data.sessionID, event.data.parentID)
           }
           break
@@ -1171,12 +1057,13 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           break
         case 'shell.created': {
           const info = event.data.info
+          const shellSessionID = z.string().safeParse(info.metadata.sessionID)
           if (
             info.status === 'running' &&
-            typeof info.metadata.sessionID === 'string' &&
+            shellSessionID.success &&
             event.directory
           ) {
-            const sessionID = info.metadata.sessionID
+            const sessionID = shellSessionID.data
             useSessionStatus.getState().setShellRunning(
               info.id,
               sessionID,
@@ -1270,11 +1157,6 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    /**
-     * Repairs caches after the stream reports missed events: a remote server reconciles its own
-     * directory activity and list caches, while the local server also refreshes session statuses,
-     * running shells, and pending actions.
-     */
     const handleResync = (subscribedDirectories: string[], serverId?: string) => {
       queryClient.invalidateQueries({ queryKey: [SESSION_GOAL_QUERY_ROOT] })
       invalidateProviderCachesDebounced(queryClient)
@@ -1411,34 +1293,4 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   ])
 
   return <EventContext.Provider value={value}>{children}</EventContext.Provider>
-}
-
-export function useEventContext() {
-  const context = useContext(EventContext)
-  if (!context) {
-    throw new Error('useEventContext must be used within EventProvider')
-  }
-  return context
-}
-
-export function usePermissions() {
-  const { permissions } = useEventContext()
-  return permissions
-}
-
-export function useToolCallPermission(
-  toolCallID: string,
-  messageID?: string,
-): PermissionRequest | null {
-  const context = useContext(EventContext)
-  return context?.permissions.getForToolCall(toolCallID, messageID) ?? null
-}
-
-export function useForms() {
-  const { forms } = useEventContext()
-  return forms
-}
-
-export function useSSEHealth(): SSEHealthState {
-  return useEventContext().sseHealth
 }

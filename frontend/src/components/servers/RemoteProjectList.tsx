@@ -220,10 +220,6 @@ function RemoteProjectListContent({ serverId }: { serverId: string }) {
   )
 }
 
-/**
- * The projects of one linked server with their sessions and project actions, scoped to that server
- * so every hook inside it targets the linked server rather than the local one.
- */
 export function RemoteProjectList({ serverId }: { serverId: string }) {
   return (
     <OpenCodeServerProvider serverId={serverId}>

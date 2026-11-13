@@ -1,127 +1,166 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, waitFor } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { useSession } from '@/lib/auth-client'
 import { usePushSubscriptionSessionSync } from './usePushSubscriptionSessionSync'
+import { renderHookWithProviders } from '@/test/render'
+import { installNotification, installServiceWorkerWithoutPushSubscription, installServiceWorkerPushSubscription } from '@/test/browserFakes'
+import { makeAuthSession } from '@/test/fixtures/api'
+import type { FetchRoute } from '@/test/fetchFake'
 
-const authState = vi.hoisted(() => ({ sessionId: null as string | null }))
-const serviceWorker = vi.hoisted(() => ({ getServiceWorkerRegistration: vi.fn() }))
-const notificationsApi = vi.hoisted(() => ({ subscribe: vi.fn() }))
+const hookProviders = {
+  auth: false,
+  theme: false,
+  tts: false,
+  toaster: false,
+} as const
 
-vi.mock('@/lib/auth-client', () => ({
-  useSession: () => ({
-    data: authState.sessionId ? { session: { id: authState.sessionId }, user: { id: 'user-1' } } : null,
-  }),
-}))
-
-vi.mock('@/lib/serviceWorker', () => ({
-  getServiceWorkerRegistration: serviceWorker.getServiceWorkerRegistration,
-  urlBase64ToUint8Array: vi.fn(() => new Uint8Array([1, 2, 3])),
-}))
-
-vi.mock('@/api/notifications', () => ({ notificationsApi }))
-
-const subscriptionJson = {
-  endpoint: 'https://push.example.com/phone',
-  keys: { p256dh: 'p256dh-key', auth: 'auth-key' },
+const pushSubscription = {
+  endpoint: 'https://push.example.com/subscription',
+  keys: { p256dh: 'p256dh-key', auth: 'auth-secret' },
 }
 
-function grantNotificationPermission(): void {
-  Object.defineProperty(window, 'Notification', {
-    configurable: true,
-    value: { permission: 'granted' },
+function sessionBody(sessionId: string | null) {
+  if (sessionId === null) return null
+  return makeAuthSession({
+    session: {
+      id: sessionId,
+      userId: 'test-user',
+      token: 'test-token',
+      expiresAt: '2030-01-01T00:00:00.000Z',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    },
   })
+}
+
+function useSessionSyncHarness() {
+  usePushSubscriptionSessionSync()
+  return useSession().refetch
+}
+
+const subscribeRoute: FetchRoute = {
+  method: 'POST',
+  path: '/api/notifications/subscribe',
+  respond: (request) => ({
+    json: {
+      subscription: {
+        id: 1,
+        userId: 'test-user',
+        endpoint: request.body?.endpoint,
+        p256dh: 'p256dh-key',
+        auth: 'auth-secret',
+        deviceName: null,
+        createdAt: 1,
+        lastUsedAt: null,
+      },
+    },
+  }),
+}
+
+function renderSessionSync(initialSessionId: string | null) {
+  let currentSessionId = initialSessionId
+  const rendered = renderHookWithProviders(() => useSessionSyncHarness(), {
+    ...hookProviders,
+    fetchRoutes: [
+      {
+        method: 'GET',
+        path: '/api/auth/get-session',
+        respond: () => ({ json: sessionBody(currentSessionId) }),
+      },
+      subscribeRoute,
+    ],
+  })
+  return {
+    ...rendered,
+    signInAs: (sessionId: string | null) => {
+      currentSessionId = sessionId
+    },
+    refreshSession: async () => {
+      await act(async () => {
+        await rendered.result.current()
+      })
+    },
+  }
 }
 
 describe('usePushSubscriptionSessionSync', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    authState.sessionId = 'ses_first'
-    grantNotificationPermission()
-    serviceWorker.getServiceWorkerRegistration.mockResolvedValue({
-      pushManager: {
-        getSubscription: vi.fn().mockResolvedValue({ toJSON: () => subscriptionJson }),
-      },
-    })
-    notificationsApi.subscribe.mockResolvedValue({ subscription: { id: 1 } })
-  })
+  it('does not send before a session is signed in', async () => {
+    installNotification('granted')
+    installServiceWorkerPushSubscription()
+    const { fetchFake, refreshSession } = renderSessionSync(null)
 
-  afterEach(() => {
-    Reflect.deleteProperty(window, 'Notification')
+    await refreshSession()
+
+    await waitFor(() => expect(fetchFake.findRequests('GET', '/api/auth/get-session').length).toBeGreaterThan(0))
+    expect(fetchFake.findRequests('POST', '/api/notifications/subscribe')).toHaveLength(0)
   })
 
   it('re-sends the registered subscription once a session is signed in', async () => {
-    renderHook(() => usePushSubscriptionSessionSync())
+    installNotification('granted')
+    installServiceWorkerPushSubscription()
+    const { fetchFake, refreshSession } = renderSessionSync('ses_first')
+    const baseline = fetchFake.findRequests('POST', '/api/notifications/subscribe').length
 
-    await waitFor(() => {
-      expect(notificationsApi.subscribe).toHaveBeenCalledTimes(1)
-    })
-    expect(notificationsApi.subscribe).toHaveBeenCalledWith(subscriptionJson, undefined)
+    await refreshSession()
+
+    await waitFor(() =>
+      expect(fetchFake.findRequests('POST', '/api/notifications/subscribe')).toHaveLength(baseline + 1),
+    )
+    expect(fetchFake.lastRequest('POST', '/api/notifications/subscribe')?.body).toEqual(pushSubscription)
   })
 
   it('re-sends the registered subscription again after the session changes', async () => {
-    const { rerender } = renderHook(() => usePushSubscriptionSessionSync())
+    installNotification('granted')
+    installServiceWorkerPushSubscription()
+    const { fetchFake, refreshSession, signInAs, rerender } = renderSessionSync('ses_first')
 
-    await waitFor(() => {
-      expect(notificationsApi.subscribe).toHaveBeenCalledTimes(1)
-    })
+    await refreshSession()
+    await waitFor(() => expect(fetchFake.findRequests('POST', '/api/notifications/subscribe').length).toBeGreaterThan(0))
+    const baseline = fetchFake.findRequests('POST', '/api/notifications/subscribe').length
 
-    authState.sessionId = 'ses_second'
+    signInAs('ses_second')
     rerender()
+    await refreshSession()
 
-    await waitFor(() => {
-      expect(notificationsApi.subscribe).toHaveBeenCalledTimes(2)
-    })
-    expect(notificationsApi.subscribe).toHaveBeenLastCalledWith(subscriptionJson, undefined)
+    await waitFor(() =>
+      expect(fetchFake.findRequests('POST', '/api/notifications/subscribe')).toHaveLength(baseline + 1),
+    )
   })
 
   it('sends the subscription only once for the same session', async () => {
-    const { rerender } = renderHook(() => usePushSubscriptionSessionSync())
+    installNotification('granted')
+    installServiceWorkerPushSubscription()
+    const { fetchFake, refreshSession, rerender } = renderSessionSync('ses_first')
 
-    await waitFor(() => {
-      expect(notificationsApi.subscribe).toHaveBeenCalledTimes(1)
-    })
+    await refreshSession()
+    await waitFor(() => expect(fetchFake.findRequests('POST', '/api/notifications/subscribe').length).toBeGreaterThan(0))
+    const baseline = fetchFake.findRequests('POST', '/api/notifications/subscribe').length
 
     rerender()
+    await refreshSession()
 
-    await waitFor(() => {
-      expect(notificationsApi.subscribe).toHaveBeenCalledTimes(1)
-    })
+    expect(fetchFake.findRequests('POST', '/api/notifications/subscribe')).toHaveLength(baseline)
   })
 
   it('does not send while notification permission is not granted', async () => {
-    Object.defineProperty(window, 'Notification', {
-      configurable: true,
-      value: { permission: 'default' },
-    })
+    installNotification('default')
+    installServiceWorkerPushSubscription()
+    const { fetchFake, refreshSession } = renderSessionSync('ses_first')
 
-    renderHook(() => usePushSubscriptionSessionSync())
+    await refreshSession()
 
-    await waitFor(() => {
-      expect(serviceWorker.getServiceWorkerRegistration).not.toHaveBeenCalled()
-    })
-    expect(notificationsApi.subscribe).not.toHaveBeenCalled()
+    await waitFor(() => expect(fetchFake.findRequests('GET', '/api/auth/get-session').length).toBeGreaterThan(0))
+    expect(fetchFake.findRequests('POST', '/api/notifications/subscribe')).toHaveLength(0)
   })
 
   it('does not send when the browser has no push subscription', async () => {
-    serviceWorker.getServiceWorkerRegistration.mockResolvedValue({
-      pushManager: { getSubscription: vi.fn().mockResolvedValue(null) },
-    })
+    installNotification('granted')
+    installServiceWorkerWithoutPushSubscription()
+    const { fetchFake, refreshSession } = renderSessionSync('ses_first')
 
-    renderHook(() => usePushSubscriptionSessionSync())
+    await refreshSession()
 
-    await waitFor(() => {
-      expect(serviceWorker.getServiceWorkerRegistration).toHaveBeenCalled()
-    })
-    expect(notificationsApi.subscribe).not.toHaveBeenCalled()
-  })
-
-  it('does not send before a session is signed in', async () => {
-    authState.sessionId = null
-
-    renderHook(() => usePushSubscriptionSessionSync())
-
-    await waitFor(() => {
-      expect(serviceWorker.getServiceWorkerRegistration).not.toHaveBeenCalled()
-    })
-    expect(notificationsApi.subscribe).not.toHaveBeenCalled()
+    await waitFor(() => expect(fetchFake.findRequests('GET', '/api/auth/get-session').length).toBeGreaterThan(0))
+    expect(fetchFake.findRequests('POST', '/api/notifications/subscribe')).toHaveLength(0)
   })
 })

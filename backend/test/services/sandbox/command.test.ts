@@ -56,6 +56,19 @@ function vmSpec(overrides: Partial<SandboxVmSpec> = {}): SandboxVmSpec {
   }
 }
 
+function withProcessIds(uid: () => number | undefined, gid: () => number | undefined, action: () => void): void {
+  const originalUid = Object.getOwnPropertyDescriptor(process, 'getuid')
+  const originalGid = Object.getOwnPropertyDescriptor(process, 'getgid')
+  Object.defineProperty(process, 'getuid', { value: uid, configurable: true })
+  Object.defineProperty(process, 'getgid', { value: gid, configurable: true })
+  try {
+    action()
+  } finally {
+    if (originalUid) Object.defineProperty(process, 'getuid', originalUid)
+    if (originalGid) Object.defineProperty(process, 'getgid', originalGid)
+  }
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
 })
@@ -178,8 +191,7 @@ describe('sandbox command builders', () => {
     const spec = vmSpec()
     const args = buildSandboxCreateArgs(spec)
     const canonical = buildCanonicalSandboxSpec(spec)
-    const resources = canonical.resources as { memory_mib: number }
-    expect(args[args.indexOf('--tmpfs') + 1]).toBe(`/tmp:${resolveSandboxRuntimeTmpfsSizeMib(resources.memory_mib)}M`)
+    expect(args[args.indexOf('--tmpfs') + 1]).toBe(`/tmp:${resolveSandboxRuntimeTmpfsSizeMib(canonical.resources.memory_mib)}M`)
 
     const mountNamedIndex = args.indexOf('--mount-named')
     expect(mountNamedIndex).toBeGreaterThan(-1)
@@ -219,9 +231,9 @@ describe('sandbox command builders', () => {
 
     expect(JSON.stringify(canonical)).not.toContain('--replace')
     expect(canonical.name).toBe(VM_NAME)
-    expect((canonical.image as { Oci: { reference: string } }).Oci.reference).toBe(ENV.SANDBOX.IMAGE)
-    expect((canonical.runtime as { cmd: string[] }).cmd).toEqual(['sleep', 'infinity'])
-    expect((canonical.runtime as { workdir: string }).workdir).toBe(getReposPath())
+    expect(canonical.image.Oci.reference).toBe(ENV.SANDBOX.IMAGE)
+    expect(canonical.runtime.cmd).toEqual(['sleep', 'infinity'])
+    expect(canonical.runtime.workdir).toBe(getReposPath())
     expect(canonical.labels).toEqual({ 'ocm.managed': 'true', 'ocm.net': ENV.SANDBOX.NET, 'ocm.session': ROOT_SESSION_ID })
   })
 
@@ -271,21 +283,20 @@ describe('sandbox command builders', () => {
 
   it('derives a canonical spec from the create args matching the security configuration', () => {
     const spec = buildCanonicalSandboxSpec(vmSpec())
-    const labels = spec.labels as Record<string, string>
-    const resources = spec.resources as Record<string, number>
-    const runtime = spec.runtime as Record<string, unknown>
-    const mounts = spec.mounts as Array<Record<string, unknown>>
-    const network = spec.network as Record<string, unknown>
-    const lifecycle = spec.lifecycle as Record<string, unknown>
+    const labels = spec.labels
+    const resources = spec.resources
+    const runtime = spec.runtime
+    const mounts = spec.mounts
+    const network = spec.network
+    const lifecycle = spec.lifecycle
 
     expect(spec.name).toBe(VM_NAME)
-    const canonicalImage = spec.image as Record<string, { reference: string } | undefined>
-    expect(canonicalImage.Oci?.reference).toBe(ENV.SANDBOX.IMAGE)
+    expect(spec.image.Oci.reference).toBe(ENV.SANDBOX.IMAGE)
     expect(labels['ocm.managed']).toBe('true')
     expect(labels['ocm.net']).toBe(ENV.SANDBOX.NET)
     expect(labels['ocm.session']).toBe(ROOT_SESSION_ID)
     expect(resources.cpus).toBe(ENV.SANDBOX.CPUS)
-    expect(typeof resources.memory_mib).toBe('number')
+    expect(resources.memory_mib).toBe(parseMemoryMib(ENV.SANDBOX.MEMORY))
     expect(runtime.workdir).toBe(getReposPath())
     expect(runtime.user).toBe(resolveSandboxExecUser())
     expect(runtime.cmd).toEqual(['sleep', 'infinity'])
@@ -308,11 +319,10 @@ describe('sandbox command builders', () => {
     ])
     for (const mount of binds) {
       expect(mount.guest).toBe(mount.host)
-      const options = mount.options as Record<string, boolean>
-      expect(options.readonly).toBe(false)
-      expect(options.noexec).toBe(false)
-      expect(options.nosuid).toBe(false)
-      expect(options.nodev).toBe(false)
+      expect(mount.options.readonly).toBe(false)
+      expect(mount.options.noexec).toBe(false)
+      expect(mount.options.nosuid).toBe(false)
+      expect(mount.options.nodev).toBe(false)
       expect(mount.stat_virtualization).toBe('strict')
       expect(mount.host_permissions).toBe('private')
       expect(mount.follow_root_symlinks).toBe(false)
@@ -331,7 +341,7 @@ describe('sandbox command builders', () => {
       follow_root_symlinks: false,
     })
 
-    expect(mounts.find((mount) => mount.type === 'Tmpfs')).toBeUndefined()
+    expect(JSON.stringify(mounts)).not.toContain('Tmpfs')
   })
 
   it('accepts real repo dirs, schedule, OpenCode, and forge worktrees while rejecting config, missing, and unrelated paths', async () => {
@@ -423,21 +433,19 @@ describe('sandbox command builders', () => {
   })
 
   it('resolves the named exec user default to the manager uid:gid', () => {
-    const proc = process as unknown as { getuid: () => number; getgid: () => number }
-    vi.spyOn(proc, 'getuid').mockReturnValue(1001)
-    vi.spyOn(proc, 'getgid').mockReturnValue(1002)
-
-    expect(resolveSandboxExecUser()).toBe('1001:1002')
-    expect(resolveSandboxExecUserUid()).toBe(1001)
-    expect(resolveSandboxExecUserGid()).toBe(1002)
+    withProcessIds(() => 1001, () => 1002, () => {
+      expect(resolveSandboxExecUser()).toBe('1001:1002')
+      expect(resolveSandboxExecUserUid()).toBe(1001)
+      expect(resolveSandboxExecUserGid()).toBe(1002)
+    })
   })
 
   it('builds provisioning args that add the exec user passwd entry as root', () => {
-    const proc = process as unknown as { getuid: () => number; getgid: () => number }
-    vi.spyOn(proc, 'getuid').mockReturnValue(1001)
-    vi.spyOn(proc, 'getgid').mockReturnValue(1002)
 
-    const args = buildSandboxProvisionArgs(VM_NAME)
+    const args: string[] = []
+    withProcessIds(() => 1001, () => 1002, () => {
+      args.push(...buildSandboxProvisionArgs(VM_NAME))
+    })
 
     expect(args[0]).toBe('exec')
     expect(args).toContain(VM_NAME)
@@ -453,20 +461,20 @@ describe('sandbox command builders', () => {
   })
 
   it('returns no provisioning args when the exec user does not resolve to numeric uid and gid', () => {
-    const proc = process as unknown as { getuid: () => number | undefined; getgid: () => number | undefined }
-    vi.spyOn(proc, 'getuid').mockReturnValue(undefined)
-    vi.spyOn(proc, 'getgid').mockReturnValue(undefined)
-
-    expect(buildSandboxProvisionArgs(VM_NAME)).toEqual([])
-    expect(buildSandboxVerifyProvisionArgs(VM_NAME)).toEqual([])
+    withProcessIds(() => undefined, () => undefined, () => {
+      expect(buildSandboxProvisionArgs(VM_NAME)).toEqual([])
+      expect(buildSandboxVerifyProvisionArgs(VM_NAME)).toEqual([])
+    })
   })
 
   it('builds verify-provision args that assert the exec user passwd entry as root', () => {
-    const proc = process as unknown as { getuid: () => number; getgid: () => number }
-    vi.spyOn(proc, 'getuid').mockReturnValue(1001)
-    vi.spyOn(proc, 'getgid').mockReturnValue(1002)
 
-    expect(buildSandboxVerifyProvisionArgs(VM_NAME)).toEqual([
+    const args: string[] = []
+    withProcessIds(() => 1001, () => 1002, () => {
+      args.push(...buildSandboxVerifyProvisionArgs(VM_NAME))
+    })
+
+    expect(args).toEqual([
       'exec',
       VM_NAME,
       '--no-tty',
@@ -481,14 +489,13 @@ describe('sandbox command builders', () => {
   })
 
   it('aligns a numeric exec user with the manager gid', async () => {
-    const proc = process as unknown as { getuid: () => number; getgid: () => number }
-    vi.spyOn(proc, 'getuid').mockReturnValue(1001)
-    vi.spyOn(proc, 'getgid').mockReturnValue(1002)
     process.env.SANDBOX_EXEC_USER = '1001'
     try {
       vi.resetModules()
       const { resolveSandboxExecUser } = await import('../../../src/services/sandbox/command')
-      expect(resolveSandboxExecUser()).toBe('1001:1002')
+      withProcessIds(() => 1001, () => 1002, () => {
+        expect(resolveSandboxExecUser()).toBe('1001:1002')
+      })
     } finally {
       delete process.env.SANDBOX_EXEC_USER
     }
@@ -739,7 +746,7 @@ describe('sandbox network policy attestation helpers', () => {
     const inspected = {
       ...publicPolicy,
       rules: [
-        publicPolicy.rules[0],
+        publicPolicy.rules[0]!,
         { direction: 'egress', destination: { any: true }, protocols: [], ports: [], action: 'allow' },
       ],
     }
@@ -750,7 +757,7 @@ describe('sandbox network policy attestation helpers', () => {
     const inspected = {
       ...publicPolicy,
       rules: [
-        publicPolicy.rules[0],
+        publicPolicy.rules[0]!,
         { direction: 'egress', destination: { group: 'public' }, protocols: ['tcp'], ports: [443], action: 'allow' },
       ],
     }
@@ -771,7 +778,7 @@ describe('sandbox network policy attestation helpers', () => {
   it('rejects a policy missing a required rule', () => {
     const inspected = {
       ...publicPolicy,
-      rules: [publicPolicy.rules[0]],
+      rules: [publicPolicy.rules[0]!],
     }
     expect(sandboxNetworkPolicyMismatch(inspected, resolveExpectedSandboxNetworkPolicy('public')!)).toContain('network policy')
   })

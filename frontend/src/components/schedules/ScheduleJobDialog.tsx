@@ -257,7 +257,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
       prompt: prompt.trim(),
       branch: serverTargetDirectory ? null : (branch.trim() || null),
       workspaceMode: serverTargetDirectory ? 'in-place' : workspaceMode,
-      ...(serverTargetDirectory ? { directory: serverTargetDirectory } : {}),
+      directory: serverTargetDirectory,
       mcpServers,
       permissionConfig: {
         allowExternalDirectory,
@@ -265,14 +265,14 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
         bashDenyPatterns: bashDenyPatterns.map((p) => p.trim()).filter(Boolean),
       },
       sandbox,
-      ...(shouldIncludeSkillMetadata ? {
-        skillMetadata: skillSlugs.length > 0 || skillNotes.trim()
+      skillMetadata: shouldIncludeSkillMetadata
+        ? skillSlugs.length > 0 || skillNotes.trim()
           ? {
               skillSlugs,
               notes: skillNotes.trim() || undefined,
             }
-          : null,
-      } : {}),
+          : null
+        : undefined,
     }
 
     if (schedulePreset !== 'interval') {

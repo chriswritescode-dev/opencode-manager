@@ -1,15 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { ShellPreview, ToolDetails, useToolDetailsState } from './ToolDetails'
+import { installWindowSize } from '@/test/browserFakes'
 
-const mocks = vi.hoisted(() => ({
-  useMobile: vi.fn(),
-}))
-
-vi.mock('@/hooks/useMobile', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/hooks/useMobile')>()),
-  useMobile: mocks.useMobile,
-}))
+const DESKTOP_WIDTH = 1024
+const MOBILE_WIDTH = 500
 
 const Details = ({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) => (
   <ToolDetails open={open} onOpenChange={onOpenChange} title="$ git status">
@@ -29,13 +24,14 @@ function StateProbe({ defaultOpen }: { defaultOpen: boolean }) {
   )
 }
 
-describe('ToolDetails', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
+function shrinkToMobile(): void {
+  installWindowSize(MOBILE_WIDTH)
+  fireEvent(window, new Event('resize'))
+}
 
+describe('ToolDetails', () => {
   it('renders the detail inline on desktop when open', () => {
-    mocks.useMobile.mockReturnValue(false)
+    installWindowSize(DESKTOP_WIDTH)
 
     render(<Details open onOpenChange={vi.fn()} />)
 
@@ -44,7 +40,7 @@ describe('ToolDetails', () => {
   })
 
   it('renders nothing inline on desktop when closed', () => {
-    mocks.useMobile.mockReturnValue(false)
+    installWindowSize(DESKTOP_WIDTH)
 
     render(<Details open={false} onOpenChange={vi.fn()} />)
 
@@ -52,7 +48,7 @@ describe('ToolDetails', () => {
   })
 
   it('renders the detail inside a dialog on mobile when open', () => {
-    mocks.useMobile.mockReturnValue(true)
+    installWindowSize(MOBILE_WIDTH)
 
     render(<Details open onOpenChange={vi.fn()} />)
 
@@ -62,7 +58,7 @@ describe('ToolDetails', () => {
   })
 
   it('renders nothing on mobile when closed', () => {
-    mocks.useMobile.mockReturnValue(true)
+    installWindowSize(MOBILE_WIDTH)
 
     render(<Details open={false} onOpenChange={vi.fn()} />)
 
@@ -72,12 +68,8 @@ describe('ToolDetails', () => {
 })
 
 describe('useToolDetailsState', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
   it('starts closed on mobile even when the default is open', () => {
-    mocks.useMobile.mockReturnValue(true)
+    installWindowSize(MOBILE_WIDTH)
 
     render(<StateProbe defaultOpen />)
 
@@ -85,7 +77,7 @@ describe('useToolDetailsState', () => {
   })
 
   it('starts open on desktop when the default is open', () => {
-    mocks.useMobile.mockReturnValue(false)
+    installWindowSize(DESKTOP_WIDTH)
 
     render(<StateProbe defaultOpen />)
 
@@ -93,7 +85,7 @@ describe('useToolDetailsState', () => {
   })
 
   it('starts closed on desktop when the default is closed', () => {
-    mocks.useMobile.mockReturnValue(false)
+    installWindowSize(DESKTOP_WIDTH)
 
     render(<StateProbe defaultOpen={false} />)
 
@@ -101,7 +93,7 @@ describe('useToolDetailsState', () => {
   })
 
   it('follows a default that turns open after mount on desktop', () => {
-    mocks.useMobile.mockReturnValue(false)
+    installWindowSize(DESKTOP_WIDTH)
 
     const { rerender } = render(<StateProbe defaultOpen={false} />)
 
@@ -113,7 +105,7 @@ describe('useToolDetailsState', () => {
   })
 
   it('keeps the user choice when a later default differs', () => {
-    mocks.useMobile.mockReturnValue(false)
+    installWindowSize(DESKTOP_WIDTH)
 
     const { rerender } = render(<StateProbe defaultOpen />)
 
@@ -129,14 +121,13 @@ describe('useToolDetailsState', () => {
   })
 
   it('closes when the viewport shrinks to mobile after opening on desktop', () => {
-    mocks.useMobile.mockReturnValue(false)
+    installWindowSize(DESKTOP_WIDTH)
 
-    const { rerender } = render(<StateProbe defaultOpen />)
+    render(<StateProbe defaultOpen />)
 
     expect(screen.getByText('open')).toBeInTheDocument()
 
-    mocks.useMobile.mockReturnValue(true)
-    rerender(<StateProbe defaultOpen />)
+    shrinkToMobile()
 
     expect(screen.getByText('closed')).toBeInTheDocument()
   })
@@ -145,12 +136,8 @@ describe('useToolDetailsState', () => {
 describe('ShellPreview', () => {
   const output = Array.from({ length: 25 }, (_, index) => `line ${index + 1}`).join('\n')
 
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
   it('shows the last 10 output lines on desktop', () => {
-    mocks.useMobile.mockReturnValue(false)
+    installWindowSize(DESKTOP_WIDTH)
 
     render(<ShellPreview command="ls" output={output} onClick={vi.fn()} />)
 
@@ -158,7 +145,7 @@ describe('ShellPreview', () => {
   })
 
   it('shows only the last 4 output lines on mobile', () => {
-    mocks.useMobile.mockReturnValue(true)
+    installWindowSize(MOBILE_WIDTH)
 
     render(<ShellPreview command="ls" output={output} onClick={vi.fn()} />)
 

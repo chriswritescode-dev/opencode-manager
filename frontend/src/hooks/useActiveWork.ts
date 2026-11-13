@@ -5,7 +5,7 @@ import type { SessionInfo } from '@opencode-manager/shared/opencode'
 import { listSessionPage } from '@/api/opencode'
 import { sessionQueryOptions, useSessionsAcrossDirectories } from '@/hooks/useOpenCode'
 import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
-import { usePendingInputSessionIDs, useRepoWorktreeList } from '@/contexts/RepoWorktreesContext'
+import { usePendingInputSessionIDs, useRepoWorktreeList } from '@/contexts/repo-worktrees-context'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 import { useOpenCodeServers } from '@/hooks/useOpenCodeServers'
 import { serverScopedKey } from '@/lib/serverScope'
@@ -33,19 +33,11 @@ import type { Repo } from '@/api/types'
 const ACTIVE_WORK_SESSION_LIMIT = 50
 const ACTIVE_WORK_SESSIONS_STALE_MS = 10000
 
-/**
- * The active-work time window in minutes, derived from the user's configured
- * `activityWindowMinutes` with the shared default as a fallback.
- */
 export function useActivityWindowMinutes(): number {
   const { preferences } = useSettings()
   return preferences?.activityWindowMinutes ?? DEFAULT_ACTIVITY_WINDOW_MINUTES
 }
 
-/**
- * Distinct active roots for a badge: needs-input roots and running roots that are not also
- * pending input. Reads only the session-status store and the pending queues, with no network.
- */
 export function useActiveWorkCounts(): { needsInput: number; running: number } {
   const statuses = useSessionStatus((state) => state.statuses)
   const parents = useSessionStatus((state) => state.parents)
@@ -64,10 +56,6 @@ export function useActiveWorkCounts(): { needsInput: number; running: number } {
   }, [statuses, parents, runningShells, pendingInputSessionIDs])
 }
 
-/**
- * Whether a repo has any active session, returned as a primitive so rows only re-render when it
- * changes. Reads only the session-status store and the pending queues, with no network.
- */
 export function useRepoActivityState(repo: Repo): 'needs-input' | 'running' | null {
   const pendingInputSessionIDs = usePendingInputSessionIDs()
   const worktrees = useRepoWorktreeList()
@@ -87,10 +75,6 @@ export function useRepoActivityState(repo: Repo): 'needs-input' | 'running' | nu
   )
 }
 
-/**
- * Whether a linked server has any active session, returned as a primitive so rows only re-render
- * when it changes. Reads only the session-status store and the pending queues, with no network.
- */
 export function useServerActivityState(serverId: string): 'needs-input' | 'running' | null {
   const pendingInputSessionIDs = usePendingInputSessionIDs()
 
@@ -109,10 +93,6 @@ export function useServerActivityState(serverId: string): 'needs-input' | 'runni
   )
 }
 
-/**
- * Whether any local session is active, returned as a primitive so the local switcher row only
- * re-renders when it changes. Reads only the session-status store and the pending queues.
- */
 export function useLocalActivityState(): 'needs-input' | 'running' | null {
   const pendingInputSessionIDs = usePendingInputSessionIDs()
 
@@ -134,10 +114,6 @@ export function useLocalActivityState(): 'needs-input' | 'running' | null {
   })
 }
 
-/**
- * Whether a project on a linked server has any active session, returned as a primitive so rows
- * only re-render when it changes.
- */
 export function useProjectActivityState(
   serverId: string,
   directory: string,
@@ -165,10 +141,6 @@ interface SessionScope {
   directory: string | undefined
 }
 
-/**
- * The owning server and plain directory of a session from the status store. A server-keyed
- * directory names its owner, otherwise the session-server index does; everything else is local.
- */
 function sessionScopeOf(
   sessionID: string,
   directories: ReadonlyMap<string, string>,
@@ -178,12 +150,6 @@ function sessionScopeOf(
   return { serverId: scope.serverId, directory: scope.directory ?? undefined }
 }
 
-/**
- * Walks a session's ancestor chain through the shared session cache, returning each link as
- * `[sessionID, parentID]` from the session down to its root. Stops at a root, a missing session,
- * or a cycle. Remote sessions are read through their owning server, never the local API. Reusing
- * `sessionQueryOptions` keeps these reads on the shared session cache.
- */
 async function fetchAncestorLinks(
   queryClient: QueryClient,
   sessionID: string,
@@ -210,7 +176,6 @@ async function fetchAncestorLinks(
   return links
 }
 
-/** Flattens the resolved ancestor links from each query result, dropping unresolved queries. */
 const combineAncestorLinks = (
   results: Array<{ data?: Array<[string, string | null]> }>,
 ): Array<[string, string | null]> => results.flatMap((result) => result.data ?? [])
@@ -220,10 +185,6 @@ interface ServerSessionPage {
   sessions: SessionInfo[]
 }
 
-/**
- * Pairs each server's active-work page with its server id, dropping pages that are empty or failed
- * so one unreachable server never removes the others from the list.
- */
 function combineServerSessionPages(
   results: Array<{ data?: SessionInfo[] }>,
   serverIds: ReadonlyArray<string>,
@@ -234,15 +195,13 @@ function combineServerSessionPages(
   })
 }
 
-/**
- * The full active-work list. Performs network reads, so it must only be used by components that
- * are mounted while visible (the session picker fetches only while open).
- */
-export function useActiveWork(windowMs: number): {
+export interface ActiveWorkResult {
   groups: ActiveWorkGroups
   isLoading: boolean
   isError: boolean
-} {
+}
+
+export function useActiveWork(windowMs: number): ActiveWorkResult {
   const queryClient = useQueryClient()
   const [now, setNow] = useState(() => Date.now())
   const { repos, isLoading: isReposLoading } = useNavigableRepos()

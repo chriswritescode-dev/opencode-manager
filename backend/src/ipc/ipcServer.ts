@@ -3,6 +3,7 @@ import * as crypto from 'crypto'
 import * as path from 'path'
 import * as os from 'os'
 import * as fs from 'fs/promises'
+import { JsonValueSchema, type JsonValue } from '@opencode-manager/shared/utils'
 import { logger } from '../utils/logger'
 
 function getIPCHandlePath(id: string): string {
@@ -16,7 +17,11 @@ function getIPCHandlePath(id: string): string {
 }
 
 export interface IPCHandler {
-  handle(request: unknown): Promise<unknown>
+  handle(request: JsonValue): Promise<JsonValue | void>
+}
+
+export interface IpcEnvironment {
+  [key: string]: string
 }
 
 export class IPCServer {
@@ -37,7 +42,7 @@ export class IPCServer {
     return this.handlers.get(`/${name}`)
   }
 
-  getEnv(): Record<string, string> {
+  getEnv(): IpcEnvironment {
     return { VSCODE_GIT_IPC_HANDLE: this.ipcHandlePath }
   }
 
@@ -63,7 +68,7 @@ export class IPCServer {
           res.end(JSON.stringify({ error: 'Empty request body' }))
           return
         }
-        const request = JSON.parse(body)
+        const request = JsonValueSchema.parse(JSON.parse(body))
         logger.info(`IPC calling handler for ${req.url} with:`, request)
         const result = await handler.handle(request)
         logger.info(`IPC handler result for ${req.url}:`, result)
@@ -101,7 +106,6 @@ export async function createIPCServer(context?: string): Promise<IPCServer> {
     try {
       await fs.unlink(ipcHandlePath)
     } catch {
-      /* socket file may not exist */
     }
   }
 

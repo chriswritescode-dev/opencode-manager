@@ -3,7 +3,7 @@ import { findJsoncLineForPath, parseJsoncPathSegments } from '@opencode-manager/
 
 export function resolveJsoncIssueLine(content: string, path: PropertyKey[] | string): number | null {
   const segments = Array.isArray(path)
-    ? path.map((segment) => (typeof segment === 'number' ? segment : String(segment)))
+    ? path.map((segment) => (Number.isFinite(segment) ? Number(segment) : String(segment)))
     : parseJsoncPathSegments(path)
   return findJsoncLineForPath(content, segments)
 }

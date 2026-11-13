@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { isModelAvailable } from './modelCatalog'
-import type { ModelInfo } from '@opencode-manager/shared/opencode'
+import { makeCatalogModel } from '@/test/fixtures/api'
 
 const models = [
-  { providerID: 'openai', id: 'gpt-5' },
-  { providerID: 'anthropic', id: 'claude-sonnet-4-20250514' },
-] as unknown as ModelInfo[]
+  makeCatalogModel({ providerID: 'openai', id: 'gpt-5', modelID: 'gpt-5-2025-08-07' }),
+  makeCatalogModel({ providerID: 'anthropic', id: 'claude-sonnet-4-20250514', modelID: 'claude-sonnet-4-20250514' }),
+]
 
 describe('isModelAvailable', () => {
   it('accepts a selection that matches the OpenCode key', () => {

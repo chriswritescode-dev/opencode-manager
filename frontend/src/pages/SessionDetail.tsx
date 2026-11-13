@@ -24,7 +24,7 @@ import { useVcsInfo } from "@/hooks/useVcsInfo";
 import { useUIState } from "@/stores/uiStateStore";
 import { useSettings } from "@/hooks/useSettings";
 import { useModelSelection } from "@/hooks/useModelSelection";
-import { useShortcutActions } from "@/contexts/KeyboardShortcutsContext";
+import { useShortcutActions } from "@/contexts/keyboard-shortcuts-context";
 import { useSettingsDialog } from "@/hooks/useSettingsDialog";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useMobile } from "@/hooks/useMobile";
@@ -49,15 +49,15 @@ import { RepoActionsDialog } from "@/components/repo/RepoActionsDialog";
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
 import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
 import { compactSession, findRemoteProjectForDirectory, forkSession, listSessionMessages, remoteProjectName } from "@/api/opencode";
-import { useOpenCodeServerId, isLocalOpenCodeServer } from "@/contexts/OpenCodeServerContext";
+import { useOpenCodeServerId, isLocalOpenCodeServer } from "@/contexts/opencode-server-context";
 import { useRemoteProjects } from "@/hooks/useRemoteProjects";
-import { useSwipeNavigation } from "@/contexts/SwipeNavigationContext";
+import { useSwipeNavigation } from "@/contexts/swipe-navigation-context";
 import { useOpenCodeServers, useOpenCodeServerStatuses } from "@/hooks/useOpenCodeServers";
 import { serverScopedKey } from "@/lib/serverScope";
 import { useSessionStatus } from "@/stores/sessionStatusStore";
 import type { PageCommandActions } from "@/lib/builtinCommands";
 import { useRedoMessage, useUndoMessage } from "@/hooks/useUndoMessage";
-import { usePermissions, useForms } from "@/contexts/EventContext";
+import { usePermissions, useForms } from "@/contexts/event-context";
 import { SessionTranscriptContext, type SessionTranscriptSnapshot } from "@/contexts/session-transcript-context";
 import type { FormInfo, SessionMessageInfo } from "@opencode-manager/shared/opencode";
 import type { SkillFileInfo } from "@opencode-manager/shared";
@@ -100,7 +100,7 @@ function applyRevertBoundary(
 }
 
 async function fetchCompleteSessionHistory(sessionID: string, serverId?: string): Promise<SessionMessageInfo[]> {
-  let history: SessionMessageInfo[] = []
+  const pagesNewestFirst: SessionMessageInfo[][] = []
   const seenIds = new Set<string>()
   const seenCursors = new Set<string>()
   let cursor: string | undefined
@@ -109,23 +109,18 @@ async function fetchCompleteSessionHistory(sessionID: string, serverId?: string)
     const page = await listSessionMessages(sessionID, cursor === undefined ? {} : { cursor }, serverId)
     const older = page.messages.filter((message) => !seenIds.has(message.id))
     for (const message of older) seenIds.add(message.id)
-    history = [...older, ...history]
+    pagesNewestFirst.push(older)
 
-    if (!page.nextCursor || seenCursors.has(page.nextCursor)) return history
+    if (!page.nextCursor || seenCursors.has(page.nextCursor)) return pagesNewestFirst.reverse().flat()
     seenCursors.add(page.nextCursor)
     cursor = page.nextCursor
   }
 }
 
-function isSessionNotFoundError(error: unknown): boolean {
-  return error instanceof FetchError && (error.statusCode === 400 || error.statusCode === 404)
+function isSessionNotFoundError(cause: unknown): boolean {
+  return cause instanceof FetchError && (cause.statusCode === 400 || cause.statusCode === 404)
 }
 
-/**
- * Renders one session: a header with its title and parent link, the transcript with its composer,
- * and the collapsible tool panels. Redirects home for an unknown session and shows a not-found
- * state when the repository does not exist.
- */
 export function SessionDetail() {
   const serverId = useOpenCodeServerId();
   const isRemoteServer = !isLocalOpenCodeServer(serverId);
@@ -493,7 +488,6 @@ export function SessionDetail() {
         messageContent: lastUserMessage.text,
       });
     } catch {
-      // The undo hook surfaces the failure.
     }
   }, [sessionId, undoMessageAsync]);
 
@@ -502,7 +496,6 @@ export function SessionDetail() {
     try {
       await redoMessageAsync();
     } catch {
-      // The redo hook surfaces the failure.
     }
   }, [sessionId, redoMessageAsync]);
 
@@ -621,10 +614,10 @@ export function SessionDetail() {
   }, [session, sessionId, serverId]);
 
   const handleExportSession = useCallback(async () => {
-    const result = await buildSessionExport().catch((error: unknown) => {
+    const result = await buildSessionExport().catch((cause: unknown) => {
       showToast.error(
-        error instanceof Error && error.message === 'No session data to export'
-          ? error.message
+        cause instanceof Error && cause.message === 'No session data to export'
+          ? cause.message
           : 'Failed to export session',
       )
       return null
@@ -987,7 +980,7 @@ export function SessionDetail() {
               <div className={cn(isFormSheetOpen && "shrink-0 bg-background px-[3%]")}>
                 <div className={cn(!isFormSheetOpen && "px-[3%] md:px-0")}>
                   <SessionSendErrorBanner sessionId={sessionId} isConnected={streamConnected} isReconnecting={streamReconnecting} />
-                  <SessionGoalBar sessionID={sessionId} directory={sessionDirectory} />
+                  <SessionGoalBar sessionID={sessionId} directory={resolvedDirectory} />
                   <BackgroundWorkBar
                     sessionID={sessionId}
                     directory={sessionDirectory}
@@ -1001,6 +994,7 @@ export function SessionDetail() {
                     key={sessionId}
                     ref={promptInputRef}
                     directory={sessionDirectory}
+                    goalDirectory={resolvedDirectory}
                     sessionID={sessionId}
                     onVoiceConversationActiveChange={setIsVoiceConversationActive}
                     onSuggestionsOpenChange={setHasComposerSuggestions}

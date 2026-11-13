@@ -7,10 +7,6 @@ interface SessionStatusIndicatorProps {
   className?: string
 }
 
-/**
- * Shows a session's activity as the braille spinner sized for list rows.
- * Renders nothing while the session is idle and has no background activity.
- */
 export const SessionStatusIndicator = memo(function SessionStatusIndicator({
   sessionID,
   className = '',

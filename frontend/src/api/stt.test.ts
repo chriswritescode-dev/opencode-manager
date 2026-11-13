@@ -1,220 +1,119 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createFetchFake, type FetchFake, type FetchRoute } from '@/test/fetchFake'
 import { sttApi } from './stt'
 import { FetchError } from './fetchWrapper'
 
-describe('WAV extension selection logic', () => {
-  const originalFetch = global.fetch
-  const mockFetch = vi.fn()
+function installRoutes(routes: FetchRoute[]): FetchFake {
+  const fetchFake = createFetchFake(routes)
+  fetchFake.install()
+  return fetchFake
+}
 
-  beforeEach(() => {
-    vi.stubGlobal('fetch', mockFetch)
+function audioName(fetchFake: FetchFake): string {
+  const audio = fetchFake.findFormData()?.get('audio')
+  if (!(audio instanceof File)) throw new Error('no audio file was uploaded')
+  return audio.name
+}
+
+function abortableResponse(init: RequestInit | undefined): Promise<never> {
+  const signal = init?.signal
+  if (!signal) throw new Error('the request has no abort signal')
+  return new Promise((_resolve, reject) => {
+    const rejectOnAbort = () => {
+      const error = new Error('The operation was aborted')
+      error.name = 'AbortError'
+      reject(error)
+    }
+    if (signal.aborted) {
+      rejectOnAbort()
+      return
+    }
+    signal.addEventListener('abort', rejectOnAbort, { once: true })
+  })
+}
+
+afterEach(() => {
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+})
+
+describe('sttApi.transcribe audio file naming', () => {
+  const cases = [
+    { title: 'wav for audio/wav blob', type: 'audio/wav', extension: 'wav' },
+    { title: 'webm for audio/webm blob', type: 'audio/webm', extension: 'webm' },
+    { title: 'ogg for audio/ogg blob', type: 'audio/ogg', extension: 'ogg' },
+    { title: 'm4a for audio/mp4 blob', type: 'audio/mp4', extension: 'm4a' },
+    { title: 'webm for audio/webm;codecs=opus blob', type: 'audio/webm;codecs=opus', extension: 'webm' },
+    { title: 'wav for unknown types', type: 'audio/unknown', extension: 'wav' },
+    { title: 'wav over webm when both present', type: 'audio/wav;codecs=pcm', extension: 'wav' },
+  ]
+
+  it.each(cases)('uses $title', async ({ type, extension }) => {
+    const fetchFake = installRoutes([
+      { method: 'POST', path: '/api/stt/transcribe', respond: () => ({ json: { text: 'test' } }) },
+    ])
+
+    await sttApi.transcribe(new Blob([], { type }), 'test-user')
+
+    expect(audioName(fetchFake)).toBe(`recording.${extension}`)
+  })
+})
+
+describe('sttApi.transcribe request shape', () => {
+  it('includes the user id and sends the audio as multipart form data', async () => {
+    const fetchFake = installRoutes([
+      { method: 'POST', path: '/api/stt/transcribe', respond: () => ({ json: { text: 'transcribed text' } }) },
+    ])
+
+    const result = await sttApi.transcribe(new Blob(['audio data'], { type: 'audio/wav' }), 'custom-user')
+
+    expect(result.text).toBe('transcribed text')
+    expect(fetchFake.lastRequest('POST', '/api/stt/transcribe')?.searchParams.get('userId')).toBe('custom-user')
+    expect(fetchFake.findFormData()?.get('audio')).toBeInstanceOf(File)
   })
 
-  afterEach(() => {
-    vi.restoreAllMocks()
-    global.fetch = originalFetch
-  })
-
-  const createMockResponse = (ok = true, data = {}) => {
-    return new Response(JSON.stringify(data), {
-      status: ok ? 200 : 400,
-      headers: { 'Content-Type': 'application/json' },
-    })
-  }
-
-  it('should return wav for audio/wav blob', async () => {
-    const blob = new Blob([], { type: 'audio/wav' })
-    mockFetch.mockResolvedValueOnce(createMockResponse(true, { text: 'test' }))
-
-    await sttApi.transcribe(blob, 'test-user')
-
-    const callArgs = mockFetch.mock.calls[0]
-    const formData = callArgs[1]?.body as FormData
-    const audioFile = formData.get('audio') as File
-    expect(audioFile.name).toBe('recording.wav')
-  })
-
-  it('should return webm for audio/webm blob', async () => {
-    const blob = new Blob([], { type: 'audio/webm' })
-    mockFetch.mockResolvedValueOnce(createMockResponse(true, { text: 'test' }))
-
-    await sttApi.transcribe(blob, 'test-user')
-
-    const callArgs = mockFetch.mock.calls[0]
-    const formData = callArgs[1]?.body as FormData
-    const audioFile = formData.get('audio') as File
-    expect(audioFile.name).toBe('recording.webm')
-  })
-
-  it('should return ogg for audio/ogg blob', async () => {
-    const blob = new Blob([], { type: 'audio/ogg' })
-    mockFetch.mockResolvedValueOnce(createMockResponse(true, { text: 'test' }))
-
-    await sttApi.transcribe(blob, 'test-user')
-
-    const callArgs = mockFetch.mock.calls[0]
-    const formData = callArgs[1]?.body as FormData
-    const audioFile = formData.get('audio') as File
-    expect(audioFile.name).toBe('recording.ogg')
-  })
-
-  it('should return m4a for audio/mp4 blob', async () => {
-    const blob = new Blob([], { type: 'audio/mp4' })
-    mockFetch.mockResolvedValueOnce(createMockResponse(true, { text: 'test' }))
-
-    await sttApi.transcribe(blob, 'test-user')
-
-    const callArgs = mockFetch.mock.calls[0]
-    const formData = callArgs[1]?.body as FormData
-    const audioFile = formData.get('audio') as File
-    expect(audioFile.name).toBe('recording.m4a')
-  })
-
-  it('should return webm for audio/webm;codecs=opus blob', async () => {
-    const blob = new Blob([], { type: 'audio/webm;codecs=opus' })
-    mockFetch.mockResolvedValueOnce(createMockResponse(true, { text: 'test' }))
-
-    await sttApi.transcribe(blob, 'test-user')
-
-    const callArgs = mockFetch.mock.calls[0]
-    const formData = callArgs[1]?.body as FormData
-    const audioFile = formData.get('audio') as File
-    expect(audioFile.name).toBe('recording.webm')
-  })
-
-  it('should default to wav for unknown types', async () => {
-    const blob = new Blob([], { type: 'audio/unknown' })
-    mockFetch.mockResolvedValueOnce(createMockResponse(true, { text: 'test' }))
-
-    await sttApi.transcribe(blob, 'test-user')
-
-    const callArgs = mockFetch.mock.calls[0]
-    const formData = callArgs[1]?.body as FormData
-    const audioFile = formData.get('audio') as File
-    expect(audioFile.name).toBe('recording.wav')
-  })
-
-  it('should prioritize wav over webm when both present', async () => {
-    const blob = new Blob([], { type: 'audio/wav;codecs=pcm' })
-    mockFetch.mockResolvedValueOnce(createMockResponse(true, { text: 'test' }))
-
-    await sttApi.transcribe(blob, 'test-user')
-
-    const callArgs = mockFetch.mock.calls[0]
-    const formData = callArgs[1]?.body as FormData
-    const audioFile = formData.get('audio') as File
-    expect(audioFile.name).toBe('recording.wav')
-  })
-
-  it('should include userId in request URL', async () => {
-    const blob = new Blob([], { type: 'audio/wav' })
-    mockFetch.mockResolvedValueOnce(createMockResponse(true, { text: 'test' }))
-
-    await sttApi.transcribe(blob, 'custom-user')
-
-    const callArgs = mockFetch.mock.calls[0]
-    const url = callArgs[0] as string
-    expect(url).toContain('userId=custom-user')
-  })
-
-  it('should send FormData with audio file', async () => {
-    const blob = new Blob(['audio data'], { type: 'audio/wav' })
-    mockFetch.mockResolvedValueOnce(createMockResponse(true, { text: 'transcribed text' }))
-
-    await sttApi.transcribe(blob, 'test-user')
-
-    expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining('/api/stt/transcribe'),
-      expect.objectContaining({
+  it('surfaces the server transcription error message', async () => {
+    installRoutes([
+      {
         method: 'POST',
-        body: expect.any(FormData),
-      })
-    )
+        path: '/api/stt/transcribe',
+        respond: () => ({ status: 400, json: { error: 'Audio too short' } }),
+      },
+    ])
 
-    const callArgs = mockFetch.mock.calls[0]
-    const formData = callArgs[1]?.body as FormData
-    expect(formData.get('audio')).toBeInstanceOf(File)
+    await expect(sttApi.transcribe(new Blob([], { type: 'audio/wav' }), 'test-user')).rejects.toMatchObject({
+      message: 'Audio too short',
+      statusCode: 400,
+    })
   })
 })
 
 describe('sttApi.transcribe cancellation and timeout', () => {
-  const originalFetch = global.fetch
-
-  beforeEach(() => {
-    vi.stubGlobal('fetch', vi.fn())
-  })
-
-  afterEach(() => {
-    vi.restoreAllMocks()
-    global.fetch = originalFetch
-  })
-
   it('throws 499 CANCELED when caller aborts', async () => {
-    const blob = new Blob([], { type: 'audio/webm;codecs=opus' })
+    installRoutes([
+      { method: 'POST', path: '/api/stt/transcribe', respond: (_request, _params, init) => abortableResponse(init) },
+    ])
     const abortController = new AbortController()
 
-    const mockFetch = global.fetch as ReturnType<typeof vi.fn>
-    mockFetch.mockImplementation((_url: string, options: RequestInit) => {
-      const signal = options.signal as AbortSignal
-      return new Promise((_resolve, reject) => {
-        if (signal.aborted) {
-          const err = new Error('The operation was aborted')
-          err.name = 'AbortError'
-          reject(err)
-          return
-        }
-        signal.addEventListener('abort', () => {
-          const err = new Error('The operation was aborted')
-          err.name = 'AbortError'
-          reject(err)
-        }, { once: true })
-      })
-    })
-
-    const promise = sttApi.transcribe(blob, 'test-user', abortController.signal)
+    const promise = sttApi.transcribe(new Blob([], { type: 'audio/webm;codecs=opus' }), 'test-user', abortController.signal)
 
     abortController.abort()
 
-    await expect(promise).rejects.toThrow(FetchError)
-    await expect(promise).rejects.toMatchObject({
-      statusCode: 499,
-      code: 'CANCELED',
-    })
+    await expect(promise).rejects.toBeInstanceOf(FetchError)
+    await expect(promise).rejects.toMatchObject({ statusCode: 499, code: 'CANCELED' })
   })
 
   it('throws 408 TIMEOUT when transcription times out', async () => {
     vi.useFakeTimers()
+    installRoutes([
+      { method: 'POST', path: '/api/stt/transcribe', respond: (_request, _params, init) => abortableResponse(init) },
+    ])
 
-    const blob = new Blob([], { type: 'audio/webm;codecs=opus' })
-
-    const mockFetch = global.fetch as ReturnType<typeof vi.fn>
-    mockFetch.mockImplementation((_url: string, options: RequestInit) => {
-      const signal = options.signal as AbortSignal
-      return new Promise((_resolve, reject) => {
-        if (signal.aborted) {
-          const err = new Error('The operation was aborted')
-          err.name = 'AbortError'
-          reject(err)
-          return
-        }
-        signal.addEventListener('abort', () => {
-          const err = new Error('The operation was aborted')
-          err.name = 'AbortError'
-          reject(err)
-        }, { once: true })
-      })
-    })
-
-    const promise = sttApi.transcribe(blob, 'test-user')
+    const promise = sttApi.transcribe(new Blob([], { type: 'audio/webm;codecs=opus' }), 'test-user')
 
     vi.advanceTimersByTime(60000)
 
-    await expect(promise).rejects.toThrow(FetchError)
-    await expect(promise).rejects.toMatchObject({
-      statusCode: 408,
-      code: 'TIMEOUT',
-    })
-
-    vi.useRealTimers()
+    await expect(promise).rejects.toBeInstanceOf(FetchError)
+    await expect(promise).rejects.toMatchObject({ statusCode: 408, code: 'TIMEOUT' })
   })
 })

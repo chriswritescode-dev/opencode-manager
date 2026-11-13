@@ -21,7 +21,7 @@ import {
 } from '@opencode-manager/shared/schemas'
 import type { SecretScope } from '@/api/secrets'
 
-const KIND_META: Record<SecretKind, { label: string; namespace: string; emptyHint: string }> = {
+const KIND_META = {
   secret: {
     label: 'Secret',
     namespace: 'secrets',
@@ -32,7 +32,7 @@ const KIND_META: Record<SecretKind, { label: string; namespace: string; emptyHin
     namespace: 'vars',
     emptyHint: 'Variable values are stored in plain text and shown here.',
   },
-}
+} satisfies Record<SecretKind, { label: string; namespace: string; emptyHint: string }>
 
 function secretReference(kind: SecretKind, name: string): string {
   return `\${{ ${KIND_META[kind].namespace}.${name} }}`
@@ -253,7 +253,7 @@ function SecretKindPanel({ scope, kind }: SecretKindPanelProps) {
 
       <SettingsList
         isLoading={entriesQuery.isLoading}
-        error={entriesQuery.error as Error | null}
+        error={entriesQuery.error}
         isEmpty={entries.length === 0}
         emptyTitle={`No ${meta.label.toLowerCase()}s yet`}
         emptyHint={meta.emptyHint}

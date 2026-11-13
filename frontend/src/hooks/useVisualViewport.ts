@@ -4,7 +4,7 @@ const isTextInputFocused = () => {
   const el = document.activeElement
   if (!el) return false
   const tag = el.tagName
-  return tag === 'TEXTAREA' || tag === 'INPUT' || (el as HTMLElement).isContentEditable
+  return tag === 'TEXTAREA' || tag === 'INPUT' || (el instanceof HTMLElement && el.isContentEditable)
 }
 
 interface UseVisualViewportOptions {

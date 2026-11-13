@@ -2,8 +2,10 @@ import { OPENCODE_CONFIG_SOURCE_NAMES, type OpenCodeConfigSourceName } from './d
 
 export const DEFAULT_OPENCODE_CONFIG_SOURCE_NAME: OpenCodeConfigSourceName = 'opencode.jsonc'
 
+const OPENCODE_CONFIG_SOURCE_NAME_SET: ReadonlySet<string> = new Set(OPENCODE_CONFIG_SOURCE_NAMES)
+
 export function isOpenCodeConfigSourceName(value: string): value is OpenCodeConfigSourceName {
-  return (OPENCODE_CONFIG_SOURCE_NAMES as readonly string[]).includes(value)
+  return OPENCODE_CONFIG_SOURCE_NAME_SET.has(value)
 }
 
 export function selectPreferredOpenCodeConfigSourceName(

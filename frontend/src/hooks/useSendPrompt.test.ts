@@ -1,383 +1,350 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { createElement } from 'react'
+import { act } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
 import { useSendPrompt } from './useOpenCode'
-import { FetchError } from '../api/fetchWrapper'
-import { sessionTranscriptQueryKey } from '../lib/queryInvalidation'
-import { emptySessionTranscript } from '../lib/session-projection'
+import { useSessionStatus } from '@/stores/sessionStatusStore'
+import { useSendErrorStore } from '@/stores/sendErrorStore'
+import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
+import { emptySessionTranscript } from '@/lib/session-projection'
+import type { TranscriptCache } from '@/lib/session-projection'
 import type { SessionInboxUser } from '@opencode-manager/shared/opencode'
+import { renderHookWithProviders } from '@/test/render'
+import { makeSession } from '@/test/fixtures/api'
+import type { FetchRoute } from '@/test/fetchFake'
 
-const mocks = vi.hoisted(() => ({
-  sendPrompt: vi.fn(),
-  switchSessionModel: vi.fn(),
-  switchSessionAgent: vi.fn(),
-  setOptimisticActive: vi.fn(),
-  clearStatus: vi.fn(),
-  clearError: vi.fn(),
-  setError: vi.fn(),
-}))
+const hookProviders = {
+  auth: false,
+  theme: false,
+  tts: false,
+  toaster: false,
+} as const
 
-vi.mock('../api/opencode', async () => {
-  const actual = await vi.importActual('../api/opencode')
+const sessionKey = ['opencode', 'session', 'test-session', '/test'] as const
+
+const claudeModel = { providerID: 'anthropic', id: 'claude-sonnet-4' }
+const gptModel = { providerID: 'openai', id: 'gpt-4' }
+
+function inboxItem(sessionID: string, text: string): SessionInboxUser {
   return {
-    ...actual,
-    sendPrompt: mocks.sendPrompt,
-    switchSessionModel: mocks.switchSessionModel,
-    switchSessionAgent: mocks.switchSessionAgent,
+    id: `inbox_${text}`,
+    sessionID,
+    time: { created: 1000 },
+    type: 'user',
+    payload: { text },
+    delivery: 'queue',
   }
-})
+}
 
-vi.mock('@/stores/sessionStatusStore', () => ({
-  useSessionStatus: Object.assign(vi.fn(() => vi.fn()), {
-    getState: () => ({
-      setOptimisticActive: mocks.setOptimisticActive,
-      clearStatus: mocks.clearStatus,
-    }),
-  }),
-}))
+function promptRoute(respond: FetchRoute['respond']): FetchRoute {
+  return { method: 'POST', path: '/api/opencode/api/session/:sessionID/prompt', respond }
+}
 
-vi.mock('../lib/toast', () => ({
-  showToast: { error: vi.fn() },
-}))
+function switchRoutes(respond: FetchRoute['respond'] = () => ({ status: 204 })): FetchRoute[] {
+  return [
+    { method: 'POST', path: '/api/opencode/api/session/:sessionID/agent', respond },
+    { method: 'POST', path: '/api/opencode/api/session/:sessionID/model', respond },
+  ]
+}
 
-vi.mock('../lib/opencode-errors', () => ({
-  parseNetworkError: vi.fn((err) => ({
-    title: 'Error',
-    message: err.message,
-    isRetryable: false,
-  })),
-  isGatewayTimeout: vi.fn((err) => err?.statusCode === 524),
-}))
-
-vi.mock('../stores/sendErrorStore', () => ({
-  useSendErrorStore: {
-    getState: () => ({
-      clearError: mocks.clearError,
-      setError: mocks.setError,
-    }),
-  },
-}))
-
-const inboxItem = (sessionID: string, text: string): SessionInboxUser => ({
-  id: `inbox_${text}`,
-  sessionID,
-  time: { created: 1000 },
-  type: 'user',
-  payload: { text },
-  delivery: 'queue',
-})
-
-const sessionInfo = (overrides: Record<string, unknown> = {}) => ({
-  id: 'test-session',
-  projectID: 'proj_1',
-  time: { created: 1000, updated: 1000 },
-  location: { directory: '/test' },
-  ...overrides,
-})
-
-const createTestQueryClient = () =>
-  new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
+function renderSendPrompt(extraRoutes: FetchRoute[] = []) {
+  const rendered = renderHookWithProviders(() => useSendPrompt('/test'), {
+    ...hookProviders,
+    fetchRoutes: [
+      ...extraRoutes,
+      promptRoute(() => ({ json: { data: inboxItem('test-session', 'Hello') } })),
+      ...switchRoutes(),
+    ],
   })
+  rendered.queryClient.setQueryData(
+    sessionKey,
+    makeSession({ id: 'test-session', agent: 'build', model: claudeModel, location: { directory: '/test' } }),
+  )
+  return rendered
+}
+
+function modelRequests(fetchFake: ReturnType<typeof renderSendPrompt>['fetchFake']) {
+  return fetchFake.findRequests('POST', '/api/opencode/api/session/:sessionID/model')
+}
+
+function agentRequests(fetchFake: ReturnType<typeof renderSendPrompt>['fetchFake']) {
+  return fetchFake.findRequests('POST', '/api/opencode/api/session/:sessionID/agent')
+}
 
 describe('useSendPrompt', () => {
-  let queryClient: QueryClient
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    queryClient = createTestQueryClient()
-    mocks.sendPrompt.mockResolvedValue(inboxItem('test-session', 'Hello'))
-    mocks.switchSessionModel.mockResolvedValue(undefined)
-    mocks.switchSessionAgent.mockResolvedValue(undefined)
-  })
-
-  const renderHookWithProviders = () =>
-    renderHook(() => useSendPrompt('/test'), {
-      wrapper: ({ children }) =>
-        createElement(QueryClientProvider, { client: queryClient }, children),
-    })
-
-  const setSession = (session: Record<string, unknown>) => {
-    queryClient.setQueryData(['opencode', 'session', 'test-session', '/test'], session)
-  }
-
   it('sends a V2 prompt without switching when the model and agent match the session', async () => {
-    setSession(sessionInfo({
-      agent: 'build',
-      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
-    }))
+    const { result, fetchFake } = renderSendPrompt()
 
-    const { result } = renderHookWithProviders()
-
-    await result.current.mutateAsync({
-      sessionID: 'test-session',
-      text: 'Hello',
-      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
-      agent: 'build',
+    await act(async () => {
+      await result.current.mutateAsync({
+        sessionID: 'test-session',
+        text: 'Hello',
+        model: claudeModel,
+        agent: 'build',
+      })
     })
 
-    expect(mocks.switchSessionModel).not.toHaveBeenCalled()
-    expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
-    expect(mocks.sendPrompt).toHaveBeenCalledWith({
-      sessionID: 'test-session',
+    expect(modelRequests(fetchFake)).toHaveLength(0)
+    expect(agentRequests(fetchFake)).toHaveLength(0)
+    expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/prompt')?.body).toEqual({
       text: 'Hello',
-      files: undefined,
-      agents: undefined,
-      skills: undefined,
-      delivery: undefined,
-    }, 'local')
+      metadata: { ocmClient: 'desktop' },
+    })
   })
 
   it('switches the model before prompting when the selection changed', async () => {
-    setSession(sessionInfo({
-      agent: 'build',
-      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
-    }))
+    const { result, fetchFake } = renderSendPrompt()
 
-    const { result } = renderHookWithProviders()
-
-    await result.current.mutateAsync({
-      sessionID: 'test-session',
-      text: 'Hello',
-      model: { providerID: 'openai', id: 'gpt-4', variant: 'v1' },
-      agent: 'build',
+    await act(async () => {
+      await result.current.mutateAsync({
+        sessionID: 'test-session',
+        text: 'Hello',
+        model: { ...gptModel, variant: 'v1' },
+        agent: 'build',
+      })
     })
 
-    expect(mocks.switchSessionModel).toHaveBeenCalledWith('test-session', {
-      providerID: 'openai',
-      id: 'gpt-4',
-      variant: 'v1',
-    }, 'local')
-    expect(mocks.switchSessionModel.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.sendPrompt.mock.invocationCallOrder[0],
+    expect(modelRequests(fetchFake).map((request) => request.body)).toEqual([
+      { model: { providerID: 'openai', id: 'gpt-4', variant: 'v1' } },
+    ])
+    expect(agentRequests(fetchFake)).toHaveLength(0)
+
+    const paths = fetchFake.requests.map((request) => request.path)
+    expect(paths.indexOf('/api/opencode/api/session/test-session/model')).toBeLessThan(
+      paths.indexOf('/api/opencode/api/session/test-session/prompt'),
     )
-    expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
   })
 
   it('switches the agent before prompting when the selection changed', async () => {
-    setSession(sessionInfo({
-      agent: 'build',
-      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
-    }))
+    const { result, fetchFake } = renderSendPrompt()
 
-    const { result } = renderHookWithProviders()
-
-    await result.current.mutateAsync({
-      sessionID: 'test-session',
-      text: 'Hello',
-      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
-      agent: 'plan',
+    await act(async () => {
+      await result.current.mutateAsync({
+        sessionID: 'test-session',
+        text: 'Hello',
+        model: claudeModel,
+        agent: 'plan',
+      })
     })
 
-    expect(mocks.switchSessionAgent).toHaveBeenCalledWith('test-session', 'plan', 'local')
-    expect(mocks.switchSessionModel).toHaveBeenCalledWith('test-session', {
-      providerID: 'anthropic',
-      id: 'claude-sonnet-4',
-    }, 'local')
-    expect(mocks.switchSessionAgent.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.switchSessionModel.mock.invocationCallOrder[0],
+    expect(agentRequests(fetchFake).map((request) => request.body)).toEqual([{ agent: 'plan' }])
+    expect(modelRequests(fetchFake).map((request) => request.body)).toEqual([{ model: claudeModel }])
+
+    const paths = fetchFake.requests.map((request) => request.path)
+    expect(paths.indexOf('/api/opencode/api/session/test-session/agent')).toBeLessThan(
+      paths.indexOf('/api/opencode/api/session/test-session/model'),
     )
   })
 
   it('switches the agent before the model when both changed', async () => {
-    setSession(sessionInfo({
-      agent: 'build',
-      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
-    }))
+    const { result, fetchFake } = renderSendPrompt()
 
-    const { result } = renderHookWithProviders()
-
-    await result.current.mutateAsync({
-      sessionID: 'test-session',
-      text: 'Hello',
-      model: { providerID: 'openai', id: 'gpt-4' },
-      agent: 'plan',
+    await act(async () => {
+      await result.current.mutateAsync({
+        sessionID: 'test-session',
+        text: 'Hello',
+        model: gptModel,
+        agent: 'plan',
+      })
     })
 
-    expect(mocks.switchSessionAgent).toHaveBeenCalledWith('test-session', 'plan', 'local')
-    expect(mocks.switchSessionModel).toHaveBeenCalledWith('test-session', { providerID: 'openai', id: 'gpt-4' }, 'local')
-    expect(mocks.switchSessionAgent.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.switchSessionModel.mock.invocationCallOrder[0],
+    expect(agentRequests(fetchFake).map((request) => request.body)).toEqual([{ agent: 'plan' }])
+    expect(modelRequests(fetchFake).map((request) => request.body)).toEqual([{ model: gptModel }])
+
+    const paths = fetchFake.requests.map((request) => request.path)
+    expect(paths.indexOf('/api/opencode/api/session/test-session/agent')).toBeLessThan(
+      paths.indexOf('/api/opencode/api/session/test-session/model'),
     )
   })
 
   it('switches back to a previously cached model after an intermediate switch', async () => {
-    const modelA = { providerID: 'anthropic', id: 'claude-sonnet-4' }
-    const modelB = { providerID: 'openai', id: 'gpt-4' }
-    setSession(sessionInfo({ agent: 'build', model: modelA }))
+    const { result, fetchFake } = renderSendPrompt()
 
-    const { result } = renderHookWithProviders()
+    await act(async () => {
+      await result.current.mutateAsync({ sessionID: 'test-session', text: 'first', model: gptModel })
+      await result.current.mutateAsync({ sessionID: 'test-session', text: 'second', model: claudeModel })
+    })
 
-    await result.current.mutateAsync({ sessionID: 'test-session', text: 'first', model: modelB })
-    await result.current.mutateAsync({ sessionID: 'test-session', text: 'second', model: modelA })
-
-    expect(mocks.switchSessionModel.mock.calls).toEqual([
-      ['test-session', modelB, 'local'],
-      ['test-session', modelA, 'local'],
+    expect(modelRequests(fetchFake).map((request) => request.body)).toEqual([
+      { model: gptModel },
+      { model: claudeModel },
     ])
   })
 
   it('switches back to a previously cached agent after an intermediate switch', async () => {
-    setSession(sessionInfo({ agent: 'build', model: { providerID: 'anthropic', id: 'claude-sonnet-4' } }))
+    const { result, fetchFake } = renderSendPrompt()
 
-    const { result } = renderHookWithProviders()
+    await act(async () => {
+      await result.current.mutateAsync({ sessionID: 'test-session', text: 'first', agent: 'plan' })
+      await result.current.mutateAsync({ sessionID: 'test-session', text: 'second', agent: 'build' })
+    })
 
-    await result.current.mutateAsync({ sessionID: 'test-session', text: 'first', agent: 'plan' })
-    await result.current.mutateAsync({ sessionID: 'test-session', text: 'second', agent: 'build' })
-
-    expect(mocks.switchSessionAgent.mock.calls).toEqual([
-      ['test-session', 'plan', 'local'],
-      ['test-session', 'build', 'local'],
+    expect(agentRequests(fetchFake).map((request) => request.body)).toEqual([
+      { agent: 'plan' },
+      { agent: 'build' },
     ])
   })
 
   it('keeps the cached selection when a switch fails', async () => {
-    setSession(sessionInfo({ agent: 'build', model: { providerID: 'anthropic', id: 'claude-sonnet-4' } }))
-    mocks.switchSessionModel.mockRejectedValueOnce(new Error('switch failed'))
+    const failingSwitch: FetchRoute = {
+      method: 'POST',
+      path: '/api/opencode/api/session/test-session/model',
+      respond: () => ({ status: 400, json: { message: 'switch failed' } }),
+    }
+    const { result, queryClient } = renderSendPrompt([failingSwitch])
 
-    const { result } = renderHookWithProviders()
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({
+          sessionID: 'test-session',
+          text: 'Hello',
+          model: gptModel,
+        }),
+      ).rejects.toThrow('switch failed')
+    })
 
-    await expect(
-      result.current.mutateAsync({
-        sessionID: 'test-session',
-        text: 'Hello',
-        model: { providerID: 'openai', id: 'gpt-4' },
-      }),
-    ).rejects.toThrow('switch failed')
-
-    expect(
-      queryClient.getQueryData<{ model?: unknown }>(['opencode', 'session', 'test-session', '/test'])?.model,
-    ).toEqual({ providerID: 'anthropic', id: 'claude-sonnet-4' })
+    expect(queryClient.getQueryData(sessionKey)).toMatchObject({ model: claudeModel })
   })
 
   it('keeps a successful agent switch when the following model switch fails', async () => {
-    setSession(sessionInfo({ agent: 'build', model: { providerID: 'anthropic', id: 'claude-sonnet-4' } }))
-    mocks.switchSessionModel.mockRejectedValueOnce(new Error('model switch failed'))
+    const failingSwitch: FetchRoute = {
+      method: 'POST',
+      path: '/api/opencode/api/session/test-session/model',
+      respond: () => ({ status: 400, json: { message: 'model switch failed' } }),
+    }
+    const { result, queryClient } = renderSendPrompt([failingSwitch])
 
-    const { result } = renderHookWithProviders()
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({
+          sessionID: 'test-session',
+          text: 'Hello',
+          model: gptModel,
+          agent: 'plan',
+        }),
+      ).rejects.toThrow('model switch failed')
+    })
 
-    await expect(
-      result.current.mutateAsync({
-        sessionID: 'test-session',
-        text: 'Hello',
-        model: { providerID: 'openai', id: 'gpt-4' },
-        agent: 'plan',
-      }),
-    ).rejects.toThrow('model switch failed')
-
-    const cached = queryClient.getQueryData<{ model?: unknown; agent?: string }>([
-      'opencode',
-      'session',
-      'test-session',
-      '/test',
-    ])
-    expect(cached?.agent).toBe('plan')
-    expect(cached?.model).toEqual({ providerID: 'anthropic', id: 'claude-sonnet-4' })
+    expect(queryClient.getQueryData(sessionKey)).toMatchObject({ agent: 'plan', model: claudeModel })
   })
 
   it('does not switch the session model when the variant matches the durable selection', async () => {
-    setSession(sessionInfo({
-      agent: 'build',
-      model: { providerID: 'anthropic', id: 'claude-sonnet-4', variant: 'high' },
-    }))
+    const { result, queryClient, fetchFake } = renderSendPrompt()
+    queryClient.setQueryData(
+      sessionKey,
+      makeSession({
+        id: 'test-session',
+        agent: 'build',
+        model: { ...claudeModel, variant: 'high' },
+        location: { directory: '/test' },
+      }),
+    )
 
-    const { result } = renderHookWithProviders()
-
-    await result.current.mutateAsync({
-      sessionID: 'test-session',
-      text: 'Hello',
-      model: { providerID: 'anthropic', id: 'claude-sonnet-4', variant: 'high' },
-      agent: 'build',
+    await act(async () => {
+      await result.current.mutateAsync({
+        sessionID: 'test-session',
+        text: 'Hello',
+        model: { ...claudeModel, variant: 'high' },
+        agent: 'build',
+      })
     })
 
-    expect(mocks.switchSessionModel).not.toHaveBeenCalled()
-    expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
+    expect(modelRequests(fetchFake)).toHaveLength(0)
+    expect(agentRequests(fetchFake)).toHaveLength(0)
   })
 
   it('adds the returned inbox item to the transcript pending state immediately', async () => {
-    mocks.sendPrompt.mockResolvedValue(inboxItem('test-session', 'queued prompt'))
-    queryClient.setQueryData(sessionTranscriptQueryKey('test-session'), {
-      transcript: emptySessionTranscript,
+    const transcriptKey = sessionTranscriptQueryKey('test-session')
+    const { result, queryClient } = renderSendPrompt([
+      promptRoute(() => ({ json: { data: inboxItem('test-session', 'queued prompt') } })),
+    ])
+    queryClient.setQueryData(transcriptKey, { transcript: emptySessionTranscript })
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        sessionID: 'test-session',
+        text: 'queued prompt',
+        delivery: 'queue',
+      })
     })
 
-    const { result } = renderHookWithProviders()
-
-    await result.current.mutateAsync({
-      sessionID: 'test-session',
-      text: 'queued prompt',
-      delivery: 'queue',
-    })
-
-    const cached = queryClient.getQueryData<{
-      transcript: { pending: SessionInboxUser[] }
-    }>(sessionTranscriptQueryKey('test-session'))
-
+    const cached = queryClient.getQueryData<TranscriptCache>(transcriptKey)
     expect(cached?.transcript.pending.map((item) => item.id)).toEqual(['inbox_queued prompt'])
   })
 
   it('clears the stored send error on success', async () => {
-    const { result } = renderHookWithProviders()
-
-    await result.current.mutateAsync({
-      sessionID: 'session-1',
-      text: 'Hello',
+    const { result } = renderSendPrompt()
+    useSendErrorStore.getState().setError({
+      sessionID: 'test-session',
+      title: 'Error',
+      message: 'Network error',
+      kind: 'network',
     })
 
-    expect(mocks.clearError).toHaveBeenCalledWith('session-1')
+    await act(async () => {
+      await result.current.mutateAsync({
+        sessionID: 'test-session',
+        text: 'Hello',
+      })
+    })
+
+    expect(useSendErrorStore.getState().getError('test-session')).toBeNull()
   })
 
   it('stores the failed prompt for restoration on network failure', async () => {
-    mocks.sendPrompt.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    const { result } = renderSendPrompt([
+      promptRoute(() => {
+        throw new TypeError('Failed to fetch')
+      }),
+    ])
+    useSessionStatus.getState().setOptimisticActive('session-lost')
 
-    const { result } = renderHookWithProviders()
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({
+          sessionID: 'session-lost',
+          text: 'keep this prompt',
+        }),
+      ).rejects.toThrow('Failed to fetch')
+    })
 
-    await expect(
-      result.current.mutateAsync({
-        sessionID: 'session-lost',
-        text: 'keep this prompt',
-      })
-    ).rejects.toThrow('Failed to fetch')
-
-    expect(mocks.clearStatus).toHaveBeenCalledWith('session-lost')
-    expect(mocks.setError).toHaveBeenCalledWith(expect.objectContaining({
+    expect(useSessionStatus.getState().getStatus('session-lost')).toEqual({ type: 'idle' })
+    expect(useSendErrorStore.getState().getError('session-lost')).toMatchObject({
       sessionID: 'session-lost',
       failedPrompt: 'keep this prompt',
       kind: 'network',
-    }))
+    })
   })
 
   it('surfaces no error on gateway timeout (524)', async () => {
-    mocks.sendPrompt.mockRejectedValueOnce(new FetchError('Gateway timeout', 524))
+    const { result } = renderSendPrompt([
+      promptRoute(() => ({ status: 524, json: { message: 'Gateway timeout' } })),
+    ])
+    useSessionStatus.getState().setOptimisticActive('session-524')
 
-    const { result } = renderHookWithProviders()
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({
+          sessionID: 'session-524',
+          text: 'long running prompt',
+        }),
+      ).rejects.toThrow()
+    })
 
-    await expect(
-      result.current.mutateAsync({
-        sessionID: 'session-524',
-        text: 'long running prompt',
-      })
-    ).rejects.toThrow('Gateway timeout')
-
-    expect(mocks.clearStatus).not.toHaveBeenCalled()
-    expect(mocks.setError).not.toHaveBeenCalled()
+    expect(useSessionStatus.getState().getStatus('session-524')).toEqual({ type: 'busy' })
+    expect(useSendErrorStore.getState().getError('session-524')).toBeNull()
   })
 
   it('does not refetch the event-driven transcript after a successful send', async () => {
-    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
-    const refetchSpy = vi.spyOn(queryClient, 'refetchQueries')
+    const transcriptKey = sessionTranscriptQueryKey('test-session')
+    const { result, queryClient } = renderSendPrompt()
+    queryClient.setQueryData(transcriptKey, { transcript: emptySessionTranscript })
 
-    const { result } = renderHookWithProviders()
-
-    await result.current.mutateAsync({
-      sessionID: 'session-no-refetch',
-      text: 'Hello',
+    await act(async () => {
+      await result.current.mutateAsync({
+        sessionID: 'test-session',
+        text: 'Hello',
+      })
     })
 
-    expect(invalidateSpy).not.toHaveBeenCalled()
-    expect(refetchSpy).not.toHaveBeenCalled()
+    expect(queryClient.getQueryState(transcriptKey)?.isInvalidated).toBe(false)
   })
 })

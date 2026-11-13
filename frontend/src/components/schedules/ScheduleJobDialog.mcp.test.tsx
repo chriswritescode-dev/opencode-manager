@@ -1,94 +1,36 @@
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { describe, it, expect } from 'vitest'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ScheduleJobDialog } from './ScheduleJobDialog'
-import type { ScheduleJob } from '@opencode-manager/shared/types'
-
-Element.prototype.scrollIntoView = vi.fn()
-
-const mocks = vi.hoisted(() => ({
-  getStatus: vi.fn(),
-}))
-
-vi.mock('@/hooks/usePromptTemplates', () => ({
-  usePromptTemplates: () => ({ data: [], isLoading: false }),
-  useCreatePromptTemplate: () => ({ mutate: vi.fn(), isPending: false }),
-  useUpdatePromptTemplate: () => ({ mutate: vi.fn(), isPending: false }),
-  useDeletePromptTemplate: () => ({ mutate: vi.fn(), isPending: false }),
-}))
-
-vi.mock('@/api/providers', () => ({
-  getProviders: () => Promise.resolve({ providers: [], models: [] }),
-}))
-
-vi.mock('@/hooks/useOpenCode', () => ({
-  useAgents: () => ({ data: [] }),
-}))
-
-vi.mock('@/hooks/useScheduleTarget', () => ({
-  useScheduleTarget: () => ({ scheduleTarget: { fullPath: '/workspace/repos/sample' } }),
-}))
-
-vi.mock('@/api/settings', () => ({
-  settingsApi: {
-    listManagedSkills: () => Promise.resolve([]),
-  },
-}))
-
-vi.mock('@/api/mcp', () => ({
-  mcpApi: { getStatus: mocks.getStatus },
-}))
-
-vi.mock('@/api/repos', () => ({
-  listRepos: () => Promise.resolve([]),
-  listBranches: () => Promise.resolve({ branches: [], status: { ahead: 0, behind: 0 } }),
-}))
-
-function createWrapper() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  )
-}
-
-const job: ScheduleJob = {
-  id: 1,
-  repoId: 1,
-  name: 'Test Job',
-  description: null,
-  enabled: true,
-  showInInbox: true,
-  scheduleMode: 'interval',
-  intervalMinutes: 60,
-  cronExpression: null,
-  timezone: null,
-  agentSlug: null,
-  prompt: 'Test prompt',
-  model: null,
-  skillMetadata: null,
-  permissionConfig: null,
-  mcpServers: [
-    { name: 'github' },
-    { name: 'old-remote', config: { type: 'remote', url: 'https://old.example.com/mcp' } },
-  ],
-  branch: null,
-  createdAt: Date.now(),
-  updatedAt: Date.now(),
-  lastRunAt: null,
-  nextRunAt: null,
-}
+import {
+  renderScheduleJobDialog,
+  makeMcpServer,
+  makeScheduleJobFixture,
+} from '@/test/scheduleJobDialog'
+import { makeRepo } from '@/test/fixtures/api'
 
 describe('ScheduleJobDialog — MCP servers', () => {
   it('lists servers from the schedule directory and submits configured and schedule-only servers', async () => {
-    mocks.getStatus.mockResolvedValue({ github: { status: 'disabled' }, linear: { status: 'connected' } })
-    const onSubmit = vi.fn()
     const user = userEvent.setup()
-
-    render(<ScheduleJobDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} isSaving={false} job={job} />, { wrapper: createWrapper() })
+    const dialog = await renderScheduleJobDialog({
+      job: makeScheduleJobFixture({
+        repoId: 1,
+        name: 'Test Job',
+        prompt: 'Test prompt',
+        mcpServers: [
+          { name: 'github' },
+          { name: 'old-remote', config: { type: 'remote', url: 'https://old.example.com/mcp' } },
+        ],
+      }),
+      repos: [makeRepo({ id: 1, fullPath: '/workspace/repos/sample' })],
+      mcpServers: [makeMcpServer('github', 'disabled'), makeMcpServer('linear', 'connected')],
+    })
 
     await user.click(screen.getByRole('tab', { name: 'MCP' }))
-    await waitFor(() => expect(mocks.getStatus).toHaveBeenCalledWith('/workspace/repos/sample'))
+    await waitFor(() =>
+      expect(dialog.fetchFake.lastRequest('GET', '/api/opencode/api/mcp')?.searchParams.get('location[directory]')).toBe(
+        '/workspace/repos/sample',
+      ),
+    )
     expect(await screen.findByText('old-remote')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Remove old-remote' }))
@@ -102,11 +44,26 @@ describe('ScheduleJobDialog — MCP servers', () => {
     expect(await screen.findByText('filesystem')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
 
-    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+    expect(dialog.onSubmit).toHaveBeenCalledWith(expect.objectContaining({
       mcpServers: [
         { name: 'github' },
         { name: 'filesystem', config: { type: 'local', command: ['npx', 'server-filesystem', '/tmp'] } },
       ],
     }))
+  })
+
+  it('offers the servers reported for the schedule directory', async () => {
+    const user = userEvent.setup()
+    await renderScheduleJobDialog({
+      job: makeScheduleJobFixture({ repoId: 1 }),
+      repoId: 1,
+      mcpServers: [makeMcpServer('github', 'disabled'), makeMcpServer('linear', 'connected')],
+    })
+
+    await user.click(screen.getByRole('tab', { name: 'MCP' }))
+    await user.click(await screen.findByText('Search and select MCP servers...'))
+
+    expect(await screen.findByText('Currently connected')).toBeInTheDocument()
+    expect(screen.getByText('Currently disabled')).toBeInTheDocument()
   })
 })

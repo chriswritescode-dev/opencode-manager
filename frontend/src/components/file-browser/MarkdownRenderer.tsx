@@ -75,7 +75,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, classN
     ...markdownComponents,
     input(props) {
       const { type, checked, disabled, ...rest } = props
-      delete (rest as Record<string, unknown>).node
+      const inputProps = { ...rest }
+      delete inputProps.node
 
       if (type === 'checkbox') {
         return (
@@ -84,12 +85,12 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, classN
             checked={Boolean(checked)}
             onChange={(event) => handleInputToggle(event.currentTarget)}
             className="cursor-pointer accent-primary"
-            {...rest}
+            {...inputProps}
           />
         )
       }
 
-      return <input type={type} checked={checked} disabled={disabled} {...rest} />
+      return <input type={type} checked={checked} disabled={disabled} {...inputProps} />
     },
     a(props) {
       return <MarkdownLink {...props} onOpenLocalPath={handleOpenLocalPath} />

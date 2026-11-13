@@ -13,7 +13,9 @@ import {
   getScheduleWorktreesPath,
 } from '@opencode-manager/shared/config/env'
 import { isPathWithinRoot } from '../../utils/fs-safe'
-import { executeCommand } from '../../utils/process'
+import { executeCommand, type ExecuteCommandResult } from '../../utils/process'
+import { z } from 'zod'
+import { parseJsonObject, parseJsonString, type JsonValue } from '@opencode-manager/shared/utils'
 
 export const SESSION_SANDBOX_NAME_PATTERN = /^ocm-session-[0-9a-f]{12}$/
 
@@ -56,10 +58,18 @@ export function overrideSandboxExecutableTrustValidator(validator: ((candidate: 
   resetSandboxExecutableCache()
 }
 
+function currentProcessOwner(): { uid: number; gid: number } | null {
+  const getuid = process.getuid
+  const getgid = process.getgid
+  if (getuid === undefined || getgid === undefined) return null
+  return { uid: getuid(), gid: getgid() }
+}
+
 function isWritableByManager(stat: { uid: number; gid: number; mode: number }): boolean {
-  if (typeof process.getuid === 'function' && typeof process.getgid === 'function') {
-    if (stat.uid === process.getuid() && (stat.mode & 0o200) !== 0) return true
-    if (stat.gid === process.getgid() && (stat.mode & 0o020) !== 0) return true
+  const owner = currentProcessOwner()
+  if (owner !== null) {
+    if (stat.uid === owner.uid && (stat.mode & 0o200) !== 0) return true
+    if (stat.gid === owner.gid && (stat.mode & 0o020) !== 0) return true
   }
   return (stat.mode & 0o002) !== 0
 }
@@ -209,7 +219,7 @@ function buildSandboxDockerDataMountArg(name: string): string {
   return `${sandboxDockerDataVolumeName(name)}:${SANDBOX_DOCKER_DATA_GUEST_PATH}:kind=disk,size=${SANDBOX_DOCKER_DATA_SIZE}`
 }
 
-function parseSandboxNamedMountSpec(spec: string): { name: string; guest: string } {
+function parseSandboxNamedMountSpec(spec: string) {
   const [name = '', guest = ''] = spec.split(':')
   return { name, guest }
 }
@@ -287,9 +297,9 @@ export function buildSandboxStopManagedArgs(): string[] {
 
 export type SandboxNetworkPolicyRule = {
   direction: string
-  destination: Record<string, unknown> | string
-  protocols: unknown[]
-  ports: unknown[]
+  destination: JsonValue
+  protocols: JsonValue[]
+  ports: JsonValue[]
   action: string
 }
 
@@ -299,24 +309,21 @@ export type SandboxNetworkPolicy = {
   rules: SandboxNetworkPolicyRule[]
 }
 
-const SUPPORTED_SANDBOX_NETWORK_PROFILES = ['public', 'private', 'host'] as const
+const SUPPORTED_SANDBOX_NETWORK_PROFILES = new Set(['public', 'private', 'host'])
 const TERMINAL_SANDBOX_NETWORK_PROFILES = new Set(['all', 'none'])
 
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function stableJson(value: unknown): string {
+function stableJson(value: JsonValue | undefined): string {
   if (Array.isArray(value)) {
     return `[${value.map((item) => stableJson(item)).join(',')}]`
   }
-  if (isPlainRecord(value)) {
-    return `{${Object.keys(value)
+  const record = parseJsonObject(value)
+  if (record !== null) {
+    return `{${Object.keys(record)
       .sort()
-      .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
       .join(',')}}`
   }
-  return JSON.stringify(value)
+  return String(JSON.stringify(value))
 }
 
 export function resolveExpectedSandboxNetworkPolicy(netProfile: string): SandboxNetworkPolicy | null {
@@ -329,7 +336,7 @@ export function resolveExpectedSandboxNetworkPolicy(netProfile: string): Sandbox
     if (TERMINAL_SANDBOX_NETWORK_PROFILES.has(token)) {
       return null
     }
-    if (!(SUPPORTED_SANDBOX_NETWORK_PROFILES as readonly string[]).includes(token)) {
+    if (!SUPPORTED_SANDBOX_NETWORK_PROFILES.has(token)) {
       return null
     }
     if (!groups.includes(token)) {
@@ -346,30 +353,36 @@ export function resolveExpectedSandboxNetworkPolicy(netProfile: string): Sandbox
   }
 }
 
-function canonicalSandboxNetworkRuleKey(rule: unknown): string | null {
-  if (!isPlainRecord(rule)) return null
-  if (typeof rule.direction !== 'string' || typeof rule.action !== 'string') return null
-  if (!Array.isArray(rule.protocols) || !Array.isArray(rule.ports)) return null
-  const protocols = [...rule.protocols].map(String).sort().join(',')
-  const ports = [...rule.ports].map(String).sort().join(',')
-  return `${rule.direction}|${stableJson(rule.destination)}|${protocols}|${ports}|${rule.action}`
+function canonicalSandboxNetworkRuleKey(rule: JsonValue): string | null {
+  const record = parseJsonObject(rule)
+  if (record === null) return null
+  const direction = parseJsonString(record.direction)
+  const action = parseJsonString(record.action)
+  if (direction === null || action === null) return null
+  if (!Array.isArray(record.protocols) || !Array.isArray(record.ports)) return null
+  const protocols = [...record.protocols].map(String).sort().join(',')
+  const ports = [...record.ports].map(String).sort().join(',')
+  return `${direction}|${stableJson(record.destination)}|${protocols}|${ports}|${action}`
 }
 
-export function sandboxNetworkPolicyMismatch(inspected: unknown, expected: SandboxNetworkPolicy): string | null {
-  if (!isPlainRecord(inspected) || typeof inspected.default_egress !== 'string' || typeof inspected.default_ingress !== 'string') {
+export function sandboxNetworkPolicyMismatch(inspected: JsonValue | undefined, expected: SandboxNetworkPolicy): string | null {
+  const policy = parseJsonObject(inspected)
+  const defaultEgress = policy === null ? null : parseJsonString(policy.default_egress)
+  const defaultIngress = policy === null ? null : parseJsonString(policy.default_ingress)
+  if (policy === null || defaultEgress === null || defaultIngress === null) {
     return 'sandbox network policy is missing or malformed'
   }
-  if (inspected.default_egress !== expected.default_egress) {
-    return `sandbox network default_egress ${inspected.default_egress} does not match the deny policy required by the configured network profile; unrestricted egress is not allowed`
+  if (defaultEgress !== expected.default_egress) {
+    return `sandbox network default_egress ${defaultEgress} does not match the deny policy required by the configured network profile; unrestricted egress is not allowed`
   }
-  if (inspected.default_ingress !== expected.default_ingress) {
-    return `sandbox network default_ingress ${inspected.default_ingress} does not match the configured network profile`
+  if (defaultIngress !== expected.default_ingress) {
+    return `sandbox network default_ingress ${defaultIngress} does not match the configured network profile`
   }
-  if (!Array.isArray(inspected.rules)) {
+  if (!Array.isArray(policy.rules)) {
     return 'sandbox network policy is missing or malformed'
   }
   const inspectedKeys: string[] = []
-  for (const rule of inspected.rules) {
+  for (const rule of policy.rules) {
     const key = canonicalSandboxNetworkRuleKey(rule)
     if (key === null) {
       return 'sandbox network policy contains a rule that does not match the configured network profile'
@@ -403,25 +416,91 @@ export function parseMemoryMib(value: string): number | null {
   return Math.floor(number * 1024)
 }
 
-export function resolveSandboxRuntimeTmpfsSizeMib(memoryMib: unknown): number | null {
-  if (typeof memoryMib !== 'number' || !Number.isFinite(memoryMib) || memoryMib <= 0) return null
-  return Math.min(512, Math.max(1, Math.floor(memoryMib / 4)))
+export function resolveSandboxRuntimeTmpfsSizeMib(memoryMib: JsonValue | undefined): number | null {
+  const parsed = z.number().finite().positive().safeParse(memoryMib)
+  if (!parsed.success) return null
+  return Math.min(512, Math.max(1, Math.floor(parsed.data / 4)))
 }
 
-function parseSandboxCreateArgs(args: string[]): {
+type SandboxCreateArgs = {
   name: string
   labels: Record<string, string>
   memory: string
   cpus: number
   user: string
   mountDirs: string[]
-  namedMounts: Array<{ name: string; guest: string }>
+  namedMounts: { name: string; guest: string }[]
   workdir: string
   entrypoint: string[]
   shell: string
   image: string
   cmd: string[]
-} {
+}
+
+export type SandboxMountOptions = {
+  readonly?: boolean
+  noexec?: boolean
+  nosuid?: boolean
+  nodev?: boolean
+}
+
+export type SandboxCanonicalBindMount = {
+  type: 'Bind'
+  host: string
+  guest: string
+  options: SandboxMountOptions
+  stat_virtualization: string
+  host_permissions: string
+  follow_root_symlinks: boolean
+  quota_mib: number | null
+}
+
+export type SandboxCanonicalNamedMount = {
+  type: 'Named'
+  name: string
+  guest: string
+  options: SandboxMountOptions
+  stat_virtualization: string
+  host_permissions: string
+  follow_root_symlinks: boolean
+}
+
+export type SandboxCanonicalMount = SandboxCanonicalBindMount | SandboxCanonicalNamedMount
+
+export type SandboxCanonicalSpec = {
+  name: string
+  image: { Oci: { reference: string } }
+  resources: {
+    cpus: number
+    memory_mib: number | null
+    max_cpus: number
+    max_memory_mib: number | null
+  }
+  runtime: {
+    workdir: string
+    shell: string
+    scripts: Record<string, JsonValue>
+    entrypoint: string[]
+    cmd: string[]
+    hostname: null
+    user: string
+    log_level: null
+    metrics_sample_interval_ms: number
+    disable_metrics_sample: boolean
+  }
+  env: JsonValue[]
+  labels: Record<string, string>
+  rlimits: JsonValue[]
+  mounts: SandboxCanonicalMount[]
+  patches: JsonValue[]
+  network: { enabled: boolean; ports: JsonValue[] }
+  init: null
+  pull_policy: string
+  security_profile: string
+  lifecycle: { ephemeral: boolean; max_duration_secs: null; idle_timeout_secs: null }
+}
+
+function parseSandboxCreateArgs(args: string[]): SandboxCreateArgs {
   const labels: Record<string, string> = {}
   const mountDirs: string[] = []
   const namedMounts: Array<{ name: string; guest: string }> = []
@@ -469,13 +548,13 @@ function parseSandboxCreateArgs(args: string[]): {
   return { name, labels, memory, cpus, user, mountDirs, namedMounts, workdir, entrypoint, shell, image, cmd }
 }
 
-export function buildCanonicalSandboxSpec(spec: SandboxVmSpec): Record<string, unknown> {
+export function buildCanonicalSandboxSpec(spec: SandboxVmSpec): SandboxCanonicalSpec {
   const args = parseSandboxCreateArgs(buildSandboxCreateArgs(spec))
   const memoryMib = parseMemoryMib(args.memory)
-  const bindMounts = args.mountDirs.map((spec) => {
-    const separator = spec.indexOf(':')
-    const host = separator >= 0 ? spec.slice(0, separator) : spec
-    const guest = separator >= 0 ? spec.slice(separator + 1) : spec
+  const bindMounts: SandboxCanonicalBindMount[] = args.mountDirs.map((mountSpec) => {
+    const separator = mountSpec.indexOf(':')
+    const host = separator >= 0 ? mountSpec.slice(0, separator) : mountSpec
+    const guest = separator >= 0 ? mountSpec.slice(separator + 1) : mountSpec
     return {
       type: 'Bind',
       host,
@@ -487,7 +566,7 @@ export function buildCanonicalSandboxSpec(spec: SandboxVmSpec): Record<string, u
       quota_mib: null,
     }
   })
-  const namedMounts = args.namedMounts.map((mount) => ({
+  const namedMounts: SandboxCanonicalNamedMount[] = args.namedMounts.map((mount) => ({
     type: 'Named',
     name: mount.name,
     guest: mount.guest,
@@ -570,19 +649,18 @@ export async function resolveSessionSandboxMounts(locationDirectory: string): Pr
   const work = await resolveSandboxWorkDirectory(locationDirectory)
   if (work === null) return null
 
-  let result: string | { exitCode: number; stdout: string; stderr: string }
+  let result: ExecuteCommandResult
   try {
-    result = (await executeCommand(
+    result = await executeCommand(
       ['git', '-C', work, 'rev-parse', '--path-format=absolute', '--show-toplevel', '--git-dir', '--git-common-dir'],
       { ignoreExitCode: true, silent: true, timeout: SANDBOX_GIT_RESOLVE_TIMEOUT_MS },
-    )) as string | { exitCode: number; stdout: string; stderr: string }
+    )
   } catch {
     return [work]
   }
-  const listing = typeof result === 'string' ? { exitCode: 0, stdout: result, stderr: '' } : result
-  if (listing.exitCode !== 0) return [work]
+  if (result.exitCode !== 0) return [work]
 
-  const lines = listing.stdout.split('\n').map((line) => line.trim()).filter((line) => line !== '')
+  const lines = result.stdout.split('\n').map((line) => line.trim()).filter((line) => line !== '')
   if (lines.length < 3) return [work]
   const top = await resolveSandboxWorkDirectory(lines[0]!)
   const gitDir = lines[1]!
@@ -620,14 +698,15 @@ export async function resolveSessionSandboxMounts(locationDirectory: string): Pr
 
 export function resolveSandboxExecUser(): string {
   const configured = ENV.SANDBOX.EXEC_USER.trim()
+  const owner = currentProcessOwner()
   if (/^\d+$/.test(configured)) {
-    return typeof process.getgid === 'function' ? `${configured}:${process.getgid()}` : configured
+    return owner === null ? configured : `${configured}:${owner.gid}`
   }
   if (/^\d+:\d+$/.test(configured)) {
     return configured
   }
-  if (typeof process.getuid === 'function' && typeof process.getgid === 'function') {
-    return `${process.getuid()}:${process.getgid()}`
+  if (owner !== null) {
+    return `${owner.uid}:${owner.gid}`
   }
   return configured
 }

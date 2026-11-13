@@ -61,7 +61,7 @@ export function dedupeRepos(repos: Repo[]): Repo[] {
     }
 
     return acc
-  }, [] as Repo[])
+  }, new Array<Repo>())
 }
 
 export function buildRepoViewModels(

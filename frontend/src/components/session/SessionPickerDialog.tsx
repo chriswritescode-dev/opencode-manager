@@ -1,10 +1,13 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { z } from 'zod'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { format, startOfDay } from 'date-fns'
 import { ChevronsUpDown, MoreHorizontal, Pin, PinOff, Plus } from 'lucide-react'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
-import { OpenCodeServerProvider, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
+import { useOpenCodeServerId } from '@/contexts/opencode-server-context'
 import { openCodeLocationQueryOptions } from '@/lib/openCodeLocation'
+import { deleteSession as deleteSessionOnServer } from '@/api/opencode'
 import type { Repo, Session } from '@/api/types'
 import { ACTIVE_WORK_GROUPS, MS_PER_MINUTE, formatActivityEmptyMessage } from '@/lib/activeWork'
 import { Button } from '@/components/ui/button'
@@ -22,22 +25,20 @@ import { ProjectPickerContent } from '@/components/session/ProjectPickerContent'
 import { AddRepoDialog } from '@/components/repo/AddRepoDialog'
 import { LocalRepoNewSessionButton } from '@/components/navigation/RepoSessionNav'
 import { RemoteProjectNavList } from '@/components/navigation/RemoteProjectNav'
-import {
-  PickerSearchBar,
-  optionId,
-  usePickerCursor,
-  usePickerKeyNav,
-} from '@/components/session/usePickerKeyboardNav'
+import { PickerSearchBar } from '@/components/session/PickerSearchBar'
+import { optionId, usePickerCursor, usePickerKeyNav } from '@/components/session/picker-cursor'
 import { partitionSessions } from '@/components/session/session-partition'
 import { buildRepoByDirectory, isRepoReady } from '@/components/navigation/sidebar-session-tree'
 import { useDeleteSession } from '@/hooks/useOpenCode'
 import { useActiveWork, useActivityWindowMinutes } from '@/hooks/useActiveWork'
+import { activeWorkSessionsQueryKey } from '@/lib/queryInvalidation'
+import { showToast } from '@/lib/toast'
 import { useSessionSearch } from '@/hooks/useSessionSearch'
 import { useSessionPins, useToggleSessionPin } from '@/hooks/useSessionPins'
 import { usePersistentBoolean } from '@/hooks/usePersistentBoolean'
 import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
 import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
-import { useShortcutActions } from '@/contexts/KeyboardShortcutsContext'
+import { useShortcutActions } from '@/contexts/keyboard-shortcuts-context'
 import { useSettings } from '@/hooks/useSettings'
 import { buildPinnedSessionKeys, getSessionKey } from '@/lib/sessionKey'
 import { formatShortcutLabel, resolveShortcutBindings } from '@/lib/keyboardShortcuts'
@@ -48,15 +49,17 @@ const ALL_PROJECTS_STORAGE_KEY = 'oc:session-picker:all-projects'
 const UNTITLED_SESSION_TITLE = 'Untitled Session'
 const NEAR_BOTTOM_PX = 240
 
-type SessionPickerTab = 'active' | 'sessions' | 'projects'
+const sessionPickerTabSchema = z.enum(['active', 'sessions', 'projects'])
+
+type SessionPickerTab = z.infer<typeof sessionPickerTabSchema>
 
 const SESSION_PICKER_TABS: SessionPickerTab[] = ['active', 'sessions', 'projects']
 
-const SESSION_PICKER_TAB_LABELS: Record<SessionPickerTab, string> = {
+const SESSION_PICKER_TAB_LABELS = {
   active: 'Activity',
   sessions: 'Sessions',
   projects: 'Projects',
-}
+} satisfies Record<SessionPickerTab, string>
 
 function nextSessionPickerTab(tab: SessionPickerTab, tabs: SessionPickerTab[]): SessionPickerTab {
   const index = tabs.indexOf(tab)
@@ -71,9 +74,7 @@ function sessionsTabLabel(scopeEnabled: boolean, allProjects: boolean): string {
 export interface RemotePickerScope {
   serverId: string
   serverName?: string
-  /** Canonical project directory in view; omitted when the route scopes to the whole server. */
   projectDirectory?: string
-  /** Whether the route's project directory is still resolving, which holds the all-sessions search. */
   isPending?: boolean
 }
 
@@ -207,7 +208,7 @@ interface SessionPickerRowItemProps {
   onOpen: (row: SessionPickerRow) => void
   onHover: (index: number) => void
   onTogglePin: (row: SessionPickerRow) => void
-  onRequestDelete: (session: Session) => void
+  onRequestDelete: (row: SessionPickerRow) => void
   registerRef: (key: string, node: HTMLDivElement | null) => void
 }
 
@@ -289,7 +290,7 @@ const SessionPickerRowItem = memo(function SessionPickerRowItem({
         </span>
       </div>
       <div className="flex shrink-0 items-center pr-1">
-        {row.serverId || !showActions ? null : <DropdownMenu>
+        {showActions ? <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
               type="button"
@@ -305,13 +306,15 @@ const SessionPickerRowItem = memo(function SessionPickerRowItem({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="z-[200]" onClick={(event) => event.stopPropagation()}>
-            <DropdownMenuItem onClick={() => onTogglePin(row)}>
-              {isPinned ? <PinOff className="h-4 w-4 mr-2" /> : <Pin className="h-4 w-4 mr-2" />}
-              {isPinned ? 'Unpin' : 'Pin'}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onRequestDelete(row.session)}>Delete</DropdownMenuItem>
+            {row.serverId ? null : (
+              <DropdownMenuItem onClick={() => onTogglePin(row)}>
+                {isPinned ? <PinOff className="h-4 w-4 mr-2" /> : <Pin className="h-4 w-4 mr-2" />}
+                {isPinned ? 'Unpin' : 'Pin'}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onClick={() => onRequestDelete(row)}>Delete</DropdownMenuItem>
           </DropdownMenuContent>
-        </DropdownMenu>}
+        </DropdownMenu> : null}
       </div>
     </div>
   )
@@ -332,7 +335,7 @@ interface SessionPickerRowActions {
   openRow: (row: SessionPickerRow | undefined) => void
   deleteRow: (row: SessionPickerRow | undefined) => void
   handleTogglePin: (row: SessionPickerRow) => void
-  handleRequestDelete: (session: Session) => void
+  handleRequestDelete: (row: SessionPickerRow) => void
   deleteDialogProps: {
     open: boolean
     onOpenChange: (open: boolean) => void
@@ -353,7 +356,9 @@ function useSessionPickerRowActions({
   const togglePin = useToggleSessionPin()
   const pinnedKeys = useMemo(() => buildPinnedSessionKeys(sessionPins ?? []), [sessionPins])
   const deleteSession = useDeleteSession(directories)
-  const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null)
+  const queryClient = useQueryClient()
+  const [rowToDelete, setRowToDelete] = useState<SessionPickerRow | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null)
 
   const clearPendingDelete = useCallback(() => {
@@ -373,23 +378,37 @@ function useSessionPickerRowActions({
   )
 
   const performDelete = useCallback(
-    (session: Session) => {
-      if (session.id === activeSessionID) onDeleteActiveSession()
-      return deleteSession
-        .mutateAsync({ id: session.id, directory: session.location.directory })
-        .catch(() => undefined)
+    async (row: SessionPickerRow) => {
+      if (row.session.id === activeSessionID) onDeleteActiveSession()
+      const serverId = row.serverId
+      if (!serverId) {
+        await deleteSession
+          .mutateAsync({ id: row.session.id, directory: row.session.location.directory })
+          .catch(() => undefined)
+        return
+      }
+      setIsDeleting(true)
+      try {
+        await deleteSessionOnServer(row.session.id, serverId)
+        showToast.success('Session deleted')
+      } catch {
+        showToast.error('Failed to delete sessions')
+      } finally {
+        setIsDeleting(false)
+        void queryClient.invalidateQueries({ queryKey: activeWorkSessionsQueryKey(serverId) })
+      }
     },
-    [deleteSession, activeSessionID, onDeleteActiveSession],
+    [deleteSession, activeSessionID, onDeleteActiveSession, queryClient],
   )
 
   const deleteRow = useCallback(
     (row: SessionPickerRow | undefined) => {
-      if (!row || row.serverId) return
+      if (!row) return
       if (pendingDeleteKey !== row.key) {
         setPendingDeleteKey(row.key)
         return
       }
-      void performDelete(row.session).finally(() => {
+      void performDelete(row).finally(() => {
         setPendingDeleteKey(null)
       })
     },
@@ -408,30 +427,30 @@ function useSessionPickerRowActions({
     [togglePin, pinnedKeys],
   )
 
-  const handleRequestDelete = useCallback((session: Session) => {
-    setSessionToDelete(session)
+  const handleRequestDelete = useCallback((row: SessionPickerRow) => {
+    setRowToDelete(row)
   }, [])
 
   const confirmDelete = useCallback(() => {
-    if (!sessionToDelete) return
-    void performDelete(sessionToDelete).finally(() => {
-      setSessionToDelete(null)
+    if (!rowToDelete) return
+    void performDelete(rowToDelete).finally(() => {
+      setRowToDelete(null)
     })
-  }, [sessionToDelete, performDelete])
+  }, [rowToDelete, performDelete])
 
   const deleteDialogProps = useMemo(
     () => ({
-      open: sessionToDelete !== null,
+      open: rowToDelete !== null,
       onOpenChange: (nextOpen: boolean) => {
-        if (!nextOpen) setSessionToDelete(null)
+        if (!nextOpen) setRowToDelete(null)
       },
       onConfirm: () => {
         void confirmDelete()
       },
-      onCancel: () => setSessionToDelete(null),
-      isDeleting: deleteSession.isPending,
+      onCancel: () => setRowToDelete(null),
+      isDeleting: deleteSession.isPending || isDeleting,
     }),
-    [sessionToDelete, confirmDelete, deleteSession.isPending],
+    [rowToDelete, confirmDelete, deleteSession.isPending, isDeleting],
   )
 
   return {
@@ -464,7 +483,7 @@ interface SessionPickerListProps {
   onOpenRow: (row: SessionPickerRow) => void
   onHoverRow: (index: number) => void
   onTogglePin: (row: SessionPickerRow) => void
-  onRequestDelete: (session: Session) => void
+  onRequestDelete: (row: SessionPickerRow) => void
   registerRef: (key: string, node: HTMLDivElement | null) => void
   listRef?: React.RefObject<HTMLDivElement | null>
   onScroll?: (event: React.UIEvent<HTMLDivElement>) => void
@@ -1204,17 +1223,12 @@ export interface SessionPickerPanelProps {
   onDeleteActiveSession: () => void
   onSelectRepo: (repo: Repo) => void
   onNavigate: (path: string) => void
-  /** Set on a linked-server route to list that server's sessions instead of Manager repos. */
   remote?: RemotePickerScope
   searchTrailing?: React.ReactNode
   onAddRepo?: () => void
   renderTitle?: (label: string) => React.ReactNode
 }
 
-/**
- * Picker content shared by the desktop dialog and the mobile sheet. A remote scope supplies its own
- * server, so every host reads the linked server's sessions without wrapping the panel itself.
- */
 export function SessionPickerPanel(props: SessionPickerPanelProps) {
   if (!props.remote) return <SessionPickerPanelBody {...props} />
   return (
@@ -1330,12 +1344,6 @@ function SessionPickerPanelBody({
 
   const canToggleScope = scopeEnabled && activeTab === 'sessions'
 
-  /**
-   * The sessions tab re-activates itself to toggle the scope. Pointer activation records whether the
-   * tab was already selected before Radix activates it, so the click that follows only toggles a
-   * tab that was already current. Keyboard activation toggles on Enter/Space directly and suppresses
-   * the click Radix would otherwise synthesize for the same key press.
-   */
   const handleSessionsPointerDown = () => {
     scopePressRef.current = canToggleScope
   }
@@ -1357,7 +1365,10 @@ function SessionPickerPanelBody({
     <>
       <Tabs
         value={activeTab}
-        onValueChange={(value) => setActiveTab(value as SessionPickerTab)}
+        onValueChange={(value) => {
+          const parsedTab = sessionPickerTabSchema.safeParse(value)
+          if (parsedTab.success) setActiveTab(parsedTab.data)
+        }}
         className="flex min-h-0 w-full min-w-0 flex-1 flex-col gap-0"
       >
         <div className="shrink-0 px-4 pt-4 sm:px-0 sm:pt-6">
@@ -1481,8 +1492,8 @@ export function SessionPickerDialog({
         onEscapeKeyDown={() => onOpenChange(false)}
         onOpenAutoFocus={(event) => {
           event.preventDefault()
-          if (!hasFinePointer) {
-            ;(event.currentTarget as HTMLElement).focus()
+          if (!hasFinePointer && event.currentTarget instanceof HTMLElement) {
+            event.currentTarget.focus()
           }
         }}
       >

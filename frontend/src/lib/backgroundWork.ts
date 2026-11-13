@@ -1,4 +1,5 @@
-import { unwrapSandboxExecCommand } from '@opencode-manager/shared/utils'
+import { unwrapSandboxExecCommand, type JsonObject } from '@opencode-manager/shared/utils'
+import { z } from 'zod'
 import type { SessionMessageAssistantTool, SessionMessageInfo } from '@opencode-manager/shared/opencode'
 import type { ShellInfo } from '@/api/opencode'
 import type { SessionStatusType } from '@/stores/sessionStatusStore'
@@ -65,14 +66,14 @@ function shellExitRecord(directory: string, id: string): ShellExitRecord | undef
   return shellExitRecords.get(shellExitKey(directory, id))
 }
 
-export function toolMetadata(part: SessionMessageAssistantTool): Record<string, unknown> {
+export function toolMetadata(part: SessionMessageAssistantTool): JsonObject {
   if (part.state.status === 'streaming') return {}
   return part.state.metadata ?? {}
 }
 
 function metadataString(part: SessionMessageAssistantTool, key: string): string | undefined {
-  const value = toolMetadata(part)[key]
-  return typeof value === 'string' ? value : undefined
+  const value = z.string().safeParse(toolMetadata(part)[key])
+  return value.success ? value.data : undefined
 }
 
 export function subagentSessionID(part: SessionMessageAssistantTool): string | undefined {
@@ -281,24 +282,24 @@ function shellNoticeFromMessage(message: SessionMessageInfo): { shellID: string;
   if (message.type !== 'synthetic' && message.type !== 'system') return undefined
   const metadata = message.metadata
   if (!metadata || metadata.source !== 'shell') return undefined
-  const shellID = metadata.shellID
-  if (typeof shellID !== 'string' || !shellID) return undefined
+  const shellID = z.string().min(1).safeParse(metadata.shellID)
+  if (!shellID.success) return undefined
   const exit = metadata.exit
   const completed = metadata.state === 'completed' && (exit === undefined || exit === 0)
-  return { shellID, outcome: completed ? 'completed' : 'failed' }
+  return { shellID: shellID.data, outcome: completed ? 'completed' : 'failed' }
 }
 
 function shellLabel(part: SessionMessageAssistantTool): string {
   if (part.state.status === 'streaming') return 'Shell command'
-  const command = part.state.input.command
-  if (typeof command !== 'string' || !command) return 'Shell command'
-  return unwrapSandboxExecCommand(command)
+  const command = z.string().min(1).safeParse(part.state.input.command)
+  if (!command.success) return 'Shell command'
+  return unwrapSandboxExecCommand(command.data)
 }
 
 function subagentLabel(part: SessionMessageAssistantTool): string {
   if (part.state.status !== 'streaming') {
-    const description = part.state.input.description
-    if (typeof description === 'string' && description) return description
+    const description = z.string().min(1).safeParse(part.state.input.description)
+    if (description.success) return description.data
   }
   return 'Sub-agent task'
 }

@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
+import { z } from 'zod'
+import { JsonObjectSchema, parseJsonText, type JsonValue } from '@opencode-manager/shared/utils'
 import { createManagerSessionTransfer } from '../src/remote-session.js'
 import type { SessionTransferData } from '@opencode-manager/shared/opencode'
 
@@ -6,19 +8,37 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-const transferData = {
-  info: { id: 'ses_a' },
-  messages: [{ id: 'msg_1' }],
-} as unknown as SessionTransferData
+const transferData: SessionTransferData = {
+  info: {
+    id: 'ses_a',
+    projectID: 'proj_1',
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    time: { created: 1, updated: 2 },
+    location: { directory: '/Users/x/repo' },
+  },
+  messages: [{ id: 'msg_1', time: { created: 1 }, type: 'user', text: 'hello' }],
+}
+
+const ImportRequestBodySchema = z.object({
+  location: z.object({ directory: z.string() }),
+  info: JsonObjectSchema,
+  messages: z.array(JsonObjectSchema),
+})
+
+const ReminderRequestBodySchema = z.object({ text: z.string(), resume: z.boolean() })
+
+function jsonResponse(status: number, body: JsonValue): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+}
+
+async function requestedJson<Value>(init: RequestInit | undefined, schema: z.ZodType<Value>): Promise<Value> {
+  return schema.parse(parseJsonText(String(init?.body)))
+}
 
 describe('createManagerSessionTransfer', () => {
   it('imports through the manager proxy with basic auth and the remote location', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ data: { id: 'ses_new' } }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
-    )
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { data: { id: 'ses_new' } }))
     vi.stubGlobal('fetch', fetchMock)
 
     const transfer = createManagerSessionTransfer('https://manager.example', 'tok_123')
@@ -28,22 +48,17 @@ describe('createManagerSessionTransfer', () => {
     expect(fetchMock).toHaveBeenCalledOnce()
     const [url, init] = fetchMock.mock.calls[0]!
     expect(String(url)).toBe('https://manager.example/api/opencode-proxy/api/experimental/session/import')
-    expect(init.method).toBe('POST')
-    const headers = init.headers as Headers
+    expect(init?.method).toBe('POST')
+    const headers = new Headers(init?.headers)
     expect(headers.get('authorization')).toBe(`Basic ${Buffer.from('opencode:tok_123').toString('base64')}`)
-    const body = JSON.parse(init.body as string) as Record<string, unknown>
+    const body = await requestedJson(init, ImportRequestBodySchema)
     expect(body.location).toEqual({ directory: '/workspace/repo' })
     expect(body.info).toEqual(transferData.info)
     expect(body.messages).toEqual(transferData.messages)
   })
 
   it('sends a synthetic reminder through the manager proxy', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ data: {} }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
-    )
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { data: {} }))
     vi.stubGlobal('fetch', fetchMock)
 
     const transfer = createManagerSessionTransfer('https://manager.example', 'tok_123')
@@ -51,14 +66,10 @@ describe('createManagerSessionTransfer', () => {
 
     const [url, init] = fetchMock.mock.calls[0]!
     expect(String(url)).toBe('https://manager.example/api/opencode-proxy/api/session/ses_new/synthetic')
-    const body = JSON.parse(init.body as string) as Record<string, unknown>
+    const body = await requestedJson(init, ReminderRequestBodySchema)
     expect(body.text).toBe('hello')
     expect(body.resume).toBe(false)
   })
-
-  function jsonResponse(status: number, body: unknown) {
-    return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
-  }
 
   it('reports an existing Manager session', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { data: { id: 'ses_a' } }))

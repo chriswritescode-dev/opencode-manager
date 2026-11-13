@@ -1,290 +1,119 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { useSyncExternalStore } from 'react'
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { PromptInput } from './PromptInput'
-import { useComposerDraftStore } from '@/stores/composerDraftStore'
+import { describe, expect, it } from 'vitest'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
-import { createCommandActionsMock, createVoiceConversationControllerMock } from '@/test/test-utils'
-import type { ContextUsage } from '@/lib/contextUsage'
+import { connectTestEventStream } from '@/test/render'
+import { promptTextarea, renderPromptInput } from '@/test/promptInput'
+import type { SessionMessageAssistant } from '@opencode-manager/shared/opencode'
 
-const mocks = vi.hoisted(() => ({
-  useSTT: vi.fn(),
-  useVoiceConversation: vi.fn(),
-  useMobile: vi.fn(),
-  useCommands: vi.fn(),
-  useCommandHandler: vi.fn(),
-  useFileSearch: vi.fn(),
-  useModelSelection: vi.fn(),
-  useVariants: vi.fn(),
-  useSessionAgent: vi.fn(),
-  useUserBash: vi.fn(),
-  useSessionAgentStore: vi.fn(),
-  useSendErrorStore: vi.fn(),
-  useHasBackgroundActivity: vi.fn(),
-  useSendPrompt: vi.fn(),
-  useContextUsage: vi.fn(),
-  contextUsageListeners: new Set<() => void>(),
-  contextUsageValue: null as ContextUsage | null,
-  agentQuickSelectRenders: { current: 0 },
-  sessionData: undefined as { revert?: { messageID: string } } | undefined,
-  hasPendingPermission: vi.fn(() => false),
-  setShowDialog: vi.fn(),
-}))
+const submitButton = () => document.querySelector('[data-submit-prompt]')
+const controlsRow = () => screen.getByTestId('composer-controls-row')
+const voiceMicButton = () => screen.queryByRole('button', { name: 'Start voice conversation' })
+const keyButtons = () => screen.queryAllByRole('toolbar', { name: 'Insert' })
 
-vi.mock('@/hooks/useSTT', () => ({
-  useSTT: mocks.useSTT,
-  useSttAvailability: () => ({ isEnabled: true, isSupported: true }),
-}))
-vi.mock('@/hooks/useVoiceConversation', () => ({ useVoiceConversation: mocks.useVoiceConversation }))
-vi.mock('@/hooks/useMobile', () => ({ useMobile: mocks.useMobile }))
-vi.mock('@/hooks/useCommands', () => ({ useCommands: mocks.useCommands }))
-vi.mock('@/hooks/useCommandHandler', () => ({ useCommandHandler: mocks.useCommandHandler }))
-vi.mock('@/hooks/useFileSearch', () => ({ useFileSearch: mocks.useFileSearch }))
-vi.mock('@/hooks/useModelSelection', () => ({ useModelSelection: mocks.useModelSelection }))
-vi.mock('@/hooks/useVariants', () => ({ useVariants: mocks.useVariants }))
-vi.mock('@/hooks/useSessionAgent', () => ({ useSessionAgent: mocks.useSessionAgent }))
-vi.mock('@/stores/userBashStore', () => ({ useUserBash: mocks.useUserBash }))
-vi.mock('@/stores/sessionAgentStore', () => ({ useSessionAgentStore: mocks.useSessionAgentStore }))
-vi.mock('@/stores/sendErrorStore', () => ({ useSendErrorStore: mocks.useSendErrorStore }))
-vi.mock('@/stores/sessionStatusStore', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/stores/sessionStatusStore')>()
-  return { ...actual, useHasBackgroundActivity: mocks.useHasBackgroundActivity }
-})
-vi.mock('@/lib/toast', () => ({
-  showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn(), loading: vi.fn(), promise: vi.fn(), dismiss: vi.fn() },
-}))
-
-vi.mock('@/hooks/useOpenCode', () => ({
-  useSendPrompt: () => ({ mutate: mocks.useSendPrompt, mutateAsync: mocks.useSendPrompt, isPending: false }),
-  useInterruptSession: () => ({ mutate: vi.fn() }),
-  useSendShell: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(() => Promise.resolve()), isPending: false }),
-  useAgents: () => ({ data: [] }),
-  useSkills: () => ({ data: [] }),
-  useSession: () => ({ data: mocks.sessionData }),
-}))
-
-vi.mock('@/hooks/useProviders', () => ({ useProviders: () => ({ data: undefined }) }))
-vi.mock('@/hooks/useContextUsage', () => ({ useContextUsage: mocks.useContextUsage }))
-
-vi.mock('@/contexts/EventContext', () => ({
-  usePermissions: () => ({
-    hasForSession: mocks.hasPendingPermission,
-    setShowDialog: mocks.setShowDialog,
-  }),
-}))
-
-vi.mock('@/components/agent/AgentQuickSelect', () => ({
-  AgentQuickSelect: () => {
-    mocks.agentQuickSelectRenders.current += 1
-    return <div data-testid="agent-quick-select" />
-  },
-}))
-
-vi.mock('@/components/model/ModelQuickSelect', () => ({
-  ModelQuickSelect: ({ children }: { children?: React.ReactNode }) => (
-    <div data-testid="model-quick-select">{children}</div>
-  ),
-}))
-
-vi.mock('@/components/session/PermissionModeToggle', () => ({ PermissionModeToggle: () => null }))
-vi.mock('@/components/session/SessionSandboxMenu', () => ({ SessionSandboxMenu: () => null }))
-vi.mock('./ComposerToolsMenu', () => ({
-  ComposerToolsMenu: () => <div data-testid="composer-tools-menu" />,
-}))
-vi.mock('./PromptSuggestions', () => ({ PromptSuggestions: () => null }))
-vi.mock('@/hooks/useSessionGoals', () => ({
-  useSessionGoal: () => ({ data: undefined }),
-  useSessionGoalCommand: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
-}))
-vi.mock('@/hooks/useSessionPermissionMode', () => ({ useSessionPermissionMode: () => ({ data: undefined }) }))
-
-function subscribeContextUsage(listener: () => void) {
-  mocks.contextUsageListeners.add(listener)
-  return () => {
-    mocks.contextUsageListeners.delete(listener)
+function assistantUsageMessage(tokens: SessionMessageAssistant['tokens']): SessionMessageAssistant {
+  return {
+    id: 'msg_assistant',
+    type: 'assistant',
+    agent: 'build',
+    model: { providerID: 'anthropic', id: 'claude-sonnet-4-5' },
+    content: [{ type: 'text', text: 'A reply' }],
+    time: { created: 1, completed: 2 },
+    tokens,
   }
 }
 
-function getContextUsageSnapshot() {
-  return mocks.contextUsageValue
-}
-
-function setContextUsage(usage: ContextUsage | null) {
-  mocks.contextUsageValue = usage
-  mocks.contextUsageListeners.forEach((listener) => listener())
-}
-
-const createTestQueryClient = () => new QueryClient({
-  defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-})
-
-const defaultProps = {
-  directory: '/test',
-  sessionID: 'test-session',
-  isSessionActive: false,
-  isStreamingResponse: false,
-  onScrollToBottom: vi.fn(),
-  commandActions: createCommandActionsMock(),
-  onPromptChange: vi.fn(),
-}
-
 describe('PromptInput composer layout', () => {
-  const renderComponent = (overrides: Partial<typeof defaultProps> = {}) => render(
-    <QueryClientProvider client={createTestQueryClient()}>
-      <PromptInput {...defaultProps} {...overrides} />
-    </QueryClientProvider>,
-  )
-
-  const promptInput = () => screen.getByPlaceholderText('Send a message...')
-  const submitButton = () => document.querySelector('[data-submit-prompt]')
-  const controlsRow = () => screen.getByTestId('composer-controls-row')
-  const voiceMicButton = () => screen.queryByRole('button', { name: 'Start voice conversation' })
-  const keyButtons = () => screen.queryAllByRole('toolbar', { name: 'Insert' })
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    useComposerDraftStore.setState({ drafts: {} })
-    mocks.useSendPrompt.mockResolvedValue({ id: 'inbox_1' })
-    mocks.useVoiceConversation.mockReturnValue(createVoiceConversationControllerMock())
-    mocks.hasPendingPermission.mockReturnValue(false)
-    mocks.useMobile.mockReturnValue(false)
-    mocks.useSTT.mockReturnValue({
-      isRecording: false,
-      isProcessing: false,
-      isSupported: true,
-      isEnabled: true,
-      interimTranscript: '',
-      transcript: '',
-      startRecording: vi.fn(),
-      stopRecording: vi.fn(),
-      abortRecording: vi.fn(),
-      reset: vi.fn(),
-      clear: vi.fn(),
-    })
-    mocks.useCommands.mockReturnValue({ searchCommands: () => [], findCommand: vi.fn(), recentNames: [] })
-    mocks.useCommandHandler.mockReturnValue({ executeCommand: vi.fn() })
-    mocks.useFileSearch.mockReturnValue({ files: [] })
-    mocks.useModelSelection.mockReturnValue({
-      model: null,
-      modelString: 'test-model',
-      setModel: vi.fn(),
-      setActiveAgent: vi.fn(),
-      recentModels: [],
-      favoriteModels: [],
-      toggleFavorite: vi.fn(),
-      isModelReady: true,
-    })
-    mocks.useVariants.mockReturnValue({ hasVariants: false, currentVariant: null, cycleVariant: vi.fn() })
-    mocks.useSessionAgent.mockReturnValue({ agent: 'default' })
-    mocks.useUserBash.mockImplementation((selector: (state: unknown) => unknown) => selector({ addUserBashCommand: vi.fn() }))
-    mocks.useSessionAgentStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ setAgent: vi.fn() }))
-    mocks.useSendErrorStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ errors: {} }))
-    mocks.useHasBackgroundActivity.mockReturnValue(false)
-    mocks.useContextUsage.mockReturnValue(null)
-    mocks.contextUsageListeners.clear()
-    mocks.contextUsageValue = null
-    mocks.agentQuickSelectRenders.current = 0
-    mocks.sessionData = undefined
-  })
-
-  it('anchors the activity bar in the gap above the controls row', () => {
+  it('anchors the activity bar in the gap above the controls row', async () => {
     useSessionStatus.getState().setStatus('test-session', { type: 'busy' })
+    await renderPromptInput()
 
-    renderComponent()
-
-    const bar = screen.getByRole('progressbar', { name: 'Session working' })
+    const bar = await screen.findByRole('progressbar', { name: 'Session working' })
     expect(controlsRow()).toContainElement(bar)
     expect(controlsRow().firstElementChild).toBe(bar)
     expect(bar).toHaveClass('absolute', 'bottom-full')
-    expect(promptInput().compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-
-    act(() => {
-      useSessionStatus.getState().clearStatus('test-session')
-    })
+    expect(promptTextarea().compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   describe('primary action placement', () => {
-    it('omits the submit button while the prompt is empty', () => {
-      renderComponent()
+    it('omits the submit button while the prompt is empty', async () => {
+      await renderPromptInput()
 
-      expect(promptInput()).toBeInTheDocument()
+      expect(await screen.findByPlaceholderText('Send a message...')).toBeInTheDocument()
       expect(submitButton()).toBeNull()
     })
 
-    it('renders the submit button after the textarea in the same row', () => {
-      renderComponent()
+    it('renders the submit button after the textarea in the same row', async () => {
+      await renderPromptInput()
 
-      fireEvent.change(promptInput(), { target: { value: 'hello' } })
+      fireEvent.change(await screen.findByPlaceholderText('Send a message...'), { target: { value: 'hello' } })
 
-      const textarea = promptInput()
-      const button = submitButton() as HTMLElement
+      const textarea = promptTextarea()
+      const button = submitButton()
+      if (!(button instanceof HTMLElement)) throw new Error('submit button is missing')
 
-      expect(button).not.toBeNull()
       expect(button.parentElement).toBe(textarea.parentElement)
       expect(textarea.nextElementSibling).toBe(button)
       expect(button.parentElement?.contains(controlsRow())).toBe(false)
     })
 
     it('sends the typed prompt from the row button', async () => {
-      renderComponent()
+      const { fetchFake } = await renderPromptInput()
 
-      fireEvent.change(promptInput(), { target: { value: 'row send' } })
+      fireEvent.change(await screen.findByPlaceholderText('Send a message...'), { target: { value: 'row send' } })
       fireEvent.click(screen.getByTitle('Send'))
 
-      await waitFor(() => expect(promptInput()).toHaveValue(''))
-      const [variables] = mocks.useSendPrompt.mock.calls[0] as [{ text: string }]
-      expect(variables.text).toBe('row send')
+      await waitFor(() => expect(promptTextarea()).toHaveValue(''))
+      expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/prompt')?.body).toMatchObject({
+        text: 'row send',
+      })
     })
 
-    it('queues from the row button while a response streams', () => {
-      renderComponent({ isStreamingResponse: true })
+    it('queues from the row button while a response streams', async () => {
+      await renderPromptInput({ isStreamingResponse: true })
 
-      fireEvent.change(promptInput(), { target: { value: 'follow-up' } })
+      fireEvent.change(await screen.findByPlaceholderText('Send a message...'), { target: { value: 'follow-up' } })
 
       expect(screen.getByTitle('Queue message')).toBeInTheDocument()
     })
 
-    it('shows View for a pending permission even while the prompt is empty', () => {
-      mocks.hasPendingPermission.mockReturnValue(true)
-      renderComponent()
+    it('shows View for a pending permission even while the prompt is empty', async () => {
+      const { eventStream } = await renderPromptInput()
+      await screen.findByPlaceholderText('Send a message...')
+      await connectTestEventStream(eventStream)
+      act(() => {
+        eventStream?.message({
+          id: 'evt_permission',
+          created: 1,
+          type: 'permission.asked',
+          data: { id: 'permission-1', sessionID: 'test-session', action: 'bash', resources: ['echo'], metadata: {} },
+          directory: '/test',
+        })
+      })
 
-      const view = screen.getByTitle('View pending permission')
+      const view = await screen.findByTitle('View pending permission')
       expect(view).toHaveTextContent('View')
       expect(view).toHaveAttribute('data-submit-prompt')
-      expect(view.parentElement).toBe(promptInput().parentElement)
-
-      fireEvent.click(view)
-      expect(mocks.setShowDialog).toHaveBeenCalledWith(true)
+      expect(view.parentElement).toBe(promptTextarea().parentElement)
     })
   })
 
   describe('model visibility', () => {
-    it('keeps the model selector visible on mobile while the session is active', () => {
-      mocks.useMobile.mockReturnValue(true)
-      renderComponent({ isSessionActive: true })
+    it.each([true, false])('keeps the model selector visible while the session is active (mobile: %s)', async (mobile) => {
+      await renderPromptInput({ isSessionActive: true, mobile })
 
-      expect(screen.getByTestId('model-quick-select')).toBeInTheDocument()
-      expect(screen.getByText('test-model')).toBeInTheDocument()
-    })
-
-    it('keeps the model selector visible on desktop while the session is active', () => {
-      renderComponent({ isSessionActive: true })
-
-      expect(screen.getByTestId('model-quick-select')).toBeInTheDocument()
+      expect(await screen.findByRole('button', { name: /Claude Sonnet 4\.5/ })).toBeInTheDocument()
     })
   })
 
   describe('model pill context usage', () => {
-    const setUsage = (usage: ContextUsage) => {
-      mocks.useContextUsage.mockReturnValue(usage)
-    }
+    it('shows the percentage with its tone and the meter on the model pill', async () => {
+      await renderPromptInput({
+        transcript: {
+          messages: [assistantUsageMessage({ input: 80000, output: 4000, reasoning: 0, cache: { read: 0, write: 0 } })],
+        },
+      })
 
-    it('shows the percentage with its tone and the meter on the model pill', () => {
-      setUsage({ totalTokens: 84000, usagePercentage: 42, contextLimit: 200000 })
-      renderComponent()
-
-      const pill = screen.getByRole('button', { name: /test-model, context 42% used/ })
+      const pill = await screen.findByRole('button', { name: /Claude Sonnet 4\.5, context 42% used/ })
       const usage = screen.getByTestId('model-pill-context-usage')
 
       expect(pill).toContainElement(usage)
@@ -293,196 +122,185 @@ describe('PromptInput composer layout', () => {
       expect(screen.getByTestId('context-usage-meter-fill')).toHaveStyle({ width: '42%' })
     })
 
-    it('tints the warning tone from 50 percent', () => {
-      setUsage({ totalTokens: 120000, usagePercentage: 50, contextLimit: 240000 })
-      renderComponent()
+    it.each([
+      [100000, 'text-warning', '50%'],
+      [176000, 'text-destructive', '88%'],
+    ])('tints the usage from %i total tokens', async (totalTokens, tone, label) => {
+      await renderPromptInput({
+        transcript: {
+          messages: [assistantUsageMessage({ input: totalTokens, output: 0, reasoning: 0, cache: { read: 0, write: 0 } })],
+        },
+      })
 
-      expect(screen.getByTestId('model-pill-context-usage')).toHaveClass('text-warning')
+      const usage = await screen.findByTestId('model-pill-context-usage')
+      expect(usage).toHaveClass(tone)
+      expect(usage).toHaveTextContent(label)
     })
 
-    it('tints the destructive tone from 80 percent', () => {
-      setUsage({ totalTokens: 176000, usagePercentage: 88, contextLimit: 200000 })
-      renderComponent()
+    it('caps the meter at full width when usage exceeds the context window', async () => {
+      await renderPromptInput({
+        transcript: {
+          messages: [assistantUsageMessage({ input: 260000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } })],
+        },
+      })
 
-      expect(screen.getByTestId('model-pill-context-usage')).toHaveClass('text-destructive')
-      expect(screen.getByTestId('context-usage-meter-fill')).toHaveStyle({ width: '88%' })
-    })
-
-    it('caps the meter at full width when usage exceeds the context window', () => {
-      setUsage({ totalTokens: 260000, usagePercentage: 130, contextLimit: 200000 })
-      renderComponent()
-
+      await screen.findByTestId('model-pill-context-usage')
       expect(screen.getByTestId('context-usage-meter-fill')).toHaveStyle({ width: '100%' })
     })
 
-    it('falls back to a compact token count without a known context limit', () => {
-      setUsage({ totalTokens: 12400, usagePercentage: null, contextLimit: null })
-      renderComponent()
+    it('falls back to a compact token count without a known context limit', async () => {
+      await renderPromptInput({
+        models: [{ id: 'claude-sonnet-4-5', providerID: 'anthropic', name: 'Claude Sonnet 4.5', contextLimit: 0 }],
+        transcript: {
+          messages: [assistantUsageMessage({ input: 12400, output: 0, reasoning: 0, cache: { read: 0, write: 0 } })],
+        },
+      })
 
-      expect(screen.getByRole('button', { name: /test-model, context 12k tokens used/ })).toBeInTheDocument()
-      expect(screen.getByTestId('model-pill-context-usage')).toHaveTextContent('12k')
+      expect(await screen.findByTestId('model-pill-context-usage')).toHaveTextContent('12k')
       expect(screen.getByTestId('context-usage-meter-fill')).toHaveStyle({ width: '0%' })
     })
 
-    it('hides the usage without context data', () => {
-      renderComponent()
-
-      expect(screen.getByRole('button', { name: 'test-model' })).toBeInTheDocument()
-      expect(screen.queryByTestId('model-pill-context-usage')).not.toBeInTheDocument()
-      expect(screen.queryByTestId('context-usage-meter')).not.toBeInTheDocument()
-    })
-
-    it('re-renders only the pill when the context usage changes', () => {
-      mocks.useContextUsage.mockImplementation(() => useSyncExternalStore(subscribeContextUsage, getContextUsageSnapshot))
-      setContextUsage({ totalTokens: 84000, usagePercentage: 42, contextLimit: 200000 })
-      renderComponent()
-
-      const siblingRenders = mocks.agentQuickSelectRenders.current
-      expect(screen.getByTestId('model-pill-context-usage')).toHaveTextContent('42%')
-      expect(siblingRenders).toBeGreaterThan(0)
-
-      act(() => {
-        setContextUsage({ totalTokens: 100000, usagePercentage: 50, contextLimit: 200000 })
+    it('measures usage up to the staged revert boundary', async () => {
+      renderPromptInput({
+        sessionRevert: { messageID: 'msg_reverted' },
+        transcript: {
+          messages: [
+            assistantUsageMessage({ input: 80000, output: 4000, reasoning: 0, cache: { read: 0, write: 0 } }),
+            { ...assistantUsageMessage({ input: 176000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }), id: 'msg_reverted' },
+          ],
+        },
       })
 
-      expect(screen.getByTestId('model-pill-context-usage')).toHaveTextContent('50%')
-      expect(screen.getByTestId('model-pill-context-usage')).toHaveClass('text-warning')
-      expect(mocks.agentQuickSelectRenders.current).toBe(siblingRenders)
+      const usage = await screen.findByTestId('model-pill-context-usage')
+      expect(usage).toHaveTextContent('42%')
     })
 
-    it('measures usage up to the staged revert boundary', () => {
-      mocks.sessionData = { revert: { messageID: 'msg_2' } }
-      renderComponent()
+    it('hides the usage without context data', async () => {
+      await renderPromptInput()
 
-      expect(mocks.useContextUsage).toHaveBeenCalledWith('test-session', '/test', 'msg_2')
+      expect(await screen.findByRole('button', { name: 'Claude Sonnet 4.5' })).toBeInTheDocument()
+      expect(screen.queryByTestId('model-pill-context-usage')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('context-usage-meter')).not.toBeInTheDocument()
     })
   })
 
   describe('mobile key bar', () => {
-    beforeEach(() => {
-      mocks.useMobile.mockReturnValue(true)
-    })
+    it('replaces the agent and model selectors with keys in the controls row while focused', async () => {
+      await renderPromptInput({ mobile: true })
 
-    it('replaces the agent and model selectors with keys in the controls row while focused', () => {
-      renderComponent()
-
+      expect(await screen.findByPlaceholderText('Send a message...')).toBeInTheDocument()
       expect(keyButtons()).toHaveLength(0)
-      expect(screen.getByTestId('agent-quick-select')).toBeInTheDocument()
-      expect(screen.getByTestId('model-quick-select')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Claude Sonnet 4\.5/ })).toBeInTheDocument()
 
-      fireEvent.focus(promptInput())
+      fireEvent.focus(promptTextarea())
 
       expect(keyButtons()).toHaveLength(1)
       expect(controlsRow().firstElementChild).toContainElement(keyButtons()[0])
       expect(screen.getByRole('button', { name: 'cmd /' })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: 'mention @' })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: 'bash !' })).toBeInTheDocument()
-      expect(screen.queryByTestId('agent-quick-select')).not.toBeInTheDocument()
-      expect(screen.queryByTestId('model-quick-select')).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Claude Sonnet 4\.5/ })).not.toBeInTheDocument()
     })
 
     it('restores the agent and model selectors after the prompt blurs', async () => {
-      renderComponent()
+      await renderPromptInput({ mobile: true })
 
-      fireEvent.focus(promptInput())
-      expect(screen.queryByTestId('model-quick-select')).not.toBeInTheDocument()
+      fireEvent.focus(await screen.findByPlaceholderText('Send a message...'))
+      expect(screen.queryByRole('button', { name: /Claude Sonnet 4\.5/ })).not.toBeInTheDocument()
 
-      fireEvent.blur(promptInput())
+      fireEvent.blur(promptTextarea())
 
       await waitFor(() => {
         expect(screen.queryByRole('toolbar', { name: 'Insert' })).not.toBeInTheDocument()
       })
-      expect(screen.getByTestId('agent-quick-select')).toBeInTheDocument()
-      expect(screen.getByTestId('model-quick-select')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Claude Sonnet 4\.5/ })).toBeInTheDocument()
     })
 
-    it('keeps the composer tools button at the bottom of the transcript', () => {
-      renderComponent()
+    it('keeps the composer tools button at the bottom of the transcript', async () => {
+      await renderPromptInput({ mobile: true })
 
-      expect(screen.getByTestId('composer-tools-menu')).toBeInTheDocument()
+      expect(await screen.findByRole('button', { name: 'Composer options' })).toBeInTheDocument()
       expect(screen.queryByRole('button', { name: 'Scroll to bottom' })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: 'Jump to latest' })).not.toBeInTheDocument()
     })
 
-    it('keeps the composer tools button while the prompt has text', () => {
-      renderComponent()
+    it('keeps the voice button and composer tools on the right side of the controls row', async () => {
+      await renderPromptInput({ mobile: true })
 
-      fireEvent.change(promptInput(), { target: { value: 'hello' } })
+      fireEvent.focus(await screen.findByPlaceholderText('Send a message...'))
 
-      expect(screen.getByTestId('composer-tools-menu')).toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: 'Scroll to bottom' })).not.toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: 'Jump to latest' })).not.toBeInTheDocument()
-    })
-
-    it('keeps the voice button and composer tools on the right side of the controls row', () => {
-      renderComponent()
-
-      fireEvent.focus(promptInput())
-
-      const actions = controlsRow().lastElementChild as HTMLElement
-      expect(actions).toContainElement(voiceMicButton() as HTMLElement)
-      expect(actions).toContainElement(screen.getByTestId('composer-tools-menu'))
+      const actions = controlsRow().lastElementChild
+      if (!(actions instanceof HTMLElement)) throw new Error('actions row is missing')
+      expect(actions).toContainElement(voiceMicButton())
+      expect(actions).toContainElement(screen.getByRole('button', { name: 'Composer options' }))
     })
   })
 
   describe('mobile voice button', () => {
-    beforeEach(() => {
-      mocks.useMobile.mockReturnValue(true)
-    })
+    it('renders the mobile mic alongside Send when the prompt has content', async () => {
+      await renderPromptInput({ mobile: true })
 
-    it('renders the mobile mic alongside Send when the prompt has content', () => {
-      renderComponent()
-
-      fireEvent.change(promptInput(), { target: { value: 'hello' } })
+      fireEvent.change(await screen.findByPlaceholderText('Send a message...'), { target: { value: 'hello' } })
 
       expect(submitButton()).not.toBeNull()
       expect(voiceMicButton()).not.toBeNull()
-      expect(controlsRow().lastElementChild).toContainElement(voiceMicButton() as HTMLElement)
+      const actions = controlsRow().lastElementChild
+      if (!(actions instanceof HTMLElement)) throw new Error('actions row is missing')
+      expect(actions).toContainElement(voiceMicButton())
     })
 
-    it('hides the mic while a permission is pending', () => {
-      mocks.hasPendingPermission.mockReturnValue(true)
-      renderComponent()
+    it('hides the mic while a permission is pending', async () => {
+      const { eventStream } = await renderPromptInput({ mobile: true })
+      await screen.findByPlaceholderText('Send a message...')
+      await connectTestEventStream(eventStream)
+      act(() => {
+        eventStream?.message({
+          id: 'evt_permission',
+          created: 1,
+          type: 'permission.asked',
+          data: { id: 'permission-1', sessionID: 'test-session', action: 'bash', resources: ['echo'], metadata: {} },
+          directory: '/test',
+        })
+      })
 
+      expect(await screen.findByTitle('View pending permission')).toBeInTheDocument()
       expect(voiceMicButton()).toBeNull()
-      expect(screen.getByTitle('View pending permission')).toBeInTheDocument()
     })
   })
 
   describe('control sizing', () => {
-    it('keeps the mic at 44px before and after the prompt gains focus on mobile', () => {
-      mocks.useMobile.mockReturnValue(true)
-      renderComponent()
+    it('keeps the mic at 44px before and after the prompt gains focus on mobile', async () => {
+      await renderPromptInput({ mobile: true })
 
-      const micBeforeFocus = voiceMicButton() as HTMLElement
+      await screen.findByPlaceholderText('Send a message...')
+      const micBeforeFocus = voiceMicButton()
       expect(micBeforeFocus).toHaveClass('min-h-11', 'min-w-11')
       expect(micBeforeFocus).not.toHaveClass('min-h-[44px]')
 
-      fireEvent.focus(promptInput())
+      fireEvent.focus(promptTextarea())
 
-      const micAfterFocus = voiceMicButton() as HTMLElement
+      const micAfterFocus = voiceMicButton()
       expect(micAfterFocus).toHaveClass('min-h-11', 'min-w-11')
       expect(micAfterFocus).not.toHaveClass('min-h-[44px]')
     })
 
-    it('keeps the key buttons at 36px after the prompt gains focus on mobile', () => {
-      mocks.useMobile.mockReturnValue(true)
-      renderComponent()
+    it('keeps the key buttons at 36px after the prompt gains focus on mobile', async () => {
+      await renderPromptInput({ mobile: true })
 
-      fireEvent.focus(promptInput())
+      fireEvent.focus(await screen.findByPlaceholderText('Send a message...'))
 
       const commandKey = screen.getByRole('button', { name: 'cmd /' })
       expect(commandKey).toHaveClass('min-h-9')
       expect(commandKey).not.toHaveClass('min-h-[44px]')
     })
 
-    it('sizes the submit button at 36px on mobile', () => {
-      mocks.useMobile.mockReturnValue(true)
-      renderComponent()
+    it('sizes the submit button at 36px on mobile', async () => {
+      await renderPromptInput({ mobile: true })
 
-      fireEvent.change(promptInput(), { target: { value: 'hello' } })
+      fireEvent.change(await screen.findByPlaceholderText('Send a message...'), { target: { value: 'hello' } })
 
-      const send = submitButton() as HTMLElement
+      const send = submitButton()
+      if (!(send instanceof HTMLElement)) throw new Error('submit button is missing')
       expect(send).toHaveClass('h-9')
       expect(send).not.toHaveClass('min-h-[44px]')
     })

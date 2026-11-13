@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 import { execFileSync } from 'child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'fs'
 import { rm } from 'fs/promises'
@@ -15,15 +15,6 @@ import {
 } from '../../src/services/archive'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 
-vi.mock('../../src/utils/logger', () => ({
-  logger: {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  },
-}))
-
 function runGit(cwd: string, args: string[]): void {
   execFileSync('git', args, { cwd, stdio: 'ignore' })
 }
@@ -38,7 +29,7 @@ function listZipEntries(zipPath: string): string[] {
 async function readStreamToBuffer(stream: ReadStream): Promise<Buffer> {
   const chunks: Buffer[] = []
   for await (const chunk of stream) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string))
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
   }
   return Buffer.concat(chunks)
 }

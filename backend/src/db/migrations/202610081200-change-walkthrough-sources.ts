@@ -1,9 +1,10 @@
+import { selectTableColumns } from '../rows'
 import type { Migration } from '../migration-runner'
 
 const migration: Migration = {
   id: '202610081200-change-walkthrough-sources',
   up(db) {
-    const columns = db.prepare('PRAGMA table_info(change_walkthroughs)').all() as Array<{ name: string }>
+    const columns = selectTableColumns(db, 'change_walkthroughs')
     if (columns.some((column) => column.name === 'source_key')) {
       return
     }

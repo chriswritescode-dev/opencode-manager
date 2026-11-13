@@ -2,9 +2,12 @@ import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { request as playwrightRequest, type APIRequestContext, type APIResponse, type Page } from '@playwright/test'
+import { z } from 'zod'
 import { test, expect } from './fixtures'
 import { createMockRepo, createSession, startMockProvider, type MockProvider } from './mockProvider'
 import { BASE_URL, STORAGE_STATE } from './env'
+import type { JsonValue } from '../shared/src/utils/json'
+import { JsonValueSchema } from '../shared/src/utils/json'
 
 const SECRET_NAME = 'E2E_SECRET_TOKEN'
 const VARIABLE_NAME = 'E2E_BASE_URL'
@@ -25,11 +28,11 @@ function locationQuery(directory: string): string {
   return new URLSearchParams({ 'location[directory]': directory }).toString()
 }
 
-async function requireOk(response: APIResponse, label: string): Promise<unknown> {
+async function requireOk(response: APIResponse, label: string): Promise<JsonValue | null> {
   if (!response.ok()) {
     throw new Error(`${label} failed: ${response.status()} ${await response.text()}`)
   }
-  return response.status() === 204 ? null : response.json()
+  return response.status() === 204 ? null : JsonValueSchema.parse(await response.json())
 }
 
 async function runShell(request: APIRequestContext, directory: string, command: string): Promise<string> {
@@ -40,7 +43,7 @@ async function runShell(request: APIRequestContext, directory: string, command: 
     }),
     'start shell',
   )
-  const shellID = (started as { data: { id: string } }).data.id
+  const shellID = z.object({ data: z.object({ id: z.string() }) }).parse(started).data.id
   try {
     let output = ''
     await expect
@@ -74,7 +77,7 @@ async function readTerminalOutput(page: Page, repoId: number, ptyID: string, com
         socket.onopen = () => socket.send(input)
         socket.onerror = () => reject(new Error('terminal socket failed'))
         socket.onmessage = (event: MessageEvent<string | ArrayBuffer>) => {
-          text += typeof event.data === 'string' ? event.data : decoder.decode(event.data, { stream: true })
+          text += event.data instanceof ArrayBuffer ? decoder.decode(event.data, { stream: true }) : event.data
           if (!text.includes(needle)) return
           clearTimeout(timer)
           socket.close()
@@ -142,10 +145,20 @@ test.afterAll(async () => {
 
 test.describe('repository secrets', () => {
   test('injects mapped values into agent shells only once the project file is trusted', async ({ request }) => {
-    const config = (await requireOk(
-      await request.get(`/api/repos/${secretsRepo.id}/project-config`),
-      'read project config',
-    )) as { repoFile: { trusted: boolean; hash: string | null; executable: { env?: Record<string, string> } | null } }
+    const config = z
+      .object({
+        repoFile: z.object({
+          trusted: z.boolean(),
+          hash: z.string().nullable(),
+          executable: z.object({ env: z.record(z.string(), z.string()).optional() }).nullable().optional(),
+        }),
+      })
+      .parse(
+        await requireOk(
+          await request.get(`/api/repos/${secretsRepo.id}/project-config`),
+          'read project config',
+        ),
+      )
     expect(config.repoFile.trusted).toBe(false)
     expect(config.repoFile.executable?.env).toEqual({
       [SECRET_NAME]: `\${{ secrets.${SECRET_NAME} }}`,
@@ -168,10 +181,12 @@ test.describe('repository secrets', () => {
 
   test('injects mapped values into repo terminals', async ({ page, request }) => {
     await page.goto(`/repos/${secretsRepo.id}`)
-    const terminal = (await requireOk(
-      await request.post(`/api/repos/${secretsRepo.id}/terminals`, { data: { title: 'secrets' } }),
-      'create terminal',
-    )) as { id: string }
+    const terminal = z.object({ id: z.string() }).parse(
+      await requireOk(
+        await request.post(`/api/repos/${secretsRepo.id}/terminals`, { data: { title: 'secrets' } }),
+        'create terminal',
+      ),
+    )
     try {
       const output = await readTerminalOutput(
         page,

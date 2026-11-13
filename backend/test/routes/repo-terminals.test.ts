@@ -1,115 +1,132 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { mkdirSync } from 'node:fs'
+import path from 'node:path'
 import { Hono } from 'hono'
+import { z } from 'zod'
+import { TerminalInfoSchema } from '@opencode-manager/shared/schemas'
+import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
 import type { Database } from 'bun:sqlite'
-import type { Repo } from '@opencode-manager/shared/types'
 import { createRepoTerminalRoutes } from '../../src/routes/repo-terminals'
-import { TerminalNotFoundError } from '../../src/services/terminal'
-import type { TerminalService } from '../../src/services/terminal'
-import type { GitAuthService } from '../../src/services/git-auth'
-import type { OpenCodeClient } from '../../src/services/opencode/client'
+import { TerminalService } from '../../src/services/terminal'
+import { CredentialProvider } from '../../src/services/credential-provider'
 import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
+import { createStubRepoEnvService } from '../helpers/stub-repo-env-service'
+import { createGitAuthService } from '../helpers/git-fixtures'
+import { readJson } from '../helpers/read-json'
+import { createTestDatabase, seedRepo } from '../helpers/test-database'
+import { createTempWorkspace, type TempWorkspace } from '../helpers/test-env'
 
-vi.mock('../../src/services/repo', () => ({
-  resolveRepoOrAssistant: vi.fn(),
-  resolveRepoWorkingDirectory: vi.fn(),
-  listRepoSiblings: vi.fn(),
-}))
+type PtyInfo = Awaited<ReturnType<OpenCodeApi['pty']['list']>>['data'][number]
+type PtyApiOverrides = Partial<OpenCodeApi['pty']>
 
-import { resolveRepoOrAssistant, resolveRepoWorkingDirectory, listRepoSiblings } from '../../src/services/repo'
-
-const database = {} as Database
-const gitAuthService = { getGitEnvironment: vi.fn(() => ({})) } as unknown as GitAuthService
-const openCodeClient: OpenCodeClient = createStubOpenCodeClient()
-
-const readyRepo = { id: 1, fullPath: '/tmp/repo', cloneStatus: 'ready' } as Repo
-const assistantRepo = { id: 0, fullPath: '/tmp/repo', cloneStatus: 'ready' } as Repo
-
-const shellTerminal = {
-  id: 'pty-1',
-  title: 'Terminal',
-  kind: 'shell',
-  cwd: '/tmp/repo',
-  status: 'running',
-} as const
-
-function createService(overrides: Partial<TerminalService> = {}): TerminalService {
-  return {
-    list: vi.fn(async () => []),
-    create: vi.fn(async () => shellTerminal),
-    requireTerminal: vi.fn(async () => shellTerminal),
-    resize: vi.fn(async () => undefined),
-    remove: vi.fn(async () => undefined),
-    removeAll: vi.fn(async () => undefined),
-    ...overrides,
-  } as unknown as TerminalService
-}
-
-function createApp(service: TerminalService): Hono {
-  const app = new Hono()
-  app.route('/', createRepoTerminalRoutes(database, gitAuthService, openCodeClient, service))
-  return app
-}
+const TerminalsEnvelopeSchema = z.object({ terminals: z.array(TerminalInfoSchema) })
+const ErrorEnvelopeSchema = z.object({ error: z.string() })
+const SuccessEnvelopeSchema = z.object({ success: z.boolean() })
 
 const jsonHeaders = { 'Content-Type': 'application/json' }
 
-describe('Repo Terminal Routes', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    vi.mocked(resolveRepoOrAssistant).mockImplementation((_db, id) =>
-      id === 1 ? readyRepo : id === 0 ? assistantRepo : null,
-    )
-    vi.mocked(resolveRepoWorkingDirectory).mockImplementation(async (_repo, directory) => {
-      if (directory === undefined || directory === '/tmp/repo') return '/tmp/repo'
-      return null
+function buildPty(overrides: Partial<PtyInfo> = {}): PtyInfo {
+  return {
+    id: 'pty-1',
+    title: 'Terminal',
+    command: '/bin/sh',
+    args: [],
+    cwd: '/repo',
+    status: 'running',
+    pid: 4242,
+    ...overrides,
+  }
+}
+
+describe('repo terminal routes', () => {
+  let workspace: TempWorkspace
+  let db: Database
+  let repoFullPath: string
+  let repoId = 0
+  let foreignDirectory: string
+
+  function createApp(ptyOverrides: PtyApiOverrides = {}): Hono {
+    const client = createStubOpenCodeClient({
+      api: {
+        pty: {
+          list: async (input) => ({ location: { directory: input?.location?.directory ?? '/repo' }, data: [buildPty()] }),
+          create: async (input) => ({ location: { directory: input?.location?.directory ?? '/repo' }, data: buildPty({ title: input?.title ?? 'Terminal' }) }),
+          update: async (input) => ({ location: { directory: input?.location?.directory ?? '/repo' }, data: buildPty() }),
+          remove: async () => undefined,
+          ...ptyOverrides,
+        },
+      },
     })
-    vi.mocked(listRepoSiblings).mockResolvedValue([])
+    const service = new TerminalService(
+      { client, baseUrl: () => 'http://127.0.0.1:5551', includeLocalEnv: false },
+      new CredentialProvider(db),
+      createStubRepoEnvService(),
+    )
+    const app = new Hono()
+    app.route('/', createRepoTerminalRoutes(db, createGitAuthService(), client, service))
+    return app
+  }
+
+  beforeEach(() => {
+    workspace = createTempWorkspace('ocm-terminal-routes-')
+    db = createTestDatabase()
+    const repo = seedRepo(db, { localPath: 'repo' })
+    repoId = repo.id
+    repoFullPath = repo.fullPath
+    mkdirSync(repoFullPath, { recursive: true })
+    foreignDirectory = path.join(workspace.path, 'other')
+    mkdirSync(foreignDirectory, { recursive: true })
+  })
+
+  afterEach(() => {
+    db.close()
+    workspace.restore()
   })
 
   describe('GET /:id/terminals', () => {
     it('returns the terminals for the resolved directory', async () => {
-      const terminals = [{ ...shellTerminal }]
-      const list = vi.fn(async () => terminals)
-      const res = await createApp(createService({ list })).request('/1/terminals')
+      const res = await createApp().request(`/${repoId}/terminals`)
+      const body = await readJson(res, TerminalsEnvelopeSchema)
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ terminals })
-      expect(list).toHaveBeenCalledWith('/tmp/repo')
+      expect(body.terminals).toEqual([{ id: 'pty-1', title: 'Terminal', kind: 'shell', cwd: '/repo', status: 'running' }])
     })
 
     it('returns 400 for a non-numeric repo id', async () => {
-      const res = await createApp(createService()).request('/abc/terminals')
+      const res = await createApp().request('/abc/terminals')
       expect(res.status).toBe(400)
     })
 
     it('resolves the assistant repo when assistant access is allowed', async () => {
-      const terminals = [{ ...shellTerminal }]
-      const list = vi.fn(async () => terminals)
-      const res = await createApp(createService({ list })).request('/0/terminals')
+      const res = await createApp().request('/0/terminals')
+      const body = await readJson(res, TerminalsEnvelopeSchema)
 
       expect(res.status).toBe(200)
-      expect(list).toHaveBeenCalledWith('/tmp/repo')
+      expect(body.terminals).toHaveLength(1)
     })
 
     it('returns 404 for an unknown repo', async () => {
-      vi.mocked(resolveRepoOrAssistant).mockReturnValue(null)
-      const res = await createApp(createService()).request('/2/terminals')
+      const res = await createApp().request('/999/terminals')
+      const body = await readJson(res, ErrorEnvelopeSchema)
 
       expect(res.status).toBe(404)
-      expect(await res.json()).toEqual({ error: 'Repo not found' })
+      expect(body.error).toBe('Repo not found')
     })
 
     it('returns 400 for a foreign directory', async () => {
-      const res = await createApp(createService()).request('/1/terminals?directory=/tmp/other')
+      const res = await createApp().request(`/${repoId}/terminals?directory=${encodeURIComponent(foreignDirectory)}`)
+      const body = await readJson(res, ErrorEnvelopeSchema)
 
       expect(res.status).toBe(400)
-      expect(await res.json()).toEqual({ error: 'Directory is not part of this repository' })
+      expect(body.error).toBe('Directory is not part of this repository')
     })
 
     it('returns 502 when the terminal service fails', async () => {
-      const list = vi.fn(async () => {
-        throw Object.assign(new Error('upstream failed'), { _tag: 'UnknownError' })
-      })
-      const res = await createApp(createService({ list })).request('/1/terminals')
+      const res = await createApp({
+        list: async () => {
+          throw Object.assign(new Error('upstream failed'), { _tag: 'UnknownError' })
+        },
+      }).request(`/${repoId}/terminals`)
 
       expect(res.status).toBe(502)
     })
@@ -117,45 +134,41 @@ describe('Repo Terminal Routes', () => {
 
   describe('POST /:id/terminals', () => {
     it('creates a shell with the default name', async () => {
-      const create = vi.fn(async () => shellTerminal)
-      const res = await createApp(createService({ create })).request('/1/terminals', {
+      const res = await createApp().request(`/${repoId}/terminals`, {
         method: 'POST',
         headers: jsonHeaders,
         body: JSON.stringify({}),
       })
+      const body = await readJson(res, TerminalInfoSchema)
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual(shellTerminal)
-      expect(create).toHaveBeenCalledWith('/tmp/repo', { kind: 'shell', name: 'Terminal' })
+      expect(body).toMatchObject({ id: 'pty-1', title: 'Terminal', kind: 'shell' })
     })
 
-    it('creates a shell with the requested title and directory', async () => {
-      const create = vi.fn(async () => shellTerminal)
-      const res = await createApp(createService({ create })).request('/1/terminals', {
+    it('creates a shell with the requested title', async () => {
+      const res = await createApp().request(`/${repoId}/terminals`, {
         method: 'POST',
         headers: jsonHeaders,
-        body: JSON.stringify({ directory: '/tmp/repo', title: 'My shell' }),
+        body: JSON.stringify({ title: 'My shell' }),
       })
+      const body = await readJson(res, TerminalInfoSchema)
 
       expect(res.status).toBe(200)
-      expect(create).toHaveBeenCalledWith('/tmp/repo', { kind: 'shell', name: 'My shell' })
+      expect(body.title).toBe('My shell')
     })
 
     it('returns 400 for an invalid body', async () => {
-      const create = vi.fn(async () => shellTerminal)
-      const res = await createApp(createService({ create })).request('/1/terminals', {
+      const res = await createApp().request(`/${repoId}/terminals`, {
         method: 'POST',
         headers: jsonHeaders,
         body: JSON.stringify({ title: 'a'.repeat(81) }),
       })
 
       expect(res.status).toBe(400)
-      expect(create).not.toHaveBeenCalled()
     })
 
     it('returns 404 for an unknown repo', async () => {
-      vi.mocked(resolveRepoOrAssistant).mockReturnValue(null)
-      const res = await createApp(createService()).request('/2/terminals', {
+      const res = await createApp().request('/999/terminals', {
         method: 'POST',
         headers: jsonHeaders,
         body: JSON.stringify({}),
@@ -167,50 +180,49 @@ describe('Repo Terminal Routes', () => {
 
   describe('PATCH /:id/terminals/:ptyID', () => {
     it('resizes a known terminal', async () => {
-      const requireTerminal = vi.fn(async () => shellTerminal)
-      const resize = vi.fn(async () => undefined)
-      const res = await createApp(createService({ requireTerminal, resize })).request('/1/terminals/pty-1', {
+      let receivedSize: { cols: number; rows: number } | null = null
+      const res = await createApp({
+        update: async (input) => {
+          receivedSize = { cols: input?.size?.cols ?? 0, rows: input?.size?.rows ?? 0 }
+          return { location: { directory: input?.location?.directory ?? '/repo' }, data: buildPty() }
+        },
+      }).request(`/${repoId}/terminals/pty-1`, {
         method: 'PATCH',
         headers: jsonHeaders,
-        body: JSON.stringify({ directory: '/tmp/repo', cols: 80, rows: 24 }),
+        body: JSON.stringify({ directory: repoFullPath, cols: 80, rows: 24 }),
       })
+      const body = await readJson(res, SuccessEnvelopeSchema)
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ success: true })
-      expect(requireTerminal).toHaveBeenCalledWith('/tmp/repo', 'pty-1')
-      expect(resize).toHaveBeenCalledWith('/tmp/repo', 'pty-1', { cols: 80, rows: 24 })
+      expect(body.success).toBe(true)
+      expect(receivedSize).toEqual({ cols: 80, rows: 24 })
     })
 
     it('returns 400 for invalid resize bounds', async () => {
-      const requireTerminal = vi.fn(async () => shellTerminal)
-      const app = createApp(createService({ requireTerminal }))
+      const app = createApp()
 
       for (const body of ['{"cols":0,"rows":24}', '{"cols":80}', '{"cols":80,"rows":501}', '{"cols":1.5,"rows":24}']) {
-        const res = await app.request('/1/terminals/pty-1', { method: 'PATCH', headers: jsonHeaders, body })
+        const res = await app.request(`/${repoId}/terminals/pty-1`, { method: 'PATCH', headers: jsonHeaders, body })
         expect(res.status).toBe(400)
       }
-
-      expect(requireTerminal).not.toHaveBeenCalled()
     })
 
     it('returns 404 for an unknown PTY id', async () => {
-      const requireTerminal = vi.fn(async () => {
-        throw new TerminalNotFoundError('missing')
-      })
-      const res = await createApp(createService({ requireTerminal })).request('/1/terminals/missing', {
-        method: 'PATCH',
-        headers: jsonHeaders,
-        body: JSON.stringify({ cols: 80, rows: 24 }),
-      })
+      const res = await createApp({ list: async (input) => ({ location: { directory: input?.location?.directory ?? '/repo' }, data: [] }) })
+        .request(`/${repoId}/terminals/missing`, {
+          method: 'PATCH',
+          headers: jsonHeaders,
+          body: JSON.stringify({ cols: 80, rows: 24 }),
+        })
 
       expect(res.status).toBe(404)
     })
 
     it('returns 400 for a foreign directory', async () => {
-      const res = await createApp(createService()).request('/1/terminals/pty-1', {
+      const res = await createApp().request(`/${repoId}/terminals/pty-1`, {
         method: 'PATCH',
         headers: jsonHeaders,
-        body: JSON.stringify({ directory: '/tmp/other', cols: 80, rows: 24 }),
+        body: JSON.stringify({ directory: foreignDirectory, cols: 80, rows: 24 }),
       })
 
       expect(res.status).toBe(400)
@@ -219,25 +231,22 @@ describe('Repo Terminal Routes', () => {
 
   describe('DELETE /:id/terminals/:ptyID', () => {
     it('removes a known terminal', async () => {
-      const requireTerminal = vi.fn(async () => shellTerminal)
-      const remove = vi.fn(async () => undefined)
-      const res = await createApp(createService({ requireTerminal, remove })).request('/1/terminals/pty-1?directory=/tmp/repo', {
-        method: 'DELETE',
-      })
+      let removedPtyId = ''
+      const res = await createApp({
+        remove: async (input) => {
+          removedPtyId = input.ptyID
+        },
+      }).request(`/${repoId}/terminals/pty-1?directory=${encodeURIComponent(repoFullPath)}`, { method: 'DELETE' })
+      const body = await readJson(res, SuccessEnvelopeSchema)
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ success: true })
-      expect(requireTerminal).toHaveBeenCalledWith('/tmp/repo', 'pty-1')
-      expect(remove).toHaveBeenCalledWith('/tmp/repo', 'pty-1')
+      expect(body.success).toBe(true)
+      expect(removedPtyId).toBe('pty-1')
     })
 
     it('returns 404 for an unknown PTY id', async () => {
-      const requireTerminal = vi.fn(async () => {
-        throw new TerminalNotFoundError('missing')
-      })
-      const res = await createApp(createService({ requireTerminal })).request('/1/terminals/missing', {
-        method: 'DELETE',
-      })
+      const res = await createApp({ list: async (input) => ({ location: { directory: input?.location?.directory ?? '/repo' }, data: [] }) })
+        .request(`/${repoId}/terminals/missing`, { method: 'DELETE' })
 
       expect(res.status).toBe(404)
     })

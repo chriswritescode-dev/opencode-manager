@@ -1,348 +1,271 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { Mock } from 'vitest'
 import { Hono } from 'hono'
 import type { MiddlewareHandler } from 'hono'
-import { createAuthenticatedOpenCodeProxyRoutes } from '../../src/routes/opencode-auth-proxy'
-import { FetchOpenCodeClient, type OpenCodeClient } from '../../src/services/opencode/client'
-import { OpenCodeSupervisor } from '../../src/services/opencode-supervisor'
-import type { SettingsService } from '../../src/services/settings'
-
-const isLifecycleInitializedMock = vi.hoisted(() => vi.fn().mockReturnValue(true))
-
-vi.mock('../../src/services/opencode-single-server', () => ({
-  opencodeServerManager: { isLifecycleInitialized: isLifecycleInitializedMock },
-}))
-
-const forwardRawMock = vi.hoisted(() => vi.fn<OpenCodeClient['forwardRaw']>(async () => new Response('ok', { status: 200 })))
-
-vi.mock('../../src/services/opencode/client', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../src/services/opencode/client')>()),
-  createOpenCodeClient: vi.fn(),
-}))
+import type { JsonValue } from '@opencode-manager/shared/utils'
+import { parseJsonText } from '@opencode-manager/shared/utils'
+import {
+  createAuthenticatedOpenCodeProxyRoutes,
+  type OpenCodeLifecycleGate,
+  type OpenCodeProxyClient,
+} from '../../src/routes/opencode-auth-proxy'
+import { FetchOpenCodeClient } from '../../src/services/opencode/client'
+import { OpenCodeSupervisor, type OpenCodeSupervisorManager } from '../../src/services/opencode-supervisor'
+import { createFetchStub } from '../helpers/fetch-stub'
 
 const passThroughAuth: MiddlewareHandler = async (c, next) => {
   await next()
 }
 
-function buildApp() {
+const okResponse = () => new Response('ok', { status: 200 })
+
+function createLifecycleGate(initialized: boolean): OpenCodeLifecycleGate & { initialized: boolean } {
+  return {
+    initialized,
+    isLifecycleInitialized() {
+      return this.initialized
+    },
+  }
+}
+
+function createProxyClient(forwardRaw: Mock<OpenCodeProxyClient['forwardRaw']>): OpenCodeProxyClient {
+  return { forwardRaw }
+}
+
+function buildApp(
+  forwardRaw: Mock<OpenCodeProxyClient['forwardRaw']>,
+  lifecycleGate: OpenCodeLifecycleGate = createLifecycleGate(true),
+) {
   const app = new Hono()
-  app.route(
-    '/api/opencode',
-    createAuthenticatedOpenCodeProxyRoutes({ forwardRaw: forwardRawMock } as unknown as OpenCodeClient, passThroughAuth),
-  )
+  app.route('/api/opencode', createAuthenticatedOpenCodeProxyRoutes(createProxyClient(forwardRaw), passThroughAuth, lifecycleGate))
   return app
 }
 
+function forwardedRequest(forwardRaw: Mock<OpenCodeProxyClient['forwardRaw']>): Request {
+  const request = forwardRaw.mock.calls[0]?.[0]
+  if (!request) throw new Error('the proxy did not forward a request')
+  return request
+}
+
+async function forwardedJson(forwardRaw: Mock<OpenCodeProxyClient['forwardRaw']>): Promise<JsonValue> {
+  return parseJsonText(await forwardedRequest(forwardRaw).text())
+}
+
+function createSupervisorManager(
+  lifecycle: { initialized: boolean },
+  overrides: Partial<OpenCodeSupervisorManager> = {},
+): OpenCodeSupervisorManager {
+  return {
+    start: vi.fn<OpenCodeSupervisorManager['start']>(async () => undefined),
+    stop: vi.fn<OpenCodeSupervisorManager['stop']>(async () => undefined),
+    restart: vi.fn<OpenCodeSupervisorManager['restart']>(async () => undefined),
+    checkHealth: vi.fn<OpenCodeSupervisorManager['checkHealth']>(async () => true),
+    isOperationInProgress: vi.fn<OpenCodeSupervisorManager['isOperationInProgress']>(() => false),
+    clearStartupError: vi.fn<OpenCodeSupervisorManager['clearStartupError']>(),
+    getLastStartupError: vi.fn<OpenCodeSupervisorManager['getLastStartupError']>(() => null),
+    isLastStartupErrorNonRecoverable: vi.fn<OpenCodeSupervisorManager['isLastStartupErrorNonRecoverable']>(() => false),
+    setLifecycleInitialized: vi.fn<OpenCodeSupervisorManager['setLifecycleInitialized']>((value: boolean) => {
+      lifecycle.initialized = value
+    }),
+    getPort: vi.fn<OpenCodeSupervisorManager['getPort']>(() => 5551),
+    getVersion: vi.fn<OpenCodeSupervisorManager['getVersion']>(() => '2.0.15'),
+    getMinVersion: vi.fn<OpenCodeSupervisorManager['getMinVersion']>(() => '2.0.15'),
+    isVersionSupported: vi.fn<OpenCodeSupervisorManager['isVersionSupported']>(() => true),
+    ...overrides,
+  }
+}
+
 describe('authenticated opencode proxy routes', () => {
+  let forwardRaw: Mock<OpenCodeProxyClient['forwardRaw']>
+
   beforeEach(() => {
-    vi.clearAllMocks()
-    isLifecycleInitializedMock.mockReturnValue(true)
-    forwardRawMock.mockResolvedValue(new Response('ok', { status: 200 }))
+    forwardRaw = vi.fn<OpenCodeProxyClient['forwardRaw']>(async () => okResponse())
   })
 
-  it('returns 503 and never forwards when the OpenCode lifecycle is not initialized', async () => {
-    isLifecycleInitializedMock.mockReturnValue(false)
-    const app = buildApp()
-    const res = await app.request('/api/opencode/session/ses_1/message')
+  it.each([
+    ['an ordinary endpoint', '/api/opencode/session/ses_1/message', { method: 'GET' }],
+    ['an MCP auth endpoint', '/api/opencode/mcp/evil-server/auth', { method: 'POST' }],
+    ['an MCP authenticate endpoint', '/api/opencode/mcp/evil-server/auth/authenticate', { method: 'POST' }],
+    ['the session shell endpoint', '/api/opencode/session/ses_1/shell', { method: 'POST' }],
+  ])('returns 503 and never forwards %s when the OpenCode lifecycle is not initialized', async (_label, path, init) => {
+    const res = await buildApp(forwardRaw, createLifecycleGate(false)).request(path, init)
+
     expect(res.status).toBe(503)
-    expect(forwardRawMock).not.toHaveBeenCalled()
+    expect(forwardRaw).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['an ordinary endpoint', '/api/opencode/session/ses_1/message', { method: 'GET' }],
+    ['an MCP auth endpoint', '/api/opencode/mcp/evil-server/auth', { method: 'POST' }],
+    ['an MCP authenticate endpoint', '/api/opencode/mcp/evil-server/auth/authenticate', { method: 'POST' }],
+    ['the session shell endpoint', '/api/opencode/session/ses_1/shell', { method: 'POST' }],
+    ['a percent-encoded PTY path', '/api/opencode/%70ty', { method: 'POST' }],
+  ])('forwards %s when the lifecycle is initialized', async (_label, path, init) => {
+    const res = await buildApp(forwardRaw).request(path, init)
+
+    expect(res.status).toBe(200)
+    expect(forwardRaw).toHaveBeenCalledTimes(1)
+    expect(forwardedRequest(forwardRaw).url).toContain(path)
   })
 
   it('returns 503 through the proxy gate on a below-threshold health failure and reopens once the supervisor recovers', async () => {
     const lifecycle = { initialized: true }
-    isLifecycleInitializedMock.mockImplementation(() => lifecycle.initialized)
-    const manager = {
-      start: vi.fn().mockResolvedValue(undefined),
-      stop: vi.fn().mockResolvedValue(undefined),
-      isOperationInProgress: vi.fn(() => false),
-      checkHealth: vi.fn().mockResolvedValue(true),
-      restart: vi.fn().mockResolvedValue(undefined),
-      clearStartupError: vi.fn(),
-      getLastStartupError: vi.fn(() => null),
-      isLastStartupErrorNonRecoverable: vi.fn(() => false),
-      setLifecycleInitialized: vi.fn((value: boolean) => { lifecycle.initialized = value }),
-      getPort: vi.fn(() => 5551),
-      getVersion: vi.fn(() => '2.0.15'),
-      getMinVersion: vi.fn(() => '2.0.15'),
-      isVersionSupported: vi.fn(() => true),
-    }
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, {} as SettingsService, {
-      failureThreshold: 2,
-      watchEnabled: false,
-    })
+    const checkHealth = vi.fn<OpenCodeSupervisorManager['checkHealth']>(async () => true)
+    const manager = createSupervisorManager(lifecycle, { checkHealth })
+    const supervisor = new OpenCodeSupervisor(
+      manager,
+      { getLastKnownGoodConfig: () => null },
+      { failureThreshold: 2, watchEnabled: false },
+    )
     await supervisor.start()
+    const gate: OpenCodeLifecycleGate = { isLifecycleInitialized: () => lifecycle.initialized }
 
-    const healthyRes = await buildApp().request('/api/opencode/session/ses_1/message')
+    const healthyRes = await buildApp(forwardRaw, gate).request('/api/opencode/session/ses_1/message')
     expect(healthyRes.status).toBe(200)
-    expect(forwardRawMock).toHaveBeenCalledTimes(1)
+    expect(forwardRaw).toHaveBeenCalledTimes(1)
 
-    manager.checkHealth.mockResolvedValueOnce(false)
+    checkHealth.mockResolvedValueOnce(false)
     const status = await supervisor.checkNow('manual')
     expect(status.state).toBe('unhealthy')
     expect(lifecycle.initialized).toBe(false)
 
-    const blockedRes = await buildApp().request('/api/opencode/session/ses_1/message')
+    const blockedRes = await buildApp(forwardRaw, gate).request('/api/opencode/session/ses_1/message')
     expect(blockedRes.status).toBe(503)
-    expect(forwardRawMock).toHaveBeenCalledTimes(1)
+    expect(forwardRaw).toHaveBeenCalledTimes(1)
 
-    manager.checkHealth.mockResolvedValueOnce(true)
+    checkHealth.mockResolvedValueOnce(true)
     const recovered = await supervisor.checkNow('manual')
     expect(recovered.healthy).toBe(true)
     expect(lifecycle.initialized).toBe(true)
 
-    const reopenedRes = await buildApp().request('/api/opencode/session/ses_1/message')
+    const reopenedRes = await buildApp(forwardRaw, gate).request('/api/opencode/session/ses_1/message')
     expect(reopenedRes.status).toBe(200)
-    expect(forwardRawMock).toHaveBeenCalledTimes(2)
+    expect(forwardRaw).toHaveBeenCalledTimes(2)
   })
 
-  it('forwards ordinary endpoints when enforcement is off', async () => {
-    const app = buildApp()
-    const res = await app.request('/api/opencode/session/ses_1/message')
-    expect(res.status).toBe(200)
-    expect(forwardRawMock).toHaveBeenCalled()
-  })
-
-  it('returns 503 for MCP auth endpoints when the OpenCode lifecycle is not initialized', async () => {
-    isLifecycleInitializedMock.mockReturnValue(false)
-    const app = buildApp()
-    const res = await app.request('/api/opencode/mcp/evil-server/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    })
-    expect(res.status).toBe(503)
-    expect(forwardRawMock).not.toHaveBeenCalled()
-  })
-
-  it('forwards MCP auth endpoints through the lifecycle-gated proxy when initialized', async () => {
-    const app = buildApp()
-    const res = await app.request('/api/opencode/mcp/evil-server/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    })
-    expect(res.status).toBe(200)
-    expect(forwardRawMock).toHaveBeenCalledTimes(1)
-    const forwarded = forwardRawMock.mock.calls[0]![0] as Request
-    expect(forwarded.url).toContain('/api/opencode/mcp/evil-server/auth')
-  })
-
-  it('forwards MCP auth authenticate endpoints through the lifecycle-gated proxy when initialized', async () => {
-    const app = buildApp()
-    const res = await app.request('/api/opencode/mcp/evil-server/auth/authenticate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    })
-    expect(res.status).toBe(200)
-    expect(forwardRawMock).toHaveBeenCalledTimes(1)
-    const forwarded = forwardRawMock.mock.calls[0]![0] as Request
-    expect(forwarded.url).toContain('/api/opencode/mcp/evil-server/auth/authenticate')
-  })
-
-  it('forwards the session shell endpoint', async () => {
-    const app = buildApp()
-    const res = await app.request('/api/opencode/session/ses_1/shell', { method: 'POST' })
-    expect(res.status).toBe(200)
-    expect(forwardRawMock).toHaveBeenCalled()
-  })
-
-  it('forwards percent-encoded PTY paths when enforced', async () => {
-    const app = buildApp()
-    const res = await app.request('/api/opencode/%70ty', { method: 'POST' })
-    expect(res.status).toBe(200)
-    expect(forwardRawMock).toHaveBeenCalled()
-  })
-
-  it('forwards a PATCH /config mutation with plugins exactly when enforced', async () => {
-    const app = buildApp()
-    const res = await app.request('/api/opencode/config', {
+  it.each([
+    ['plugins', { theme: 'dark', plugin: ['opencode-plugin-npm'] }],
+    [
+      'local MCP servers and formatter config',
+      { formatter: { command: 'prettier' }, mcp: { local: { type: 'local', command: ['node', 'server.js'] } } },
+    ],
+    [
+      'LSP servers and experimental hooks',
+      {
+        lsp: { typescript: { command: ['typescript-language-server'] } },
+        experimental: { hook: { file_edited: [{ command: ['chmod', '+x', 'x'] }] }, chatMaxRetries: 4 },
+      },
+    ],
+    ['custom provider npm selectors', { model: 'x', provider: { evil: { npm: 'file:///repo/evil-provider.js' } } }],
+    ['a body without host-execution sections', { theme: 'dark' }],
+  ])('forwards a PATCH /config mutation with %s unchanged', async (_label, body) => {
+    const res = await buildApp(forwardRaw).request('/api/opencode/config', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ theme: 'dark', plugin: ['opencode-plugin-npm'] }),
+      body: JSON.stringify(body),
     })
+
     expect(res.status).toBe(200)
-    expect(forwardRawMock).toHaveBeenCalledTimes(1)
-    const forwarded = JSON.parse(await (forwardRawMock.mock.calls[0]![0] as Request).text()) as Record<string, unknown>
-    expect(forwarded).toEqual({ theme: 'dark', plugin: ['opencode-plugin-npm'] })
+    expect(forwardRaw).toHaveBeenCalledTimes(1)
+    expect(await forwardedJson(forwardRaw)).toEqual(body)
   })
 
-  it('forwards a PATCH /config mutation with local MCP servers and formatter config exactly when enforced', async () => {
-    const app = buildApp()
-    const body = JSON.stringify({
-      formatter: { command: 'prettier' },
-      mcp: { local: { type: 'local', command: ['node', 'server.js'] } },
-    })
-    const res = await app.request('/api/opencode/config', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body,
-    })
-    expect(res.status).toBe(200)
-    const forwarded = JSON.parse(await (forwardRawMock.mock.calls[0]![0] as Request).text()) as Record<string, unknown>
-    expect(forwarded).toEqual(JSON.parse(body))
-  })
-
-  it('forwards a malformed PATCH /config body exactly when enforced', async () => {
-    const app = buildApp()
-    const res = await app.request('/api/opencode/config', {
+  it('forwards a malformed PATCH /config body unchanged', async () => {
+    const res = await buildApp(forwardRaw).request('/api/opencode/config', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: '{not json',
     })
+
     expect(res.status).toBe(200)
-    expect(forwardRawMock).toHaveBeenCalledTimes(1)
-    expect(await (forwardRawMock.mock.calls[0]![0] as Request).text()).toBe('{not json')
+    expect(await forwardedRequest(forwardRaw).text()).toBe('{not json')
   })
 
-  it('forwards PATCH /config mutations raw when enforcement is off', async () => {
-    const app = buildApp()
-    const res = await app.request('/api/opencode/config', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ theme: 'dark', plugin: ['opencode-plugin-npm'] }),
-    })
-    expect(res.status).toBe(200)
-    const forwarded = JSON.parse(await (forwardRawMock.mock.calls[0]![0] as Request).text()) as Record<string, unknown>
-    expect(forwarded.plugin).toEqual(['opencode-plugin-npm'])
-  })
-
-  it('forwards a local MCP server add when enforced', async () => {
-    const app = buildApp()
-    const res = await app.request('/api/opencode/mcp', {
+  it.each([
+    ['a local MCP server', { name: 'evil', config: { type: 'local', command: ['node', 'server.js'] } }],
+    ['a remote MCP server', { name: 'remote-server', config: { type: 'remote', url: 'https://example.com/mcp' } }],
+  ])('forwards an add of %s', async (_label, body) => {
+    const res = await buildApp(forwardRaw).request('/api/opencode/mcp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'evil',
-        config: { type: 'local', command: ['node', 'server.js'] },
-      }),
+      body: JSON.stringify(body),
     })
+
     expect(res.status).toBe(200)
-    expect(forwardRawMock).toHaveBeenCalledTimes(1)
-    const forwarded = JSON.parse(await (forwardRawMock.mock.calls[0]![0] as Request).text()) as Record<string, unknown>
-    expect(forwarded).toEqual({
-      name: 'evil',
-      config: { type: 'local', command: ['node', 'server.js'] },
-    })
+    expect(forwardRaw).toHaveBeenCalledTimes(1)
+    expect(await forwardedJson(forwardRaw)).toEqual(body)
   })
 
-  it('forwards a remote MCP server add when enforced', async () => {
-    const app = buildApp()
-    const res = await app.request('/api/opencode/mcp', {
+  it.each([
+    ['a well-known write', { type: 'wellknown', key: 'SSO_TOKEN', token: 't' }],
+    ['an api key write', { type: 'api', key: 'sk-test' }],
+    ['an oauth write', { type: 'oauth', access: 'access-token' }],
+  ])('forwards %s', async (_label, body) => {
+    const res = await buildApp(forwardRaw).request('/api/opencode/auth/sso.example.com', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+    expect(res.status).toBe(200)
+    expect(forwardRaw).toHaveBeenCalledTimes(1)
+    expect(await forwardedJson(forwardRaw)).toEqual(body)
+  })
+
+  function rpcUnavailable(): Response {
+    return new Response(
+      JSON.stringify({ _tag: 'RpcError', type: 'rpc.unavailable', message: 'RPC is unavailable: opencode.goal' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+
+  async function rpcCall(path: string): Promise<Response> {
+    return buildApp(forwardRaw).request(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'remote-server',
-        config: { type: 'remote', url: 'https://example.com/mcp' },
-      }),
+      body: JSON.stringify({ input: { sessionID: 'ses_1' } }),
     })
-    expect(res.status).toBe(200)
-    expect(forwardRawMock).toHaveBeenCalledTimes(1)
-    const forwarded = JSON.parse(await (forwardRawMock.mock.calls[0]![0] as Request).text()) as Record<string, unknown>
-    expect(forwarded).toEqual({
-      name: 'remote-server',
-      config: { type: 'remote', url: 'https://example.com/mcp' },
-    })
+  }
+
+  it('retries an RPC call once while the directory instance loads its RPCs', async () => {
+    forwardRaw
+      .mockResolvedValueOnce(rpcUnavailable())
+      .mockResolvedValueOnce(new Response(JSON.stringify({ output: null }), { status: 200 }))
+
+    vi.useFakeTimers()
+    try {
+      const pending = rpcCall('/api/opencode/rpc/opencode.goal/get')
+      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(1_000)
+      const res = await pending
+      expect(res.status).toBe(200)
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(forwardRaw).toHaveBeenCalledTimes(2)
+    expect(forwardRaw.mock.calls[1]?.[0].url).toContain('/rpc/opencode.goal/get')
   })
 
-  it('forwards MCP server adds raw when enforcement is off', async () => {
-    const app = buildApp()
-    const res = await app.request('/api/opencode/mcp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'local-server',
-        config: { type: 'local', command: ['node', 'server.js'] },
-      }),
-    })
-    expect(res.status).toBe(200)
-    const forwarded = JSON.parse(await (forwardRawMock.mock.calls[0]![0] as Request).text()) as { config: { type: string } }
-    expect(forwarded.config.type).toBe('local')
+  it('does not retry an unavailable RPC outside an RPC path', async () => {
+    forwardRaw.mockResolvedValueOnce(rpcUnavailable())
+
+    const res = await buildApp(forwardRaw).request('/api/opencode/session/ses_1/message', { method: 'POST' })
+
+    expect(res.status).toBe(400)
+    expect(forwardRaw).toHaveBeenCalledTimes(1)
   })
 
-  it('forwards a PATCH /config mutation with LSP servers and experimental hooks exactly when enforced', async () => {
-    const app = buildApp()
-    const body = JSON.stringify({
-      lsp: { typescript: { command: ['typescript-language-server'] } },
-      experimental: {
-        hook: { file_edited: [{ command: ['chmod', '+x', 'x'] }] },
-        chatMaxRetries: 4,
-      },
-    })
-    const res = await app.request('/api/opencode/config', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body,
-    })
-    expect(res.status).toBe(200)
-    const forwarded = JSON.parse(await (forwardRawMock.mock.calls[0]![0] as Request).text()) as Record<string, unknown>
-    expect(forwarded).toEqual(JSON.parse(body))
-  })
+  it('does not retry a different RPC failure', async () => {
+    forwardRaw.mockResolvedValueOnce(new Response(
+      JSON.stringify({ _tag: 'RpcError', type: 'rpc.failed', message: 'RPC failed' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    ))
 
-  it('forwards a PATCH /config mutation without host-execution sections unchanged when enforced', async () => {
-    const app = buildApp()
-    const res = await app.request('/api/opencode/config', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ theme: 'dark' }),
-    })
-    expect(res.status).toBe(200)
-    const forwarded = JSON.parse(await (forwardRawMock.mock.calls[0]![0] as Request).text()) as Record<string, unknown>
-    expect(forwarded).toEqual({ theme: 'dark' })
-  })
+    const res = await rpcCall('/api/opencode/rpc/opencode.goal/get')
 
-  it('forwards a well-known auth write when enforced', async () => {
-    const app = buildApp()
-    const res = await app.request('/api/opencode/auth/sso.example.com', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'wellknown', key: 'SSO_TOKEN', token: 't' }),
-    })
-    expect(res.status).toBe(200)
-    expect(forwardRawMock).toHaveBeenCalledTimes(1)
-    const forwarded = JSON.parse(await (forwardRawMock.mock.calls[0]![0] as Request).text()) as Record<string, unknown>
-    expect(forwarded).toEqual({ type: 'wellknown', key: 'SSO_TOKEN', token: 't' })
-  })
-
-  it('forwards api and oauth auth writes when enforced', async () => {
-    const app = buildApp()
-    const res = await app.request('/api/opencode/auth/anthropic', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'api', key: 'sk-test' }),
-    })
-    expect(res.status).toBe(200)
-    expect(forwardRawMock).toHaveBeenCalledTimes(1)
-    const forwarded = JSON.parse(await (forwardRawMock.mock.calls[0]![0] as Request).text()) as Record<string, unknown>
-    expect(forwarded).toEqual({ type: 'api', key: 'sk-test' })
-  })
-
-  it('forwards auth writes raw when enforcement is off', async () => {
-    const app = buildApp()
-    const res = await app.request('/api/opencode/auth/sso.example.com', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'wellknown', key: 'SSO_TOKEN', token: 't' }),
-    })
-    expect(res.status).toBe(200)
-    const forwarded = JSON.parse(await (forwardRawMock.mock.calls[0]![0] as Request).text()) as Record<string, unknown>
-    expect(forwarded.type).toBe('wellknown')
-  })
-
-  it('forwards a PATCH /config mutation with custom provider npm selectors exactly when enforced', async () => {
-    const app = buildApp()
-    const body = JSON.stringify({
-      model: 'x',
-      provider: {
-        evil: { npm: 'file:///repo/evil-provider.js' },
-        builtin: { options: { apiKey: 'k' } },
-      },
-    })
-    const res = await app.request('/api/opencode/config', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body,
-    })
-    expect(res.status).toBe(200)
-    expect(forwardRawMock).toHaveBeenCalledTimes(1)
-    const forwarded = JSON.parse(await (forwardRawMock.mock.calls[0]![0] as Request).text()) as Record<string, unknown>
-    expect(forwarded).toEqual(JSON.parse(body))
+    expect(res.status).toBe(400)
+    expect(forwardRaw).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -357,19 +280,17 @@ describe('authenticated opencode proxy streaming', () => {
       },
     })
 
-    let capturedInit: RequestInit | undefined
-    const fetchFn = async (_input: URL | Request | string, init?: RequestInit) => {
-      capturedInit = init
-      return new Response(upstreamBody, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
-    }
+    const fetchFn = createFetchStub(async () => (
+      new Response(upstreamBody, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    ))
     const client = new FetchOpenCodeClient({
       baseUrl: 'http://127.0.0.1:5551',
       basicAuth: '',
-      fetchFn: fetchFn as unknown as typeof fetch,
+      fetchFn,
     })
 
     const app = new Hono()
-    app.route('/api/opencode', createAuthenticatedOpenCodeProxyRoutes(client, passThroughAuth))
+    app.route('/api/opencode', createAuthenticatedOpenCodeProxyRoutes(client, passThroughAuth, createLifecycleGate(true)))
 
     const responsePromise = app.request('/api/opencode/event', {
       method: 'POST',
@@ -382,7 +303,9 @@ describe('authenticated opencode proxy streaming', () => {
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toBe('text/event-stream')
 
-    const reader = response.body!.getReader()
+    const body = response.body
+    if (!body) throw new Error('the proxied response has no body')
+    const reader = body.getReader()
     const first = await reader.read()
     expect(decoder.decode(first.value)).toBe('first-chunk')
 
@@ -392,6 +315,7 @@ describe('authenticated opencode proxy streaming', () => {
     upstreamController.close()
     await reader.cancel()
 
+    const capturedInit = fetchFn.mock.calls[0]?.[1]
     expect(capturedInit?.body).toBeInstanceOf(ReadableStream)
     expect(capturedInit?.duplex).toBe('half')
   })

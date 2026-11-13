@@ -1,624 +1,512 @@
-import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest'
-import { createFileRoutes } from '../../src/routes/files'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createReadStream, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { Hono } from 'hono'
-import type { ReadStream } from 'fs'
-import * as fileService from '../../src/services/files'
-import * as archiveService from '../../src/services/archive'
-import type { FileInfo, ChunkedFileInfo } from '@opencode-manager/shared'
+import { z } from 'zod'
+import type { Mock } from 'vitest'
+import {
+  ChunkedFileInfoSchema,
+  FileInfoSchema,
+  FileUploadResponseSchema,
+} from '@opencode-manager/shared/schemas'
+import type { FileInfo, FilePatchRequest } from '@opencode-manager/shared'
+import { createFileRoutes } from '../../src/routes/files'
+import type { FileArchiveRoutesService, FileRoutesService } from '../../src/routes/files'
+import type { RawFileMetadata } from '../../src/services/files'
+import { readJson } from '../helpers/read-json'
 
-interface FileUploadResult {
-  name: string
-  path: string
-  size: number
-  mimeType: string
+const ErrorResponseSchema = z.object({ error: z.string() })
+const SuccessResponseSchema = z.object({ success: z.literal(true) })
+const PatchResultSchema = z.object({ success: z.boolean(), totalLines: z.number() })
+
+interface FileServiceFakes {
+  getFile: Mock<FileRoutesService['getFile']>
+  getRawFileContent: Mock<FileRoutesService['getRawFileContent']>
+  getRawFileMetadata: Mock<FileRoutesService['getRawFileMetadata']>
+  getFileRange: Mock<FileRoutesService['getFileRange']>
+  uploadFile: Mock<FileRoutesService['uploadFile']>
+  createFileOrFolder: Mock<FileRoutesService['createFileOrFolder']>
+  deleteFileOrFolder: Mock<FileRoutesService['deleteFileOrFolder']>
+  renameOrMoveFile: Mock<FileRoutesService['renameOrMoveFile']>
+  applyFilePatches: Mock<FileRoutesService['applyFilePatches']>
 }
 
-vi.mock('../../src/utils/logger', () => ({
-  logger: {
-    info: vi.fn(),
-    error: vi.fn(),
-  },
-}))
+interface ArchiveServiceFakes {
+  createDirectoryArchive: Mock<FileArchiveRoutesService['createDirectoryArchive']>
+  getArchiveSize: Mock<FileArchiveRoutesService['getArchiveSize']>
+  getArchiveStream: Mock<FileArchiveRoutesService['getArchiveStream']>
+  deleteArchive: Mock<FileArchiveRoutesService['deleteArchive']>
+  getIgnoredPathsList: Mock<FileArchiveRoutesService['getIgnoredPathsList']>
+}
 
-vi.mock('@opencode-manager/shared/config/env', () => ({
-  getReposPath: vi.fn(() => '/test/repos'),
-  FILE_LIMITS: {
-    MAX_SIZE_BYTES: 1024 * 1024,
-    MAX_UPLOAD_SIZE_BYTES: 10 * 1024 * 1024,
-  },
-}))
+function createFileServiceFakes(): FileServiceFakes {
+  return {
+    getFile: vi.fn<FileRoutesService['getFile']>(),
+    getRawFileContent: vi.fn<FileRoutesService['getRawFileContent']>(),
+    getRawFileMetadata: vi.fn<FileRoutesService['getRawFileMetadata']>(),
+    getFileRange: vi.fn<FileRoutesService['getFileRange']>(),
+    uploadFile: vi.fn<FileRoutesService['uploadFile']>(),
+    createFileOrFolder: vi.fn<FileRoutesService['createFileOrFolder']>(),
+    deleteFileOrFolder: vi.fn<FileRoutesService['deleteFileOrFolder']>(),
+    renameOrMoveFile: vi.fn<FileRoutesService['renameOrMoveFile']>(),
+    applyFilePatches: vi.fn<FileRoutesService['applyFilePatches']>(),
+  }
+}
 
-vi.mock('../../src/services/files', () => ({
-  getFile: vi.fn(),
-  getRawFileContent: vi.fn(),
-  getRawFileMetadata: vi.fn(),
-  getFileRange: vi.fn(),
-  uploadFile: vi.fn(),
-  createFileOrFolder: vi.fn(),
-  deleteFileOrFolder: vi.fn(),
-  renameOrMoveFile: vi.fn(),
-  applyFilePatches: vi.fn(),
-}))
+function createArchiveServiceFakes(): ArchiveServiceFakes {
+  return {
+    createDirectoryArchive: vi.fn<FileArchiveRoutesService['createDirectoryArchive']>(),
+    getArchiveSize: vi.fn<FileArchiveRoutesService['getArchiveSize']>(),
+    getArchiveStream: vi.fn<FileArchiveRoutesService['getArchiveStream']>(),
+    deleteArchive: vi.fn<FileArchiveRoutesService['deleteArchive']>(),
+    getIgnoredPathsList: vi.fn<FileArchiveRoutesService['getIgnoredPathsList']>(),
+  }
+}
 
-vi.mock('../../src/services/archive', () => ({
-  createDirectoryArchive: vi.fn(),
-  getArchiveSize: vi.fn(),
-  getArchiveStream: vi.fn(),
-  deleteArchive: vi.fn(),
-}))
+const fileInfo: FileInfo = {
+  name: 'test.txt',
+  path: 'test-repo/test.txt',
+  isDirectory: false,
+  size: 100,
+  mimeType: 'text/plain',
+  content: Buffer.from('test content').toString('base64'),
+  lastModified: new Date(),
+}
 
-const getFile = fileService.getFile as MockedFunction<typeof fileService.getFile>
-const getRawFileContent = fileService.getRawFileContent as MockedFunction<typeof fileService.getRawFileContent>
-const getRawFileMetadata = fileService.getRawFileMetadata as MockedFunction<typeof fileService.getRawFileMetadata>
-const getFileRange = fileService.getFileRange as MockedFunction<typeof fileService.getFileRange>
-const uploadFile = fileService.uploadFile as MockedFunction<typeof fileService.uploadFile>
-const createFileOrFolder = fileService.createFileOrFolder as MockedFunction<typeof fileService.createFileOrFolder>
-const deleteFileOrFolder = fileService.deleteFileOrFolder as MockedFunction<typeof fileService.deleteFileOrFolder>
-const renameOrMoveFile = fileService.renameOrMoveFile as MockedFunction<typeof fileService.renameOrMoveFile>
-const applyFilePatches = fileService.applyFilePatches as MockedFunction<typeof fileService.applyFilePatches>
+const directoryInfo: FileInfo = {
+  name: 'src',
+  path: 'test-repo/src',
+  isDirectory: true,
+  size: 0,
+  children: [
+    {
+      name: 'file.ts',
+      path: 'test-repo/src/file.ts',
+      isDirectory: false,
+      size: 200,
+      lastModified: new Date(),
+    },
+  ],
+  lastModified: new Date(),
+}
 
-const createDirectoryArchive = archiveService.createDirectoryArchive as MockedFunction<typeof archiveService.createDirectoryArchive>
-const getArchiveSize = archiveService.getArchiveSize as MockedFunction<typeof archiveService.getArchiveSize>
-const getArchiveStream = archiveService.getArchiveStream as MockedFunction<typeof archiveService.getArchiveStream>
+const rawLastModified = new Date('2024-01-02T03:04:05.000Z')
+const rawEtag = `W/"13-${rawLastModified.getTime()}"`
+const rawMetadata = { size: 13, mimeType: 'text/html', lastModified: rawLastModified } satisfies RawFileMetadata
+const rawContent = Buffer.from('<h1>hi</h1>\n\n')
 
-describe('File Routes', () => {
+describe('file routes', () => {
   let app: Hono
-  let filesApp: Hono
+  let files: FileServiceFakes
+  let archives: ArchiveServiceFakes
+  let tempDir: string
 
   beforeEach(() => {
-    vi.clearAllMocks()
-    filesApp = createFileRoutes()
+    files = createFileServiceFakes()
+    archives = createArchiveServiceFakes()
     app = new Hono()
-    app.route('/api/files', filesApp)
+    app.route('/api/files', createFileRoutes(files, archives))
+    tempDir = mkdtempSync(path.join(tmpdir(), 'ocm-file-routes-'))
   })
 
-  describe('GET /*/download-zip - Route Order Regression Test', () => {
-    it('should route to archive service for directory download, not file service', async () => {
-      const mockStream = {
-        on: vi.fn(),
-      } as unknown as ReadStream
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true })
+  })
 
-      createDirectoryArchive.mockResolvedValue('/tmp/test-repo-123.zip')
-      getArchiveSize.mockResolvedValue(1024)
-      getArchiveStream.mockReturnValue(mockStream)
+  describe('GET /:path/download-zip', () => {
+    it('streams a directory archive instead of the file route', async () => {
+      const archivePath = path.join(tempDir, 'test-repo-src.zip')
+      writeFileSync(archivePath, 'zip-bytes')
+      archives.createDirectoryArchive.mockResolvedValue(archivePath)
+      archives.getArchiveSize.mockResolvedValue(9)
+      archives.getArchiveStream.mockImplementation(() => createReadStream(archivePath))
 
-      await app.request('/api/files/test-repo/src/download-zip')
+      const response = await app.request('/api/files/test-repo/src/download-zip')
 
-      expect(createDirectoryArchive).toHaveBeenCalledWith('test-repo/src', undefined, {
+      expect(response.status).toBe(200)
+      expect(response.headers.get('Content-Type')).toBe('application/zip')
+      expect(response.headers.get('Content-Disposition')).toBe('attachment; filename="src.zip"')
+      expect(response.headers.get('Content-Length')).toBe('9')
+      expect(await response.text()).toBe('zip-bytes')
+      expect(files.getFile).not.toHaveBeenCalled()
+      expect(archives.createDirectoryArchive).toHaveBeenCalledWith('test-repo/src', undefined, {
         includeGit: false,
         includePaths: undefined,
       })
-      expect(getArchiveSize).toHaveBeenCalledWith('/tmp/test-repo-123.zip')
-      expect(getArchiveStream).toHaveBeenCalledWith('/tmp/test-repo-123.zip')
-      expect(getFile).not.toHaveBeenCalled()
-
-      expect(mockStream.on).toHaveBeenCalledWith('end', expect.any(Function))
-      expect(mockStream.on).toHaveBeenCalledWith('error', expect.any(Function))
+      await vi.waitFor(() => expect(archives.deleteArchive).toHaveBeenCalledWith(archivePath))
     })
 
-    it('should return 400 when no path provided', async () => {
+    it('returns 400 when no path is provided', async () => {
       const response = await app.request('/api/files/download-zip')
-      const body = await response.json() as { error: string }
+      const body = await readJson(response, ErrorResponseSchema)
 
       expect(response.status).toBe(400)
-      expect(body).toHaveProperty('error', 'No path provided')
-      expect(createDirectoryArchive).not.toHaveBeenCalled()
+      expect(body.error).toBe('No path provided')
+      expect(archives.createDirectoryArchive).not.toHaveBeenCalled()
     })
 
-    it('should return 500 when archive creation fails', async () => {
-      createDirectoryArchive.mockRejectedValue(new Error('Directory not found'))
+    it('returns 500 when archive creation fails', async () => {
+      archives.createDirectoryArchive.mockRejectedValue(new Error('Directory not found'))
 
       const response = await app.request('/api/files/non-repo/download-zip')
-      const body = await response.json() as { error: string }
+      const body = await readJson(response, ErrorResponseSchema)
 
       expect(response.status).toBe(500)
-      expect(body).toHaveProperty('error')
+      expect(body.error).toBe('Directory not found')
     })
   })
 
-  describe('GET /* - File/Directory Lookup', () => {
-    const mockFileInfo: FileInfo = {
-      name: 'test.txt',
-      path: 'test-repo/test.txt',
-      isDirectory: false,
-      size: 100,
-      mimeType: 'text/plain',
-      content: Buffer.from('test content').toString('base64'),
-      lastModified: new Date(),
-    }
-
-    const mockDirInfo: FileInfo = {
-      name: 'src',
-      path: 'test-repo/src',
-      isDirectory: true,
-      size: 0,
-      children: [
-        {
-          name: 'file.ts',
-          path: 'test-repo/src/file.ts',
-          isDirectory: false,
-          size: 200,
-          lastModified: new Date(),
-        },
-      ],
-      lastModified: new Date(),
-    }
-
-    const rawLastModified = new Date('2024-01-02T03:04:05.000Z')
-    const rawEtag = `W/"13-${rawLastModified.getTime()}"`
-
-    it('should return directory listing when path is directory', async () => {
-      getFile.mockResolvedValue(mockDirInfo)
+  describe('GET /:path', () => {
+    it('returns a directory listing', async () => {
+      files.getFile.mockResolvedValue(directoryInfo)
 
       const response = await app.request('/api/files/test-repo/src')
-      const body = await response.json() as FileInfo
+      const body = await readJson(response, FileInfoSchema)
 
       expect(response.status).toBe(200)
-      expect(body).toHaveProperty('isDirectory', true)
-      expect(body).toHaveProperty('children')
-      expect(Array.isArray(body.children)).toBe(true)
-      expect(getFile).toHaveBeenCalledWith('test-repo/src')
+      expect(body.isDirectory).toBe(true)
+      expect(body.children?.map((child) => child.name)).toEqual(['file.ts'])
     })
 
-    it('should return file info when no query params', async () => {
-      getFile.mockResolvedValue(mockFileInfo)
+    it('returns file info when no query params are set', async () => {
+      files.getFile.mockResolvedValue(fileInfo)
 
       const response = await app.request('/api/files/test-repo/test.txt')
-      const body = await response.json() as FileInfo
+      const body = await readJson(response, FileInfoSchema)
 
       expect(response.status).toBe(200)
-      expect(body).toHaveProperty('isDirectory', false)
-      expect(body).toHaveProperty('content')
-      expect(getFile).toHaveBeenCalledWith('test-repo/test.txt')
+      expect(body.isDirectory).toBe(false)
+      expect(body.content).toBe(fileInfo.content)
     })
 
-    it('should serve raw content inside a CSP sandbox', async () => {
-      getRawFileMetadata.mockResolvedValue({ size: 13, mimeType: 'text/html', lastModified: rawLastModified })
-      getRawFileContent.mockResolvedValue(Buffer.from('<h1>hi</h1>\n\n'))
+    it.each(['test-repo/report.html', 'test-repo/report.htm'])(
+      'serves %s raw inside a CSP sandbox',
+      async (requestPath) => {
+        files.getRawFileMetadata.mockResolvedValue(rawMetadata)
+        files.getRawFileContent.mockResolvedValue(rawContent)
 
-      const response = await app.request('/api/files?path=test-repo/report.html&raw=true')
+        const response = await app.request(`/api/files?path=${requestPath}&raw=true`)
 
-      expect(response.status).toBe(200)
-      expect(response.headers.get('Content-Type')).toBe('text/html')
-      expect(response.headers.get('Content-Security-Policy')).toBe('sandbox allow-scripts')
-      expect(response.headers.get('Cache-Control')).toBe('no-cache')
-      expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff')
-      expect(getFile).not.toHaveBeenCalled()
-    })
+        expect(response.status).toBe(200)
+        expect(response.headers.get('Content-Type')).toBe('text/html')
+        expect(response.headers.get('Content-Security-Policy')).toBe('sandbox allow-scripts')
+        expect(response.headers.get('Cache-Control')).toBe('no-cache')
+        expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff')
+        expect(await response.text()).toBe('<h1>hi</h1>\n\n')
+        expect(files.getFile).not.toHaveBeenCalled()
+      },
+    )
 
-    it('should serve .htm raw content as text/html', async () => {
-      getRawFileMetadata.mockResolvedValue({ size: 13, mimeType: 'text/html', lastModified: rawLastModified })
-      getRawFileContent.mockResolvedValue(Buffer.from('<h1>hi</h1>\n\n'))
-
-      const response = await app.request('/api/files?path=test-repo/report.htm&raw=true')
-
-      expect(response.status).toBe(200)
-      expect(response.headers.get('Content-Type')).toBe('text/html')
-    })
-
-    it('should include ETag and Last-Modified on raw responses', async () => {
-      getRawFileMetadata.mockResolvedValue({ size: 13, mimeType: 'text/html', lastModified: rawLastModified })
-      getRawFileContent.mockResolvedValue(Buffer.from('<h1>hi</h1>\n\n'))
+    it('includes ETag and Last-Modified on raw responses', async () => {
+      files.getRawFileMetadata.mockResolvedValue(rawMetadata)
+      files.getRawFileContent.mockResolvedValue(rawContent)
 
       const response = await app.request('/api/files?path=test-repo/report.html&raw=true')
 
       expect(response.headers.get('ETag')).toBe(rawEtag)
       expect(response.headers.get('Last-Modified')).toBe(rawLastModified.toUTCString())
+      expect(response.headers.get('Content-Length')).toBe('13')
     })
 
-    it('should return 304 without a body when If-None-Match matches the ETag', async () => {
-      getRawFileMetadata.mockResolvedValue({ size: 13, mimeType: 'text/html', lastModified: rawLastModified })
+    it.each([
+      { label: 'the exact ETag', header: rawEtag },
+      { label: 'a comma-separated list', header: `"other", ${rawEtag}` },
+      { label: 'the wildcard', header: '*' },
+    ])('returns 304 without a body when If-None-Match matches $label', async ({ header }) => {
+      files.getRawFileMetadata.mockResolvedValue(rawMetadata)
 
       const response = await app.request('/api/files?path=test-repo/report.html&raw=true', {
-        headers: { 'If-None-Match': rawEtag },
+        headers: { 'If-None-Match': header },
       })
 
       expect(response.status).toBe(304)
       expect(response.headers.get('ETag')).toBe(rawEtag)
       expect(response.headers.get('Cache-Control')).toBe('no-cache')
-      expect(response.headers.get('Content-Security-Policy')).toBe('sandbox allow-scripts')
-      expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff')
       expect(await response.text()).toBe('')
-      expect(getRawFileContent).not.toHaveBeenCalled()
+      expect(files.getRawFileContent).not.toHaveBeenCalled()
     })
 
-    it('should match If-None-Match within a comma-separated list', async () => {
-      getRawFileMetadata.mockResolvedValue({ size: 13, mimeType: 'text/html', lastModified: rawLastModified })
-
-      const response = await app.request('/api/files?path=test-repo/report.html&raw=true', {
-        headers: { 'If-None-Match': `"other", ${rawEtag}` },
-      })
-
-      expect(response.status).toBe(304)
-      expect(getRawFileContent).not.toHaveBeenCalled()
-    })
-
-    it('should match the If-None-Match wildcard', async () => {
-      getRawFileMetadata.mockResolvedValue({ size: 13, mimeType: 'text/html', lastModified: rawLastModified })
-
-      const response = await app.request('/api/files?path=test-repo/report.html&raw=true', {
-        headers: { 'If-None-Match': '*' },
-      })
-
-      expect(response.status).toBe(304)
-      expect(getRawFileContent).not.toHaveBeenCalled()
-    })
-
-    it('should return 200 when If-None-Match does not match', async () => {
-      getRawFileMetadata.mockResolvedValue({ size: 13, mimeType: 'text/html', lastModified: rawLastModified })
-      getRawFileContent.mockResolvedValue(Buffer.from('<h1>hi</h1>\n\n'))
+    it('returns 200 when If-None-Match does not match', async () => {
+      files.getRawFileMetadata.mockResolvedValue(rawMetadata)
+      files.getRawFileContent.mockResolvedValue(rawContent)
 
       const response = await app.request('/api/files?path=test-repo/report.html&raw=true', {
         headers: { 'If-None-Match': 'W/"different"' },
       })
 
       expect(response.status).toBe(200)
-      expect(getRawFileContent).toHaveBeenCalled()
+      expect(files.getRawFileContent).toHaveBeenCalled()
     })
 
-    it('should fall through to the directory listing when raw is requested for a directory', async () => {
-      getRawFileMetadata.mockResolvedValue(null)
-      getFile.mockResolvedValue(mockDirInfo)
+    it('falls through to the directory listing when raw is requested for a directory', async () => {
+      files.getRawFileMetadata.mockResolvedValue(null)
+      files.getFile.mockResolvedValue(directoryInfo)
 
       const response = await app.request('/api/files?path=test-repo/src&raw=true')
-      const body = await response.json() as FileInfo
+      const body = await readJson(response, FileInfoSchema)
 
       expect(response.status).toBe(200)
-      expect(body).toHaveProperty('isDirectory', true)
-      expect(getFile).toHaveBeenCalledWith('test-repo/src')
-      expect(getRawFileContent).not.toHaveBeenCalled()
+      expect(body.isDirectory).toBe(true)
+      expect(files.getRawFileContent).not.toHaveBeenCalled()
     })
 
-    it('should return 404 when path does not exist', async () => {
-      getFile.mockRejectedValue({ message: 'File or directory not found', statusCode: 404 })
+    it('returns 404 when the path does not exist', async () => {
+      files.getFile.mockRejectedValue({ message: 'File or directory not found', statusCode: 404 })
 
       const response = await app.request('/api/files/test-repo/nonexistent.txt')
-      const body = await response.json() as { error: string }
+      const body = await readJson(response, ErrorResponseSchema)
 
       expect(response.status).toBe(404)
-      expect(body).toHaveProperty('error')
+      expect(body.error).toBe('File or directory not found')
     })
+
+    it.each(['test-repo/../etc/passwd', 'test-repo/..%2Fetc'])(
+      'returns the service path traversal rejection for %s',
+      async (requestPath) => {
+        files.getFile.mockRejectedValue({ message: 'Path traversal detected', statusCode: 403 })
+
+        const response = await app.request(`/api/files/${requestPath}`)
+        const body = await readJson(response, ErrorResponseSchema)
+
+        expect(response.status).toBe(403)
+        expect(body.error).toContain('Path traversal detected')
+      },
+    )
   })
 
-  describe('GET /* with ?startLine&endLine - File Range', () => {
-    const mockChunkedInfo: ChunkedFileInfo = {
-      name: 'test.ts',
-      path: 'test-repo/test.ts',
-      isDirectory: false,
-      size: 500,
-      mimeType: 'text/typescript',
-      lines: ['line 5', 'line 6', 'line 7', 'line 8', 'line 9'],
-      totalLines: 100,
-      startLine: 5,
-      endLine: 10,
-      hasMore: true,
-      lastModified: new Date(),
-    }
-
-    it('should return file range for valid parameters', async () => {
-      getFileRange.mockResolvedValue(mockChunkedInfo)
+  describe('GET /:path?startLine&endLine', () => {
+    it('returns the requested file range', async () => {
+      files.getFileRange.mockResolvedValue({
+        name: 'test.ts',
+        path: 'test-repo/test.ts',
+        isDirectory: false,
+        size: 500,
+        mimeType: 'text/typescript',
+        lines: ['line 5', 'line 6', 'line 7', 'line 8', 'line 9'],
+        totalLines: 100,
+        startLine: 5,
+        endLine: 10,
+        hasMore: true,
+        lastModified: new Date(),
+      })
 
       const response = await app.request('/api/files/test-repo/test.ts?startLine=5&endLine=10')
-      const body = await response.json() as ChunkedFileInfo
+      const body = await readJson(response, ChunkedFileInfoSchema)
 
       expect(response.status).toBe(200)
-      expect(body).toHaveProperty('startLine', 5)
-      expect(body).toHaveProperty('endLine', 10)
-      expect(body).toHaveProperty('lines')
-      expect(body).toHaveProperty('totalLines', 100)
-      expect(getFileRange).toHaveBeenCalledWith('test-repo/test.ts', 5, 10)
+      expect(body.startLine).toBe(5)
+      expect(body.endLine).toBe(10)
+      expect(body.totalLines).toBe(100)
+      expect(body.lines).toHaveLength(5)
     })
 
-    it('should return 400 for invalid startLine', async () => {
-      const response = await app.request('/api/files/test-repo/test.ts?startLine=invalid&endLine=10')
-      const body = await response.json() as { error: string }
+    it.each([
+      { label: 'a non-numeric startLine', query: 'startLine=invalid&endLine=10' },
+      { label: 'a non-numeric endLine', query: 'startLine=0&endLine=invalid' },
+      { label: 'an endLine equal to startLine', query: 'startLine=10&endLine=10' },
+      { label: 'a negative startLine', query: 'startLine=-5&endLine=10' },
+    ])('returns 400 for $label', async ({ query }) => {
+      const response = await app.request(`/api/files/test-repo/test.ts?${query}`)
+      const body = await readJson(response, ErrorResponseSchema)
 
       expect(response.status).toBe(400)
-      expect(body).toHaveProperty('error', 'Invalid line range parameters')
-    })
-
-    it('should return 400 for invalid endLine', async () => {
-      const response = await app.request('/api/files/test-repo/test.ts?startLine=0&endLine=invalid')
-      const body = await response.json() as { error: string }
-
-      expect(response.status).toBe(400)
-      expect(body).toHaveProperty('error', 'Invalid line range parameters')
-    })
-
-    it('should return 400 when startLine equals endLine', async () => {
-      const response = await app.request('/api/files/test-repo/test.ts?startLine=10&endLine=10')
-      const body = await response.json() as { error: string }
-
-      expect(response.status).toBe(400)
-      expect(body).toHaveProperty('error', 'Invalid line range parameters')
-    })
-
-    it('should return 400 for negative startLine', async () => {
-      const response = await app.request('/api/files/test-repo/test.ts?startLine=-5&endLine=10')
-      const body = await response.json() as { error: string }
-
-      expect(response.status).toBe(400)
-      expect(body).toHaveProperty('error', 'Invalid line range parameters')
+      expect(body.error).toBe('Invalid line range parameters')
+      expect(files.getFileRange).not.toHaveBeenCalled()
     })
   })
 
-  describe('POST /* - File Upload', () => {
-    it('should upload file successfully', async () => {
-      const mockResult: FileUploadResult = {
+  describe('POST /:path', () => {
+    it('uploads a file', async () => {
+      files.uploadFile.mockResolvedValue({
         name: 'test.txt',
         path: 'test-repo/test.txt',
         size: 100,
         mimeType: 'text/plain',
-      }
-      uploadFile.mockResolvedValue(mockResult)
-
-      const file = new File(['content'], 'test.txt', { type: 'text/plain' })
-      const formData = new FormData()
-      formData.append('file', file)
-
-      const response = await app.request('/api/files/test-repo', {
-        method: 'POST',
-        body: formData,
       })
-      const body = await response.json() as FileUploadResult
+      const formData = new FormData()
+      formData.append('file', new File(['content'], 'test.txt', { type: 'text/plain' }))
+
+      const response = await app.request('/api/files/test-repo', { method: 'POST', body: formData })
+      const body = await readJson(response, FileUploadResponseSchema)
 
       expect(response.status).toBe(200)
-      expect(body).toHaveProperty('name', 'test.txt')
-      expect(body).toHaveProperty('path', 'test-repo/test.txt')
-      expect(uploadFile).toHaveBeenCalled()
+      expect(body.name).toBe('test.txt')
+      expect(body.path).toBe('test-repo/test.txt')
     })
 
-    it('should return 400 when no file provided', async () => {
-      const formData = new FormData()
-
-      const response = await app.request('/api/files/test-repo', {
-        method: 'POST',
-        body: formData,
-      })
-      const body = await response.json() as { error: string }
+    it('returns 400 when no file is provided', async () => {
+      const response = await app.request('/api/files/test-repo', { method: 'POST', body: new FormData() })
+      const body = await readJson(response, ErrorResponseSchema)
 
       expect(response.status).toBe(400)
-      expect(body).toHaveProperty('error', 'No file provided')
-      expect(uploadFile).not.toHaveBeenCalled()
+      expect(body.error).toBe('No file provided')
+      expect(files.uploadFile).not.toHaveBeenCalled()
     })
 
-    it('should handle file too large error', async () => {
-      uploadFile.mockRejectedValue(new Error('File too large'))
-
-      const file = new File(['content'], 'large.bin', { type: 'application/octet-stream' })
+    it('maps an upload failure to its status code', async () => {
+      files.uploadFile.mockRejectedValue(new Error('File too large'))
       const formData = new FormData()
-      formData.append('file', file)
+      formData.append('file', new File(['content'], 'large.bin', { type: 'application/octet-stream' }))
 
-      const response = await app.request('/api/files/test-repo', {
-        method: 'POST',
-        body: formData,
-      })
-      const body = await response.json() as { error: string }
+      const response = await app.request('/api/files/test-repo', { method: 'POST', body: formData })
+      const body = await readJson(response, ErrorResponseSchema)
 
       expect(response.status).toBe(500)
-      expect(body).toHaveProperty('error', 'File too large')
+      expect(body.error).toBe('File too large')
     })
   })
 
-  describe('PUT /* - Create File/Folder', () => {
-    const mockFileResult: FileInfo = {
-      name: 'newfile.ts',
-      path: 'test-repo/newfile.ts',
-      isDirectory: false,
-      size: 50,
-      lastModified: new Date(),
-    }
+  describe('PUT /:path', () => {
+    const createCases = [
+      {
+        label: 'a file',
+        body: { type: 'file', content: 'export const x = 1' },
+        result: {
+          name: 'newfile.ts',
+          path: 'test-repo/newfile.ts',
+          isDirectory: false,
+          size: 50,
+          lastModified: new Date(),
+        },
+      },
+      {
+        label: 'a folder',
+        body: { type: 'folder' },
+        result: {
+          name: 'newfolder',
+          path: 'test-repo/newfolder',
+          isDirectory: true,
+          size: 0,
+          lastModified: new Date(),
+        },
+      },
+    ] satisfies { label: string; body: { type: 'file' | 'folder'; content?: string }; result: FileInfo }[]
 
-    const mockFolderResult: FileInfo = {
-      name: 'newfolder',
-      path: 'test-repo/newfolder',
-      isDirectory: true,
-      size: 0,
-      lastModified: new Date(),
-    }
+    it.each(createCases)('creates $label', async ({ body: requestBody, result }) => {
+      files.createFileOrFolder.mockResolvedValue(result)
 
-    it('should create file successfully', async () => {
-      createFileOrFolder.mockResolvedValue(mockFileResult)
-
-      const response = await app.request('/api/files/test-repo/newfile.ts', {
+      const response = await app.request(`/api/files/${result.path}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'file', content: 'export const x = 1' }),
+        body: JSON.stringify(requestBody),
       })
-      const body = await response.json() as FileInfo
+      const body = await readJson(response, FileInfoSchema)
 
       expect(response.status).toBe(200)
-      expect(body).toHaveProperty('isDirectory', false)
-      expect(body).toHaveProperty('size', 50)
-      expect(createFileOrFolder).toHaveBeenCalledWith('test-repo/newfile.ts', {
-        type: 'file',
-        content: 'export const x = 1',
-      })
+      expect(body.path).toBe(result.path)
+      expect(body.isDirectory).toBe(result.isDirectory)
     })
 
-    it('should create folder successfully', async () => {
-      createFileOrFolder.mockResolvedValue(mockFolderResult)
-
-      const response = await app.request('/api/files/test-repo/newfolder', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'folder' }),
-      })
-      const body = await response.json() as FileInfo
-
-      expect(response.status).toBe(200)
-      expect(body).toHaveProperty('isDirectory', true)
-      expect(createFileOrFolder).toHaveBeenCalledWith('test-repo/newfolder', {
-        type: 'folder',
-      })
-    })
-
-    it('should return 500 when creation fails', async () => {
-      createFileOrFolder.mockRejectedValue(new Error('Permission denied'))
+    it('returns 500 when creation fails', async () => {
+      files.createFileOrFolder.mockRejectedValue(new Error('Permission denied'))
 
       const response = await app.request('/api/files/test-repo/newfile.ts', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'file' }),
       })
-      const body = await response.json() as { error: string }
+      const body = await readJson(response, ErrorResponseSchema)
 
       expect(response.status).toBe(500)
-      expect(body).toHaveProperty('error')
+      expect(body.error).toBe('Permission denied')
     })
   })
 
-  describe('DELETE /* - Delete File/Folder', () => {
-    it('should delete file successfully', async () => {
-      deleteFileOrFolder.mockResolvedValue(undefined)
+  describe('DELETE /:path', () => {
+    it.each(['test-repo/oldfile.ts', 'test-repo/oldfolder'])('deletes %s', async (requestPath) => {
+      files.deleteFileOrFolder.mockResolvedValue(undefined)
 
-      const response = await app.request('/api/files/test-repo/oldfile.ts', {
-        method: 'DELETE',
-      })
-      const body = await response.json() as { success: boolean }
+      const response = await app.request(`/api/files/${requestPath}`, { method: 'DELETE' })
+      const body = await readJson(response, SuccessResponseSchema)
 
       expect(response.status).toBe(200)
-      expect(body).toEqual({ success: true })
-      expect(deleteFileOrFolder).toHaveBeenCalledWith('test-repo/oldfile.ts')
+      expect(body.success).toBe(true)
+      expect(files.deleteFileOrFolder).toHaveBeenCalledWith(requestPath)
     })
 
-    it('should delete folder successfully', async () => {
-      deleteFileOrFolder.mockResolvedValue(undefined)
+    it('maps a deletion failure to its status code', async () => {
+      files.deleteFileOrFolder.mockRejectedValue({ message: 'File not found', statusCode: 404 })
 
-      const response = await app.request('/api/files/test-repo/oldfolder', {
-        method: 'DELETE',
-      })
-      const body = await response.json() as { success: boolean }
-
-      expect(response.status).toBe(200)
-      expect(body).toEqual({ success: true })
-    })
-
-    it('should return error when deletion fails', async () => {
-      const error = new Error('File not found') as any
-      error.statusCode = 404
-      deleteFileOrFolder.mockRejectedValue(error)
-
-      const response = await app.request('/api/files/test-repo/nonexistent.ts', {
-        method: 'DELETE',
-      })
-      const body = await response.json() as { error: string }
+      const response = await app.request('/api/files/test-repo/nonexistent.ts', { method: 'DELETE' })
+      const body = await readJson(response, ErrorResponseSchema)
 
       expect(response.status).toBe(404)
-      expect(body).toHaveProperty('error')
+      expect(body.error).toBe('File not found')
     })
   })
 
-  describe('PATCH /* - File Operations', () => {
-    const mockRenameResult: FileInfo = {
-      name: 'renamed.ts',
-      path: 'test-repo/renamed.ts',
-      isDirectory: false,
-      size: 200,
-      lastModified: new Date(),
-    }
+  describe('PATCH /:path', () => {
+    it('applies patches', async () => {
+      files.applyFilePatches.mockResolvedValue({ success: true, totalLines: 150 })
+      const requestBody: FilePatchRequest = {
+        patches: [{ type: 'replace', startLine: 10, content: 'new line\n' }],
+      }
 
-    describe('Apply Patches', () => {
-      it('should apply patches successfully', async () => {
-        applyFilePatches.mockResolvedValue({ success: true, totalLines: 150 })
-
-        const response = await app.request('/api/files/test-repo/test.ts', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            patches: [
-              { type: 'replace' as const, startLine: 10, content: 'new line\n' },
-            ],
-          }),
-        })
-        const body = await response.json() as { success: boolean; totalLines: number }
-
-        expect(response.status).toBe(200)
-        expect(body).toHaveProperty('success', true)
-        expect(body).toHaveProperty('totalLines', 150)
-        expect(applyFilePatches).toHaveBeenCalledWith('test-repo/test.ts', [
-          { type: 'replace', startLine: 10, content: 'new line\n' },
-        ])
+      const response = await app.request('/api/files/test-repo/test.ts', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
       })
+      const body = await readJson(response, PatchResultSchema)
 
-      it('should return error when patch application fails', async () => {
-        const error = new Error('Invalid patch') as any
-        error.statusCode = 404
-        applyFilePatches.mockRejectedValue(error)
-
-        const response = await app.request('/api/files/test-repo/test.ts', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            patches: [{ type: 'replace' as const, startLine: 999 }],
-          }),
-        })
-        const body = await response.json() as { error: string }
-
-        expect(response.status).toBe(404)
-        expect(body).toHaveProperty('error')
-      })
+      expect(response.status).toBe(200)
+      expect(body.success).toBe(true)
+      expect(body.totalLines).toBe(150)
+      expect(files.applyFilePatches).toHaveBeenCalledWith('test-repo/test.ts', requestBody.patches)
     })
 
-    describe('Rename/Move', () => {
-      it('should rename file successfully', async () => {
-        renameOrMoveFile.mockResolvedValue(mockRenameResult)
+    it('maps a patch failure to its status code', async () => {
+      files.applyFilePatches.mockRejectedValue({ message: 'Invalid patch', statusCode: 404 })
+      const requestBody: FilePatchRequest = {
+        patches: [{ type: 'replace', startLine: 999 }],
+      }
 
-        const response = await app.request('/api/files/test-repo/old.ts', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ newPath: 'test-repo/renamed.ts' }),
-        })
-        const body = await response.json() as FileInfo
-
-        expect(response.status).toBe(200)
-        expect(body).toHaveProperty('name', 'renamed.ts')
-        expect(body).toHaveProperty('path', 'test-repo/renamed.ts')
-        expect(renameOrMoveFile).toHaveBeenCalledWith('test-repo/old.ts', {
-          newPath: 'test-repo/renamed.ts',
-        })
+      const response = await app.request('/api/files/test-repo/test.ts', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
       })
+      const body = await readJson(response, ErrorResponseSchema)
 
-      it('should return error when rename fails', async () => {
-        const error = new Error('File not found') as any
-        error.statusCode = 404
-        renameOrMoveFile.mockRejectedValue(error)
-
-        const response = await app.request('/api/files/test-repo/nonexistent.ts', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ newPath: 'test-repo/new.ts' }),
-        })
-        const body = await response.json() as { error: string }
-
-        expect(response.status).toBe(404)
-        expect(body).toHaveProperty('error')
-      })
-    })
-  })
-
-  describe('Path Traversal Protection', () => {
-
-    it('should reject path with ../ segments via service error', async () => {
-      const error = { message: 'Path traversal detected', statusCode: 403 }
-      getFile.mockRejectedValue(error)
-
-      const response = await app.request('/api/files/test-repo/../etc/passwd')
-      const body = await response.json() as { error: string }
-
-      expect(response.status).toBe(403)
-      expect(body.error).toContain('Path traversal detected')
+      expect(response.status).toBe(404)
+      expect(body.error).toBe('Invalid patch')
     })
 
-    it('should reject encoded path traversal attempts', async () => {
-      const error = { message: 'Path traversal detected', statusCode: 403 }
-      getFile.mockRejectedValue(error)
+    it('renames a file when no patches are present', async () => {
+      files.renameOrMoveFile.mockResolvedValue({
+        name: 'renamed.ts',
+        path: 'test-repo/renamed.ts',
+        isDirectory: false,
+        size: 200,
+        lastModified: new Date(),
+      })
 
-      const response = await app.request('/api/files/test-repo/..%2Fetc')
-      const body = await response.json() as { error: string }
+      const response = await app.request('/api/files/test-repo/old.ts', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newPath: 'test-repo/renamed.ts' }),
+      })
+      const body = await readJson(response, FileInfoSchema)
 
-      expect(response.status).toBe(403)
-      expect(body.error).toContain('Path traversal detected')
+      expect(response.status).toBe(200)
+      expect(body.name).toBe('renamed.ts')
+      expect(body.path).toBe('test-repo/renamed.ts')
+      expect(files.renameOrMoveFile).toHaveBeenCalledWith('test-repo/old.ts', { newPath: 'test-repo/renamed.ts' })
+    })
+
+    it('maps a rename failure to its status code', async () => {
+      files.renameOrMoveFile.mockRejectedValue({ message: 'File not found', statusCode: 404 })
+
+      const response = await app.request('/api/files/test-repo/nonexistent.ts', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newPath: 'test-repo/new.ts' }),
+      })
+      const body = await readJson(response, ErrorResponseSchema)
+
+      expect(response.status).toBe(404)
+      expect(body.error).toBe('File not found')
     })
   })
 })

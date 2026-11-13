@@ -1,58 +1,87 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook } from '@testing-library/react'
+import { waitFor } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
 import { useModelSections } from './useModelSections'
-import type { Provider } from '@/api/providers'
+import { renderHookWithProviders } from '@/test/render'
+import { makeCatalogModel, makeCatalogProvider } from '@/test/fixtures/api'
+import type { FetchRoute } from '@/test/fetchFake'
 
-const mocks = vi.hoisted(() => ({
-  useProviders: vi.fn(),
-  useOpenCodeModelState: vi.fn(),
-  useOpenCodeDefaultModel: vi.fn(),
-}))
+const hookProviders = {
+  auth: false,
+  theme: false,
+  tts: false,
+  toaster: false,
+} as const
 
-vi.mock('./useProviders', () => ({ useProviders: mocks.useProviders }))
-vi.mock('./useModelSelection', () => ({
-  useOpenCodeModelState: mocks.useOpenCodeModelState,
-  useOpenCodeDefaultModel: mocks.useOpenCodeDefaultModel,
-}))
-
-const providers: Provider[] = [
+const catalogRoutes: FetchRoute[] = [
   {
-    id: 'openai',
-    name: 'OpenAI',
-    models: [
-      { id: 'gpt-5', modelID: 'gpt-5', name: 'GPT-5', released: 0, free: false },
-      { id: 'gpt-4o', modelID: 'gpt-4o', name: 'GPT-4o', released: 0, free: false },
-      { id: 'gpt-4.1', modelID: 'gpt-4.1', name: 'GPT-4.1', released: 0, free: false },
-    ],
+    method: 'GET',
+    path: '/api/opencode/api/provider',
+    respond: () => ({ json: { data: [makeCatalogProvider({ id: 'openai', name: 'OpenAI' })] } }),
+  },
+  {
+    method: 'GET',
+    path: '/api/opencode/api/model',
+    respond: () => ({
+      json: {
+        data: ['gpt-4.1', 'gpt-4o', 'gpt-5'].map((id) =>
+          makeCatalogModel({ id, modelID: id, name: id, providerID: 'openai' }),
+        ),
+      },
+    }),
+  },
+  {
+    method: 'GET',
+    path: '/api/opencode/api/config',
+    respond: () => ({ json: [{ type: 'document', info: { model: 'openai/gpt-5' } }] }),
+  },
+  { method: 'GET', path: '/api/opencode/api/model/default', respond: () => ({ json: { data: null } }) },
+  {
+    method: 'GET',
+    path: '/api/providers/model-state',
+    respond: () => ({
+      json: { recent: [], favorite: [{ providerID: 'openai', modelID: 'gpt-4o' }], variant: {} },
+    }),
   },
 ]
 
 describe('useModelSections', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.useProviders.mockReturnValue({ data: { providers, models: [] }, isLoading: false })
-    mocks.useOpenCodeModelState.mockReturnValue({
-      data: { favorite: [{ providerID: 'openai', modelID: 'gpt-4o' }], recent: [], variant: {} },
-      isLoading: false,
+  it('builds sections from the catalog, model state and the default model', async () => {
+    const { result } = renderHookWithProviders(() => useModelSections('/repo'), {
+      ...hookProviders,
+      fetchRoutes: catalogRoutes,
     })
-    mocks.useOpenCodeDefaultModel.mockReturnValue({ data: 'openai/gpt-5', isLoading: false })
-  })
 
-  it('builds sections from the catalog, model state and the default model', () => {
-    const { result } = renderHook(() => useModelSections('/repo'))
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
 
-    expect(result.current.providers).toBe(providers)
-    expect(result.current.sections.map((section) => section.key)).toEqual(['default', 'favorites', 'provider:openai'])
+    expect(result.current.providers.map((provider) => provider.id)).toEqual(['openai'])
+    expect(result.current.providers[0].models.map((model) => model.id)).toEqual(['gpt-4.1', 'gpt-4o', 'gpt-5'])
     expect(result.current.defaultModel).toBe('openai/gpt-5')
-    expect(result.current.isLoading).toBe(false)
+    expect(result.current.sections.map((section) => section.key)).toEqual([
+      'default',
+      'favorites',
+      'provider:openai',
+    ])
+    expect(result.current.sections.find((section) => section.key === 'provider:openai')?.options.map(
+      (option) => option.modelID,
+    )).toEqual(['gpt-4.1'])
   })
 
   it('falls back to an empty provider list and reports loading', () => {
-    mocks.useProviders.mockReturnValue({ data: undefined, isLoading: true })
-    mocks.useOpenCodeModelState.mockReturnValue({ data: undefined, isLoading: true })
-    mocks.useOpenCodeDefaultModel.mockReturnValue({ data: undefined, isLoading: true })
-
-    const { result } = renderHook(() => useModelSections('/repo'))
+    const pendingRoute = (path: string): FetchRoute => ({
+      method: 'GET',
+      path,
+      respond: () => new Promise(() => {}),
+    })
+    const { result } = renderHookWithProviders(() => useModelSections('/repo'), {
+      ...hookProviders,
+      fetchRoutes: [
+        pendingRoute('/api/opencode/api/provider'),
+        pendingRoute('/api/opencode/api/model'),
+        pendingRoute('/api/opencode/api/config'),
+        pendingRoute('/api/opencode/api/model/default'),
+        pendingRoute('/api/providers/model-state'),
+      ],
+    })
 
     expect(result.current.providers).toEqual([])
     expect(result.current.sections).toEqual([])

@@ -1,25 +1,23 @@
 import { compareParsedSemver, compareSemver, normalizeSemver, parseSemver, type Semver } from '../utils/semver'
 
-/** The OpenCode release Manager is built against and bundles; matches the `@opencode/*` pnpm catalog entries. */
 export const OPENCODE_PINNED_VERSION = '2.2.5'
 
-/** The oldest OpenCode release Manager supports; any later release of the same major is accepted. */
 export const OPENCODE_MIN_VERSION = '2.2.5'
 
 const OPENCODE_RELEASE_BASE_URL = 'https://opencode.ai/files/bin'
 
-const OPENCODE_ARCH_ALIASES: Record<string, string> = {
-  x64: 'x64',
-  amd64: 'x64',
-  x86_64: 'x64',
-  arm64: 'arm64',
-  aarch64: 'arm64',
-}
+const OPENCODE_ARCH_ALIASES = new Map<string, string>([
+  ['x64', 'x64'],
+  ['amd64', 'x64'],
+  ['x86_64', 'x64'],
+  ['arm64', 'arm64'],
+  ['aarch64', 'arm64'],
+])
 
-const OPENCODE_PLATFORM_ARCHIVES: Partial<Record<NodeJS.Platform, 'tar.gz' | 'zip'>> = {
-  linux: 'tar.gz',
-  darwin: 'zip',
-}
+const OPENCODE_PLATFORM_ARCHIVES = new Map<NodeJS.Platform, 'tar.gz' | 'zip'>([
+  ['linux', 'tar.gz'],
+  ['darwin', 'zip'],
+])
 
 export type OpenCodeVersion = Semver
 
@@ -67,7 +65,6 @@ export function isSupportedOpenCodeVersion(version: string): boolean {
   return parsed.major === OPENCODE_MIN.major && compareParsedSemver(parsed, OPENCODE_MIN) >= 0
 }
 
-/** Reports whether a server version shares Manager's OpenCode major, so the V2 client can still talk to it. */
 export function isSameOpenCodeMajor(version: string): boolean {
   return parseOpenCodeVersion(version)?.major === OPENCODE_MIN.major
 }
@@ -76,14 +73,19 @@ export function describeUnsupportedOpenCodeVersion(version: string): string {
   return `OpenCode ${version} is not supported; OpenCode Manager requires OpenCode ${OPENCODE_SUPPORTED_VERSION_RANGE}`
 }
 
+export interface OpenCodeReleaseAsset {
+  url: string
+  archive: 'tar.gz' | 'zip'
+}
+
 export function buildOpenCodeReleaseAsset(
   version: string,
   target: { platform: NodeJS.Platform; arch: string; musl: boolean },
-): { url: string; archive: 'tar.gz' | 'zip' } {
-  const archive = OPENCODE_PLATFORM_ARCHIVES[target.platform]
+): OpenCodeReleaseAsset {
+  const archive = OPENCODE_PLATFORM_ARCHIVES.get(target.platform)
   if (!archive) throw new Error(`Unsupported OpenCode platform: ${target.platform}`)
 
-  const arch = OPENCODE_ARCH_ALIASES[target.arch]
+  const arch = OPENCODE_ARCH_ALIASES.get(target.arch)
   if (!arch) throw new Error(`Unsupported OpenCode architecture: ${target.arch}`)
 
   const muslSuffix = target.musl ? '-musl' : ''

@@ -1,35 +1,37 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { Database } from 'bun:sqlite'
-import { migrate } from '../../../src/db/migration-runner'
-import { allMigrations } from '../../../src/db/migrations'
+import { z } from 'zod'
 import { SettingsService } from '../../../src/services/settings'
 import { createInternalShellEnvRoutes } from '../../../src/routes/internal/shell-env'
-import type { RepoEnvService, ResolvedRepoEnv } from '../../../src/services/repo-env'
-import type { GitCredential } from '@opencode-manager/shared'
+import type { RepoEnvResolver, ResolvedRepoEnv } from '../../../src/services/repo-env'
+import { createTestDatabase } from '../../helpers/test-database'
+import { readJson } from '../../helpers/read-json'
 
-function createRepoEnvService(resolve: (cwd: string) => Promise<ResolvedRepoEnv>): RepoEnvService {
-  return { resolveForDirectory: vi.fn(resolve) } as unknown as RepoEnvService
+const ShellEnvResponseSchema = z.object({
+  env: z.record(z.string(), z.string()),
+  mask: z.array(z.string()),
+})
+
+function createRepoEnvService(resolve: (cwd: string) => Promise<ResolvedRepoEnv>): RepoEnvResolver {
+  return { resolveForDirectory: vi.fn(resolve) }
 }
 
 describe('internal shell-env routes', () => {
   let db: Database
   let settingsService: SettingsService
 
-  function appWith(repoEnvService: RepoEnvService) {
+  function appWith(repoEnvService: RepoEnvResolver) {
     return createInternalShellEnvRoutes(db, repoEnvService)
   }
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
+    db = createTestDatabase()
     settingsService = new SettingsService(db)
   })
 
   it('returns GH_TOKEN and GITHUB_TOKEN for a GitHub PAT when no cwd is given', async () => {
     settingsService.updateSettings({
-      gitCredentials: [
-        { name: 'github', host: 'github.com', type: 'pat', token: 'ghp_test_token' } as GitCredential,
-      ],
+      gitCredentials: [{ name: 'github', host: 'github.com', type: 'pat', token: 'ghp_test_token' }],
     })
     const repoEnvService = createRepoEnvService(async () => ({ env: {}, maskValues: [] }))
     const app = appWith(repoEnvService)
@@ -37,7 +39,10 @@ describe('internal shell-env routes', () => {
     const res = await app.request('/')
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ env: { GH_TOKEN: 'ghp_test_token', GITHUB_TOKEN: 'ghp_test_token' }, mask: [] })
+    expect(await readJson(res, ShellEnvResponseSchema)).toEqual({
+      env: { GH_TOKEN: 'ghp_test_token', GITHUB_TOKEN: 'ghp_test_token' },
+      mask: [],
+    })
     expect(repoEnvService.resolveForDirectory).not.toHaveBeenCalled()
   })
 
@@ -47,14 +52,12 @@ describe('internal shell-env routes', () => {
     const res = await app.request('/')
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ env: {}, mask: [] })
+    expect(await readJson(res, ShellEnvResponseSchema)).toEqual({ env: {}, mask: [] })
   })
 
   it('merges the mapped repository env and mask after the GitHub env for a cwd', async () => {
     settingsService.updateSettings({
-      gitCredentials: [
-        { name: 'github', host: 'github.com', type: 'pat', token: 'ghp_repo_token' } as GitCredential,
-      ],
+      gitCredentials: [{ name: 'github', host: 'github.com', type: 'pat', token: 'ghp_repo_token' }],
       gitIdentities: [{ id: 'work', name: 'Work User', email: 'work@example.com' }],
     })
     const repoEnvService = createRepoEnvService(async () => ({
@@ -66,7 +69,7 @@ describe('internal shell-env routes', () => {
     const res = await app.request('/?cwd=/tmp/any-repo')
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({
+    expect(await readJson(res, ShellEnvResponseSchema)).toEqual({
       env: { GH_TOKEN: 'ghp_repo_token', GITHUB_TOKEN: 'mapped', API_URL: 'https://internal.example' },
       mask: ['super-secret'],
     })
@@ -75,9 +78,7 @@ describe('internal shell-env routes', () => {
 
   it('skips the repository env resolution when the shell is sandboxed', async () => {
     settingsService.updateSettings({
-      gitCredentials: [
-        { name: 'github', host: 'github.com', type: 'pat', token: 'ghp_repo_token' } as GitCredential,
-      ],
+      gitCredentials: [{ name: 'github', host: 'github.com', type: 'pat', token: 'ghp_repo_token' }],
     })
     const repoEnvService = createRepoEnvService(async () => ({
       env: { API_URL: 'https://internal.example' },
@@ -88,7 +89,7 @@ describe('internal shell-env routes', () => {
     const res = await app.request('/?cwd=/tmp/any-repo&sandboxed=1')
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({
+    expect(await readJson(res, ShellEnvResponseSchema)).toEqual({
       env: { GH_TOKEN: 'ghp_repo_token', GITHUB_TOKEN: 'ghp_repo_token' },
       mask: [],
     })

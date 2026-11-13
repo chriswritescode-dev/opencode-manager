@@ -1,22 +1,25 @@
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { Hono } from 'hono'
 import { createNodeWebSocket } from '@hono/node-ws'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
+import type { JsonValue } from '@opencode-manager/shared/utils'
 import {
   createOpenCodeServerTerminalSocketRoutes,
   type ServerTerminalServiceResolver,
 } from '../../src/routes/opencode-server-terminals'
 import { TerminalService } from '../../src/services/terminal'
+import { FetchOpenCodeClient } from '../../src/services/opencode/client'
 import { OpenCodeServerNotFoundError } from '../../src/services/opencode-server-registry'
-import type { OpenCodeClient } from '../../src/services/opencode/client'
-import type { CredentialProvider } from '../../src/services/credential-provider'
+import { CredentialProvider } from '../../src/services/credential-provider'
 import type { Session } from '../../src/auth'
 import {
   closeSessionConnections,
   SESSION_CONNECTION_CLOSE_CODE,
   SESSION_CONNECTION_CLOSE_REASON,
 } from '../../src/services/session-connections'
+import { createFetchStub, type FetchStub } from '../helpers/fetch-stub'
 import { createStubRepoEnvService } from '../helpers/stub-repo-env-service'
+import { createTestDatabase } from '../helpers/test-database'
 import { startWebSocketServer, type WebSocketTestServer } from '../helpers/websocket-server'
 import { rawWebSocketHandshake } from '../helpers/raw-websocket-handshake'
 
@@ -25,22 +28,41 @@ const SERVER_ID = 'srv_kitchen'
 const UNKNOWN_SERVER_ID = 'srv_missing'
 const DIRECTORY = '/home/me/app'
 
-const ptyList = vi.fn(async ({ location }: { location: { directory: string } }) => ({
-  location,
-  data: [
-    { id: 'pty-1', title: 'Terminal', command: 'sh', args: [], cwd: DIRECTORY, status: 'running' as const, pid: 1 },
-  ],
-}))
-const connectToken = vi.fn(async () => ({
-  location: { directory: DIRECTORY },
-  data: { ticket: 'remote-ticket', expires_in: 60 },
-}))
+function jsonResponse(payload: JsonValue): Response {
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })
+}
 
-const remoteClient = {
-  api: { pty: { list: ptyList, connect: { token: connectToken } } },
-} as unknown as OpenCodeClient
+const fetchFn: FetchStub = createFetchStub(async (input) => {
+  const url = new URL(String(input))
+  if (url.pathname === '/api/pty') {
+    return jsonResponse({
+      location: { directory: DIRECTORY },
+      data: [
+        { id: 'pty-1', title: 'Terminal', command: 'sh', args: [], cwd: DIRECTORY, status: 'running', pid: 1 },
+      ],
+    })
+  }
+  if (url.pathname === '/api/pty/pty-1/connect-token') {
+    return jsonResponse({
+      location: { directory: DIRECTORY },
+      data: { ticket: 'remote-ticket', expires_in: 60 },
+    })
+  }
+  return new Response(null, { status: 404 })
+})
 
-const credentialProvider = { getGhCliEnv: vi.fn(() => ({})) } as unknown as CredentialProvider
+const remoteClient = new FetchOpenCodeClient({
+  baseUrl: 'https://remote.internal',
+  basicAuth: null,
+  defaultDirectory: false,
+  fetchFn,
+})
+
+const db = createTestDatabase()
+const credentialProvider = new CredentialProvider(db)
 
 let upstream: WebSocketTestServer
 let manager: WebSocketTestServer
@@ -58,7 +80,16 @@ upstreamApp.get(
     capturedUrl = new URL(c.req.url)
     return {
       onMessage(event, ws) {
-        if (typeof event.data === 'string') ws.send(event.data)
+        const data = event.data
+        if (data instanceof Blob) {
+          void data.text().then((text) => ws.send(text))
+          return
+        }
+        if (data instanceof ArrayBuffer) {
+          ws.send(data)
+          return
+        }
+        ws.send(String(data))
       },
     }
   }),
@@ -143,27 +174,28 @@ afterAll(async () => {
   await upstream.close()
   await manager.close()
   await sessionServer.close()
+  db.close()
 })
 
 describe('OpenCode Server Terminal Socket Route', () => {
   it('bridges to the remote base URL with a ticket, directory and cursor', async () => {
     const socket = new WebSocket(clientUrl('pty-1', DIRECTORY, 3))
-    socket.binaryType = 'arraybuffer'
-    const messages: Array<string | ArrayBuffer> = []
+    const messages: unknown[] = []
     socket.addEventListener('message', (event) => {
-      messages.push(event.data as string | ArrayBuffer)
+      messages.push(event.data)
     })
 
     await openEvent(socket)
     socket.send('echo remote')
     await waitFor(() => messages.includes('echo remote'))
 
-    expect(ptyList).toHaveBeenCalledWith({ location: { directory: DIRECTORY } })
-    expect(connectToken).toHaveBeenCalledWith({
-      ptyID: 'pty-1',
-      location: { directory: DIRECTORY },
-      'x-opencode-ticket': '1',
-    })
+    const [listCall, tokenCall] = fetchFn.mock.calls
+    const listUrl = new URL(String(listCall?.[0]))
+    expect(listUrl.pathname).toBe('/api/pty')
+    expect(listUrl.searchParams.get('location[directory]')).toBe(DIRECTORY)
+    const tokenUrl = new URL(String(tokenCall?.[0]))
+    expect(tokenUrl.pathname).toBe('/api/pty/pty-1/connect-token')
+    expect(new Headers(tokenCall?.[1]?.headers).get('x-opencode-ticket')).toBe('1')
     expect(capturedUrl?.searchParams.get('ticket')).toBe('remote-ticket')
     expect(capturedUrl?.searchParams.get('location[directory]')).toBe(DIRECTORY)
     expect(capturedUrl?.searchParams.get('cursor')).toBe('3')
@@ -212,10 +244,9 @@ describe('OpenCode Server Terminal Socket Route', () => {
 describe('OpenCode Server Terminal Socket session binding', () => {
   it('closes the socket when its session is deleted', async () => {
     const socket = new WebSocket(`ws://127.0.0.1:${sessionPort}/${SERVER_ID}/terminals/pty-1/connect?directory=${encodeURIComponent(DIRECTORY)}`)
-    socket.binaryType = 'arraybuffer'
-    const messages: Array<string | ArrayBuffer> = []
+    const messages: unknown[] = []
     socket.addEventListener('message', (event) => {
-      messages.push(event.data as string | ArrayBuffer)
+      messages.push(event.data)
     })
 
     await openEvent(socket)

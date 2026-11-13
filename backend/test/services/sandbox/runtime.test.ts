@@ -1,12 +1,9 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Database } from 'bun:sqlite'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { ENV, getOpenCodeAgentTmpPath, getOpenCodeGlobalSkillsPath, getOpenCodeToolOutputPath, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
-import type { GitCredential } from '@opencode-manager/shared'
-import { migrate } from '../../../src/db/migration-runner'
-import { allMigrations } from '../../../src/db/migrations'
 import { SettingsService } from '../../../src/services/settings'
 import {
   SANDBOX_DOCKER_DATA_GUEST_PATH,
@@ -29,35 +26,30 @@ import {
   stopSandboxesOnShutdown,
   type SandboxShellTarget,
 } from '../../../src/services/sandbox/runtime'
-import { executeCommand } from '../../../src/utils/process'
-import { detectSandboxCapability } from '../../../src/services/sandbox/capability'
-import { logger } from '../../../src/utils/logger'
-import { forceProcessAttestation } from '../../../src/services/opencode/process-identity'
+import type { JsonValue } from '@opencode-manager/shared/utils'
+import { sandboxCapabilityProbes, resetSandboxCapabilityCache } from '../../../src/services/sandbox/capability'
 import type { RepoEnvService } from '../../../src/services/repo-env'
+import { overrideSandboxExecutableTrustValidator } from '../../../src/services/sandbox/command'
+import { forceProcessAttestation } from '../../../src/services/opencode/process-identity'
+import { z } from 'zod'
+import { expectLoggedMessage, resetTestLogs, testLogEntries } from '../../helpers/log-assertions'
+import { FAKE_MSB_SCRIPT, FAKE_MSB_STATE_ENV } from '../../helpers/fake-msb'
+import { createTestDatabase } from '../../helpers/test-database'
+import { git } from '../../helpers/git-fixtures'
+import { applyTestEnv } from '../../helpers/test-env'
 
-vi.mock('../../../src/utils/process', () => ({
-  executeCommand: vi.fn(),
-}))
-
-vi.mock('../../../src/services/sandbox/capability', () => ({
-  detectSandboxCapability: vi.fn(),
-}))
-
-vi.mock('../../../src/utils/logger', () => ({
-  logger: {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  },
-}))
-
-const mockExecuteCommand = executeCommand as ReturnType<typeof vi.fn>
-const mockDetectSandboxCapability = detectSandboxCapability as ReturnType<typeof vi.fn>
-
-const originalWorkspacePath = process.env.WORKSPACE_PATH
+const suiteBinDir = mkdtempSync(path.join(realpathSync(tmpdir()), 'ocm-runtime-bin-'))
+writeFileSync(path.join(suiteBinDir, 'msb'), FAKE_MSB_SCRIPT, { mode: 0o755 })
 const suiteWorkspaceParent = mkdtempSync(path.join(realpathSync(tmpdir()), 'ocm-runtime-test-'))
-process.env.WORKSPACE_PATH = suiteWorkspaceParent
+const restoreTestEnv = applyTestEnv({
+  PATH: `${suiteBinDir}${path.delimiter}${process.env.PATH ?? ''}`,
+  GIT_CONFIG_GLOBAL: '/dev/null',
+  GIT_CONFIG_SYSTEM: '/dev/null',
+  GIT_CONFIG_NOSYSTEM: '1',
+  WORKSPACE_PATH: suiteWorkspaceParent,
+  [FAKE_MSB_STATE_ENV]: path.join(suiteWorkspaceParent, 'fake-msb'),
+})
+overrideSandboxExecutableTrustValidator(() => true)
 
 const reposRoot = getReposPath()
 const worktreesRoot = getScheduleWorktreesPath()
@@ -68,43 +60,404 @@ const repoADir = path.join(reposRoot, 'repo-a')
 const repoBDir = path.join(reposRoot, 'repo-b')
 const worktreeDir = path.join(worktreesRoot, 'job-1-run-2')
 
+const KVM_UNAVAILABLE_REASON =
+  '/dev/kvm is not available or not writable; pass --device /dev/kvm and run on a KVM-capable Linux host'
+
 const ROOT_SESSION = 'ses_root'
 const OTHER_ROOT_SESSION = 'ses_other'
 const VM_NAME = sessionSandboxName(ROOT_SESSION)
 const OTHER_VM_NAME = sessionSandboxName(OTHER_ROOT_SESSION)
 const SHARED_MOUNT_ROOTS = [toolOutputRoot, skillsRoot, agentTmpRoot]
 
-type ExecResult = { exitCode: number; stdout: string; stderr: string }
+const FakeVmStateSchema = z.object({
+  projectMounts: z.array(z.string()),
+  rootSessionId: z.string(),
+  cpus: z.number(),
+  memoryMib: z.number(),
+  running: z.boolean(),
+})
 
-type FakeVm = {
-  projectMounts: string[]
-  rootSessionId: string
-  cpus: number
-  memoryMib: number
-  running: boolean
-  mutate?: (config: Record<string, unknown>) => Record<string, unknown>
+type FakeVmState = z.infer<typeof FakeVmStateSchema>
+
+const FakeCallSchema = z.object({ argv: z.array(z.string()) })
+
+interface FakeMountOptions {
+  readonly: boolean
+  noexec: boolean
+  nosuid: boolean
+  nodev: boolean
 }
 
-type FakeMsbOptions = {
+interface FakeBindMount {
+  type: 'Bind'
+  host: string
+  guest: string
+  options: FakeMountOptions
+  stat_virtualization: string
+  host_permissions: string
+  follow_root_symlinks: boolean
+  quota_mib: null
+}
+
+interface FakeTmpfsMount {
+  type: 'Tmpfs'
+  guest: string
+  size_mib: number | null
+  options: FakeMountOptions
+}
+
+interface FakeNamedMount {
+  type: 'Named'
+  name: string
+  guest: string
+  options: FakeMountOptions
+  stat_virtualization: string
+  host_permissions: string
+  follow_root_symlinks: boolean
+}
+
+type FakeMount = FakeBindMount | FakeTmpfsMount | FakeNamedMount
+
+interface FakeInspectConfig {
+  name: string
+  image: { Oci: { reference: string; root_disk?: { kind: string; size_mib: number } } }
+  resources: { cpus: number; memory_mib: number; max_cpus: number; max_memory_mib: number }
+  runtime: {
+    workdir: string
+    shell: string
+    scripts: Record<string, JsonValue>
+    entrypoint: string[]
+    cmd: string[]
+    hostname: null
+    user: string
+    log_level: string
+    metrics_sample_interval_ms: number
+    disable_metrics_sample: boolean
+  }
+  env: JsonValue[]
+  labels: Record<string, string>
+  rlimits: JsonValue[]
+  mounts: FakeMount[]
+  patches: JsonValue[]
+  network: {
+    enabled: boolean
+    ports: JsonValue[]
+    policy: JsonValue
+    max_connections: number | null
+    trust_host_cas: boolean
+  }
+  init: null
+  pull_policy: string
+  security_profile: string
+  deployment_profile: string
+  lifecycle: { ephemeral: boolean; max_duration_secs: null; idle_timeout_secs: null }
+  manifest_digest: JsonValue
+}
+
+interface FakeNestedInspectConfig {
+  spec: FakeInspectConfig
+}
+
+type FakeReportedConfig = FakeInspectConfig | FakeNestedInspectConfig
+
+type FakeVm = FakeVmState & {
+  mutate?: (config: FakeInspectConfig) => FakeReportedConfig
+}
+
+interface FakeMsbOptions {
   lsError?: string
   runError?: string
+  runErrorOnce?: string
+  runRequiresReplace?: string
+  replaceRunError?: string
   startError?: string
   stopError?: string
-  onRun?: (name: string, vm: FakeVm) => FakeVm
+  rmError?: string
+  volumeError?: string
+  pullError?: string
+  execError?: string
+  missingRemovals?: boolean
+  gateInspect?: boolean
+  gateStop?: boolean
+  createdOverride?: { name: string; mutate: (config: FakeInspectConfig) => FakeReportedConfig }
+}
+
+const fakeMsbStateDir = path.join(suiteWorkspaceParent, 'fake-msb')
+
+function writeJsonFile(file: string, value: JsonValue | FakeVmState | FakeReportedConfig | Record<string, FakeVmState>): void {
+  mkdirSync(path.dirname(file), { recursive: true })
+  writeFileSync(file, JSON.stringify(value))
+}
+
+function fakeMsbStatePath(): string {
+  return path.join(fakeMsbStateDir, 'state.json')
+}
+
+function fakeMsbInvocations(): string[][] {
+  const logPath = path.join(fakeMsbStateDir, 'calls.jsonl')
+  if (!existsSync(logPath)) return []
+  return readFileSync(logPath, 'utf8')
+    .split('\n')
+    .filter((line) => line.length > 0)
+    .map((line) => FakeCallSchema.parse(JSON.parse(line)).argv)
+}
+
+function fakeVms(): Record<string, FakeVmState> {
+  const statePath = fakeMsbStatePath()
+  if (!existsSync(statePath)) return {}
+  return z.object({ vms: z.record(z.string(), FakeVmStateSchema) }).parse(JSON.parse(readFileSync(statePath, 'utf8'))).vms
+}
+
+function fakeVm(name: string): FakeVmState | undefined {
+  return fakeVms()[name]
+}
+
+function hasFakeVm(name: string): boolean {
+  return name in fakeVms()
+}
+
+function writeFakeMsbSpec(options: FakeMsbOptions = {}): void {
+  writeJsonFile(path.join(fakeMsbStateDir, 'spec.json'), {
+    persistentOverrides: options.createdOverride ? [options.createdOverride.name] : [],
+    version: 'msb 0.6.15',
+    image: ENV.SANDBOX.IMAGE,
+    net: ENV.SANDBOX.NET,
+    policy: resolveExpectedSandboxNetworkPolicy(ENV.SANDBOX.NET),
+    execUser: resolveSandboxExecUser(),
+    pathEnv: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+    sharedMountRoots: SHARED_MOUNT_ROOTS,
+    dockerVolumeSuffix: '-docker-data',
+    dockerGuestPath: SANDBOX_DOCKER_DATA_GUEST_PATH,
+    manifestDigest: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+  })
+}
+
+function writeFailureFile(key: string, stderr: string | undefined, extra: Record<string, JsonValue> = {}): void {
+  if (stderr === undefined) return
+  writeJsonFile(path.join(fakeMsbStateDir, `fail-${key}`), { stderr, exitCode: 1, ...extra })
+}
+
+function installFakeMsb(vms: Map<string, FakeVm>, options: FakeMsbOptions = {}): void {
+  rmSync(fakeMsbStateDir, { recursive: true, force: true })
+  mkdirSync(fakeMsbStateDir, { recursive: true })
+  writeFakeMsbSpec(options)
+
+  const states: Record<string, FakeVmState> = {}
+  for (const [name, entry] of vms) {
+    states[name] = {
+      projectMounts: entry.projectMounts,
+      rootSessionId: entry.rootSessionId,
+      cpus: entry.cpus,
+      memoryMib: entry.memoryMib,
+      running: entry.running,
+    }
+    if (entry.mutate) {
+      writeJsonFile(path.join(fakeMsbStateDir, 'vms', name, 'inspect.json'), entry.mutate(inspectConfig(entry, name)))
+    }
+  }
+  writeJsonFile(fakeMsbStatePath(), { vms: states })
+
+  if (options.createdOverride) {
+    const template = vm()
+    writeJsonFile(
+      path.join(fakeMsbStateDir, 'vms', options.createdOverride.name, 'inspect.json'),
+      options.createdOverride.mutate(inspectConfig(template, options.createdOverride.name)),
+    )
+  }
+
+  writeFailureFile('ls', options.lsError)
+  writeFailureFile('run', options.runError)
+  writeFailureFile('run', options.runErrorOnce, { once: true })
+  writeFailureFile('run-requires-replace', options.runRequiresReplace)
+  writeFailureFile('run-replace', options.replaceRunError)
+  writeFailureFile('start', options.startError)
+  writeFailureFile('stop', options.stopError)
+  writeFailureFile('rm', options.rmError)
+  writeFailureFile('volume', options.volumeError)
+  writeFailureFile('pull', options.pullError)
+  writeFailureFile('exec', options.execError)
+  if (options.missingRemovals) {
+    writeFailureFile('rm', 'sandbox not found')
+    writeFailureFile('volume', 'no such volume')
+  }
+  if (options.gateInspect) writeFileSync(path.join(fakeMsbStateDir, 'gate-inspect'), '1')
+  if (options.gateStop) writeFileSync(path.join(fakeMsbStateDir, 'gate-stop'), '1')
+}
+
+function releaseFakeMsbGate(kind: 'inspect' | 'rm' | 'stop'): void {
+  rmSync(path.join(fakeMsbStateDir, `gate-${kind}`), { force: true })
+}
+
+function openFakeMsbGate(kind: 'inspect' | 'rm' | 'stop'): void {
+  mkdirSync(fakeMsbStateDir, { recursive: true })
+  writeFileSync(path.join(fakeMsbStateDir, `gate-${kind}`), '1')
+}
+
+async function waitForFakeMsbGate(kind: 'inspect' | 'rm' | 'stop'): Promise<void> {
+  const marker = path.join(fakeMsbStateDir, `waiting-${kind}`)
+  await vi.waitFor(() => {
+    expect(existsSync(marker)).toBe(true)
+  }, { timeout: 5000 })
+}
+
+function vm(overrides: Partial<FakeVm> = {}): FakeVm {
+  return {
+    projectMounts: [repoADir],
+    rootSessionId: ROOT_SESSION,
+    cpus: ENV.SANDBOX.CPUS,
+    memoryMib: memoryMib(),
+    running: true,
+    ...overrides,
+  }
+}
+
+function msbCalls(subcommand: string): string[][] {
+  return fakeMsbInvocations().filter((args) => args[1] === subcommand)
+}
+
+function memoryMib(): number {
+  const parsed = parseMemoryMib(ENV.SANDBOX.MEMORY)
+  if (parsed === null) throw new Error(`cannot parse SANDBOX_MEMORY ${ENV.SANDBOX.MEMORY}`)
+  return parsed
+}
+
+function defaultResources() {
+  return { cpus: ENV.SANDBOX.CPUS, memoryMib: memoryMib() }
+}
+
+function shellTarget(locationDirectory: string, resources = defaultResources()): SandboxShellTarget {
+  return { rootSessionId: ROOT_SESSION, locationDirectory, resources }
+}
+
+function bindMount(host: string): FakeBindMount {
+  return {
+    type: 'Bind',
+    host,
+    guest: host,
+    options: { readonly: false, noexec: false, nosuid: false, nodev: false },
+    stat_virtualization: 'strict',
+    host_permissions: 'private',
+    follow_root_symlinks: false,
+    quota_mib: null,
+  }
+}
+
+function namedMount(name: string, guest: string): FakeNamedMount {
+  return {
+    type: 'Named',
+    name,
+    guest,
+    options: { readonly: false, noexec: false, nosuid: false, nodev: false },
+    stat_virtualization: 'strict',
+    host_permissions: 'private',
+    follow_root_symlinks: false,
+  }
+}
+
+function tmpfsMount(guest: string, sizeMib: number | null): FakeTmpfsMount {
+  return {
+    type: 'Tmpfs',
+    guest,
+    size_mib: sizeMib,
+    options: { readonly: false, noexec: false, nosuid: false, nodev: false },
+  }
+}
+
+function sandboxMounts(spec: { projectMounts: string[]; memoryMib: number }, name: string): FakeMount[] {
+  const mounts: FakeMount[] = []
+  for (const root of [...spec.projectMounts, ...SHARED_MOUNT_ROOTS]) {
+    if (!mounts.some((mount) => mount.type === 'Bind' && mount.host === root)) mounts.push(bindMount(root))
+  }
+  mounts.push(namedMount(sandboxDockerDataVolumeName(name), SANDBOX_DOCKER_DATA_GUEST_PATH))
+  mounts.push(tmpfsMount('/tmp', resolveSandboxRuntimeTmpfsSizeMib(spec.memoryMib)))
+  return mounts
+}
+
+function inspectConfig(vm: FakeVmState, name: string, overrides: Partial<FakeInspectConfig> = {}): FakeInspectConfig {
+  return {
+    name,
+    image: { Oci: { reference: ENV.SANDBOX.IMAGE } },
+    resources: { cpus: vm.cpus, memory_mib: vm.memoryMib, max_cpus: vm.cpus, max_memory_mib: vm.memoryMib },
+    runtime: {
+      workdir: vm.projectMounts[0] ?? '',
+      shell: '/bin/sh',
+      scripts: {},
+      entrypoint: ['/usr/bin/env'],
+      cmd: ['sleep', 'infinity'],
+      hostname: null,
+      user: resolveSandboxExecUser(),
+      log_level: 'info',
+      metrics_sample_interval_ms: 1000,
+      disable_metrics_sample: false,
+    },
+    env: [{ key: 'PATH', value: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' }],
+    labels: { 'ocm.managed': 'true', 'ocm.net': ENV.SANDBOX.NET, 'ocm.session': vm.rootSessionId },
+    rlimits: [],
+    mounts: sandboxMounts(vm, name),
+    patches: [],
+    network: {
+      enabled: true,
+      ports: [],
+      policy: resolveExpectedSandboxNetworkPolicy(ENV.SANDBOX.NET),
+      max_connections: null,
+      trust_host_cas: false,
+    },
+    init: null,
+    pull_policy: 'IfMissing',
+    security_profile: 'default',
+    deployment_profile: 'single_tenant',
+    lifecycle: { ephemeral: false, max_duration_secs: null, idle_timeout_secs: null },
+    manifest_digest: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+    ...overrides,
+  }
+}
+
+function logMessages(level: 'info' | 'warn' | 'error'): string[] {
+  return testLogEntries(level).map((entry) => entry.message)
+}
+
+const realSetTimeout = globalThis.setTimeout
+
+async function advanceSandboxTime(ms: number): Promise<void> {
+  const step = 60_000
+  for (let remaining = ms; remaining > 0; remaining -= step) {
+    await vi.advanceTimersByTimeAsync(Math.min(step, remaining))
+    await new Promise<void>((resolve) => {
+      realSetTimeout(resolve, 120)
+    })
+  }
+}
+
+const defaultProbes = { ...sandboxCapabilityProbes }
+
+function allowCapability(version: string): void {
+  sandboxCapabilityProbes.isKvmAccessible = () => true
+  sandboxCapabilityProbes.resolveExecUserUid = () => null
+  sandboxCapabilityProbes.readMsbVersion = () => ({ status: 0, stdout: version, stderr: '' })
+  resetSandboxCapabilityCache()
+}
+
+function denyCapability(): void {
+  sandboxCapabilityProbes.isKvmAccessible = () => false
+  resetSandboxCapabilityCache()
 }
 
 describe('SandboxRuntimeService', () => {
   let db: Database
   let settingsService: SettingsService
   let service: SandboxRuntimeService
-  let execHandler: (args: string[]) => ExecResult | Promise<ExecResult | undefined> | undefined
+
+  function enableEnforcement(): void {
+    settingsService.updateSettings({ sandbox: { enabled: true } })
+    allowCapability('msb 0.6.15')
+  }
 
   beforeEach(() => {
-    vi.resetAllMocks()
+    Object.assign(sandboxCapabilityProbes, defaultProbes)
+    resetSandboxCapabilityCache()
     resetSandboxRuntimeState()
-    forceProcessAttestation(true)
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
+    resetTestLogs()
+    db = createTestDatabase()
     settingsService = new SettingsService(db)
     service = new SandboxRuntimeService(db)
     mkdirSync(repoADir, { recursive: true })
@@ -113,15 +466,7 @@ describe('SandboxRuntimeService', () => {
     mkdirSync(toolOutputRoot, { recursive: true })
     mkdirSync(skillsRoot, { recursive: true })
     mkdirSync(agentTmpRoot, { recursive: true })
-    execHandler = () => undefined
-    mockExecuteCommand.mockImplementation(async (args: string[]) => {
-      const result = await execHandler(args)
-      if (result !== undefined) return result
-      if (args[0] === 'git') {
-        return { exitCode: 1, stdout: '', stderr: 'not a git repository' }
-      }
-      return { exitCode: 0, stdout: '[]', stderr: '' }
-    })
+    installFakeMsb(new Map())
   })
 
   afterEach(() => {
@@ -133,255 +478,14 @@ describe('SandboxRuntimeService', () => {
   })
 
   afterAll(() => {
-    if (originalWorkspacePath === undefined) {
-      delete process.env.WORKSPACE_PATH
-    } else {
-      process.env.WORKSPACE_PATH = originalWorkspacePath
-    }
+    restoreTestEnv()
+    overrideSandboxExecutableTrustValidator(null)
     rmSync(suiteWorkspaceParent, { recursive: true, force: true })
+    rmSync(suiteBinDir, { recursive: true, force: true })
   })
 
-  function enableEnforcement(): void {
-    settingsService.updateSettings({ sandbox: { enabled: true } })
-    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
-  }
-
-  function memoryMib(): number {
-    const parsed = parseMemoryMib(ENV.SANDBOX.MEMORY)
-    if (parsed === null) throw new Error(`cannot parse SANDBOX_MEMORY ${ENV.SANDBOX.MEMORY}`)
-    return parsed
-  }
-
-  function defaultResources(): { cpus: number; memoryMib: number } {
-    return { cpus: ENV.SANDBOX.CPUS, memoryMib: memoryMib() }
-  }
-
-  function shellTarget(locationDirectory: string, resources = defaultResources()): SandboxShellTarget {
-    return { rootSessionId: ROOT_SESSION, locationDirectory, resources }
-  }
-
-  function bindMount(host: string): Record<string, unknown> {
-    return {
-      type: 'Bind',
-      host,
-      guest: host,
-      options: { readonly: false, noexec: false, nosuid: false, nodev: false },
-      stat_virtualization: 'strict',
-      host_permissions: 'private',
-      follow_root_symlinks: false,
-      quota_mib: null,
-    }
-  }
-
-  function tmpfsMount(guest: string, sizeMib: number | null): Record<string, unknown> {
-    return {
-      type: 'Tmpfs',
-      guest,
-      size_mib: sizeMib,
-      options: { readonly: false, noexec: false, nosuid: false, nodev: false },
-    }
-  }
-
-  function namedMount(name: string, guest: string): Record<string, unknown> {
-    return {
-      type: 'Named',
-      name,
-      guest,
-      options: { readonly: false, noexec: false, nosuid: false, nodev: false },
-      stat_virtualization: 'strict',
-      host_permissions: 'private',
-      follow_root_symlinks: false,
-    }
-  }
-
-  function sandboxMounts(vm: { projectMounts: string[]; cpus: number; memoryMib: number }, name: string): Array<Record<string, unknown>> {
-    const mounts: Array<Record<string, unknown>> = []
-    for (const root of [...vm.projectMounts, ...SHARED_MOUNT_ROOTS]) {
-      if (!mounts.some((mount) => mount.host === root)) mounts.push(bindMount(root))
-    }
-    mounts.push(namedMount(sandboxDockerDataVolumeName(name), SANDBOX_DOCKER_DATA_GUEST_PATH))
-    mounts.push(tmpfsMount('/tmp', resolveSandboxRuntimeTmpfsSizeMib(vm.memoryMib)))
-    return mounts
-  }
-
-  function inspectConfig(vm: FakeVm, name: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
-    return {
-      name,
-      image: { Oci: { reference: ENV.SANDBOX.IMAGE } },
-      resources: { cpus: vm.cpus, memory_mib: vm.memoryMib, max_cpus: vm.cpus, max_memory_mib: vm.memoryMib },
-      runtime: {
-        workdir: vm.projectMounts[0],
-        shell: '/bin/sh',
-        scripts: {},
-        entrypoint: ['/usr/bin/env'],
-        cmd: ['sleep', 'infinity'],
-        hostname: null,
-        user: resolveSandboxExecUser(),
-        log_level: 'info',
-        metrics_sample_interval_ms: 1000,
-        disable_metrics_sample: false,
-      },
-      env: [{ key: 'PATH', value: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' }],
-      labels: { 'ocm.managed': 'true', 'ocm.net': ENV.SANDBOX.NET, 'ocm.session': vm.rootSessionId },
-      rlimits: [],
-      mounts: sandboxMounts(vm, name),
-      patches: [],
-      network: {
-        enabled: true,
-        ports: [],
-        policy: resolveExpectedSandboxNetworkPolicy(ENV.SANDBOX.NET),
-        max_connections: null,
-        trust_host_cas: false,
-      },
-      init: null,
-      pull_policy: 'IfMissing',
-      security_profile: 'default',
-      deployment_profile: 'single_tenant',
-      lifecycle: { ephemeral: false, max_duration_secs: null, idle_timeout_secs: null },
-      manifest_digest: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
-      ...overrides,
-    }
-  }
-
-  function runningInspectOutput(config: Record<string, unknown>, name: string): string {
-    return JSON.stringify({
-      name,
-      status: 'Running',
-      config,
-      created_at: '2026-08-12T00:00:00Z',
-      updated_at: '2026-08-12T00:00:00Z',
-      active_config: config,
-      pending_changes: [],
-    })
-  }
-
-  function stoppedInspectOutput(config: Record<string, unknown>, name: string): string {
-    return JSON.stringify({
-      name,
-      status: 'Stopped',
-      config,
-      created_at: '2026-08-12T00:00:00Z',
-      updated_at: '2026-08-12T00:00:00Z',
-      active_config: null,
-      pending_changes: [],
-    })
-  }
-
-  function projectMountsFromRunArgs(args: string[]): string[] {
-    const mounts: string[] = []
-    for (let index = 0; index < args.length; index++) {
-      const value = args[index + 1]
-      if (args[index] === '--mount-dir' && value !== undefined) {
-        const separator = value.indexOf(':')
-        mounts.push(separator >= 0 ? value.slice(0, separator) : value)
-      }
-    }
-    const shared = new Set(SHARED_MOUNT_ROOTS)
-    return mounts.filter((mount) => !shared.has(mount))
-  }
-
-  function rootSessionIdFromRunArgs(args: string[]): string {
-    for (let index = 0; index < args.length; index++) {
-      const value = args[index + 1]
-      if (args[index] === '--label' && value !== undefined && value.startsWith('ocm.session=')) {
-        return value.slice('ocm.session='.length)
-      }
-    }
-    return ''
-  }
-
-  function resourcesFromRunArgs(args: string[]): { cpus: number; memoryMib: number } {
-    const memoryValue = args[args.indexOf('-m') + 1] ?? ''
-    const cpusValue = args[args.indexOf('-c') + 1] ?? ''
-    return { cpus: Number(cpusValue), memoryMib: Number(memoryValue.replace(/M$/, '')) }
-  }
-
-  function installFakeMsb(vms: Map<string, FakeVm>, options: FakeMsbOptions = {}): void {
-    execHandler = (args) => {
-      const subcommand = args[1]
-      switch (subcommand) {
-        case 'inspect': {
-          const name = args[2] ?? ''
-          const vm = vms.get(name)
-          if (vm === undefined) return { exitCode: 1, stdout: '', stderr: 'no such sandbox' }
-          const base = inspectConfig(vm, name)
-          const config = vm.mutate ? vm.mutate(base) : base
-          return {
-            exitCode: 0,
-            stdout: vm.running ? runningInspectOutput(config, name) : stoppedInspectOutput(config, name),
-            stderr: '',
-          }
-        }
-        case 'ls': {
-          if (options.lsError !== undefined) return { exitCode: 1, stdout: '', stderr: options.lsError }
-          return {
-            exitCode: 0,
-            stdout: JSON.stringify([...vms].map(([name, vm]) => ({ name, status: vm.running ? 'running' : 'stopped' }))),
-            stderr: '',
-          }
-        }
-        case 'run': {
-          if (options.runError !== undefined) throw new Error(`Command failed with code 1: ${options.runError}`)
-          const name = args[args.indexOf('--name') + 1] ?? ''
-          if (name === '') return { exitCode: 1, stdout: '', stderr: 'missing sandbox name' }
-          const resources = resourcesFromRunArgs(args)
-          let vm: FakeVm = {
-            projectMounts: projectMountsFromRunArgs(args),
-            rootSessionId: rootSessionIdFromRunArgs(args),
-            cpus: resources.cpus,
-            memoryMib: resources.memoryMib,
-            running: true,
-          }
-          if (options.onRun) vm = options.onRun(name, vm)
-          vms.set(name, vm)
-          return { exitCode: 0, stdout: '', stderr: '' }
-        }
-        case 'start': {
-          if (options.startError !== undefined) return { exitCode: 1, stdout: '', stderr: options.startError }
-          const vm = vms.get(args[2] ?? '')
-          if (vm) vm.running = true
-          return { exitCode: 0, stdout: '', stderr: '' }
-        }
-        case 'stop': {
-          if (options.stopError !== undefined) return { exitCode: 1, stdout: '', stderr: options.stopError }
-          const vm = vms.get(args[2] ?? '')
-          if (vm) vm.running = false
-          return { exitCode: 0, stdout: '', stderr: '' }
-        }
-        case 'rm': {
-          vms.delete(args[args.length - 1] ?? '')
-          return { exitCode: 0, stdout: '', stderr: '' }
-        }
-        case 'volume':
-        case 'ping':
-        case 'exec':
-        case 'pull':
-          return { exitCode: 0, stdout: '', stderr: '' }
-        default:
-          return undefined
-      }
-    }
-  }
-
-  function vm(overrides: Partial<FakeVm> = {}): FakeVm {
-    return {
-      projectMounts: [repoADir],
-      rootSessionId: ROOT_SESSION,
-      cpus: ENV.SANDBOX.CPUS,
-      memoryMib: memoryMib(),
-      running: true,
-      ...overrides,
-    }
-  }
-
-  function msbCalls(subcommand: string): string[][] {
-    return mockExecuteCommand.mock.calls
-      .map((call) => call[0] as string[])
-      .filter((args) => args[0] !== 'git' && args[1] === subcommand)
-  }
-
   async function expectRecreateForMutation(
-    mutate: (config: Record<string, unknown>) => Record<string, unknown>,
+    mutate: (config: FakeInspectConfig) => FakeReportedConfig,
     expectedReasonPart: string,
   ): Promise<void> {
     enableEnforcement()
@@ -393,26 +497,26 @@ describe('SandboxRuntimeService', () => {
     expect(plan).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
     expect(msbCalls('rm')).toHaveLength(1)
     expect(msbCalls('run')).toHaveLength(1)
-    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining(expectedReasonPart))
+    expectLoggedMessage(expectedReasonPart, 'warn')
   }
 
   it('returns host mode when the preference is off', async () => {
-    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.3.1' })
+    allowCapability('msb 0.3.1')
 
     const plan = await service.planShell(repoADir, shellTarget(repoADir))
 
     expect(plan).toEqual({ mode: 'host' })
-    expect(mockExecuteCommand).not.toHaveBeenCalled()
+    expect(fakeMsbInvocations()).toEqual([])
   })
 
   it('returns blocked when the preference is on but capability is unavailable', async () => {
     settingsService.updateSettings({ sandbox: { enabled: true } })
-    mockDetectSandboxCapability.mockReturnValue({ available: false, reason: '/dev/kvm is not available' })
+    denyCapability()
 
     const plan = await service.planShell(repoADir, shellTarget(repoADir))
 
-    expect(plan).toEqual({ mode: 'blocked', reason: '/dev/kvm is not available' })
-    expect(mockExecuteCommand).not.toHaveBeenCalled()
+    expect(plan).toEqual({ mode: 'blocked', reason: KVM_UNAVAILABLE_REASON })
+    expect(fakeMsbInvocations()).toEqual([])
   })
 
   it('returns the named sandbox plan for an attested running VM without listing or creating', async () => {
@@ -446,8 +550,8 @@ describe('SandboxRuntimeService', () => {
     expect(second).toEqual({ mode: 'sandbox', name: OTHER_VM_NAME, workdir: repoBDir })
     expect(VM_NAME).not.toBe(OTHER_VM_NAME)
     expect(sandboxDockerDataVolumeName(VM_NAME)).not.toBe(sandboxDockerDataVolumeName(OTHER_VM_NAME))
-    expect(vms.get(VM_NAME)?.projectMounts).toEqual([repoADir])
-    expect(vms.get(OTHER_VM_NAME)?.projectMounts).toEqual([repoBDir])
+    expect(fakeVm(VM_NAME)?.projectMounts).toEqual([repoADir])
+    expect(fakeVm(OTHER_VM_NAME)?.projectMounts).toEqual([repoBDir])
   })
 
   it('accepts a nested directory inside the session mounts', async () => {
@@ -473,7 +577,7 @@ describe('SandboxRuntimeService', () => {
       mode: 'blocked',
       reason: `working directory ${repoBDir} is outside this session's sandbox (mounted: ${repoADir})`,
     })
-    expect(mockExecuteCommand.mock.calls.filter((call) => (call[0] as string[])[0] !== 'git')).toHaveLength(0)
+    expect(fakeMsbInvocations()).toHaveLength(0)
   })
 
   it('blocks a session directory outside the sandboxed project roots', async () => {
@@ -499,18 +603,10 @@ describe('SandboxRuntimeService', () => {
 
   it('includes the resolved git identity in the sandbox plan env', async () => {
     enableEnforcement()
-    const vms = new Map<string, FakeVm>([[VM_NAME, vm()]])
-    installFakeMsb(vms)
-    const baseHandler = execHandler
-    execHandler = (args) => {
-      if (args[0] === 'git' && args.includes('config') && args.includes('user.name')) {
-        return { exitCode: 0, stdout: 'local\tfile:/repo/.git/config\tLocal User\n', stderr: '' }
-      }
-      if (args[0] === 'git' && args.includes('config') && args.includes('user.email')) {
-        return { exitCode: 0, stdout: 'local\tfile:/repo/.git/config\tlocal@example.com\n', stderr: '' }
-      }
-      return baseHandler(args)
-    }
+    installFakeMsb(new Map([[VM_NAME, vm()]]))
+    git(['init'], repoADir)
+    git(['config', 'user.name', 'Local User'], repoADir)
+    git(['config', 'user.email', 'local@example.com'], repoADir)
 
     const plan = await service.planShell(repoADir, shellTarget(repoADir))
 
@@ -530,7 +626,7 @@ describe('SandboxRuntimeService', () => {
   it('forwards the sandbox git credentials from the plan only when the toggle allows them', async () => {
     enableEnforcement()
     settingsService.updateSettings({
-      gitCredentials: [{ name: 'github', host: 'github.com', type: 'pat', token: 'ghp_plan_token' } as GitCredential],
+      gitCredentials: [{ name: 'github', host: 'github.com', type: 'pat', token: 'ghp_plan_token' }],
       sandbox: { enabled: true, gitCredentials: true },
     })
     installFakeMsb(new Map([[VM_NAME, vm()]]))
@@ -552,22 +648,16 @@ describe('SandboxRuntimeService', () => {
 
   it('includes the repository env in the sandbox plan env after the git env', async () => {
     enableEnforcement()
-    mockExecuteCommand.mockImplementation(async (args: string[]) => {
-      if (args.includes('inspect')) return { exitCode: 0, stdout: runningInspectOutput(inspectConfig(vm(), VM_NAME), VM_NAME), stderr: '' }
-      if (args.includes('config') && args.includes('user.name')) {
-        return { exitCode: 0, stdout: 'local\tfile:/repo/.git/config\tLocal User\n', stderr: '' }
-      }
-      if (args.includes('config') && args.includes('user.email')) {
-        return { exitCode: 0, stdout: 'local\tfile:/repo/.git/config\tlocal@example.com\n', stderr: '' }
-      }
-      return { exitCode: 0, stdout: '[]', stderr: '' }
-    })
+    installFakeMsb(new Map([[VM_NAME, vm()]]))
+    git(['init'], repoADir)
+    git(['config', 'user.name', 'Local User'], repoADir)
+    git(['config', 'user.email', 'local@example.com'], repoADir)
     const repoEnvService = {
       resolveForDirectory: vi.fn(async () => ({
         env: { REPO_SECRET: 's3cret', GIT_AUTHOR_NAME: 'Repo User' },
         maskValues: ['s3cret'],
       })),
-    } as unknown as RepoEnvService
+    } satisfies Pick<RepoEnvService, 'resolveForDirectory'>
     const withRepoEnv = new SandboxRuntimeService(db, repoEnvService)
 
     const plan = await withRepoEnv.planShell(repoADir, shellTarget(repoADir))
@@ -595,10 +685,7 @@ describe('SandboxRuntimeService', () => {
     const plan = await service.planShell(repoADir, shellTarget(repoADir))
 
     expect(plan).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
-    expect(mockExecuteCommand).toHaveBeenCalledWith(
-      [sandboxExecutablePath(), 'start', VM_NAME],
-      expect.objectContaining({ ignoreExitCode: true }),
-    )
+    expect(fakeMsbInvocations()).toContainEqual([sandboxExecutablePath(), 'start', VM_NAME])
     expect(msbCalls('run')).toHaveLength(0)
     expect(msbCalls('rm')).toHaveLength(0)
     expect(msbCalls('inspect')).toHaveLength(2)
@@ -611,11 +698,11 @@ describe('SandboxRuntimeService', () => {
     const plan = await service.planShell(repoADir, shellTarget(repoADir))
 
     expect(plan).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
-    const provisionCall = mockExecuteCommand.mock.calls.find(
-      (call) => (call[0] as string[])[1] === 'exec' && (call[0] as string[]).some((arg) => arg.includes('/etc/passwd')),
+    const provisionArgs = fakeMsbInvocations().find(
+      (args) => args[1] === 'exec' && args.some((arg) => arg.includes('/etc/passwd')),
     )
-    expect(provisionCall).toBeDefined()
-    const provisionArgs = provisionCall![0] as string[]
+    expect(provisionArgs).toBeDefined()
+    if (!provisionArgs) throw new Error('expected a provisioning call')
     expect(provisionArgs[provisionArgs.indexOf('-u') + 1]).toBe('0:0')
     expect(provisionArgs).toContain(VM_NAME)
   })
@@ -629,8 +716,8 @@ describe('SandboxRuntimeService', () => {
 
     expect(plan).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
     expect(msbCalls('run')).toHaveLength(1)
-    expect(vms.get(VM_NAME)?.projectMounts).toEqual([repoADir])
-    expect(vms.get(VM_NAME)?.rootSessionId).toBe(ROOT_SESSION)
+    expect(fakeVm(VM_NAME)?.projectMounts).toEqual([repoADir])
+    expect(fakeVm(VM_NAME)?.rootSessionId).toBe(ROOT_SESSION)
   })
 
   it('reuses a running sandbox whose inspect config nests the spec under config.spec', async () => {
@@ -698,21 +785,21 @@ describe('SandboxRuntimeService', () => {
 
   it('removes and recreates a sandbox whose cpus differ from the session resources', async () => {
     await expectRecreateForMutation(
-      (config) => ({ ...config, resources: { ...(config.resources as Record<string, unknown>), cpus: ENV.SANDBOX.CPUS + 3 } }),
+      (config) => ({ ...config, resources: { ...config.resources, cpus: ENV.SANDBOX.CPUS + 3 } }),
       'cpus',
     )
   })
 
   it('removes and recreates a sandbox whose memory differs from the session resources', async () => {
     await expectRecreateForMutation(
-      (config) => ({ ...config, resources: { ...(config.resources as Record<string, unknown>), memory_mib: memoryMib() * 2 } }),
+      (config) => ({ ...config, resources: { ...config.resources, memory_mib: memoryMib() * 2 } }),
       'memory',
     )
   })
 
   it('removes and recreates a sandbox carrying an unexpected bind mount', async () => {
     await expectRecreateForMutation(
-      (config) => ({ ...config, mounts: [...(config.mounts as unknown[]), bindMount('/workspace/config')] }),
+      (config) => ({ ...config, mounts: [...config.mounts, bindMount('/workspace/config')] }),
       'unexpected bind mount',
     )
   })
@@ -721,8 +808,10 @@ describe('SandboxRuntimeService', () => {
     await expectRecreateForMutation(
       (config) => ({
         ...config,
-        mounts: (config.mounts as Array<Record<string, unknown>>).map((mount) =>
-          mount.host === repoADir ? { ...mount, options: { readonly: false, noexec: true, nosuid: false, nodev: false } } : mount,
+        mounts: config.mounts.map((mount) =>
+          mount.type === 'Bind' && mount.host === repoADir
+            ? { ...mount, options: { readonly: false, noexec: true, nosuid: false, nodev: false } }
+            : mount,
         ),
       }),
       'options.noexec',
@@ -733,7 +822,7 @@ describe('SandboxRuntimeService', () => {
     await expectRecreateForMutation(
       (config) => ({
         ...config,
-        mounts: (config.mounts as Array<Record<string, unknown>>).filter((mount) => mount.type !== 'Tmpfs'),
+        mounts: config.mounts.filter((mount) => mount.type !== 'Tmpfs'),
       }),
       'missing the runtime tmpfs mount at /tmp',
     )
@@ -743,7 +832,7 @@ describe('SandboxRuntimeService', () => {
     await expectRecreateForMutation(
       (config) => ({
         ...config,
-        mounts: (config.mounts as Array<Record<string, unknown>>).map((mount) =>
+        mounts: config.mounts.map((mount) =>
           mount.type === 'Tmpfs' ? { ...mount, size_mib: (resolveSandboxRuntimeTmpfsSizeMib(memoryMib()) ?? 0) + 1 } : mount,
         ),
       }),
@@ -755,7 +844,7 @@ describe('SandboxRuntimeService', () => {
     await expectRecreateForMutation(
       (config) => ({
         ...config,
-        mounts: (config.mounts as Array<Record<string, unknown>>).map((mount) =>
+        mounts: config.mounts.map((mount) =>
           mount.type === 'Named' ? { ...mount, name: 'ocm-other-docker-data' } : mount,
         ),
       }),
@@ -767,7 +856,7 @@ describe('SandboxRuntimeService', () => {
     await expectRecreateForMutation(
       (config) => ({
         ...config,
-        mounts: (config.mounts as Array<Record<string, unknown>>).filter((mount) => mount.type !== 'Named'),
+        mounts: config.mounts.filter((mount) => mount.type !== 'Named'),
       }),
       'missing the Docker data volume mount',
     )
@@ -777,7 +866,13 @@ describe('SandboxRuntimeService', () => {
     await expectRecreateForMutation(
       (config) => ({
         ...config,
-        network: { enabled: true, ports: [], policy: { default_egress: 'allow', default_ingress: 'allow', rules: [] } },
+        network: {
+          enabled: true,
+          ports: [],
+          policy: { default_egress: 'allow', default_ingress: 'allow', rules: [] },
+          max_connections: null,
+          trust_host_cas: false,
+        },
       }),
       'unrestricted egress',
     )
@@ -785,7 +880,10 @@ describe('SandboxRuntimeService', () => {
 
   it('removes and recreates a sandbox with networking disabled', async () => {
     await expectRecreateForMutation(
-      (config) => ({ ...config, network: { enabled: false, ports: [] } }),
+      (config) => ({
+        ...config,
+        network: { enabled: false, ports: [], policy: null, max_connections: null, trust_host_cas: false },
+      }),
       'networking is disabled',
     )
   })
@@ -799,7 +897,7 @@ describe('SandboxRuntimeService', () => {
 
   it('removes and recreates a sandbox whose runtime command differs from the canonical spec', async () => {
     await expectRecreateForMutation(
-      (config) => ({ ...config, runtime: { ...(config.runtime as Record<string, unknown>), cmd: ['/bin/sh'] } }),
+      (config) => ({ ...config, runtime: { ...config.runtime, cmd: ['/bin/sh'] } }),
       'runtime.cmd',
     )
   })
@@ -838,12 +936,7 @@ describe('SandboxRuntimeService', () => {
   it('blocks planning when the sandbox removal fails and never runs a create', async () => {
     enableEnforcement()
     const vms = new Map<string, FakeVm>([[VM_NAME, vm({ mutate: (config) => ({ ...config, labels: {} }) })]])
-    installFakeMsb(vms)
-    const baseHandler = execHandler
-    execHandler = (args) => {
-      if (args[1] === 'rm') return { exitCode: 1, stdout: '', stderr: 'failed to kill vm: operation not permitted' }
-      return baseHandler(args)
-    }
+    installFakeMsb(vms, { rmError: 'failed to kill vm: operation not permitted' })
 
     const plan = await service.planShell(repoADir, shellTarget(repoADir))
 
@@ -853,14 +946,13 @@ describe('SandboxRuntimeService', () => {
     })
     expect(msbCalls('run')).toHaveLength(0)
     expect(msbCalls('rm')).toHaveLength(1)
-    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Recreating unverifiable sandbox'))
+    expectLoggedMessage('Recreating unverifiable sandbox', 'warn')
   })
 
   it('blocks planning when the freshly created sandbox fails attestation', async () => {
     enableEnforcement()
-    const vms = new Map<string, FakeVm>()
-    installFakeMsb(vms, {
-      onRun: (_name, created) => ({ ...created, mutate: (config) => ({ ...config, labels: {} }) }),
+    installFakeMsb(new Map(), {
+      createdOverride: { name: VM_NAME, mutate: (config) => ({ ...config, labels: {} }) },
     })
 
     const plan = await service.planShell(repoADir, shellTarget(repoADir))
@@ -889,22 +981,12 @@ describe('SandboxRuntimeService', () => {
     const plan = await service.planShell(repoADir, shellTarget(repoADir))
 
     expect(plan).toEqual({ mode: 'blocked', reason: 'Command failed with code 1: no KVM acceleration available' })
-    expect(logger.error).toHaveBeenCalled()
+    expect(testLogEntries('error').length).toBeGreaterThan(0)
   })
 
   it('re-uses a create failure to invalidate the running cache', async () => {
     enableEnforcement()
-    const vms = new Map<string, FakeVm>()
-    let failNextRun = true
-    installFakeMsb(vms)
-    const baseHandler = execHandler
-    execHandler = (args) => {
-      if (args[1] === 'run' && failNextRun) {
-        failNextRun = false
-        throw new Error('Command failed with code 1: no KVM acceleration available')
-      }
-      return baseHandler(args)
-    }
+    installFakeMsb(new Map(), { runErrorOnce: 'no KVM acceleration available' })
 
     const failed = await service.planShell(repoADir, shellTarget(repoADir))
     expect(failed).toEqual({ mode: 'blocked', reason: 'Command failed with code 1: no KVM acceleration available' })
@@ -916,22 +998,9 @@ describe('SandboxRuntimeService', () => {
 
   it('retries the create with --replace when msb reports the sandbox already exists', async () => {
     enableEnforcement()
-    const vms = new Map<string, FakeVm>()
-    installFakeMsb(vms)
-    const baseHandler = execHandler
-    let firstRun = true
-    execHandler = (args) => {
-      if (args[1] === 'run') {
-        if (firstRun) {
-          firstRun = false
-          return { exitCode: 1, stdout: '', stderr: `error: sandbox already exists: sandbox '${VM_NAME}' already exists` }
-        }
-        if (!args.includes('--replace')) {
-          return { exitCode: 1, stdout: '', stderr: 'retried without --replace' }
-        }
-      }
-      return baseHandler(args)
-    }
+    installFakeMsb(new Map(), {
+      runRequiresReplace: `error: sandbox already exists: sandbox '${VM_NAME}' already exists`,
+    })
 
     const plan = await service.planShell(repoADir, shellTarget(repoADir))
 
@@ -940,18 +1009,13 @@ describe('SandboxRuntimeService', () => {
     expect(runs).toHaveLength(2)
     expect(runs[0]).not.toContain('--replace')
     expect(runs[1]).toContain('--replace')
-    expect(vms.has(VM_NAME)).toBe(true)
-    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('already exists as an orphaned msb sandbox'))
+    expect(hasFakeVm(VM_NAME)).toBe(true)
+    expectLoggedMessage('already exists as an orphaned msb sandbox', 'warn')
   })
 
   it('does not retry a create that fails for another reason', async () => {
     enableEnforcement()
-    installFakeMsb(new Map())
-    const baseHandler = execHandler
-    execHandler = (args) => {
-      if (args[1] === 'run') return { exitCode: 1, stdout: '', stderr: 'no KVM acceleration available' }
-      return baseHandler(args)
-    }
+    installFakeMsb(new Map(), { runError: 'no KVM acceleration available' })
 
     const plan = await service.planShell(repoADir, shellTarget(repoADir))
 
@@ -959,22 +1023,15 @@ describe('SandboxRuntimeService', () => {
     const runs = msbCalls('run')
     expect(runs).toHaveLength(1)
     expect(runs[0]).not.toContain('--replace')
-    expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining('orphaned msb sandbox'))
+    expect(logMessages('warn')).not.toContainEqual(expect.stringContaining('orphaned msb sandbox'))
   })
 
   it('surfaces a failing replace create as a blocked plan', async () => {
     enableEnforcement()
-    installFakeMsb(new Map())
-    const baseHandler = execHandler
-    execHandler = (args) => {
-      if (args[1] === 'run') {
-        if (!args.includes('--replace')) {
-          return { exitCode: 1, stdout: '', stderr: `error: sandbox already exists: sandbox '${VM_NAME}' already exists` }
-        }
-        return { exitCode: 1, stdout: '', stderr: 'replace failed: sandbox busy' }
-      }
-      return baseHandler(args)
-    }
+    installFakeMsb(new Map(), {
+      runRequiresReplace: `error: sandbox already exists: sandbox '${VM_NAME}' already exists`,
+      replaceRunError: 'replace failed: sandbox busy',
+    })
 
     const plan = await service.planShell(repoADir, shellTarget(repoADir))
 
@@ -983,10 +1040,10 @@ describe('SandboxRuntimeService', () => {
   })
 
   it('stops the least recently used idle VM when the running cap is reached', async () => {
-    vi.useFakeTimers()
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
     try {
       settingsService.updateSettings({ sandbox: { enabled: true, maxRunningVms: 1 } })
-      mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
+      allowCapability('msb 0.6.15')
       const vms = new Map<string, FakeVm>([
         [VM_NAME, vm({ projectMounts: [repoADir] })],
         [OTHER_VM_NAME, vm({ projectMounts: [repoBDir], rootSessionId: OTHER_ROOT_SESSION, running: false })],
@@ -996,7 +1053,7 @@ describe('SandboxRuntimeService', () => {
       const first = await service.planShell(repoADir, shellTarget(repoADir))
       expect(first).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
 
-      await vi.advanceTimersByTimeAsync(ENV.SANDBOX.EXEC_TIMEOUT_MS)
+      await advanceSandboxTime(ENV.SANDBOX.EXEC_TIMEOUT_MS)
 
       const second = await service.planShell(repoBDir, {
         rootSessionId: OTHER_ROOT_SESSION,
@@ -1005,10 +1062,7 @@ describe('SandboxRuntimeService', () => {
       })
 
       expect(second).toEqual({ mode: 'sandbox', name: OTHER_VM_NAME, workdir: repoBDir })
-      expect(mockExecuteCommand).toHaveBeenCalledWith(
-        [sandboxExecutablePath(), ...buildSandboxStopArgs(VM_NAME)],
-        expect.objectContaining({ ignoreExitCode: true }),
-      )
+      expect(fakeMsbInvocations()).toContainEqual([sandboxExecutablePath(), ...buildSandboxStopArgs(VM_NAME)])
     } finally {
       vi.useRealTimers()
     }
@@ -1016,7 +1070,7 @@ describe('SandboxRuntimeService', () => {
 
   it('blocks the boot when the cap is reached and no running VM has been idle long enough', async () => {
     settingsService.updateSettings({ sandbox: { enabled: true, maxRunningVms: 1 } })
-    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
+    allowCapability('msb 0.6.15')
     const vms = new Map<string, FakeVm>([
       [VM_NAME, vm({ projectMounts: [repoADir] })],
       [OTHER_VM_NAME, vm({ projectMounts: [repoBDir], rootSessionId: OTHER_ROOT_SESSION, running: false })],
@@ -1034,22 +1088,14 @@ describe('SandboxRuntimeService', () => {
     expect(blocked.mode).toBe('blocked')
     expect(blocked.mode === 'blocked' ? blocked.reason : '').toContain('already running')
     expect(blocked.mode === 'blocked' ? blocked.reason : '').toContain('raise the limit')
-    expect(mockExecuteCommand).not.toHaveBeenCalledWith(
-      [sandboxExecutablePath(), ...buildSandboxStopArgs(VM_NAME)],
-      expect.anything(),
-    )
+    expect(fakeMsbInvocations()).not.toContainEqual([sandboxExecutablePath(), ...buildSandboxStopArgs(VM_NAME)])
   })
 
   it('blocks the boot when the idle VM cannot be stopped to make room', async () => {
     settingsService.updateSettings({ sandbox: { enabled: true, maxRunningVms: 1 } })
-    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
+    allowCapability('msb 0.6.15')
     const vms = new Map<string, FakeVm>([[VM_NAME, vm({ projectMounts: [repoADir] })]])
-    installFakeMsb(vms)
-    const baseHandler = execHandler
-    execHandler = (args) => {
-      if (args[1] === 'stop') return { exitCode: 1, stdout: '', stderr: 'failed to stop vm' }
-      return baseHandler(args)
-    }
+    installFakeMsb(vms, { stopError: 'failed to stop vm' })
 
     const plan = await service.planShell(repoBDir, {
       rootSessionId: OTHER_ROOT_SESSION,
@@ -1063,19 +1109,14 @@ describe('SandboxRuntimeService', () => {
     })
     expect(msbCalls('run')).toHaveLength(0)
     expect(msbCalls('start')).toHaveLength(0)
-    expect(vms.has(OTHER_VM_NAME)).toBe(false)
+    expect(hasFakeVm(OTHER_VM_NAME)).toBe(false)
   })
 
   it('blocks the boot when the idle VM stop throws while making room', async () => {
     settingsService.updateSettings({ sandbox: { enabled: true, maxRunningVms: 1 } })
-    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
+    allowCapability('msb 0.6.15')
     const vms = new Map<string, FakeVm>([[VM_NAME, vm({ projectMounts: [repoADir] })]])
-    installFakeMsb(vms)
-    const baseHandler = execHandler
-    execHandler = (args) => {
-      if (args[1] === 'stop') throw new Error('spawn msb ENOENT')
-      return baseHandler(args)
-    }
+    installFakeMsb(vms, { stopError: 'spawn msb ENOENT' })
 
     const plan = await service.planShell(repoBDir, {
       rootSessionId: OTHER_ROOT_SESSION,
@@ -1089,11 +1130,11 @@ describe('SandboxRuntimeService', () => {
     })
     expect(msbCalls('run')).toHaveLength(0)
     expect(msbCalls('start')).toHaveLength(0)
-    expect(vms.has(OTHER_VM_NAME)).toBe(false)
+    expect(hasFakeVm(OTHER_VM_NAME)).toBe(false)
   })
 
   it('removes an idle running VM and its Docker data volume from the sweep and boots a fresh VM on the next plan', async () => {
-    vi.useFakeTimers()
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
     try {
       enableEnforcement()
       const vms = new Map<string, FakeVm>([[VM_NAME, vm()]])
@@ -1102,15 +1143,14 @@ describe('SandboxRuntimeService', () => {
       const first = await service.planShell(repoADir, shellTarget(repoADir))
       expect(first).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
 
-      await vi.advanceTimersByTimeAsync(31 * 60 * 1000)
+      await advanceSandboxTime(31 * 60 * 1000)
+      await vi.waitFor(() => {
+        expect(logMessages('info')).toContain(`Removed idle sandbox ${VM_NAME} and its Docker data volume`)
+      })
 
       expect(msbCalls('rm')).toHaveLength(1)
-      expect(mockExecuteCommand).toHaveBeenCalledWith(
-        [sandboxExecutablePath(), 'volume', 'rm', sandboxDockerDataVolumeName(VM_NAME)],
-        expect.objectContaining({ ignoreExitCode: true }),
-      )
-      expect(vms.has(VM_NAME)).toBe(false)
-      expect(logger.info).toHaveBeenCalledWith(`Removed idle sandbox ${VM_NAME} and its Docker data volume`)
+      expect(fakeMsbInvocations()).toContainEqual([sandboxExecutablePath(), 'volume', 'rm', sandboxDockerDataVolumeName(VM_NAME)])
+      expect(hasFakeVm(VM_NAME)).toBe(false)
 
       const recreated = await service.planShell(repoADir, shellTarget(repoADir))
       expect(recreated).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
@@ -1121,10 +1161,10 @@ describe('SandboxRuntimeService', () => {
   })
 
   it('removes a session VM that the running cap stopped once it is idle', async () => {
-    vi.useFakeTimers()
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
     try {
       settingsService.updateSettings({ sandbox: { enabled: true, maxRunningVms: 1 } })
-      mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
+      allowCapability('msb 0.6.15')
       const vms = new Map<string, FakeVm>([
         [VM_NAME, vm({ projectMounts: [repoADir] })],
         [OTHER_VM_NAME, vm({ projectMounts: [repoBDir], rootSessionId: OTHER_ROOT_SESSION, running: false })],
@@ -1132,26 +1172,28 @@ describe('SandboxRuntimeService', () => {
       installFakeMsb(vms)
 
       await service.planShell(repoADir, shellTarget(repoADir))
-      await vi.advanceTimersByTimeAsync(ENV.SANDBOX.EXEC_TIMEOUT_MS)
+      await advanceSandboxTime(ENV.SANDBOX.EXEC_TIMEOUT_MS)
       const second = await service.planShell(repoBDir, {
         rootSessionId: OTHER_ROOT_SESSION,
         locationDirectory: repoBDir,
         resources: defaultResources(),
       })
       expect(second).toEqual({ mode: 'sandbox', name: OTHER_VM_NAME, workdir: repoBDir })
-      expect(vms.get(VM_NAME)?.running).toBe(false)
+      expect(fakeVm(VM_NAME)?.running).toBe(false)
 
-      await vi.advanceTimersByTimeAsync(21 * 60 * 1000)
+      await advanceSandboxTime(21 * 60 * 1000)
+      await vi.waitFor(() => {
+        expect(hasFakeVm(VM_NAME)).toBe(false)
+      })
 
-      expect(vms.has(VM_NAME)).toBe(false)
-      expect(vms.has(OTHER_VM_NAME)).toBe(true)
+      expect(hasFakeVm(OTHER_VM_NAME)).toBe(true)
     } finally {
       vi.useRealTimers()
     }
   })
 
   it('removes an untracked session VM only after the threshold from the sweep start and never a non-session VM', async () => {
-    vi.useFakeTimers()
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
     try {
       enableEnforcement()
       const vms = new Map<string, FakeVm>([
@@ -1162,30 +1204,35 @@ describe('SandboxRuntimeService', () => {
 
       await service.prepareSandboxOnBoot()
 
-      await vi.advanceTimersByTimeAsync(20 * 60 * 1000)
-      expect(vms.has(VM_NAME)).toBe(true)
-      expect(vms.has('ocm-workspace')).toBe(true)
+      await advanceSandboxTime(20 * 60 * 1000)
+      expect(hasFakeVm(VM_NAME)).toBe(true)
+      expect(hasFakeVm('ocm-workspace')).toBe(true)
       expect(msbCalls('rm')).toHaveLength(0)
 
-      await vi.advanceTimersByTimeAsync(11 * 60 * 1000)
-      expect(vms.has(VM_NAME)).toBe(false)
-      expect(vms.has('ocm-workspace')).toBe(true)
+      await advanceSandboxTime(11 * 60 * 1000)
+      await vi.waitFor(() => {
+        expect(hasFakeVm(VM_NAME)).toBe(false)
+      })
+      expect(hasFakeVm('ocm-workspace')).toBe(true)
     } finally {
       vi.useRealTimers()
     }
   })
 
   it('does not remove a VM used within the idle threshold', async () => {
-    vi.useFakeTimers()
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
     try {
       enableEnforcement()
       const vms = new Map<string, FakeVm>([[VM_NAME, vm()]])
       installFakeMsb(vms)
       await service.planShell(repoADir, shellTarget(repoADir))
 
-      await vi.advanceTimersByTimeAsync(29 * 60 * 1000)
+      await advanceSandboxTime(29 * 60 * 1000)
+      await vi.waitFor(() => {
+        expect(msbCalls('ls').length).toBeGreaterThan(0)
+      })
 
-      expect(vms.has(VM_NAME)).toBe(true)
+      expect(hasFakeVm(VM_NAME)).toBe(true)
       expect(msbCalls('rm')).toHaveLength(0)
     } finally {
       vi.useRealTimers()
@@ -1193,38 +1240,22 @@ describe('SandboxRuntimeService', () => {
   })
 
   it('skips a VM with an in-flight boot during the idle sweep', async () => {
-    vi.useFakeTimers()
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
     try {
       enableEnforcement()
       const vms = new Map<string, FakeVm>([[VM_NAME, vm()]])
       installFakeMsb(vms)
       await service.prepareSandboxOnBoot()
-
-      let releaseInspect: () => void = () => {}
-      const inspectGate = new Promise<void>((resolve) => {
-        releaseInspect = resolve
-      })
-      let notifyInspect: () => void = () => {}
-      const inspectEntered = new Promise<void>((resolve) => {
-        notifyInspect = resolve
-      })
-      const baseHandler = execHandler
-      execHandler = async (args) => {
-        if (args[1] === 'inspect') {
-          notifyInspect()
-          await inspectGate
-        }
-        return baseHandler(args)
-      }
+      openFakeMsbGate('inspect')
 
       const planning = service.planShell(repoADir, shellTarget(repoADir))
-      await inspectEntered
+      await waitForFakeMsbGate('inspect')
 
-      await vi.advanceTimersByTimeAsync(31 * 60 * 1000)
-      expect(vms.has(VM_NAME)).toBe(true)
+      await advanceSandboxTime(31 * 60 * 1000)
+      expect(hasFakeVm(VM_NAME)).toBe(true)
       expect(msbCalls('rm')).toHaveLength(0)
 
-      releaseInspect()
+      releaseFakeMsbGate('inspect')
       const plan = await planning
       expect(plan).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
     } finally {
@@ -1233,7 +1264,7 @@ describe('SandboxRuntimeService', () => {
   })
 
   it('logs a warning and continues the sweep when a removal fails', async () => {
-    vi.useFakeTimers()
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
     try {
       enableEnforcement()
       const vms = new Map<string, FakeVm>([
@@ -1241,39 +1272,32 @@ describe('SandboxRuntimeService', () => {
         [OTHER_VM_NAME, vm({ projectMounts: [repoBDir], rootSessionId: OTHER_ROOT_SESSION })],
       ])
       installFakeMsb(vms)
-      const baseHandler = execHandler
-      execHandler = (args) => {
-        if (args[1] === 'rm' && args[args.length - 1] === VM_NAME) {
-          return { exitCode: 1, stdout: '', stderr: 'operation not permitted' }
-        }
-        return baseHandler(args)
-      }
+      writeFailureFile(`rm-${VM_NAME}`, 'operation not permitted')
 
       await service.prepareSandboxOnBoot()
-      await vi.advanceTimersByTimeAsync(31 * 60 * 1000)
+      await advanceSandboxTime(31 * 60 * 1000)
+      await vi.waitFor(() => {
+        expect(logMessages('warn')).toContain(`Failed to remove idle sandbox ${VM_NAME}: msb rm failed with code 1: operation not permitted`)
+      })
 
-      expect(logger.warn).toHaveBeenCalledWith(
-        `Failed to remove idle sandbox ${VM_NAME}: msb rm failed with code 1: operation not permitted`,
-      )
-      expect(vms.has(OTHER_VM_NAME)).toBe(false)
-      expect(vms.has(VM_NAME)).toBe(true)
+      expect(hasFakeVm(OTHER_VM_NAME)).toBe(false)
+      expect(hasFakeVm(VM_NAME)).toBe(true)
     } finally {
       vi.useRealTimers()
     }
   })
 
   it('logs a warning when the idle sweep cannot list sandboxes', async () => {
-    vi.useFakeTimers()
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
     try {
       enableEnforcement()
       installFakeMsb(new Map(), { lsError: 'failed to connect to supervisor' })
 
       await service.prepareSandboxOnBoot()
-      await vi.advanceTimersByTimeAsync(31 * 60 * 1000)
-
-      expect(logger.warn).toHaveBeenCalledWith(
-        'Failed to list sandboxes for the idle sweep: msb ls failed with code 1: failed to connect to supervisor',
-      )
+      await advanceSandboxTime(31 * 60 * 1000)
+      await vi.waitFor(() => {
+        expect(logMessages('warn')).toContain('Failed to list sandboxes for the idle sweep: msb ls failed with code 1: failed to connect to supervisor')
+      })
       expect(msbCalls('rm')).toHaveLength(0)
     } finally {
       vi.useRealTimers()
@@ -1288,41 +1312,26 @@ describe('SandboxRuntimeService', () => {
     const first = await service.planShell(repoADir, shellTarget(repoADir))
     expect(first).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
 
-    let releaseRm: () => void = () => {}
-    const rmGate = new Promise<void>((resolve) => {
-      releaseRm = resolve
-    })
-    let notifyRm: () => void = () => {}
-    const rmEntered = new Promise<void>((resolve) => {
-      notifyRm = resolve
-    })
-    const baseHandler = execHandler
-    execHandler = async (args) => {
-      if (args[1] === 'rm') {
-        notifyRm()
-        await rmGate
-      }
-      return baseHandler(args)
-    }
+    openFakeMsbGate('rm')
 
     const removal = service.removeSessionSandbox(ROOT_SESSION)
-    await rmEntered
+    await waitForFakeMsbGate('rm')
 
     const planning = service.planShell(repoADir, shellTarget(repoADir))
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    releaseRm()
+    releaseFakeMsbGate('rm')
     const plan = await planning
     await removal
 
     expect(plan).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
-    expect(vms.has(VM_NAME)).toBe(true)
+    expect(hasFakeVm(VM_NAME)).toBe(true)
     expect(msbCalls('rm')).toHaveLength(1)
     expect(msbCalls('run')).toHaveLength(1)
   })
 
   it('runs a single removal when the same VM is removed concurrently', async () => {
-    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
+    allowCapability('msb 0.6.15')
     installFakeMsb(new Map<string, FakeVm>([[VM_NAME, vm()]]))
 
     const first = service.removeSessionSandbox(ROOT_SESSION)
@@ -1334,17 +1343,18 @@ describe('SandboxRuntimeService', () => {
   })
 
   it('starts the idle sweep at boot so a stale sandbox is removed without a plan', async () => {
-    vi.useFakeTimers()
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
     try {
       enableEnforcement()
       const vms = new Map<string, FakeVm>([[VM_NAME, vm()]])
       installFakeMsb(vms)
 
       await service.prepareSandboxOnBoot()
-      await vi.advanceTimersByTimeAsync(31 * 60 * 1000)
-
-      expect(vms.has(VM_NAME)).toBe(false)
-      expect(logger.info).toHaveBeenCalledWith(`Removed idle sandbox ${VM_NAME} and its Docker data volume`)
+      await advanceSandboxTime(31 * 60 * 1000)
+      await vi.waitFor(() => {
+        expect(logMessages('info')).toContain(`Removed idle sandbox ${VM_NAME} and its Docker data volume`)
+      })
+      expect(hasFakeVm(VM_NAME)).toBe(false)
     } finally {
       vi.useRealTimers()
     }
@@ -1356,51 +1366,37 @@ describe('SandboxRuntimeService', () => {
     installFakeMsb(vms)
 
     await service.planShell(repoADir, shellTarget(repoADir))
-    expect(vms.has(VM_NAME)).toBe(true)
+    expect(hasFakeVm(VM_NAME)).toBe(true)
 
     await service.removeSessionSandbox(ROOT_SESSION)
 
-    expect(vms.has(VM_NAME)).toBe(false)
-    expect(mockExecuteCommand).toHaveBeenCalledWith(
-      [sandboxExecutablePath(), 'volume', 'rm', sandboxDockerDataVolumeName(VM_NAME)],
-      expect.objectContaining({ ignoreExitCode: true }),
-    )
+    expect(hasFakeVm(VM_NAME)).toBe(false)
+    expect(fakeMsbInvocations()).toContainEqual([sandboxExecutablePath(), 'volume', 'rm', sandboxDockerDataVolumeName(VM_NAME)])
   })
 
   it('tolerates a missing VM and volume when removing a session sandbox', async () => {
-    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
-    installFakeMsb(new Map())
-    const baseHandler = execHandler
-    execHandler = (args) => {
-      if (args[1] === 'rm') return { exitCode: 1, stdout: '', stderr: 'sandbox not found' }
-      if (args[1] === 'volume') return { exitCode: 1, stdout: '', stderr: 'no such volume' }
-      return baseHandler(args)
-    }
+    allowCapability('msb 0.6.15')
+    installFakeMsb(new Map(), { missingRemovals: true })
 
     await expect(service.removeSessionSandbox(ROOT_SESSION)).resolves.toBeUndefined()
   })
 
   it('throws when removing a session sandbox fails for another reason', async () => {
-    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
-    installFakeMsb(new Map())
-    const baseHandler = execHandler
-    execHandler = (args) => {
-      if (args[1] === 'rm') return { exitCode: 1, stdout: '', stderr: 'operation not permitted' }
-      return baseHandler(args)
-    }
+    allowCapability('msb 0.6.15')
+    installFakeMsb(new Map(), { rmError: 'operation not permitted' })
 
     await expect(service.removeSessionSandbox(ROOT_SESSION)).rejects.toThrow('operation not permitted')
   })
 
   it('does not touch msb when removing a session sandbox while the capability is unavailable', async () => {
-    mockDetectSandboxCapability.mockReturnValue({ available: false, reason: '/dev/kvm is not available' })
+    denyCapability()
     const vms = new Map<string, FakeVm>([[VM_NAME, vm()]])
     installFakeMsb(vms)
 
     await expect(service.removeSessionSandbox(ROOT_SESSION)).resolves.toBeUndefined()
 
-    expect(mockExecuteCommand).not.toHaveBeenCalled()
-    expect(vms.has(VM_NAME)).toBe(true)
+    expect(fakeMsbInvocations()).toEqual([])
+    expect(hasFakeVm(VM_NAME)).toBe(true)
   })
 
   it('caches only the guest image on boot and never touches a VM', async () => {
@@ -1408,10 +1404,7 @@ describe('SandboxRuntimeService', () => {
 
     await service.prepareSandboxOnBoot()
 
-    expect(mockExecuteCommand).toHaveBeenCalledWith(
-      [sandboxExecutablePath(), 'pull', ENV.SANDBOX.IMAGE],
-      expect.objectContaining({ timeout: ENV.SANDBOX.START_TIMEOUT_MS }),
-    )
+    expect(fakeMsbInvocations()).toContainEqual([sandboxExecutablePath(), 'pull', ENV.SANDBOX.IMAGE])
     expect(msbCalls('inspect')).toHaveLength(0)
     expect(msbCalls('ls')).toHaveLength(0)
     expect(msbCalls('run')).toHaveLength(0)
@@ -1420,44 +1413,36 @@ describe('SandboxRuntimeService', () => {
   })
 
   it('never touches msb at boot when the sandbox preference is off', async () => {
-    mockExecuteCommand.mockImplementation(async () => {
-      throw new Error('msb must not be invoked when sandboxing is disabled')
-    })
+    installFakeMsb(new Map())
 
     await service.prepareSandboxOnBoot()
 
-    expect(mockExecuteCommand).not.toHaveBeenCalled()
+    expect(fakeMsbInvocations()).toEqual([])
   })
 
   it('never touches msb at boot when the capability is unavailable', async () => {
     settingsService.updateSettings({ sandbox: { enabled: true } })
-    mockDetectSandboxCapability.mockReturnValue({ available: false, reason: '/dev/kvm is not available' })
+    denyCapability()
 
     await service.prepareSandboxOnBoot()
 
-    expect(mockExecuteCommand).not.toHaveBeenCalled()
+    expect(fakeMsbInvocations()).toEqual([])
   })
 
   it('surfaces a failed boot image pull to the caller', async () => {
     enableEnforcement()
-    mockExecuteCommand.mockImplementation(async (args: string[]) => {
-      if (args[0] !== 'git' && args[1] === 'pull') throw new Error('msb pull failed: registry unreachable')
-      return { exitCode: 0, stdout: '[]', stderr: '' }
-    })
+    installFakeMsb(new Map(), { pullError: 'msb pull failed: registry unreachable' })
 
     await expect(service.prepareSandboxOnBoot()).rejects.toThrow('registry unreachable')
   })
 
   it('stops all managed sandboxes on shutdown even when capability is unavailable', async () => {
     settingsService.updateSettings({ sandbox: { enabled: true } })
-    mockDetectSandboxCapability.mockReturnValue({ available: false, reason: '/dev/kvm is not available' })
+    denyCapability()
 
     await stopSandboxesOnShutdown(db)
 
-    expect(mockExecuteCommand).toHaveBeenCalledWith(
-      [sandboxExecutablePath(), ...buildSandboxStopManagedArgs()],
-      expect.objectContaining({ ignoreExitCode: true, timeout: expect.any(Number) }),
-    )
+    expect(fakeMsbInvocations()).toContainEqual([sandboxExecutablePath(), ...buildSandboxStopManagedArgs()])
   })
 
   it('stops all managed sandboxes using the label filter', async () => {
@@ -1465,40 +1450,23 @@ describe('SandboxRuntimeService', () => {
 
     await service.stopAllSandboxes()
 
-    expect(mockExecuteCommand).toHaveBeenCalledWith(
-      [sandboxExecutablePath(), ...buildSandboxStopManagedArgs()],
-      expect.objectContaining({ ignoreExitCode: true, timeout: expect.any(Number) }),
-    )
+    expect(fakeMsbInvocations()).toContainEqual([sandboxExecutablePath(), ...buildSandboxStopManagedArgs()])
   })
 
   it('serializes shutdown with an in-flight boot and stops only after the boot completes', async () => {
     enableEnforcement()
-    let releaseInspect: () => void = () => {}
-    const inspectGate = new Promise<void>((resolve) => {
-      releaseInspect = resolve
-    })
-    installFakeMsb(new Map([[VM_NAME, vm()]]))
-    const baseHandler = execHandler
-    execHandler = async (args) => {
-      if (args[1] === 'inspect') {
-        await inspectGate
-        return { exitCode: 0, stdout: runningInspectOutput(inspectConfig(vm(), VM_NAME), VM_NAME), stderr: '' }
-      }
-      return baseHandler(args)
-    }
+    installFakeMsb(new Map([[VM_NAME, vm()]]), { gateInspect: true })
 
     const planning = service.planShell(repoADir, shellTarget(repoADir))
-    await vi.waitFor(() => {
-      expect(msbCalls('inspect').length).toBeGreaterThan(0)
-    })
+    await waitForFakeMsbGate('inspect')
 
     const stopping = service.stopAllSandboxes()
-    releaseInspect()
+    releaseFakeMsbGate('inspect')
     const plan = await planning
     await stopping
 
     expect(plan).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
-    const calls = mockExecuteCommand.mock.calls.map((call) => call[0] as string[])
+    const calls = fakeMsbInvocations()
     const inspectIndex = calls.findIndex((args) => args[1] === 'inspect')
     const stopIndex = calls.findIndex((args) => args[1] === 'stop')
     expect(inspectIndex).toBeGreaterThanOrEqual(0)
@@ -1507,69 +1475,39 @@ describe('SandboxRuntimeService', () => {
 
   it('refuses to boot a session sandbox once shutdown is in progress', async () => {
     enableEnforcement()
-    let releaseStop: () => void = () => {}
-    const stopGate = new Promise<void>((resolve) => {
-      releaseStop = resolve
-    })
-    installFakeMsb(new Map())
-    const baseHandler = execHandler
-    execHandler = (args) => {
-      if (args[1] === 'stop') {
-        void stopGate
-        return { exitCode: 0, stdout: '', stderr: '' }
-      }
-      return baseHandler(args)
-    }
+    installFakeMsb(new Map(), { gateStop: true })
 
     const stopping = service.stopAllSandboxes()
-    await vi.waitFor(() => {
-      expect(msbCalls('stop').length).toBeGreaterThan(0)
-    })
+    await waitForFakeMsbGate('stop')
 
     const plan = await service.planShell(repoADir, shellTarget(repoADir))
 
     expect(plan).toEqual({ mode: 'blocked', reason: expect.stringContaining('shutdown is in progress') })
     expect(msbCalls('run')).toHaveLength(0)
-    releaseStop()
+    releaseFakeMsbGate('stop')
     await stopping
   })
 
   it('logs a warning but succeeds when a non-zero managed stop is confirmed stopped', async () => {
-    const vms = new Map<string, FakeVm>([[VM_NAME, vm({ running: false })]])
-    installFakeMsb(vms)
-    const baseHandler = execHandler
-    execHandler = (args) => {
-      if (args[1] === 'stop') return { exitCode: 1, stdout: '', stderr: 'vm already stopped' }
-      return baseHandler(args)
-    }
+    installFakeMsb(new Map([[VM_NAME, vm({ running: false })]]), { stopError: 'vm already stopped' })
 
     await service.stopAllSandboxes()
 
-    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('msb stop failed with code 1'))
+    expectLoggedMessage('msb stop failed with code 1', 'warn')
   })
 
   it('throws when the managed stop fails and a managed VM is still running', async () => {
-    installFakeMsb(new Map([[VM_NAME, vm({ running: true })]]))
-    const baseHandler = execHandler
-    execHandler = (args) => {
-      if (args[1] === 'stop') return { exitCode: 1, stdout: '', stderr: 'failed to stop vm' }
-      return baseHandler(args)
-    }
+    installFakeMsb(new Map([[VM_NAME, vm({ running: true })]]), { stopError: 'failed to stop vm' })
 
     await expect(service.stopAllSandboxes()).rejects.toThrow('still running')
-    expect(logger.error).toHaveBeenCalled()
+    expect(testLogEntries('error').length).toBeGreaterThan(0)
   })
 
   it('throws when the managed stop fails and the sandbox state cannot be inspected', async () => {
-    installFakeMsb(new Map(), { lsError: 'failed to connect to supervisor' })
-    const baseHandler = execHandler
-    execHandler = (args) => {
-      if (args[1] === 'stop') return { exitCode: 1, stdout: '', stderr: 'failed to stop vm' }
-      return baseHandler(args)
-    }
+    installFakeMsb(new Map(), { lsError: 'failed to connect to supervisor', stopError: 'failed to stop vm' })
 
     await expect(service.stopAllSandboxes()).rejects.toThrow('msb ls failed with code 1')
-    expect(logger.error).toHaveBeenCalled()
+    expect(testLogEntries('error').length).toBeGreaterThan(0)
   })
 
   it('stops the managed sandboxes on a toggle without refusing later boots', async () => {
@@ -1588,14 +1526,11 @@ describe('SandboxRuntimeService', () => {
   })
 
   it('attempts the toggle stop even when sandbox capability is unavailable', async () => {
-    mockDetectSandboxCapability.mockReturnValue({ available: false, reason: '/dev/kvm is not available' })
+    denyCapability()
 
     await service.stopAllSandboxesForToggle()
 
-    expect(mockExecuteCommand).toHaveBeenCalledWith(
-      [sandboxExecutablePath(), ...buildSandboxStopManagedArgs()],
-      expect.objectContaining({ ignoreExitCode: true, timeout: expect.any(Number) }),
-    )
+    expect(fakeMsbInvocations()).toContainEqual([sandboxExecutablePath(), ...buildSandboxStopManagedArgs()])
   })
 
   it('shares one in-flight attempt when exec user provisioning is requested concurrently', async () => {
@@ -1614,13 +1549,7 @@ describe('SandboxRuntimeService', () => {
 
   it('schedules and cancels a background provisioning retry when the sandbox is stopped by a toggle', async () => {
     enableEnforcement()
-    const vms = new Map<string, FakeVm>()
-    installFakeMsb(vms)
-    const baseHandler = execHandler
-    execHandler = (args) => {
-      if (args[1] === 'exec') throw new Error('Command timed out after 30000ms')
-      return baseHandler(args)
-    }
+    installFakeMsb(new Map(), { execError: 'Command timed out after 30000ms' })
 
     await service.planShell(repoADir, shellTarget(repoADir))
     const retry = backgroundProvisionRetryForTests(VM_NAME)
@@ -1630,24 +1559,19 @@ describe('SandboxRuntimeService', () => {
     expect(backgroundProvisionRetryForTests(VM_NAME)).toBeNull()
 
     await retry
-    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('background retry cancelled'))
+    expectLoggedMessage('background retry cancelled', 'info')
   }, 30000)
 
   it('logs the retry exhaustion when exec user provisioning keeps failing', async () => {
     enableEnforcement()
-    installFakeMsb(new Map())
-    const baseHandler = execHandler
-    execHandler = (args) => {
-      if (args[1] === 'exec') throw new Error('Command timed out after 30000ms')
-      return baseHandler(args)
-    }
+    installFakeMsb(new Map(), { execError: 'Command timed out after 30000ms' })
 
     const plan = await service.planShell(repoADir, shellTarget(repoADir))
 
     expect(plan).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
-    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('sudo will not work inside the guest'))
+    expectLoggedMessage('sudo will not work inside the guest', 'warn')
     await backgroundProvisionRetryForTests(VM_NAME)
-    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('provisioning retries were exhausted'))
+    expectLoggedMessage('provisioning retries were exhausted', 'warn')
   }, 60000)
 
   it('blocks planning when a session mount root is a redirected path', async () => {
@@ -1661,7 +1585,7 @@ describe('SandboxRuntimeService', () => {
       const plan = await service.planShell(repoADir, shellTarget(repoADir))
 
       expect(plan).toEqual({ mode: 'blocked', reason: expect.stringContaining('refusing to mount a redirected root') })
-      expect(mockExecuteCommand.mock.calls.filter((call) => (call[0] as string[])[1] === 'inspect')).toHaveLength(0)
+      expect(fakeMsbInvocations().filter((args) => args[1] === 'inspect')).toHaveLength(0)
     } finally {
       rmSync(reposRoot, { recursive: true, force: true })
       rmSync(target, { recursive: true, force: true })
@@ -1670,7 +1594,7 @@ describe('SandboxRuntimeService', () => {
   })
 
   it('does not return host mode for an enforced request when the preference is disabled', async () => {
-    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.3.1' })
+    allowCapability('msb 0.3.1')
     installFakeMsb(new Map([[VM_NAME, vm()]]))
 
     const plan = await service.planShell(repoADir, shellTarget(repoADir), true)
@@ -1679,16 +1603,16 @@ describe('SandboxRuntimeService', () => {
   })
 
   it('blocks an enforced request when the capability is unavailable instead of falling back to host', async () => {
-    mockDetectSandboxCapability.mockReturnValue({ available: false, reason: '/dev/kvm is not available' })
+    denyCapability()
 
     const plan = await service.planShell(repoADir, shellTarget(repoADir), true)
 
-    expect(plan).toEqual({ mode: 'blocked', reason: '/dev/kvm is not available' })
-    expect(mockExecuteCommand).not.toHaveBeenCalled()
+    expect(plan).toEqual({ mode: 'blocked', reason: KVM_UNAVAILABLE_REASON })
+    expect(fakeMsbInvocations()).toEqual([])
   })
 
   it('blocks an enforced request when process identity cannot be attested', async () => {
-    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
+    allowCapability('msb 0.6.15')
     forceProcessAttestation(false)
 
     try {
@@ -1698,7 +1622,7 @@ describe('SandboxRuntimeService', () => {
         mode: 'blocked',
         reason: 'process identity attestation is unavailable on this platform (Linux /proc is required)',
       })
-      expect(mockExecuteCommand).not.toHaveBeenCalled()
+      expect(fakeMsbInvocations()).toEqual([])
     } finally {
       forceProcessAttestation(null)
     }
@@ -1711,16 +1635,16 @@ describe('SandboxRuntimeService', () => {
     const first = await service.planShell(repoADir, shellTarget(repoADir))
     expect(first).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
 
-    mockDetectSandboxCapability.mockReturnValue({ available: false, reason: '/dev/kvm is not available or not writable' })
+    denyCapability()
 
     const second = await service.planShell(repoADir, shellTarget(repoADir))
 
-    expect(second).toEqual({ mode: 'blocked', reason: '/dev/kvm is not available or not writable' })
+    expect(second).toEqual({ mode: 'blocked', reason: KVM_UNAVAILABLE_REASON })
     expect(msbCalls('run')).toHaveLength(0)
   })
 
   it('reports status combining the capability probe and the preference', () => {
-    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.3.1' })
+    allowCapability('msb 0.3.1')
 
     expect(service.getStatus()).toEqual({ available: true, enabled: false, msbVersion: 'msb 0.3.1' })
 
@@ -1728,13 +1652,13 @@ describe('SandboxRuntimeService', () => {
 
     expect(service.getStatus()).toEqual({ available: true, enabled: true, msbVersion: 'msb 0.3.1' })
 
-    mockDetectSandboxCapability.mockReturnValue({ available: false, reason: '/dev/kvm is not available' })
+    denyCapability()
 
-    expect(service.getStatus()).toEqual({ available: false, enabled: true, reason: '/dev/kvm is not available' })
+    expect(service.getStatus()).toEqual({ available: false, enabled: true, reason: KVM_UNAVAILABLE_REASON })
   })
 
   it('reports sandboxing unavailable when process identity cannot be attested', () => {
-    mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.6.15' })
+    allowCapability('msb 0.6.15')
     forceProcessAttestation(false)
 
     try {

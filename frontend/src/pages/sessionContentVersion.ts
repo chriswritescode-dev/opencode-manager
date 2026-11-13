@@ -1,4 +1,5 @@
 import type { SessionMessageAssistant, SessionMessageInfo } from "@opencode-manager/shared/opencode";
+import type { JsonObject, JsonValue } from "@opencode-manager/shared/utils";
 
 type SessionMessageAssistantContent = SessionMessageAssistant["content"][number];
 
@@ -18,16 +19,18 @@ function hashString(s: string): number {
   return h;
 }
 
-function getValueSignature(value: unknown): number {
-  if (typeof value === "string") return value.length;
-  if (typeof value === "number") return value | 0;
-  if (typeof value === "boolean") return value ? 1 : 2;
+function getValueSignature(value: JsonValue | undefined): number {
+  if (value === null || value === undefined) return 0;
+  if (value === true) return 1;
+  if (value === false) return 2;
   if (Array.isArray(value)) return value.length;
-  if (typeof value === "object" && value !== null) return Object.keys(value).length;
-  return 0;
+  const primitiveTag = Object.prototype.toString.call(value);
+  if (primitiveTag === "[object String]") return String(value).length;
+  if (primitiveTag === "[object Number]") return Number(value) | 0;
+  return Object.keys(value).length;
 }
 
-function getMetadataSignature(metadata: Record<string, unknown> | undefined): number {
+function getMetadataSignature(metadata: JsonObject | undefined): number {
   if (!metadata) return 0;
   const keys = Object.keys(metadata);
   let signature = keys.length;

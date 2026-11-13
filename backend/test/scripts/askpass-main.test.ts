@@ -5,16 +5,19 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import * as http from 'http'
 import { randomUUID } from 'crypto'
+import { z } from 'zod'
 import { createIPCServer } from '../../src/ipc/ipcServer'
 import type { IPCServer } from '../../src/ipc/ipcServer'
 import { repoRoot } from '../helpers/repo-root'
 
-interface CapturedRequest {
-  askpassType: string
-  argv: string[]
-  cwd?: string
-  repoId?: number
-}
+const CapturedRequestSchema = z.object({
+  askpassType: z.string(),
+  argv: z.array(z.string()),
+  cwd: z.string().optional(),
+  repoId: z.number().optional(),
+})
+
+type CapturedRequest = z.infer<typeof CapturedRequestSchema>
 
 const scriptPath = join(repoRoot, 'backend/scripts/askpass-main.ts')
 
@@ -133,7 +136,7 @@ describe('askpass-main', () => {
     let received: CapturedRequest | undefined
     server.registerHandler('askpass', {
       handle: async (request) => {
-        received = request as CapturedRequest
+        received = CapturedRequestSchema.parse(request)
         return 'secret-token'
       },
     })
@@ -236,10 +239,15 @@ async function runAskpassInProcess(overrides: Record<string, string | undefined>
     resolveExit = resolve
   })
   const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-  const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
-    resolveExit(code)
-    return undefined as never
-  }) as typeof process.exit)
+  const originalExit = process.exit
+  Object.defineProperty(process, 'exit', {
+    value: (code?: string | number | null) => {
+      const exitCode = z.number().safeParse(code)
+      resolveExit(exitCode.success ? exitCode.data : undefined)
+    },
+    configurable: true,
+    writable: true,
+  })
 
   vi.resetModules()
   try {
@@ -247,7 +255,7 @@ async function runAskpassInProcess(overrides: Record<string, string | undefined>
     const code = await exitPromise
     return { code, output: existsSync(outputPath) ? readFileSync(outputPath, 'utf-8') : undefined }
   } finally {
-    exitSpy.mockRestore()
+    Object.defineProperty(process, 'exit', { value: originalExit, configurable: true, writable: true })
     errorSpy.mockRestore()
     for (const key of askpassEnvKeys) {
       const previous = previousEnv[key]

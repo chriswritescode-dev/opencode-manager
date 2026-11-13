@@ -219,10 +219,6 @@ function RemoteSessionTree({ serverId }: { serverId: string }) {
   )
 }
 
-/**
- * The sidebar session navigator. Follows the selected server: local repos for this machine, or the
- * selected linked server's projects with the same rows and search behaviour.
- */
 export function DesktopSessionTree() {
   const [selectedServerId] = useSidebarServerSelection()
 

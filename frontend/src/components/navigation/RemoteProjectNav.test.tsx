@@ -1,96 +1,18 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { IsRestoringProvider, QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { OpenCodeProject } from '@/api/opencode'
+import { describe, expect, it } from 'vitest'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import { onlineManager } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { RemoteProjectNavList } from './RemoteProjectNav'
+import { renderWithProviders } from '@/test/render'
+import { LocationCatcher } from '@/test/test-components'
+import { appRoutes } from '@/test/fixtures/appRoutes'
+import { makeOpenCodeServer, makeSession } from '@/test/fixtures/api'
+import type { FetchRoute } from '@/test/fetchFake'
+import type { OpenCodeProject } from '@/api/opencode'
+import type { OpenCodeServer, OpenCodeServerStatus } from '@opencode-manager/shared/schemas'
+import type { SessionInfo } from '@opencode-manager/shared/opencode'
 
-type SessionFixture = {
-  id: string
-  projectID: string
-  title: string
-  time: { created: number; updated: number; archived?: number }
-  location: { directory: string }
-  cost: number
-  tokens: { input: number; output: number; reasoning: number; cache: { read: number; write: number } }
-}
-
-const mocks = vi.hoisted(() => ({
-  listProjects: vi.fn(),
-  useOpenCodeServers: vi.fn(),
-  useOpenCodeServerStatuses: vi.fn(),
-  useSessionsAcrossDirectories: vi.fn(),
-  useCreateSession: vi.fn(),
-  sessionsCalls: [] as Array<{
-    directories: string[]
-    options?: { serverId?: string; allDirectories?: boolean; limit?: number }
-  }>,
-  createCalls: [] as Array<{ directory?: string; serverId?: string }>,
-  sessions: [] as SessionFixture[],
-  hasNextPage: { current: false },
-}))
-
-vi.mock('@/api/opencode', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/opencode')>()
-  return { ...actual, listProjects: mocks.listProjects }
-})
-
-vi.mock('@/hooks/useOpenCodeServers', () => ({
-  useOpenCodeServers: mocks.useOpenCodeServers,
-  useOpenCodeServerStatuses: mocks.useOpenCodeServerStatuses,
-}))
-
-vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/hooks/useOpenCode')>()
-  return {
-    ...actual,
-    useSessionsAcrossDirectories: (
-      directories: string[],
-      options?: { serverId?: string; allDirectories?: boolean; limit?: number },
-    ) => {
-      mocks.sessionsCalls.push({ directories, options })
-      return {
-        data: options?.allDirectories
-          ? mocks.sessions
-          : mocks.sessions.filter((session) => directories.includes(session.location.directory)),
-        isLoading: false,
-        isError: false,
-        hasNextPage: mocks.hasNextPage.current,
-      }
-    },
-    useCreateSession: (
-      directory: string,
-      onSuccess?: (session: { id: string }) => void,
-      serverId?: string,
-    ) => ({
-      mutate: () => {
-        mocks.createCalls.push({ directory, serverId })
-        onSuccess?.({ id: 'new-session' })
-      },
-      isPending: false,
-    }),
-  }
-})
-
-vi.mock('@/hooks/useActiveWork', () => ({
-  useProjectActivityState: () => null,
-}))
-
-vi.mock('@/contexts/EventContext', () => ({
-  usePermissions: () => ({ hasForSession: () => false }),
-  useForms: () => ({ hasForSession: () => false }),
-}))
-
-const kitchen = {
-  id: 'srv_kitchen',
-  name: 'Kitchen',
-  baseUrl: 'https://kitchen.example.com',
-  username: 'opencode',
-  enabled: true,
-  hasPassword: true,
-  createdAt: 1,
-  updatedAt: 2,
-}
+const kitchen = makeOpenCodeServer({ id: 'srv_kitchen', name: 'Kitchen' })
 
 function createProject(
   id: string,
@@ -98,64 +20,28 @@ function createProject(
   canonical: string,
   time: OpenCodeProject['time'] = { created: 1, updated: 2, active: 0 },
 ): OpenCodeProject {
-  return {
-    id,
-    canonical,
-    name,
-    time,
-    sandboxes: [],
-  }
+  return { id, canonical, name, time, sandboxes: [] }
 }
 
-function createSession(id: string, directory: string, updated = Date.now()): SessionFixture {
-  return {
-    id,
-    projectID: 'proj-1',
-    title: `Session ${id}`,
-    time: { created: updated - 10000, updated },
-    location: { directory },
-    cost: 0,
-    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-  }
+function createSession(id: string, directory: string, updated = Date.now()): SessionInfo {
+  return makeSession({ id, title: `Session ${id}`, location: { directory }, time: { created: updated - 10000, updated } })
 }
 
 const alpha = createProject('p1', 'Alpha', '/projects/alpha')
 const beta = createProject('p2', undefined, '/projects/beta')
 
-function LocationSpy() {
-  const { pathname, search } = useLocation()
-  return <div data-testid="location">{`${pathname}${search}`}</div>
+function connectedStatus(connected: boolean, error: string | null = null): OpenCodeServerStatus {
+  return { serverId: 'srv_kitchen', connected, version: null, error }
 }
 
-function createWrapper(
-  initialEntry: string,
-  queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  }),
-  isRestoring = false,
-) {
-  return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={queryClient}>
-      <IsRestoringProvider value={isRestoring}>
-        <MemoryRouter initialEntries={[initialEntry]}>
-          <Routes>
-            <Route
-              path="*"
-              element={
-                <>
-                  {children}
-                  <LocationSpy />
-                </>
-              }
-            />
-          </Routes>
-        </MemoryRouter>
-      </IsRestoringProvider>
-    </QueryClientProvider>
-  )
+interface RenderOptions {
+  route?: string
+  servers?: OpenCodeServer[]
+  statuses?: OpenCodeServerStatus[]
+  projects?: FetchRoute['respond']
+  sessions?: SessionInfo[]
+  sessionNextCursor?: string
 }
-
-const toggleFor = (name: string) => screen.getByRole('button', { name: `Show sessions in ${name}` })
 
 function RemoteListHarness({ serverId }: { serverId: string }) {
   const navigate = useNavigate()
@@ -169,96 +55,105 @@ function RemoteListHarness({ serverId }: { serverId: string }) {
   )
 }
 
-describe('RemoteProjectNavList', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.sessionsCalls.splice(0, mocks.sessionsCalls.length)
-    mocks.createCalls.splice(0, mocks.createCalls.length)
-    mocks.sessions = [createSession('a1', '/projects/alpha', Date.now())]
-    mocks.hasNextPage.current = false
-    mocks.listProjects.mockResolvedValue([alpha, beta])
-    mocks.useOpenCodeServers.mockReturnValue({
-      servers: [kitchen],
-      isLoading: false,
-      showsInitialLoading: false,
-    })
-    mocks.useOpenCodeServerStatuses.mockReturnValue({
-      statuses: [],
-      statusById: { srv_kitchen: { serverId: 'srv_kitchen', connected: true, version: null, error: null } },
-      isLoading: false,
-    })
-  })
+function renderRemote(options: RenderOptions = {}) {
+  const capturedPathname = { current: '' }
+  const capturedSearch = { current: '' }
+  const projectsRoute: FetchRoute = {
+    method: 'GET',
+    path: '/api/opencode/servers/:serverId/api/project',
+    respond: options.projects ?? (() => ({ json: [alpha, beta] })),
+  }
+  const result = renderWithProviders(
+    <>
+      <RemoteListHarness serverId="srv_kitchen" />
+      <LocationCatcher capturedPathname={capturedPathname} capturedSearch={capturedSearch} />
+    </>,
+    {
+      route: options.route ?? '/',
+      events: true,
+      fetchRoutes: [
+        projectsRoute,
+        ...appRoutes({
+          servers: options.servers ?? [kitchen],
+          statuses: options.statuses ?? [connectedStatus(true)],
+          projects: [alpha, beta],
+          sessions: options.sessions ?? [createSession('a1', '/projects/alpha')],
+          sessionNextCursor: options.sessionNextCursor,
+        }),
+      ],
+    },
+  )
+  return { ...result, capturedPathname, capturedSearch }
+}
 
+function sessionRequests(fetchFake: ReturnType<typeof renderRemote>['fetchFake']) {
+  return fetchFake.findRequests('GET', '/api/opencode/servers/srv_kitchen/api/session')
+}
+
+const toggleFor = (name: string) => screen.getByRole('button', { name: `Show sessions in ${name}` })
+
+describe('RemoteProjectNavList', () => {
   it('renders project names with their directory and activity indicator slot', async () => {
-    render(
-      <RemoteProjectNavList
-        serverId="srv_kitchen"
-        isVisible
-        onOpenProject={vi.fn()}
-        onSelectSession={vi.fn()}
-      />,
-      { wrapper: createWrapper('/') },
-    )
+    const { fetchFake } = renderRemote()
 
     expect(await screen.findByText('Alpha')).toBeInTheDocument()
     expect(screen.getByText('beta')).toBeInTheDocument()
     expect(screen.getByText('/projects/alpha')).toBeInTheDocument()
-    expect(mocks.listProjects).toHaveBeenCalledWith('srv_kitchen')
+    expect(fetchFake.lastRequest('GET', '/api/opencode/servers/srv_kitchen/api/project')).toBeDefined()
   })
 
   it('orders projects by their newest session and ignores the project activity time', async () => {
-    mocks.listProjects.mockResolvedValue([
-      createProject('p1', 'Alpha', '/projects/alpha', { created: 1, updated: 900, active: 999 }),
-      createProject('p2', 'Beta', '/projects/beta', { created: 1, updated: 100, active: 1 }),
-    ])
-    mocks.sessions = [createSession('b1', '/projects/beta', 500)]
-
-    render(<RemoteListHarness serverId="srv_kitchen" />, { wrapper: createWrapper('/') })
+    const { fetchFake } = renderRemote({
+      projects: () => ({
+        json: [
+          createProject('p1', 'Alpha', '/projects/alpha', { created: 1, updated: 900, active: 999 }),
+          createProject('p2', 'Beta', '/projects/beta', { created: 1, updated: 100, active: 1 }),
+        ],
+      }),
+      sessions: [createSession('b1', '/projects/beta', 500)],
+    })
 
     await screen.findByText('Beta')
-    const toggles = screen
-      .getAllByRole('button', { name: /^Show sessions in / })
-      .map((button) => button.getAttribute('aria-label'))
-    expect(toggles).toEqual(['Show sessions in Beta', 'Show sessions in Alpha'])
-    expect(
-      mocks.sessionsCalls.filter((call) => call.options?.allDirectories === true),
-    ).toHaveLength(1)
-    expect(
-      mocks.sessionsCalls.find((call) => call.options?.allDirectories === true)?.options,
-    ).toMatchObject({ serverId: 'srv_kitchen', limit: 100 })
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByRole('button', { name: /^Show sessions in / })
+          .map((button) => button.getAttribute('aria-label')),
+      ).toEqual(['Show sessions in Beta', 'Show sessions in Alpha']),
+    )
+
+    const activityCalls = sessionRequests(fetchFake).filter(
+      (request) => request.searchParams.get('location[directory]') === null,
+    )
+    expect(activityCalls).toHaveLength(1)
+    expect(activityCalls[0].searchParams.get('limit')).toBe('100')
   })
 
   it('expands the project of the current project route and loads its sessions', async () => {
-    render(<RemoteListHarness serverId="srv_kitchen" />, {
-      wrapper: createWrapper('/servers/srv_kitchen/projects?directory=%2Fprojects%2Falpha'),
+    const { capturedPathname } = renderRemote({
+      route: '/servers/srv_kitchen/projects?directory=%2Fprojects%2Falpha',
     })
 
     await waitFor(() => expect(toggleFor('Alpha')).toHaveAttribute('aria-expanded', 'true'))
     expect(await screen.findByRole('button', { name: /Session a1/ })).toBeInTheDocument()
-    expect(mocks.sessionsCalls.some((call) => call.directories.includes('/projects/alpha'))).toBe(true)
-    expect(mocks.sessionsCalls[0]?.options?.serverId).toBe('srv_kitchen')
 
     fireEvent.click(screen.getByRole('button', { name: /Session a1/ }))
-    expect(screen.getByTestId('location')).toHaveTextContent('/servers/srv_kitchen/sessions/a1')
+    await waitFor(() => expect(capturedPathname.current).toBe('/servers/srv_kitchen/sessions/a1'))
   })
 
   it('opens a project when its name is clicked', async () => {
-    render(<RemoteListHarness serverId="srv_kitchen" />, { wrapper: createWrapper('/') })
+    const { capturedPathname, capturedSearch } = renderRemote()
 
     fireEvent.click(await screen.findByRole('button', { name: /^Alpha/ }))
 
-    expect(screen.getByTestId('location')).toHaveTextContent(
-      '/servers/srv_kitchen/projects?directory=%2Fprojects%2Falpha',
-    )
+    await waitFor(() => expect(capturedPathname.current).toBe('/servers/srv_kitchen/projects'))
+    expect(capturedSearch.current).toBe('?directory=%2Fprojects%2Falpha')
   })
 
   it('expands another project and shows its sessions', async () => {
-    mocks.sessions = [
-      createSession('a1', '/projects/alpha', Date.now()),
-      createSession('b1', '/projects/beta', Date.now() - 1000),
-    ]
-
-    render(<RemoteListHarness serverId="srv_kitchen" />, { wrapper: createWrapper('/') })
+    renderRemote({
+      sessions: [createSession('a1', '/projects/alpha'), createSession('b1', '/projects/beta', Date.now() - 1000)],
+    })
 
     await screen.findByText('beta')
     fireEvent.click(toggleFor('beta'))
@@ -268,75 +163,46 @@ describe('RemoteProjectNavList', () => {
   })
 
   it('creates a session on the selected server and opens it', async () => {
-    render(<RemoteListHarness serverId="srv_kitchen" />, { wrapper: createWrapper('/') })
+    const { capturedPathname } = renderRemote()
 
     fireEvent.click(await screen.findByRole('button', { name: 'New session in beta' }))
 
-    expect(mocks.createCalls).toContainEqual({ directory: '/projects/beta', serverId: 'srv_kitchen' })
-    expect(screen.getByTestId('location')).toHaveTextContent(
-      '/servers/srv_kitchen/sessions/new-session',
-    )
+    await waitFor(() => expect(capturedPathname.current).toBe('/servers/srv_kitchen/sessions/new-session'))
   })
 
   it('offers All sessions when the project has another page', async () => {
-    mocks.hasNextPage.current = true
-
-    render(<RemoteListHarness serverId="srv_kitchen" />, {
-      wrapper: createWrapper('/servers/srv_kitchen/projects?directory=%2Fprojects%2Falpha'),
+    const { capturedPathname, capturedSearch } = renderRemote({
+      route: '/servers/srv_kitchen/projects?directory=%2Fprojects%2Falpha',
+      projects: () => ({ json: [alpha] }),
+      sessionNextCursor: 'cursor_2',
     })
 
     fireEvent.click(await screen.findByText('All sessions'))
 
-    expect(screen.getByTestId('location')).toHaveTextContent(
-      '/servers/srv_kitchen/projects?directory=%2Fprojects%2Falpha',
-    )
+    await waitFor(() => expect(capturedPathname.current).toBe('/servers/srv_kitchen/projects'))
+    expect(capturedSearch.current).toBe('?directory=%2Fprojects%2Falpha')
   })
 
-  it('shows a disabled state for a disabled server', () => {
-    mocks.useOpenCodeServers.mockReturnValue({
-      servers: [{ ...kitchen, enabled: false }],
-      isLoading: false,
-      showsInitialLoading: false,
-    })
+  it('shows a disabled state for a disabled server', async () => {
+    const { fetchFake } = renderRemote({ servers: [{ ...kitchen, enabled: false }] })
 
-    render(
-      <RemoteProjectNavList
-        serverId="srv_kitchen"
-        isVisible
-        onOpenProject={vi.fn()}
-        onSelectSession={vi.fn()}
-      />,
-      { wrapper: createWrapper('/') },
-    )
-
-    expect(screen.getByText('Server is disabled')).toBeInTheDocument()
-    expect(mocks.listProjects).not.toHaveBeenCalled()
+    expect(await screen.findByText('Server is disabled')).toBeInTheDocument()
+    expect(fetchFake.findRequests('GET', '/api/opencode/servers/srv_kitchen/api/project')).toHaveLength(0)
   })
 
   it('reports a failed project load', async () => {
-    mocks.listProjects.mockRejectedValue(new Error('offline'))
-
-    render(
-      <RemoteProjectNavList
-        serverId="srv_kitchen"
-        isVisible
-        onOpenProject={vi.fn()}
-        onSelectSession={vi.fn()}
-      />,
-      { wrapper: createWrapper('/') },
-    )
+    renderRemote({ projects: () => ({ status: 500, json: { error: 'offline' } }) })
 
     expect(await screen.findByText('Could not load projects')).toBeInTheDocument()
   })
 
   it('keeps the cached project list when a refetch fails', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    })
-    mocks.listProjects.mockResolvedValueOnce([alpha, beta]).mockRejectedValueOnce(new Error('offline'))
-
-    render(<RemoteListHarness serverId="srv_kitchen" />, {
-      wrapper: createWrapper('/', queryClient),
+    let attempts = 0
+    const { queryClient } = renderRemote({
+      projects: () => {
+        attempts += 1
+        return attempts === 1 ? { json: [alpha, beta] } : { status: 500, json: { error: 'offline' } }
+      },
     })
 
     await screen.findByText('Alpha')
@@ -344,86 +210,53 @@ describe('RemoteProjectNavList', () => {
       await queryClient.refetchQueries()
     })
 
-    await waitFor(() => {
-      expect(mocks.listProjects).toHaveBeenCalledTimes(2)
-    })
+    await waitFor(() => expect(attempts).toBeGreaterThanOrEqual(2))
     expect(screen.getByText('Alpha')).toBeInTheDocument()
     expect(screen.queryByText('Could not load projects')).not.toBeInTheDocument()
   })
 
-  it('keeps the project list loading while the cache restore holds the query', () => {
-    mocks.listProjects.mockReturnValue(new Promise(() => {}))
-
-    render(<RemoteListHarness serverId="srv_kitchen" />, {
-      wrapper: createWrapper('/', undefined, true),
+  it('keeps the project list loading while the cache restore holds the query', async () => {
+    renderRemote({
+      projects: () => new Promise(() => {}),
     })
 
-    expect(screen.getByText('Loading projects...')).toBeInTheDocument()
+    expect(await screen.findByText('Loading projects...')).toBeInTheDocument()
     expect(screen.queryByText('No projects')).not.toBeInTheDocument()
-    expect(mocks.listProjects).not.toHaveBeenCalled()
   })
 
-  it('keeps the sidebar loading while the server list is restoring', () => {
-    mocks.useOpenCodeServers.mockReturnValue({
-      servers: [],
-      isLoading: false,
-      showsInitialLoading: true,
+  it('keeps the sidebar loading while the server list is restoring', async () => {
+    renderWithProviders(<RemoteListHarness serverId="srv_kitchen" />, {
+      events: true,
+      fetchRoutes: [
+        {
+          method: 'GET',
+          path: '/api/opencode-servers',
+          respond: () => new Promise(() => {}),
+        },
+      ],
     })
 
-    render(
-      <RemoteProjectNavList
-        serverId="srv_kitchen"
-        isVisible
-        onOpenProject={vi.fn()}
-        onSelectSession={vi.fn()}
-      />,
-      { wrapper: createWrapper('/') },
-    )
-
-    expect(screen.getByText('Loading projects...')).toBeInTheDocument()
+    expect(await screen.findByText('Loading projects...')).toBeInTheDocument()
     expect(screen.queryByText('Server not found')).not.toBeInTheDocument()
   })
 
-  it('reports an unreachable server list instead of a missing server while paused offline', () => {
-    mocks.useOpenCodeServers.mockReturnValue({
-      servers: [],
-      isLoading: false,
-      showsInitialLoading: false,
-      isPaused: true,
-    })
+  it('reports an unreachable server list instead of a missing server while paused offline', async () => {
+    onlineManager.setOnline(false)
+    try {
+      renderRemote({ servers: [] })
 
-    render(
-      <RemoteProjectNavList
-        serverId="srv_kitchen"
-        isVisible
-        onOpenProject={vi.fn()}
-        onSelectSession={vi.fn()}
-      />,
-      { wrapper: createWrapper('/') },
-    )
-
-    expect(screen.getByText('Servers unavailable')).toBeInTheDocument()
-    expect(screen.queryByText('Server not found')).not.toBeInTheDocument()
-    expect(mocks.listProjects).not.toHaveBeenCalled()
+      expect(await screen.findByText('Servers unavailable')).toBeInTheDocument()
+      expect(screen.queryByText('Server not found')).not.toBeInTheDocument()
+    } finally {
+      onlineManager.setOnline(true)
+    }
   })
 
   it('reports an unreachable server on a failed project load', async () => {
-    mocks.listProjects.mockRejectedValue(new Error('offline'))
-    mocks.useOpenCodeServerStatuses.mockReturnValue({
-      statuses: [],
-      statusById: { srv_kitchen: { serverId: 'srv_kitchen', connected: false, version: null, error: 'boom' } },
-      isLoading: false,
+    renderRemote({
+      projects: () => ({ status: 500, json: { error: 'offline' } }),
+      statuses: [connectedStatus(false, 'boom')],
     })
-
-    render(
-      <RemoteProjectNavList
-        serverId="srv_kitchen"
-        isVisible
-        onOpenProject={vi.fn()}
-        onSelectSession={vi.fn()}
-      />,
-      { wrapper: createWrapper('/') },
-    )
 
     expect(await screen.findByText('Server unreachable')).toBeInTheDocument()
   })

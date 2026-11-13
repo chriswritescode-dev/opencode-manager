@@ -1,9 +1,8 @@
-import type { ReactNode } from 'react'
-import { act, renderHook } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { act } from '@testing-library/react'
+import { useLocation, useNavigationType } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import type { Repo, Session } from '@/api/types'
-import { LocationCatcher } from '@/test/test-utils'
+import { renderHookWithProviders } from '@/test/render'
 import {
   useSessionPickerNavigation,
   type SessionPickerNavigationOptions,
@@ -39,28 +38,23 @@ function renderPickerNavigation(
   options: Omit<SessionPickerNavigationOptions, 'onClose'>,
 ) {
   const onClose = vi.fn()
-  const capturedPathname: { current: string } = { current: '' }
-  const capturedSearch: { current: string } = { current: '' }
-  const capturedNavigationType: { current: string } = { current: '' }
-  const wrapper = function Wrapper({ children }: { children: ReactNode }) {
-    return (
-      <MemoryRouter initialEntries={initialEntries}>
-        <LocationCatcher
-          capturedPathname={capturedPathname}
-          capturedSearch={capturedSearch}
-          capturedNavigationType={capturedNavigationType}
-        />
-        {children}
-      </MemoryRouter>
-    )
-  }
-  const rendered = renderHook(() => useSessionPickerNavigation({ ...options, onClose }), { wrapper })
-  return {
-    ...rendered,
-    onClose,
-    location: () =>
-      `${capturedPathname.current}${capturedSearch.current} ${capturedNavigationType.current}`,
-  }
+  const rendered = renderHookWithProviders(
+    () => ({
+      nav: useSessionPickerNavigation({ ...options, onClose }),
+      location: useLocation(),
+      navigationType: useNavigationType(),
+    }),
+    {
+      auth: false,
+      theme: false,
+      tts: false,
+      toaster: false,
+      initialEntries,
+    },
+  )
+  const location = () =>
+    `${rendered.result.current.location.pathname}${rendered.result.current.location.search} ${rendered.result.current.navigationType}`
+  return { ...rendered, onClose, location }
 }
 
 describe('useSessionPickerNavigation', () => {
@@ -72,7 +66,7 @@ describe('useSessionPickerNavigation', () => {
       )
 
       act(() => {
-        result.current.onSelectSession(createSession('b'), createRepo(1))
+        result.current.nav.onSelectSession(createSession('b'), createRepo(1))
       })
 
       expect(location()).toBe('/repos/1/sessions/b?panel=sessions PUSH')
@@ -86,7 +80,7 @@ describe('useSessionPickerNavigation', () => {
       )
 
       act(() => {
-        result.current.onSelectRemoteSession(createSession('b'), 'srv_hall')
+        result.current.nav.onSelectRemoteSession(createSession('b'), 'srv_hall')
       })
 
       expect(location()).toBe('/servers/srv_hall/sessions/b?panel=sessions PUSH')
@@ -100,7 +94,7 @@ describe('useSessionPickerNavigation', () => {
       )
 
       act(() => {
-        result.current.onSelectSession(createSession('a'), createRepo(1))
+        result.current.nav.onSelectSession(createSession('a'), createRepo(1))
       })
 
       expect(location()).toBe('/repos/1/sessions/a?panel=sessions POP')
@@ -114,7 +108,7 @@ describe('useSessionPickerNavigation', () => {
       )
 
       act(() => {
-        result.current.onSelectRemoteSession(createSession('a'), 'srv_kitchen')
+        result.current.nav.onSelectRemoteSession(createSession('a'), 'srv_kitchen')
       })
 
       expect(location()).toBe('/servers/srv_kitchen/sessions/a?panel=sessions POP')
@@ -128,7 +122,7 @@ describe('useSessionPickerNavigation', () => {
       )
 
       act(() => {
-        result.current.onSelectSession(createSession('b'), createRepo(1))
+        result.current.nav.onSelectSession(createSession('b'), createRepo(1))
       })
 
       expect(location()).toBe('/repos/1/sessions/b PUSH')
@@ -141,7 +135,7 @@ describe('useSessionPickerNavigation', () => {
       })
 
       act(() => {
-        result.current.onSelectRepo(createRepo(2))
+        result.current.nav.onSelectRepo(createRepo(2))
       })
 
       expect(location()).toBe('/repos/2 PUSH')
@@ -154,7 +148,7 @@ describe('useSessionPickerNavigation', () => {
       )
 
       act(() => {
-        result.current.onNavigate('/repos/1/schedules')
+        result.current.nav.onNavigate('/repos/1/schedules')
       })
 
       expect(location()).toBe('/repos/1/schedules?panel=sessions PUSH')
@@ -168,7 +162,7 @@ describe('useSessionPickerNavigation', () => {
       )
 
       act(() => {
-        result.current.onDeleteActiveSession()
+        result.current.nav.onDeleteActiveSession()
       })
 
       expect(location()).toBe(
@@ -184,7 +178,7 @@ describe('useSessionPickerNavigation', () => {
       )
 
       act(() => {
-        result.current.onDeleteActiveSession()
+        result.current.nav.onDeleteActiveSession()
       })
 
       expect(location()).toBe('/servers/srv_kitchen/sessions/a?panel=sessions POP')
@@ -198,7 +192,7 @@ describe('useSessionPickerNavigation', () => {
       )
 
       act(() => {
-        result.current.onDeleteActiveSession()
+        result.current.nav.onDeleteActiveSession()
       })
 
       expect(location()).toBe('/repos/1?repoTab=changes&panel=sessions PUSH')
@@ -214,7 +208,7 @@ describe('useSessionPickerNavigation', () => {
       )
 
       act(() => {
-        result.current.onSelectSession(createSession('b'), createRepo(1))
+        result.current.nav.onSelectSession(createSession('b'), createRepo(1))
       })
 
       expect(location()).toBe('/repos/1/sessions/b PUSH')
@@ -228,7 +222,7 @@ describe('useSessionPickerNavigation', () => {
       )
 
       act(() => {
-        result.current.onSelectSession(createSession('a'), createRepo(1))
+        result.current.nav.onSelectSession(createSession('a'), createRepo(1))
       })
 
       expect(location()).toBe('/repos/1/sessions/a?mobileTab=sessions POP')
@@ -244,7 +238,7 @@ describe('useSessionPickerNavigation', () => {
       )
 
       act(() => {
-        result.current.onSelectSession(createSession('b'), createRepo(1))
+        result.current.nav.onSelectSession(createSession('b'), createRepo(1))
       })
 
       expect(location()).toBe('/repos/1/sessions/b REPLACE')
@@ -258,7 +252,7 @@ describe('useSessionPickerNavigation', () => {
       )
 
       act(() => {
-        result.current.onDeleteActiveSession()
+        result.current.nav.onDeleteActiveSession()
       })
 
       expect(location()).toBe('/servers/srv_kitchen/projects?directory=%2Fapp REPLACE')

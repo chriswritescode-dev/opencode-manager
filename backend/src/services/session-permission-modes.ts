@@ -26,7 +26,7 @@ export interface SessionClientProvider {
 export type SessionClientSource = OpenCodeClient | SessionClientProvider
 
 function isClientProvider(source: SessionClientSource): source is SessionClientProvider {
-  return typeof (source as SessionClientProvider).getClient === 'function'
+  return 'getClient' in source
 }
 
 export class SessionPermissionModeError extends Error {
@@ -37,6 +37,8 @@ export class SessionPermissionModeError extends Error {
     this.status = status
   }
 }
+
+export type SessionPermissionModePinner = Pick<SessionPermissionModeService, 'pinAsk'>
 
 export class SessionPermissionModeService {
   private readonly clients: SessionClientProvider
@@ -133,12 +135,6 @@ export class SessionPermissionModeService {
     return this.settingsService.getSettings().preferences.sessionDefaults?.permissionMode ?? 'ask'
   }
 
-  /**
-   * Records the default permission mode for a session after it has been launched
-   * and accepts any permission requests it raised before the mode was stored.
-   *
-   * Does nothing when the default mode is `ask`, since that needs no stored row.
-   */
   async applyDefaultMode(
     sessionId: string,
     directory: string,

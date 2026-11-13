@@ -68,6 +68,8 @@ export const OAUTH_ERROR_CODES = [
 
 export type OAuthErrorCode = (typeof OAUTH_ERROR_CODES)[number];
 
+const OAUTH_ERROR_CODE_SET: ReadonlySet<string> = new Set(OAUTH_ERROR_CODES);
+
 export function isOAuthErrorCode(code: string): code is OAuthErrorCode {
-  return (OAUTH_ERROR_CODES as readonly string[]).includes(code);
+  return OAUTH_ERROR_CODE_SET.has(code);
 }

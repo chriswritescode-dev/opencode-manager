@@ -1,26 +1,28 @@
 import { Database } from 'bun:sqlite'
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { z } from 'zod'
+import { JsonValueSchema } from '@opencode-manager/shared/utils'
+import { getOpenCodeModelStatePath } from '@opencode-manager/shared/config/env'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
+import { selectRow } from '../../src/db/rows'
+import { createTempWorkspace, type TempWorkspace } from '../helpers/test-env'
 
-const paths = vi.hoisted(() => ({
-  workDir: '',
-  modelStateFile: '',
-}))
+const ModelStateRowSchema = z.object({
+  recent: z.array(JsonValueSchema),
+  favorite: z.array(JsonValueSchema),
+  variant: z.record(z.string(), JsonValueSchema),
+})
 
-vi.mock('@opencode-manager/shared/config/env', async (importOriginal) => ({
-  ...(await importOriginal()),
-  getOpenCodeModelStatePath: () => paths.modelStateFile,
-}))
+type ModelStateRow = z.infer<typeof ModelStateRowSchema>
 
-interface ModelStateRow {
-  recent: unknown[]
-  favorite: unknown[]
-  variant: Record<string, unknown>
-}
+const ModelStateFileSchema = ModelStateRowSchema.extend({
+  session: z.object({ current: z.string() }).optional(),
+})
+
+const TableNameRowSchema = z.object({ name: z.string() })
 
 function migrateToV19(db: Database): void {
   migrate(db, allMigrations.filter(migration => (migration.legacy?.version ?? Infinity) < 20))
@@ -33,17 +35,26 @@ function insertRow(db: Database, state: ModelStateRow, updatedAt: number): void 
 }
 
 function tableExists(db: Database): boolean {
-  return db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'opencode_model_state'").get() !== undefined
+  return selectRow(
+    db,
+    TableNameRowSchema,
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'opencode_model_state'",
+  ) !== null
+}
+
+async function readModelStateFile(): Promise<z.infer<typeof ModelStateFileSchema>> {
+  return ModelStateFileSchema.parse(JSON.parse(await readFile(getOpenCodeModelStatePath(), 'utf8')))
 }
 
 describe('020-drop-opencode-model-state', () => {
-  beforeEach(async () => {
-    paths.workDir = await mkdtemp(path.join(tmpdir(), 'opencode-model-state-migration-'))
-    paths.modelStateFile = path.join(paths.workDir, '.opencode', 'state', 'opencode', 'model.json')
+  let workspace: TempWorkspace
+
+  beforeEach(() => {
+    workspace = createTempWorkspace('opencode-model-state-migration-')
   })
 
-  afterEach(async () => {
-    await rm(paths.workDir, { recursive: true, force: true })
+  afterEach(() => {
+    workspace.restore()
   })
 
   it('writes the file from a newer row and drops the table', async () => {
@@ -60,7 +71,7 @@ describe('020-drop-opencode-model-state', () => {
     migrate(db, allMigrations)
 
     expect(tableExists(db)).toBe(false)
-    expect(JSON.parse(await readFile(paths.modelStateFile, 'utf8'))).toEqual(state)
+    expect(await readModelStateFile()).toEqual(state)
   })
 
   it('leaves an existing newer file untouched and drops the table', async () => {
@@ -73,24 +84,24 @@ describe('020-drop-opencode-model-state', () => {
       favorite: [],
       variant: {},
     })
-    await mkdir(path.dirname(paths.modelStateFile), { recursive: true })
-    await writeFile(paths.modelStateFile, existing)
+    await mkdir(path.dirname(getOpenCodeModelStatePath()), { recursive: true })
+    await writeFile(getOpenCodeModelStatePath(), existing)
 
-    const fileStats = await stat(paths.modelStateFile)
+    const fileStats = await stat(getOpenCodeModelStatePath())
     insertRow(db, { recent: [], favorite: [], variant: {} }, Math.floor(fileStats.mtimeMs) - 60_000)
 
     migrate(db, allMigrations)
 
     expect(tableExists(db)).toBe(false)
-    expect(await readFile(paths.modelStateFile, 'utf8')).toBe(existing)
+    expect(await readFile(getOpenCodeModelStatePath(), 'utf8')).toBe(existing)
   })
 
   it('preserves unknown top-level keys when restoring over an older file', async () => {
     const db = new Database(':memory:')
     migrateToV19(db)
 
-    await mkdir(path.dirname(paths.modelStateFile), { recursive: true })
-    await writeFile(paths.modelStateFile, JSON.stringify({ session: { current: 'abc' }, recent: [] }))
+    await mkdir(path.dirname(getOpenCodeModelStatePath()), { recursive: true })
+    await writeFile(getOpenCodeModelStatePath(), JSON.stringify({ session: { current: 'abc' }, recent: [] }))
 
     const state: ModelStateRow = {
       recent: [{ providerID: 'anthropic', modelID: 'claude' }],
@@ -101,12 +112,12 @@ describe('020-drop-opencode-model-state', () => {
 
     migrate(db, allMigrations)
 
-    const file = JSON.parse(await readFile(paths.modelStateFile, 'utf8')) as { session: unknown }
+    const file = await readModelStateFile()
     expect(file.session).toEqual({ current: 'abc' })
     expect(file).toMatchObject(state)
   })
 
-  it('does not throw and drops the table when the table is absent', async () => {
+  it('does not throw and drops the table when the table is absent', () => {
     const db = new Database(':memory:')
     migrateToV19(db)
     db.run('DROP TABLE IF EXISTS opencode_model_state')

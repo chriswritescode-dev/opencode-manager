@@ -15,28 +15,16 @@ export function getScheduleWorktreeBranch(jobId: number, runId: number | null): 
   return runId === null ? `schedule/${jobId}/shared` : `schedule/${jobId}/run-${runId}`
 }
 
-/**
- * Reads the job and run a schedule worktree directory name belongs to. `runId` is null
- * for a schedule's shared worktree; non-schedule names return null.
- */
 export function parseScheduleWorktreeName(name: string): { jobId: number; runId: number | null } | null {
   const match = SCHEDULE_WORKTREE_DIRECTORY.exec(name)
   if (!match) return null
   return { jobId: Number(match[1]), runId: match[2] ? Number(match[2]) : null }
 }
 
-/**
- * Whether a path names a schedule's shared worktree, as opposed to one of its run worktrees.
- */
 export function isSharedScheduleWorktreePath(worktreePath: string): boolean {
   return parseScheduleWorktreeName(path.basename(worktreePath))?.runId === null
 }
 
-/**
- * Builds a lookup that says which schedule, if any, owns a canonical worktree directory:
- * either a directory named for a schedule under the schedule worktree root, or the
- * worktree a running run works in. Directories of deleted schedules are not owned.
- */
 export function createScheduleWorktreeDescriber(database: Database): (directory: string) => RepoWorktreeSchedule | undefined {
   const scheduleRoot = canonicalPathSync(path.resolve(getScheduleWorktreesPath()))
   const jobsById = new Map(listScheduleJobWorktreeOwners(database).map((job) => [job.id, job] as const))

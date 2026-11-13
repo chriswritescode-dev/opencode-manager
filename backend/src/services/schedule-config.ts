@@ -110,20 +110,22 @@ export function buildCreateSchedulePersistenceInput(input: CreateScheduleJobRequ
     branch: input.branch?.trim() || null,
     workspaceMode: input.workspaceMode ?? 'worktree',
     sandbox: input.sandbox ?? null,
-    ...(input.directory !== undefined ? { directory: input.directory?.trim() || null } : {}),
   }
+  const directory = input.directory?.trim() || null
 
   const scheduleConfig = input.scheduleMode === 'cron'
     ? normalizeCronConfig(input.cronExpression, input.timezone, currentDate)
     : normalizeIntervalConfig(input.intervalMinutes, currentDate)
 
-  return {
+  const persistenceInput: ScheduleJobPersistenceInput = {
     ...base,
     ...scheduleConfig,
     permissionConfig: input.permissionConfig ?? null,
     mcpServers: input.mcpServers ?? [],
     nextRunAt: base.enabled ? scheduleConfig.nextRunAt : null,
   }
+  if (input.directory !== undefined) persistenceInput.directory = directory
+  return persistenceInput
 }
 
 export function buildUpdatedSchedulePersistenceInput(
@@ -157,7 +159,7 @@ export function buildUpdatedSchedulePersistenceInput(
       : existing.nextRunAt
     : null
 
-  return {
+  const persistenceInput: ScheduleJobPersistenceInput = {
     name: input.name?.trim() || existing.name,
     description: input.description === undefined ? existing.description : (input.description?.trim() || null),
     enabled,
@@ -175,9 +177,12 @@ export function buildUpdatedSchedulePersistenceInput(
     branch: input.branch === undefined ? existing.branch : (input.branch?.trim() || null),
     workspaceMode: input.workspaceMode ?? existing.workspaceMode,
     sandbox: input.sandbox !== undefined ? input.sandbox : existing.sandbox,
-    ...(input.directory !== undefined || existing.directory !== undefined
-      ? { directory: input.directory === undefined ? (existing.directory ?? null) : (input.directory?.trim() || null) }
-      : {}),
     nextRunAt,
   }
+  if (input.directory !== undefined) {
+    persistenceInput.directory = input.directory?.trim() || null
+  } else if (existing.directory !== undefined) {
+    persistenceInput.directory = existing.directory ?? null
+  }
+  return persistenceInput
 }

@@ -1,5 +1,4 @@
 import { Hono } from 'hono'
-import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { Database } from 'bun:sqlite'
 import { InternalCloneRepoRequestSchema } from '@opencode-manager/shared/schemas'
 import type { SettingsService } from '../../services/settings'
@@ -9,7 +8,9 @@ import { cloneRepo } from '../../services/repo'
 import { logger } from '../../utils/logger'
 import { getErrorMessage, getStatusCode } from '../../utils/error-utils'
 
-export function createInternalRepoRoutes(db: Database, settingsService: SettingsService, gitAuthService: GitAuthService) {
+export type InternalRepoRoutesSettings = Pick<SettingsService, 'getSettings'>
+
+export function createInternalRepoRoutes(db: Database, settingsService: InternalRepoRoutesSettings, gitAuthService: GitAuthService) {
   const app = new Hono()
 
   app.get('/', (c) => {
@@ -34,7 +35,7 @@ export function createInternalRepoRoutes(db: Database, settingsService: Settings
       return c.json(repo)
     } catch (error) {
       logger.error('Failed to clone internal repo:', error)
-      return c.json({ error: getErrorMessage(error) }, getStatusCode(error) as ContentfulStatusCode)
+      return c.json({ error: getErrorMessage(error) }, getStatusCode(error))
     }
   })
 

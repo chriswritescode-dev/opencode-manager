@@ -129,7 +129,7 @@ function commitDraft(draft: TranscriptDraft): SessionTranscript {
     messages: draft.messages,
     pending: draft.pending,
     status: draft.status,
-    ...(draft.retry === undefined ? {} : { retry: draft.retry }),
+    retry: draft.retry,
   }
 }
 
@@ -182,14 +182,14 @@ function replaceContent(
   return { ...assistant, content }
 }
 
-function editContentPart<Part extends AssistantContent>(
+function editContentPart(
   assistant: SessionMessageAssistant,
   index: number,
-  edit: (part: Part) => Part,
+  edit: (part: AssistantContent) => AssistantContent,
 ): SessionMessageAssistant {
   const current = assistant.content[index]
   if (current === undefined) return assistant
-  const next = edit(current as Part)
+  const next = edit(current)
   if (next === current) return assistant
   const content = assistant.content.slice()
   content[index] = next
@@ -201,8 +201,7 @@ function editText(
   edit: (text: AssistantText) => AssistantText,
 ): SessionMessageAssistant {
   const index = findLastIndex(assistant.content, (part) => part.type === 'text')
-  if (assistant.content[index]?.type !== 'text') return assistant
-  return editContentPart(assistant, index, edit)
+  return editContentPart(assistant, index, (part) => (part.type === 'text' ? edit(part) : part))
 }
 
 function editReasoning(
@@ -213,8 +212,9 @@ function editReasoning(
     assistant.content,
     (part) => part.type === 'reasoning' && !part.time?.completed,
   )
-  if (assistant.content[index]?.type !== 'reasoning') return assistant
-  return editContentPart(assistant, index, edit)
+  return editContentPart(assistant, index, (part) =>
+    part.type === 'reasoning' ? edit(part) : part,
+  )
 }
 
 function editTool(
@@ -226,8 +226,9 @@ function editTool(
     assistant.content,
     (part) => part.type === 'tool' && part.id === toolID,
   )
-  if (assistant.content[index]?.type !== 'tool') return assistant
-  return editContentPart(assistant, index, edit)
+  return editContentPart(assistant, index, (part) =>
+    part.type === 'tool' ? edit(part) : part,
+  )
 }
 
 function editActiveAssistant(
@@ -506,7 +507,7 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
           rawFinish: undefined,
           native: undefined,
           time: { created: started, streamed: undefined, completed: undefined },
-          ...(snapshot ? { snapshot: { ...current.snapshot, start: snapshot } } : {}),
+          snapshot: snapshot ? { ...current.snapshot, start: snapshot } : current.snapshot,
         }
         return
       }
@@ -522,7 +523,7 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
         model,
         metadata: event.metadata,
         content: [],
-        ...(snapshot ? { snapshot: { start: snapshot } } : {}),
+        snapshot: snapshot ? { start: snapshot } : undefined,
         time: { created: started },
       })
       return
@@ -542,15 +543,14 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
         native: event.data.native,
         cost: event.data.cost,
         tokens: event.data.tokens,
-        ...(event.data.snapshot || event.data.files
-          ? {
-              snapshot: {
+        snapshot:
+          event.data.snapshot || event.data.files
+            ? {
                 ...assistant.snapshot,
                 end: event.data.snapshot,
                 files: event.data.files,
-              },
-            }
-          : {}),
+              }
+            : assistant.snapshot,
       }))
       return
     case 'session.step.failed':
@@ -562,18 +562,16 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
         native: event.data.native,
         error: event.data.error,
         retry: undefined,
-        ...(event.data.cost !== undefined && event.data.tokens !== undefined
-          ? { cost: event.data.cost, tokens: event.data.tokens }
-          : {}),
-        ...(event.data.snapshot || event.data.files
-          ? {
-              snapshot: {
+        cost: event.data.cost !== undefined && event.data.tokens !== undefined ? event.data.cost : undefined,
+        tokens: event.data.cost !== undefined && event.data.tokens !== undefined ? event.data.tokens : undefined,
+        snapshot:
+          event.data.snapshot || event.data.files
+            ? {
                 ...assistant.snapshot,
                 end: event.data.snapshot,
                 files: event.data.files,
-              },
-            }
-          : {}),
+              }
+            : assistant.snapshot,
       }))
       return
     case 'session.text.started':
@@ -592,7 +590,7 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
         editText(assistant, (text) => ({
           ...text,
           text: event.data.text,
-          ...(event.data.native === undefined ? {} : { native: event.data.native }),
+          native: event.data.native,
         })),
       )
       return
@@ -604,7 +602,7 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
           {
             type: 'reasoning',
             text: '',
-            ...(event.data.native === undefined ? {} : { native: event.data.native }),
+            native: event.data.native,
             time: { created: event.created },
           },
         ],
@@ -623,7 +621,7 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
         editReasoning(assistant, (reasoning) => ({
           ...reasoning,
           text: event.data.text,
-          ...(event.data.native === undefined ? {} : { native: event.data.native }),
+          native: event.data.native,
           time: { created: reasoning.time?.created ?? event.created, completed: event.created },
         })),
       )
@@ -688,9 +686,10 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
           return {
             ...tool,
             executed: event.data.executed || tool.executed === true,
-            ...(tool.native || event.data.native
-              ? { native: { ...tool.native, ...event.data.native } }
-              : {}),
+            native:
+              tool.native || event.data.native
+                ? { ...tool.native, ...event.data.native }
+                : undefined,
             time: { ...tool.time, completed: event.created },
             state: {
               status: 'completed',
@@ -709,14 +708,15 @@ function applyEventToDraft(draft: TranscriptDraft, event: V2Event): void {
           return {
             ...tool,
             executed: event.data.executed || tool.executed === true,
-            ...(tool.native || event.data.native
-              ? { native: { ...tool.native, ...event.data.native } }
-              : {}),
+            native:
+              tool.native || event.data.native
+                ? { ...tool.native, ...event.data.native }
+                : undefined,
             time: { ...tool.time, completed: event.created },
             state: {
               status: 'error',
               error: event.data.error,
-              input: typeof tool.state.input === 'string' ? {} : tool.state.input,
+              input: tool.state.status === 'streaming' ? {} : tool.state.input,
               metadata: event.data.metadata,
               content: event.data.content,
             },
@@ -983,6 +983,6 @@ function draftTranscript(draft: TranscriptDraft): SessionTranscript {
     messages: draft.messages,
     pending: draft.pending,
     status: draft.status,
-    ...(draft.retry === undefined ? {} : { retry: draft.retry }),
+    retry: draft.retry,
   }
 }

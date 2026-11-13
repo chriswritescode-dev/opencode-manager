@@ -1,5 +1,6 @@
 import { useMemo, type ReactNode } from 'react'
 import { common, createLowlight } from 'lowlight'
+import { z } from 'zod'
 import type { DiffRow } from '@/lib/diffLines'
 import { cn } from '@/lib/utils'
 
@@ -7,37 +8,39 @@ const lowlight = createLowlight(common)
 
 type HighlightedNode = ReturnType<typeof lowlight.highlight>['children'][number]
 
-const ROW_CLASS: Record<DiffRow['kind'], string> = {
+const ROW_CLASS = {
   add: 'bg-diff-add/15',
   remove: 'bg-diff-delete/15',
   context: '',
   gap: '',
-}
+} satisfies Record<DiffRow['kind'], string>
 
-const MARKER_CLASS: Record<DiffRow['kind'], string> = {
+const MARKER_CLASS = {
   add: 'text-diff-add',
   remove: 'text-diff-delete',
   context: 'text-muted-foreground',
   gap: 'text-muted-foreground',
-}
+} satisfies Record<DiffRow['kind'], string>
 
-const MARKER_TEXT: Record<DiffRow['kind'], string> = {
+const MARKER_TEXT = {
   add: '+',
   remove: '-',
   context: ' ',
   gap: '⋯',
-}
+} satisfies Record<DiffRow['kind'], string>
 
 function renderHighlightedNode(node: HighlightedNode, key: number): ReactNode {
   if (node.type === 'text') return node.value
   if (node.type !== 'element') return null
 
-  const rawClassName = node.properties?.className
-  const className = Array.isArray(rawClassName)
-    ? rawClassName.join(' ')
-    : typeof rawClassName === 'string'
-      ? rawClassName
-      : undefined
+  const classNames = z
+    .union([z.string(), z.array(z.union([z.string(), z.number()]))])
+    .safeParse(node.properties?.className)
+  const className = classNames.success
+    ? Array.isArray(classNames.data)
+      ? classNames.data.join(' ')
+      : classNames.data
+    : undefined
 
   return (
     <span key={key} className={className}>
@@ -53,7 +56,6 @@ function highlightLine(text: string, language: string): ReactNode {
     .children.map((node, index) => renderHighlightedNode(node, index))
 }
 
-/** Renders unified diff rows as a themed, line-numbered, syntax-highlighted block. */
 export function DiffLines({ rows, language }: { rows: DiffRow[]; language: string }) {
   const highlighted = useMemo(
     () => rows.map((row) => (row.kind === 'gap' ? row.text : highlightLine(row.text, language))),

@@ -18,14 +18,6 @@ export interface ForwardProxyRequestInput {
   buildResponseHeaders: (upstream: Headers) => Headers
 }
 
-/**
- * Forwards one HTTP request to an upstream server and returns its response with the
- * body left unread so it keeps streaming to the caller.
- *
- * When `headersTimeoutMs` is set, requests without a body are aborted if the upstream
- * does not send response headers in time; that abort surfaces as a
- * `ProxyHeadersTimeoutError`. Every other fetch failure is rethrown unchanged.
- */
 export async function forwardProxyRequest({
   url,
   method,

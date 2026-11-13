@@ -1,27 +1,36 @@
 import type { Database } from 'bun:sqlite'
 import type { Repo, CreateRepoInput } from '../types/repo'
+import { RepoStatusSchema } from '@opencode-manager/shared/schemas'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH, getRepoDisplayName } from '@opencode-manager/shared/utils'
 import { getErrorMessage } from '../utils/error-utils'
 import { canonicalPathSync } from '../utils/fs-safe'
 import { invalidateRepoEnvCache } from '../utils/repo-env-cache'
+import { z } from 'zod'
 import path from 'path'
+import { selectRow, selectRows } from './rows'
 
-interface RepoRow {
-  id: number
-  name?: string
-  repo_url?: string
-  local_path: string
-  source_path?: string
-  branch?: string
-  default_branch: string
-  clone_status: string
-  cloned_at: number
-  last_pulled?: number
-  last_accessed_at?: number
-  is_worktree?: number
-  is_local?: number
-}
+const RepoRowSchema = z.object({
+  id: z.number(),
+  name: z.string().nullish(),
+  repo_url: z.string().nullish(),
+  local_path: z.string(),
+  source_path: z.string().nullish(),
+  branch: z.string().nullish(),
+  default_branch: z.string(),
+  clone_status: RepoStatusSchema,
+  cloned_at: z.number(),
+  last_pulled: z.number().nullish(),
+  last_accessed_at: z.number().nullish(),
+  is_worktree: z.number().nullish(),
+  is_local: z.number().nullish(),
+})
+
+type RepoRow = z.infer<typeof RepoRowSchema>
+
+const RepoIdRowSchema = z.object({ id: z.number() })
+
+const RepoSettingRowSchema = z.object({ value: z.string() })
 
 const REPO_GIT_CREDENTIAL_SETTING_KEY = 'gitCredentialId'
 
@@ -33,25 +42,23 @@ function rowToRepo(row: RepoRow): Repo {
   return {
     id: row.id,
     name: row.name ?? undefined,
-    repoUrl: row.repo_url,
+    repoUrl: row.repo_url ?? undefined,
     localPath: row.local_path,
     fullPath,
-    sourcePath: row.source_path,
-    branch: row.branch,
+    sourcePath: row.source_path ?? undefined,
+    branch: row.branch ?? undefined,
     defaultBranch: row.default_branch,
-    cloneStatus: row.clone_status as Repo['cloneStatus'],
+    cloneStatus: row.clone_status,
     clonedAt: row.cloned_at,
-    lastPulled: row.last_pulled,
-    lastAccessedAt: row.last_accessed_at,
+    lastPulled: row.last_pulled ?? undefined,
+    lastAccessedAt: row.last_accessed_at ?? undefined,
     isWorktree: row.is_worktree ? Boolean(row.is_worktree) : undefined,
     isLocal: row.is_local ? Boolean(row.is_local) : undefined,
   }
 }
 
 export function getRepoSetting(db: Database, repoId: number, key: string): string | null {
-  const row = db
-    .prepare('SELECT value FROM repo_settings WHERE repo_id = ? AND key = ?')
-    .get(repoId, key) as { value: string } | undefined
+  const row = selectRow(db, RepoSettingRowSchema, 'SELECT value FROM repo_settings WHERE repo_id = ? AND key = ?', repoId, key)
 
   return row?.value ?? null
 }
@@ -121,9 +128,8 @@ function updateRepoIdReference(db: Database, tableName: RepoIdTable, fromRepoId:
 }
 
 export function getRepoById(db: Database, id: number): Repo | null {
-  const stmt = db.prepare('SELECT * FROM repos WHERE id = ?')
-  const row = stmt.get(id) as RepoRow | undefined
-  
+  const row = selectRow(db, RepoRowSchema, 'SELECT * FROM repos WHERE id = ?', id)
+
   return row ? rowToRepo(row) : null
 }
 
@@ -131,8 +137,13 @@ export function ensureAssistantRepo(db: Database): Repo {
   const now = Date.now()
 
   const syncAssistantRepo = db.transaction(() => {
-    const existingAssistantPathRow = db.prepare('SELECT id FROM repos WHERE local_path = ? AND id != ?')
-      .get(ASSISTANT_REPO_PATH, ASSISTANT_REPO_ID) as { id: number } | undefined
+    const existingAssistantPathRow = selectRow(
+      db,
+      RepoIdRowSchema,
+      'SELECT id FROM repos WHERE local_path = ? AND id != ?',
+      ASSISTANT_REPO_PATH,
+      ASSISTANT_REPO_ID,
+    )
 
     if (existingAssistantPathRow) {
       for (const table of TABLES_WITH_REPO_ID) {
@@ -229,9 +240,10 @@ export function createRepo(db: Database, repo: CreateRepoInput): Repo {
       throw new Error(`Failed to retrieve newly created repo with id ${result.lastInsertRowid}`)
     }
     return newRepo
-  } catch (error: unknown) {
+  } catch (error) {
     const errorMessage = getErrorMessage(error)
-    if (errorMessage.includes('UNIQUE constraint failed') || (error && typeof error === 'object' && 'code' in error && error.code === 'SQLITE_CONSTRAINT_UNIQUE')) {
+    const isUniqueConstraintCode = error instanceof Error && 'code' in error && error.code === 'SQLITE_CONSTRAINT_UNIQUE'
+    if (errorMessage.includes('UNIQUE constraint failed') || isUniqueConstraintCode) {
       const conflictRepo = repo.isLocal 
         ? repo.sourcePath
           ? getRepoBySourcePath(db, repo.sourcePath) ?? getRepoByLocalPath(db, normalizedPath)
@@ -251,35 +263,27 @@ export function createRepo(db: Database, repo: CreateRepoInput): Repo {
 }
 
 export function getRepoByUrlAndBranch(db: Database, repoUrl: string, branch?: string): Repo | null {
-  const query = branch 
-    ? 'SELECT * FROM repos WHERE repo_url = ? AND branch = ?'
-    : 'SELECT * FROM repos WHERE repo_url = ? AND branch IS NULL'
-  
-  const stmt = db.prepare(query)
-  const row = branch 
-    ? stmt.get(repoUrl, branch) as RepoRow | undefined
-    : stmt.get(repoUrl) as RepoRow | undefined
-  
+  const row = branch
+    ? selectRow(db, RepoRowSchema, 'SELECT * FROM repos WHERE repo_url = ? AND branch = ?', repoUrl, branch)
+    : selectRow(db, RepoRowSchema, 'SELECT * FROM repos WHERE repo_url = ? AND branch IS NULL', repoUrl)
+
   return row ? rowToRepo(row) : null
 }
 
 export function getRepoByLocalPath(db: Database, localPath: string): Repo | null {
-  const stmt = db.prepare('SELECT * FROM repos WHERE local_path = ?')
-  const row = stmt.get(localPath) as RepoRow | undefined
-  
+  const row = selectRow(db, RepoRowSchema, 'SELECT * FROM repos WHERE local_path = ?', localPath)
+
   return row ? rowToRepo(row) : null
 }
 
 export function getRepoBySourcePath(db: Database, sourcePath: string): Repo | null {
-  const stmt = db.prepare('SELECT * FROM repos WHERE source_path = ?')
-  const row = stmt.get(sourcePath) as RepoRow | undefined
+  const row = selectRow(db, RepoRowSchema, 'SELECT * FROM repos WHERE source_path = ?', sourcePath)
 
   return row ? rowToRepo(row) : null
 }
 
 export function listRepos(db: Database, repoOrder?: number[]): Repo[] {
-  const stmt = db.prepare('SELECT * FROM repos ORDER BY cloned_at DESC')
-  const rows = stmt.all() as RepoRow[]
+  const rows = selectRows(db, RepoRowSchema, 'SELECT * FROM repos ORDER BY cloned_at DESC')
   const repos = rows.map(rowToRepo)
 
   if (!repoOrder || repoOrder.length === 0) {

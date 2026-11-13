@@ -13,16 +13,22 @@ export function rawWebSocketHandshake(options: {
   cookie?: string
 }): Promise<RawHandshakeResult> {
   return new Promise((resolve, reject) => {
-    const headers: Record<string, string> = {
+    const headers = new Headers({
       Connection: 'Upgrade',
       Upgrade: 'websocket',
       'Sec-WebSocket-Key': randomBytes(16).toString('base64'),
       'Sec-WebSocket-Version': '13',
-    }
-    if (options.origin !== undefined) headers.Origin = options.origin
-    if (options.cookie) headers.Cookie = options.cookie
+    })
+    if (options.origin !== undefined) headers.set('Origin', options.origin)
+    if (options.cookie) headers.set('Cookie', options.cookie)
 
-    const request = httpRequest({ host: '127.0.0.1', port: options.port, path: options.path, method: 'GET', headers })
+    const request = httpRequest({
+      host: '127.0.0.1',
+      port: options.port,
+      path: options.path,
+      method: 'GET',
+      headers: Object.fromEntries(headers),
+    })
     let settled = false
     request.on('upgrade', (_res, socket) => {
       settled = true

@@ -1,197 +1,114 @@
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
-import * as fs from 'fs/promises'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import * as fs from 'node:fs/promises'
+import { join } from 'node:path'
+import type { TempWorkspace } from '../helpers/test-env'
+import { createTempWorkspace } from '../helpers/test-env'
+import {
+  cleanupAllSSHKeys,
+  cleanupSSHKey,
+  normalizeHostPort,
+  parseHostPort,
+  parseSSHHost,
+  writeTemporarySSHKey,
+} from '../../src/utils/ssh-key-manager'
 
-vi.mock('@opencode-manager/shared/config/env', () => ({
-  getWorkspacePath: vi.fn(() => '/tmp/ssh-key-test-workspace'),
-  getReposPath: vi.fn(() => '/tmp/ssh-key-test-workspace/repos'),
-  getOpenCodeConfigFilePath: vi.fn(() => '/tmp/ssh-key-test-workspace/.config/opencode.json'),
-  getAgentsMdPath: vi.fn(() => '/tmp/ssh-key-test-workspace/AGENTS.md'),
-  getDatabasePath: vi.fn(() => ':memory:'),
-  getConfigPath: vi.fn(() => '/tmp/ssh-key-test-workspace/config'),
-  ENV: {
-    SERVER: { PORT: 5003, HOST: '0.0.0.0', NODE_ENV: 'test' },
-    AUTH: { TRUSTED_ORIGINS: 'http://localhost:5173', SECRET: 'test-secret-for-encryption-key-32c' },
-    WORKSPACE: { BASE_PATH: '/tmp/ssh-key-test-workspace', REPOS_DIR: 'repos', CONFIG_DIR: 'config' },
-    OPENCODE: { PORT: 5551, HOST: '127.0.0.1' },
-    DATABASE: { PATH: ':memory:' },
-    FILE_LIMITS: {
-      MAX_SIZE_BYTES: 1024 * 1024,
-      MAX_UPLOAD_SIZE_BYTES: 10 * 1024 * 1024,
-    },
-  },
-  FILE_LIMITS: {
-    MAX_SIZE_BYTES: 1024 * 1024,
-    MAX_UPLOAD_SIZE_BYTES: 10 * 1024 * 1024,
-  },
-}))
+let workspace: TempWorkspace
 
-import { parseSSHHost, normalizeHostPort, parseHostPort, writeTemporarySSHKey, cleanupSSHKey, cleanupAllSSHKeys } from '../../src/utils/ssh-key-manager'
-
-beforeAll(async () => {
-  await fs.mkdir('/tmp/ssh-key-test-workspace', { recursive: true })
+beforeEach(() => {
+  workspace = createTempWorkspace('ocm-ssh-key-test-')
 })
 
-afterAll(async () => {
-  await fs.rm('/tmp/ssh-key-test-workspace', { recursive: true, force: true })
+afterEach(() => {
+  workspace.restore()
 })
 
-describe('SSH Host Parsing', () => {
-  it('should parse git@host:path format', () => {
-    const result = parseSSHHost('git@github.com:user/repo.git')
-    expect(result.user).toBe('git')
-    expect(result.host).toBe('github.com')
-    expect(result.port).toBe('22')
+describe('parseSSHHost', () => {
+  it.each([
+    ['git@github.com:user/repo.git', { user: 'git', host: 'github.com', port: '22' }],
+    ['ssh://git@gitlab.com/user/repo.git', { user: 'git', host: 'gitlab.com', port: '22' }],
+    ['ssh://git@git.example.com:2222/user/repo.git', { user: 'git', host: 'git.example.com', port: '2222' }],
+    ['git@github.com:22:user/repo.git', { user: 'git', host: 'github.com', port: '22' }],
+  ])('parses %s', (input, expected) => {
+    expect(parseSSHHost(input)).toEqual(expected)
   })
 
-  it('should parse ssh:// format', () => {
-    const result = parseSSHHost('ssh://git@gitlab.com/user/repo.git')
-    expect(result.user).toBe('git')
-    expect(result.host).toBe('gitlab.com')
-    expect(result.port).toBe('22')
-  })
-
-  it('should parse ssh:// with custom port', () => {
-    const result = parseSSHHost('ssh://git@git.example.com:2222/user/repo.git')
-    expect(result.user).toBe('git')
-    expect(result.host).toBe('git.example.com')
-    expect(result.port).toBe('2222')
-  })
-
-  it('should parse git@host:port:path format', () => {
-    const result = parseSSHHost('git@github.com:22:user/repo.git')
-    expect(result.user).toBe('git')
-    expect(result.host).toBe('github.com')
-    expect(result.port).toBe('22')
-  })
-
-  it('should normalize host:port for non-standard ports', () => {
+  it('normalizes host:port for non-standard ports', () => {
     expect(normalizeHostPort('github.com', '2222')).toBe('github.com:2222')
     expect(normalizeHostPort('github.com', '22')).toBe('github.com')
     expect(normalizeHostPort('github.com', undefined)).toBe('github.com')
   })
 
-  it('should parse host:port strings', () => {
+  it('parses host:port strings', () => {
     expect(parseHostPort('github.com:2222')).toEqual({ host: 'github.com', port: '2222' })
     expect(parseHostPort('github.com')).toEqual({ host: 'github.com', port: '22' })
   })
 })
 
-describe('SSH Key Validation', () => {
-  describe('RSA Keys', () => {
-    const rsaKey = `-----BEGIN RSA PRIVATE KEY-----
-MIIEpAIBAAKCAQEAzR8u8I5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5
------END RSA PRIVATE KEY-----`
+const VALID_KEYS = [
+  ['RSA private', '-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEAzR8u8I5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5\n-----END RSA PRIVATE KEY-----'],
+  ['RSA public', 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDRHw== test@host'],
+  ['ED25519 private', '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\n-----END OPENSSH PRIVATE KEY-----'],
+  ['ED25519 public', 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIQQ/test@test.com'],
+  ['ECDSA private', '-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIP5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z\n-----END EC PRIVATE KEY-----'],
+  ['ECDSA public', 'ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEM/test@test.com'],
+] as const
 
-    it('should accept RSA private key', async () => {
-      const keyPath = await writeTemporarySSHKey(rsaKey, 'test-rsa')
-      expect(keyPath).toBeTruthy()
-      
-      const stats = await fs.stat(keyPath)
-      const mode = stats.mode & 0o777
-      expect(mode).toBe(0o600)
-      
-      await cleanupSSHKey(keyPath)
-    })
+describe('writeTemporarySSHKey', () => {
+  it.each(VALID_KEYS)('accepts a %s key', async (_label, key) => {
+    const keyPath = await writeTemporarySSHKey(key, 'test-key')
 
-    it('should accept RSA public key', async () => {
-      const rsaPublicKey = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDRHw== test@host'
-      const keyPath = await writeTemporarySSHKey(rsaPublicKey, 'test-rsa-pub')
-      expect(keyPath).toBeTruthy()
-      await cleanupSSHKey(keyPath)
-    })
+    expect(keyPath.startsWith(join(workspace.path, '.ssh-keys'))).toBe(true)
+    await expect(fs.readFile(keyPath, 'utf-8')).resolves.toContain(key.split('\n')[0])
   })
 
-  describe('ED25519 Keys', () => {
-    const ed25519Key = `-----BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
------END OPENSSH PRIVATE KEY-----`
+  it('writes the key with owner-only permissions', async () => {
+    const keyPath = await writeTemporarySSHKey(VALID_KEYS[1][1], 'test-perms')
 
-    it('should accept ED25519 private key', async () => {
-      const keyPath = await writeTemporarySSHKey(ed25519Key, 'test-ed25519')
-      expect(keyPath).toBeTruthy()
-      await cleanupSSHKey(keyPath)
-    })
-
-    it('should accept ED25519 public key', async () => {
-      const ed25519PublicKey = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIQQ/test@test.com'
-      const keyPath = await writeTemporarySSHKey(ed25519PublicKey, 'test-ed25519-pub')
-      expect(keyPath).toBeTruthy()
-      await cleanupSSHKey(keyPath)
-    })
-  })
-
-  describe('ECDSA Keys', () => {
-    const ecdsaKey = `-----BEGIN EC PRIVATE KEY-----
-MHcCAQEEIP5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5Z5
------END EC PRIVATE KEY-----`
-
-    it('should accept ECDSA private key', async () => {
-      const keyPath = await writeTemporarySSHKey(ecdsaKey, 'test-ecdsa')
-      expect(keyPath).toBeTruthy()
-      await cleanupSSHKey(keyPath)
-    })
-
-    it('should accept ECDSA public key', async () => {
-      const ecdsaPublicKey = 'ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEM/test@test.com'
-      const keyPath = await writeTemporarySSHKey(ecdsaPublicKey, 'test-ecdsa-pub')
-      expect(keyPath).toBeTruthy()
-      await cleanupSSHKey(keyPath)
-    })
-  })
-
-  it('should reject invalid key format', async () => {
-    const invalidKey = 'not a valid ssh key'
-    await expect(writeTemporarySSHKey(invalidKey, 'test-invalid')).rejects.toThrow('Invalid SSH key format')
-  })
-
-  it('should reject empty key', async () => {
-    const emptyKey = ''
-    await expect(writeTemporarySSHKey(emptyKey, 'test-empty')).rejects.toThrow('Invalid SSH key format')
-  })
-
-  it('should set correct permissions on key file', async () => {
-    const validKey = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDRHw== test@host'
-    const keyPath = await writeTemporarySSHKey(validKey, 'test-perms')
-    
     const stats = await fs.stat(keyPath)
-    const mode = stats.mode & 0o777
-    expect(mode).toBe(0o600)
-    
-    await cleanupSSHKey(keyPath)
+    expect(stats.mode & 0o777).toBe(0o600)
+  })
+
+  it.each([
+    ['an invalid key', 'not a valid ssh key'],
+    ['an empty key', ''],
+  ])('rejects %s', async (_label, key) => {
+    await expect(writeTemporarySSHKey(key, 'test-invalid')).rejects.toThrow('Invalid SSH key format')
+  })
+
+  it('removes the file it wrote when the key is invalid', async () => {
+    await expect(writeTemporarySSHKey('not a valid ssh key', 'test-invalid')).rejects.toThrow()
+    await expect(fs.readdir(join(workspace.path, '.ssh-keys'))).resolves.toEqual([])
   })
 })
 
-describe('SSH Key Cleanup', () => {
-  it('should clean up individual key', async () => {
-    const key = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDRHw== test@host'
-    const keyPath = await writeTemporarySSHKey(key, 'test-cleanup')
-    
+describe('SSH key cleanup', () => {
+  it('removes an individual key', async () => {
+    const keyPath = await writeTemporarySSHKey(VALID_KEYS[1][1], 'test-cleanup')
+
     await cleanupSSHKey(keyPath)
-    
+
     await expect(fs.access(keyPath)).rejects.toThrow()
   })
 
-  it('should clean up all keys', async () => {
-    const key1 = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDRHw== test1@host'
-    const key2 = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIQQ/test2@test.com'
-    
-    await writeTemporarySSHKey(key1, 'test-cleanup-1')
-    await writeTemporarySSHKey(key2, 'test-cleanup-2')
-    
+  it('removes every key it wrote', async () => {
+    const first = await writeTemporarySSHKey(VALID_KEYS[3][1], 'test-cleanup-1')
+    const second = await writeTemporarySSHKey(VALID_KEYS[4][1], 'test-cleanup-2')
+
     await cleanupAllSSHKeys()
+
+    await expect(fs.access(first)).rejects.toThrow()
+    await expect(fs.access(second)).rejects.toThrow()
   })
 
-   it('should handle cleanup of non-existent file gracefully', async () => {
-     const nonExistentPath = '/tmp/non-existent-ssh-key-12345'
-     
-     await cleanupSSHKey(nonExistentPath)
-   })
+  it('tolerates a missing file', async () => {
+    await expect(cleanupSSHKey(join(workspace.path, 'missing-key'))).resolves.toBeUndefined()
+  })
 
-   it('should handle cleanup of already cleaned up file gracefully', async () => {
-     const key = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDRHw== test@host'
-     const keyPath = await writeTemporarySSHKey(key, 'test-double-cleanup')
-     
-     await cleanupSSHKey(keyPath)
-     await cleanupSSHKey(keyPath)
-   })
- })
+  it('tolerates cleaning up the same key twice', async () => {
+    const keyPath = await writeTemporarySSHKey(VALID_KEYS[1][1], 'test-double-cleanup')
+
+    await cleanupSSHKey(keyPath)
+
+    await expect(cleanupSSHKey(keyPath)).resolves.toBeUndefined()
+  })
+})

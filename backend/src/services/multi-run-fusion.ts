@@ -45,20 +45,6 @@ const FUSION_REPLY_BUDGET_RATIO = 0.4
 
 const FUSION_BLOCK_SEPARATOR = '\n\n'
 
-/**
- * Builds the OpenCode session permission ruleset that lets a fusion session read
- * its selected source workspaces while denying any edit to them.
- *
- * The ruleset starts from the default unattended baseline
- * (`buildSchedulePermissionRuleset(null)`), which denies external directories,
- * questions, and destructive shell patterns. Because rules are last-match-wins,
- * the per-source rules appended afterwards take precedence for those paths.
- *
- * Each unique directory is normalized with `resolve` before a pair of rules is
- * emitted: an `external_directory` allow so the session may read outside its own
- * workspace, followed by an `edit` deny so the read-only reference cannot be
- * mutated. Deduplication happens after normalization.
- */
 export function buildFusionSourcePermissionRuleset(directories: string[]): SchedulePermissionRuleset {
   const seen = new Set<string>()
   const ruleset = buildSchedulePermissionRuleset(null)

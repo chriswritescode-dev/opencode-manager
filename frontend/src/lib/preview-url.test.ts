@@ -11,7 +11,7 @@ const managerLocation = {
   protocol: 'http:',
   hostname: 'manager.local',
   origin: 'http://manager.local:5003',
-} as Location
+}
 
 describe('parsePort', () => {
   it.each([

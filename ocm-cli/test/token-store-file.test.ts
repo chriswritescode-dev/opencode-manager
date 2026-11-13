@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { z } from 'zod'
+import { JsonObjectSchema, parseJsonText } from '@opencode-manager/shared/utils'
 import { createFileTokenStore } from '../src/token-store-file.js'
 import { TokenStoreError } from '../src/token-store.js'
 
@@ -17,13 +19,17 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-async function expectFileStoreError(run: () => Promise<unknown>, messagePart?: string) {
-  const err = await run().then(() => null, (caught: unknown) => caught)
-  expect(err).toBeInstanceOf(TokenStoreError)
-  const storeError = err as TokenStoreError
-  expect(storeError.kind).toBe('file')
-  if (messagePart) expect(storeError.message).toContain(messagePart)
-  return storeError
+async function expectFileStoreError(run: Promise<unknown>, messagePart?: string): Promise<TokenStoreError> {
+  const failure = await run.then(() => null, (cause) => cause)
+  expect(failure).toBeInstanceOf(TokenStoreError)
+  if (!(failure instanceof TokenStoreError)) throw new Error('expected a TokenStoreError from the file token store')
+  expect(failure.kind).toBe('file')
+  if (messagePart) expect(failure.message).toContain(messagePart)
+  return failure
+}
+
+function readWrittenDocument(): z.infer<typeof JsonObjectSchema> {
+  return JsonObjectSchema.parse(parseJsonText(readFileSync(file, 'utf-8')))
 }
 
 describe('file token store', () => {
@@ -175,7 +181,7 @@ describe('file token store', () => {
     writeFileSync(file, JSON.stringify({ version: 2, tokens: { 'https://a': 'tok_a' } }), { mode: 0o600 })
     const store = createFileTokenStore(file)
 
-    await expectFileStoreError(() => store.get('https://a'), 'unsupported format version 2')
+    await expectFileStoreError(store.get('https://a'), 'unsupported format version 2')
   })
 
   it('refuses to overwrite a document written by an unsupported future version', async () => {
@@ -183,7 +189,7 @@ describe('file token store', () => {
     writeFileSync(file, future, { mode: 0o600 })
     const store = createFileTokenStore(file)
 
-    await expectFileStoreError(() => store.set('https://b', 'tok_b'), 'unsupported format version 2')
+    await expectFileStoreError(store.set('https://b', 'tok_b'), 'unsupported format version 2')
     expect(readFileSync(file, 'utf-8')).toBe(future)
   })
 
@@ -191,7 +197,7 @@ describe('file token store', () => {
     writeFileSync(file, JSON.stringify({ version: 2, tokens: { 'https://a': 'tok_a' } }), { mode: 0o600 })
     const store = createFileTokenStore(file)
 
-    await expectFileStoreError(() => store.delete('https://a'), 'unsupported format version 2')
+    await expectFileStoreError(store.delete('https://a'), 'unsupported format version 2')
   })
 
   it('treats a versionless document as the current version', async () => {
@@ -207,7 +213,7 @@ describe('file token store', () => {
 
     await store.set('https://a', 'tok_a')
 
-    const written = JSON.parse(readFileSync(file, 'utf-8')) as Record<string, unknown>
+    const written = readWrittenDocument()
     expect(written.futureField).toEqual({ keep: true })
     expect(written.version).toBe(1)
   })
@@ -215,13 +221,13 @@ describe('file token store', () => {
   it('wraps read failures from set as a file TokenStoreError', async () => {
     const store = createFileTokenStore(dir)
 
-    await expectFileStoreError(() => store.set('https://a', 'tok_a'))
+    await expectFileStoreError(store.set('https://a', 'tok_a'))
   })
 
   it('wraps read failures from delete as a file TokenStoreError', async () => {
     const store = createFileTokenStore(dir)
 
-    await expectFileStoreError(() => store.delete('https://a'))
+    await expectFileStoreError(store.delete('https://a'))
   })
 
   it('throws a TokenStoreError naming the file and cause when the file is unreadable', async () => {
@@ -229,7 +235,7 @@ describe('file token store', () => {
     writeFileSync(file, '{}', { mode: 0o000 })
     const store = createFileTokenStore(file)
 
-    const err = await expectFileStoreError(() => store.get('https://a'), 'failed to read token file')
+    const err = await expectFileStoreError(store.get('https://a'), 'failed to read token file')
     expect(err.message).toContain(file)
   })
 
@@ -238,25 +244,15 @@ describe('file token store', () => {
     writeFileSync(file, '{"version":1,"tokens":{"https://a":"tok_a"}}', { mode: 0o000 })
     const store = createFileTokenStore(file)
 
-    await expectFileStoreError(() => store.get('https://a'))
+    await expectFileStoreError(store.get('https://a'))
   })
 
-  it('treats an object-valued token as missing without throwing', async () => {
-    writeFileSync(file, JSON.stringify({ version: 1, tokens: { 'https://m': {} } }), { mode: 0o600 })
-    const store = createFileTokenStore(file)
-
-    await expect(store.get('https://m')).resolves.toBeNull()
-  })
-
-  it('treats a number-valued token as missing without throwing', async () => {
-    writeFileSync(file, JSON.stringify({ version: 1, tokens: { 'https://m': 42 } }), { mode: 0o600 })
-    const store = createFileTokenStore(file)
-
-    await expect(store.get('https://m')).resolves.toBeNull()
-  })
-
-  it('treats a boolean-valued token as missing without throwing', async () => {
-    writeFileSync(file, JSON.stringify({ version: 1, tokens: { 'https://m': true } }), { mode: 0o600 })
+  it.each([
+    ['object', {}],
+    ['number', 42],
+    ['boolean', true],
+  ])('treats a %s-valued token as missing without throwing', async (_label, value) => {
+    writeFileSync(file, JSON.stringify({ version: 1, tokens: { 'https://m': value } }), { mode: 0o600 })
     const store = createFileTokenStore(file)
 
     await expect(store.get('https://m')).resolves.toBeNull()
@@ -285,7 +281,7 @@ describe('file token store', () => {
     await store.set('https://m', 'tok_real')
 
     await expect(store.get('https://m')).resolves.toBe('tok_real')
-    const written = JSON.parse(readFileSync(file, 'utf-8')) as { tokens: Record<string, unknown> }
-    expect(typeof written.tokens['https://m']).toBe('string')
+    const written = z.object({ tokens: z.record(z.string(), z.string()) }).parse(parseJsonText(readFileSync(file, 'utf-8')))
+    expect(written.tokens['https://m']).toBe('tok_real')
   })
 })

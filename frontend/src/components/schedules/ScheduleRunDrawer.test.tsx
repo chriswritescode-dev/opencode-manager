@@ -1,96 +1,56 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import type { ComponentProps } from 'react'
-import { render, screen, fireEvent } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router-dom'
+import { fireEvent, screen } from '@testing-library/react'
 import { ScheduleRunDrawer } from './ScheduleRunDrawer'
-import type { ScheduleRunWithContext } from '@/api/schedules'
-import type { Repo } from '@/api/types'
+import { renderWithProviders } from '@/test/render'
+import { makeRepo, makeScheduleRunWithContext } from '@/test/fixtures/api'
 
-const mocks = vi.hoisted(() => ({
-  useScheduleRunDetail: vi.fn(),
-  useMarkScheduleRunViewed: vi.fn(),
-  getRepo: vi.fn(),
-}))
+const repo = makeRepo({ id: 5, name: 'my-repo', localPath: 'repos/my-repo', fullPath: '/abs/repos/my-repo' })
 
-vi.mock('@/hooks/useSchedules', () => ({
-  useScheduleRunDetail: mocks.useScheduleRunDetail,
-  useMarkScheduleRunViewed: mocks.useMarkScheduleRunViewed,
-}))
-
-vi.mock('@/api/repos', () => ({
-  getRepo: mocks.getRepo,
-}))
-
-vi.mock('@/components/file-browser/FileBrowserSheet', () => ({
-  FileBrowserSheet: () => null,
-}))
-
-const repo: Repo = {
-  id: 5,
-  name: 'my-repo',
-  localPath: 'repos/my-repo',
-  fullPath: '/abs/repos/my-repo',
-  defaultBranch: 'main',
-  cloneStatus: 'ready',
-  clonedAt: 0,
-}
-
-function makeRun(overrides: Partial<ScheduleRunWithContext> = {}): ScheduleRunWithContext {
-  return {
+function makeRun(overrides: Partial<ReturnType<typeof makeScheduleRunWithContext>> = {}) {
+  return makeScheduleRunWithContext({
     id: 1,
     jobId: 7,
     repoId: 5,
-    triggerSource: 'manual',
     status: 'completed',
     startedAt: 0,
     finishedAt: 60_000,
     viewedAt: 123,
     createdAt: 0,
-    sessionId: null,
-    sessionTitle: null,
-    logText: null,
-    responseText: null,
-    errorText: null,
     runBranch: 'feature/x',
     commitHash: 'abc1234def',
-    worktreePath: null,
     jobName: 'Daily report',
     repoName: 'my-repo',
     repoPath: '/abs/repos/my-repo',
     ...overrides,
-  }
+  })
 }
 
 function renderDrawer(props: Partial<ComponentProps<typeof ScheduleRunDrawer>> = {}) {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  })
-  return render(
-    <MemoryRouter>
-      <QueryClientProvider client={queryClient}>
-        <ScheduleRunDrawer
-          run={makeRun()}
-          open
-          onClose={vi.fn()}
-          onCancelRun={vi.fn()}
-          cancelPending={false}
-          {...props}
-        />
-      </QueryClientProvider>
-    </MemoryRouter>,
+  return renderWithProviders(
+    <ScheduleRunDrawer
+      run={makeRun()}
+      open
+      onClose={vi.fn()}
+      onCancelRun={vi.fn()}
+      cancelPending={false}
+      {...props}
+    />,
+    {
+      auth: false,
+      theme: false,
+      toaster: false,
+      fetchRoutes: [
+        { method: 'GET', path: '/api/repos/5', respond: () => ({ json: repo }) },
+        { method: 'GET', path: '/api/repos/5/schedules/7/runs/1', respond: () => ({ json: { run: makeRun() } }) },
+        { method: 'POST', path: '/api/schedules/all/runs/:runId/viewed', respond: () => ({ json: { updated: true } }) },
+      ],
+    },
   )
 }
 
 describe('ScheduleRunDrawer', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.useScheduleRunDetail.mockReturnValue({ data: undefined, isLoading: false })
-    mocks.useMarkScheduleRunViewed.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.getRepo.mockResolvedValue(repo)
-  })
-
-  it('renders the title and meta row', () => {
+  it('renders the title and meta row', async () => {
     renderDrawer()
 
     expect(screen.getByRole('heading', { name: 'Daily report' })).toBeInTheDocument()

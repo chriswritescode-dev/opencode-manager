@@ -33,7 +33,9 @@ export function parseLocalDevUrl(url: string): LocalDevUrl | null {
   return { port, path: `${parsed.pathname}${parsed.search}${parsed.hash}` }
 }
 
-export function getPreviewOrigin(input: PreviewOriginInput, location: Location = window.location): string {
+export type ManagerLocation = Pick<Location, 'protocol' | 'hostname' | 'origin'>
+
+export function getPreviewOrigin(input: PreviewOriginInput, location: ManagerLocation = window.location): string {
   if (input.publicUrl) {
     return new URL(input.publicUrl, location.origin).origin
   }
@@ -43,14 +45,14 @@ export function getPreviewOrigin(input: PreviewOriginInput, location: Location =
 export function buildPreviewStartUrl(
   session: CreatePreviewSessionResponse,
   path: string,
-  location: Location = window.location,
+  location: ManagerLocation = window.location,
 ): string {
   const origin = getPreviewOrigin(session, location)
   const query = new URLSearchParams({ token: session.token, path })
   return `${origin}/__ocm_preview/start?${query.toString()}`
 }
 
-export function isSameOriginAsManager(origin: string, location: Location = window.location): boolean {
+export function isSameOriginAsManager(origin: string, location: ManagerLocation = window.location): boolean {
   try {
     return new URL(origin).origin === location.origin
   } catch {

@@ -1,4 +1,8 @@
 import { API_BASE_URL } from "@/config";
+import { z } from "zod";
+import { JsonValueSchema, type JsonValue } from "@opencode-manager/shared/utils";
+import { CredentialStatusResponseSchema } from "@opencode-manager/shared/schemas";
+import { decodeModelPreference, toModelPreference } from "@opencode-manager/shared/opencode";
 import { fetchWrapper } from "./fetchWrapper";
 import { callOpenCode } from "./opencodeApi";
 import {
@@ -16,7 +20,6 @@ import {
   type ModelPreferenceModel,
   type ModelRef,
 } from "@opencode-manager/shared/opencode";
-import type { CredentialStatusResponse } from "@opencode-manager/shared/schemas";
 
 export type Model = Pick<ModelInfo, 'id' | 'modelID' | 'name'> & {
   limit?: {
@@ -126,49 +129,56 @@ export async function getOpenCodeServerDefaultModel(
   }
 }
 
+const successResponseSchema = z.object({ success: z.literal(true) })
+
+function modelStateFromDocument(document: JsonValue): OpenCodeModelState {
+  return toModelPreference(decodeModelPreference(document))
+}
+
 export async function saveOpenCodeModelVariant(
   model: ModelSelection,
   value?: string | null,
 ): Promise<OpenCodeModelState> {
-  return await fetchWrapper<OpenCodeModelState>(`${API_BASE_URL}/api/providers/model-state`, {
+  const document = await fetchWrapper(`${API_BASE_URL}/api/providers/model-state`, JsonValueSchema, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ variant: { model, value: value ?? null } }),
   });
+  return modelStateFromDocument(document);
 }
 
 export async function getOpenCodeModelState(): Promise<OpenCodeModelState> {
-  return await fetchWrapper<OpenCodeModelState>(`${API_BASE_URL}/api/providers/model-state`);
+  const document = await fetchWrapper(`${API_BASE_URL}/api/providers/model-state`, JsonValueSchema);
+  return modelStateFromDocument(document);
 }
 
 export async function addOpenCodeRecentModel(model: ModelSelection): Promise<OpenCodeModelState> {
-  return await fetchWrapper<OpenCodeModelState>(`${API_BASE_URL}/api/providers/model-state`, {
+  const document = await fetchWrapper(`${API_BASE_URL}/api/providers/model-state`, JsonValueSchema, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ recent: model }),
   });
+  return modelStateFromDocument(document);
 }
 
 export async function removeOpenCodeRecentModel(model: ModelSelection): Promise<OpenCodeModelState> {
-  return await fetchWrapper<OpenCodeModelState>(`${API_BASE_URL}/api/providers/model-state`, {
+  const document = await fetchWrapper(`${API_BASE_URL}/api/providers/model-state`, JsonValueSchema, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ removeRecent: model }),
   });
+  return modelStateFromDocument(document);
 }
 
 export async function toggleOpenCodeFavoriteModel(model: ModelSelection): Promise<OpenCodeModelState> {
-  return await fetchWrapper<OpenCodeModelState>(`${API_BASE_URL}/api/providers/model-state`, {
+  const document = await fetchWrapper(`${API_BASE_URL}/api/providers/model-state`, JsonValueSchema, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ favorite: model }),
   });
+  return modelStateFromDocument(document);
 }
 
-/**
- * Returns the model's display name, falling back to its ID when the catalog
- * provides no name.
- */
 export function formatModelName(model: Model): string {
   return model.name || model.modelID;
 }
@@ -187,14 +197,15 @@ export function formatProviderName(provider: Provider): string {
 
 export const providerCredentialsApi = {
   getStatus: async (providerId: string): Promise<boolean> => {
-    const { hasCredentials } = await fetchWrapper<CredentialStatusResponse>(
-      `${API_BASE_URL}/api/providers/${providerId}/credentials/status`
+    const { hasCredentials } = await fetchWrapper(
+      `${API_BASE_URL}/api/providers/${providerId}/credentials/status`,
+      CredentialStatusResponseSchema
     );
     return hasCredentials;
   },
 
   set: async (providerId: string, apiKey: string, answer?: FormAnswer): Promise<void> => {
-    await fetchWrapper(`${API_BASE_URL}/api/providers/${providerId}/credentials`, {
+    await fetchWrapper(`${API_BASE_URL}/api/providers/${providerId}/credentials`, successResponseSchema, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ apiKey, answer }),
@@ -202,7 +213,7 @@ export const providerCredentialsApi = {
   },
 
   delete: async (providerId: string): Promise<void> => {
-    await fetchWrapper(`${API_BASE_URL}/api/providers/${providerId}/credentials`, {
+    await fetchWrapper(`${API_BASE_URL}/api/providers/${providerId}/credentials`, successResponseSchema, {
       method: 'DELETE',
     });
   },

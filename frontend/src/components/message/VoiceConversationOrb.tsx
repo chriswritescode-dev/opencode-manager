@@ -9,7 +9,7 @@ interface PhasePresentation {
   animation: string
 }
 
-const PHASE_PRESENTATION: Record<VoicePhase, PhasePresentation> = {
+const PHASE_PRESENTATION = {
   off: {
     core: 'bg-muted-foreground text-background',
     halo: 'bg-muted-foreground/15',
@@ -45,9 +45,9 @@ const PHASE_PRESENTATION: Record<VoicePhase, PhasePresentation> = {
     halo: 'bg-muted-foreground/5',
     animation: '',
   },
-}
+} satisfies Record<VoicePhase, PhasePresentation>
 
-const PHASE_ICONS: Record<VoicePhase, LucideIcon> = {
+const PHASE_ICONS = {
   off: MicOff,
   listening: Mic,
   sending: LoaderCircle,
@@ -55,28 +55,17 @@ const PHASE_ICONS: Record<VoicePhase, LucideIcon> = {
   speaking: Volume2,
   recording: MessageSquarePlus,
   paused: MicOff,
-}
+} satisfies Record<VoicePhase, LucideIcon>
 
 const GLYPH_CLASS = 'size-[26px]'
 
 export interface VoiceConversationOrbProps {
-  /** Current stage of the conversation loop. */
   phase: VoicePhase
-  /** Action label read by assistive technology. */
   label: string
-  /** Called when the orb is pressed. */
   onPress: () => void
-  /** Whether the orb cannot be pressed. */
   disabled?: boolean
 }
 
-/**
- * The single control of the voice conversation bar. It carries the phase color
- * and glyph, breathes gently while the microphone captures a turn, pulses slowly
- * while the agent works and faster while a reply is read, and holds still in
- * every other phase. Paused reads fainter through a dimmed orb and a weaker
- * halo. All motion stops when the system asks for reduced motion.
- */
 export function VoiceConversationOrb({
   phase,
   label,

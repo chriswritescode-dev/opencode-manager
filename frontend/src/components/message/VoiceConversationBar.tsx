@@ -36,24 +36,11 @@ function BarIconButton({ label, onClick, children }: BarIconButtonProps) {
 }
 
 export interface VoiceConversationBarProps {
-  /** Conversation state and its controls. */
   controller: VoiceConversationController
-  /** Whether the session waits for the user to approve a tool or a form. */
   hasPendingApproval: boolean
-  /** Opens the pending permission dialog. */
   onViewApproval: () => void
 }
 
-/**
- * Shows a hands-free voice conversation under the session composer on a fixed
- * block: the short status sits on the left of the first line with the latest
- * dictated words on the right, the orb keeps the centre of the control row, and
- * the exit or edit control, the stop control and the pause, resume or approval
- * control fill the two slots beside it. The hint and the notice each keep a
- * reserved line under the orb, so the bar never changes height while the
- * conversation talks, works, waits or reports a problem. Status changes are
- * announced to assistive technology.
- */
 export function VoiceConversationBar({
   controller,
   hasPendingApproval,

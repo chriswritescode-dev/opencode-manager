@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { SSESubscribeRequest, SSEVisibilityRequest } from '@opencode-manager/shared/schemas'
 import { OpenCodeEventStream, TestEventStreamTransport } from '..'
 import type { EventStreamHealthState } from '..'
 
 class RejectingSubscribeTransport extends TestEventStreamTransport {
-  override async post(path: string, body: unknown): Promise<boolean> {
+  override async post(path: string, body: SSESubscribeRequest | SSEVisibilityRequest): Promise<boolean> {
     this.posts.push({ path, body })
     return false
   }
@@ -12,7 +13,7 @@ class RejectingSubscribeTransport extends TestEventStreamTransport {
 class DeferredSubscribeTransport extends TestEventStreamTransport {
   private resolvers: Array<(value: boolean) => void> = []
 
-  override post(path: string, body: unknown): Promise<boolean> {
+  override post(path: string, body: SSESubscribeRequest | SSEVisibilityRequest): Promise<boolean> {
     this.posts.push({ path, body })
     return new Promise<boolean>((resolve) => {
       this.resolvers.push(resolve)
@@ -43,11 +44,21 @@ describe('OpenCodeEventStream', () => {
     stream.subscribeGlobalMonitor({ directories: ['/repo'], onEvent })
     transport.openConnection()
     transport.connected()
-    transport.message({ directory: '/repo', payload: { type: 'permission.asked', properties: { sessionID: 'session-1' } } })
+    transport.message({
+      directory: '/repo',
+      payload: {
+        id: 'evt_1',
+        created: 1000,
+        type: 'permission.asked',
+        data: { id: 'perm_1', sessionID: 'session-1', action: 'read', resources: ['/repo'] },
+      },
+    })
 
     expect(onEvent).toHaveBeenCalledWith({
+      id: 'evt_1',
+      created: 1000,
       type: 'permission.asked',
-      properties: { sessionID: 'session-1' },
+      data: { id: 'perm_1', sessionID: 'session-1', action: 'read', resources: ['/repo'] },
       directory: '/repo',
     })
   })
@@ -60,11 +71,24 @@ describe('OpenCodeEventStream', () => {
     stream.subscribeGlobalMonitor({ directories: ['/repo'], onEvent })
     transport.openConnection()
     transport.connected()
-    transport.message({ directory: null, payload: { type: 'provider.updated', data: {} } })
-    transport.message({ payload: { type: 'credential.updated', data: {} } })
+    transport.message({
+      directory: null,
+      payload: { id: 'evt_2', created: 1001, type: 'provider.updated', data: {} },
+    })
+    transport.message({ payload: { id: 'evt_3', created: 1002, type: 'credential.updated', data: {} } })
 
-    expect(onEvent).toHaveBeenNthCalledWith(1, { type: 'provider.updated', data: {} })
-    expect(onEvent).toHaveBeenNthCalledWith(2, { type: 'credential.updated', data: {} })
+    expect(onEvent).toHaveBeenNthCalledWith(1, {
+      id: 'evt_2',
+      created: 1001,
+      type: 'provider.updated',
+      data: {},
+    })
+    expect(onEvent).toHaveBeenNthCalledWith(2, {
+      id: 'evt_3',
+      created: 1002,
+      type: 'credential.updated',
+      data: {},
+    })
   })
 
   it('passes through a bare event without an envelope and drops frames without a type', () => {
@@ -75,11 +99,23 @@ describe('OpenCodeEventStream', () => {
     stream.subscribeGlobalMonitor({ directories: ['/repo'], onEvent })
     transport.openConnection()
     transport.connected()
-    transport.message({ type: 'ssh.host-key-request', properties: { requestId: 'r1' } })
+    const hostKeyRequest = {
+      id: 'r1',
+      host: 'example.com',
+      ip: '10.0.0.1',
+      keyType: 'ssh-ed25519',
+      fingerprint: 'SHA256:test',
+      timestamp: 1,
+      isKeyChanged: false,
+    }
+    transport.message({ type: 'ssh.host-key-request', properties: hostKeyRequest })
     transport.message({ payload: { data: {} } })
 
     expect(onEvent).toHaveBeenCalledTimes(1)
-    expect(onEvent).toHaveBeenCalledWith({ type: 'ssh.host-key-request', properties: { requestId: 'r1' } })
+    expect(onEvent).toHaveBeenCalledWith({
+      type: 'ssh.host-key-request',
+      properties: hostKeyRequest,
+    })
   })
 
   it('copies the envelope server id onto remote events only', () => {
@@ -93,17 +129,48 @@ describe('OpenCodeEventStream', () => {
     transport.message({
       directory: '/repo',
       serverId: 'srv_abc',
-      payload: { type: 'session.created', data: { sessionID: 'session-1' } },
+      payload: {
+        id: 'evt_4',
+        created: 1003,
+        type: 'session.created',
+        durable: { aggregateID: 'session-1', seq: 4, version: 1 },
+        data: {
+          sessionID: 'session-1',
+          projectID: 'proj_1',
+          location: { directory: '/repo' },
+          slug: 'session-1',
+          version: '1',
+        },
+      },
     })
-    transport.message({ directory: '/repo', payload: { type: 'session.idle', data: { sessionID: 'session-1' } } })
+    transport.message({
+      directory: '/repo',
+      payload: {
+        id: 'evt_5',
+        created: 1004,
+        type: 'session.idle',
+        data: { sessionID: 'session-1' },
+      },
+    })
 
     expect(onEvent).toHaveBeenNthCalledWith(1, {
+      id: 'evt_4',
+      created: 1003,
       type: 'session.created',
-      data: { sessionID: 'session-1' },
+      durable: { aggregateID: 'session-1', seq: 4, version: 1 },
+      data: {
+        sessionID: 'session-1',
+        projectID: 'proj_1',
+        location: { directory: '/repo' },
+        slug: 'session-1',
+        version: '1',
+      },
       directory: '/repo',
       serverId: 'srv_abc',
     })
     expect(onEvent).toHaveBeenNthCalledWith(2, {
+      id: 'evt_5',
+      created: 1004,
       type: 'session.idle',
       data: { sessionID: 'session-1' },
       directory: '/repo',

@@ -1,72 +1,78 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import { z } from 'zod'
+import { parseJsonText } from '@opencode-manager/shared/utils'
 import { FetchError } from '@opencode-manager/shared'
+import { createFetchFake } from '@/test/fetchFake'
 import { settingsApi } from './settings'
 
+const installedSkill = {
+  skill: {
+    name: 'teach',
+    description: 'Teach',
+    body: '# Teach',
+    scope: 'global',
+    location: 'skills/teach',
+  },
+  overwritten: false,
+}
+
+const fileManifestSchema = z.array(
+  z.object({ fieldName: z.string(), relativePath: z.string() }),
+)
+
+const githubInstallRequest = {
+  sourceType: 'github',
+  url: 'https://github.com/user/repo/tree/main/teach',
+  scope: 'global',
+} as const
+
 describe('settingsApi', () => {
-  const fetchMock = vi.fn()
-
-  beforeEach(() => {
-    fetchMock.mockReset()
-    vi.stubGlobal('fetch', fetchMock)
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
   describe('installSkillFromGithub', () => {
     it('posts JSON to skills install endpoint', async () => {
-      fetchMock.mockResolvedValue(
-        new Response(JSON.stringify({ skill: { name: 'teach' }, overwritten: false, sourceType: 'github', filesInstalled: ['SKILL.md'] }), { status: 200 }),
-      )
+      const fetchFake = createFetchFake([
+        {
+          method: 'POST',
+          path: '/api/settings/skills/install',
+          respond: () => ({ json: { ...installedSkill, sourceType: 'github', filesInstalled: ['SKILL.md'] } }),
+        },
+      ])
+      fetchFake.install()
 
-      const result = await settingsApi.installSkillFromGithub({
-        sourceType: 'github',
-        url: 'https://github.com/user/repo/tree/main/teach',
-        scope: 'global',
-      })
+      const result = await settingsApi.installSkillFromGithub(githubInstallRequest)
 
       expect(result.skill.name).toBe('teach')
-
-      const callUrl = fetchMock.mock.calls[0][0]
-      expect(callUrl).toEqual(expect.stringContaining('/api/settings/skills/install'))
-
-      const callOptions = fetchMock.mock.calls[0][1]
-      expect(callOptions.method).toBe('POST')
-      expect(callOptions.headers['Content-Type']).toBe('application/json')
-
-      const body = JSON.parse(callOptions.body)
-      expect(body.sourceType).toBe('github')
+      const installRequest = fetchFake.lastRequest('POST', '/api/settings/skills/install')
+      expect(installRequest?.headers['content-type']).toBe('application/json')
+      expect(installRequest?.body).toMatchObject({ sourceType: 'github', scope: 'global' })
     })
 
     it('surfaces 409 conflict as FetchError', async () => {
-      fetchMock.mockResolvedValue(
-        new Response(JSON.stringify({ error: 'Skill "teach" already exists in global scope' }), { status: 409 }),
-      )
+      const fetchFake = createFetchFake([
+        {
+          method: 'POST',
+          path: '/api/settings/skills/install',
+          respond: () => ({ status: 409, json: { error: 'Skill "teach" already exists in global scope' } }),
+        },
+      ])
+      fetchFake.install()
 
-      await expect(
-        settingsApi.installSkillFromGithub({
-          sourceType: 'github',
-          url: 'https://github.com/user/repo/tree/main/teach',
-          scope: 'global',
-        }),
-      ).rejects.toThrow(FetchError)
+      const request = settingsApi.installSkillFromGithub(githubInstallRequest)
 
-      await expect(
-        settingsApi.installSkillFromGithub({
-          sourceType: 'github',
-          url: 'https://github.com/user/repo/tree/main/teach',
-          scope: 'global',
-        }),
-      ).rejects.toMatchObject({ statusCode: 409 })
+      await expect(request).rejects.toBeInstanceOf(FetchError)
+      await expect(request).rejects.toMatchObject({ statusCode: 409 })
     })
   })
 
   describe('installSkillFromUpload', () => {
     it('posts FormData manifest and files', async () => {
-      fetchMock.mockResolvedValue(
-        new Response(JSON.stringify({ skill: { name: 'teach' }, overwritten: false, sourceType: 'upload', filesInstalled: ['teach/SKILL.md'] }), { status: 200 }),
-      )
+      const fetchFake = createFetchFake([
+        {
+          method: 'POST',
+          path: '/api/settings/skills/install',
+          respond: () => ({ json: { ...installedSkill, sourceType: 'upload', filesInstalled: ['teach/SKILL.md'] } }),
+        },
+      ])
+      fetchFake.install()
 
       const file = new File(['# Teach Skill'], 'SKILL.md', { type: 'text/markdown' })
       Object.defineProperty(file, 'webkitRelativePath', { value: 'teach/SKILL.md' })
@@ -74,22 +80,13 @@ describe('settingsApi', () => {
       const result = await settingsApi.installSkillFromUpload({ files: [file], scope: 'global' })
 
       expect(result.sourceType).toBe('upload')
-
-      const callUrl = fetchMock.mock.calls[0][0]
-      expect(callUrl).toEqual(expect.stringContaining('/api/settings/skills/install'))
-
-      const callOptions = fetchMock.mock.calls[0][1]
-      expect(callOptions.method).toBe('POST')
-      expect(callOptions.headers?.hasOwnProperty).toBeFalsy()
-
-      const formData = callOptions.body as FormData
+      const formData = fetchFake.findFormData()
+      if (!formData) throw new Error('no FormData request body was recorded')
       expect(formData.get('sourceType')).toBe('upload')
       expect(formData.get('file0')).toBe(file)
 
-      const manifest = JSON.parse(formData.get('fileManifest') as string)
-      expect(manifest).toHaveLength(1)
-      expect(manifest[0].fieldName).toBe('file0')
-      expect(manifest[0].relativePath).toBe('teach/SKILL.md')
+      const manifest = fileManifestSchema.parse(parseJsonText(z.string().parse(formData.get('fileManifest'))))
+      expect(manifest).toEqual([{ fieldName: 'file0', relativePath: 'teach/SKILL.md' }])
     })
   })
 })

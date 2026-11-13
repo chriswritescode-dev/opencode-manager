@@ -1,13 +1,15 @@
 import type { Database } from 'bun:sqlite'
+import { z } from 'zod'
+import { selectRow } from './rows'
 
-/** Reports whether a Better Auth session row still exists and has not expired. */
+const AuthSessionRowSchema = z.object({
+  expiresAt: z.union([z.number(), z.string().transform((value) => Date.parse(value))]),
+})
+
 export function isAuthSessionActive(db: Database, sessionId: string, now: number = Date.now()): boolean {
-  const row = db
-    .prepare('SELECT expiresAt FROM "session" WHERE id = ?')
-    .get(sessionId) as { expiresAt: string | number } | null
+  const row = selectRow(db, AuthSessionRowSchema, 'SELECT expiresAt FROM "session" WHERE id = ?', sessionId)
 
   if (!row) return false
 
-  const expiresAt = typeof row.expiresAt === 'number' ? row.expiresAt : Date.parse(row.expiresAt)
-  return Number.isFinite(expiresAt) && expiresAt > now
+  return Number.isFinite(row.expiresAt) && row.expiresAt > now
 }

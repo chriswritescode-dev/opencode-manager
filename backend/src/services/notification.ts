@@ -17,7 +17,11 @@ import {
   getPermissionDetail,
   getFormText,
   getGoalStatusTitle,
+  type PermissionLike,
 } from "@opencode-manager/shared/notifications";
+import { z } from "zod";
+import { getStatusCode } from "../utils/error-utils";
+import { parseJsonObject, parseJsonString, type JsonObject } from "@opencode-manager/shared/utils";
 import { SettingsService } from "./settings";
 import { sseAggregator, type SSEEvent } from "./sse-aggregator";
 import { getRepoName } from "../db/queries";
@@ -40,43 +44,89 @@ interface VapidConfig {
   subject: string;
 }
 
-const EVENT_CONFIG: Record<
-  string,
-  {
-    preferencesKey: keyof typeof DEFAULT_NOTIFICATION_PREFERENCES.events;
-    titleFn: (data: Record<string, unknown>) => string;
-    bodyFn: (data: Record<string, unknown>) => string;
-  }
-> = {
-  [NotificationEventType.PERMISSION_ASKED]: {
-    preferencesKey: "permissionAsked",
-    titleFn: (data) =>
-      getPermissionLabel(
-        typeof data.action === "string" ? data.action : ""
-      ),
-    bodyFn: (data) => getPermissionDetail(data).primary || "Approval required",
-  },
-  [NotificationEventType.FORM_CREATED]: {
-    preferencesKey: "questionAsked",
-    titleFn: () => "Question",
-    bodyFn: (data) => getFormText(data.form as { title?: unknown }) || "A question needs your answer",
-  },
-  [NotificationEventType.SESSION_FAILED]: {
-    preferencesKey: "sessionError",
-    titleFn: () => "Error",
-    bodyFn: (data) => {
-      const error = data.error as { message?: string } | undefined;
-      return error?.message ?? "A session encountered an error";
+interface NotificationEventConfig {
+  preferencesKey: keyof typeof DEFAULT_NOTIFICATION_PREFERENCES.events;
+  titleFn: (data: JsonObject) => string;
+  bodyFn: (data: JsonObject) => string;
+}
+
+const permissionResourcesSchema = z.array(z.string());
+
+function permissionLikeFromEventData(data: JsonObject): PermissionLike {
+  const action = parseJsonString(data.action);
+  const metadata = parseJsonObject(data.metadata);
+  const resources = permissionResourcesSchema.safeParse(data.resources);
+  return {
+    action: action ?? undefined,
+    metadata: metadata ?? undefined,
+    resources: resources.success ? resources.data : undefined,
+  };
+}
+
+const EVENT_CONFIG = new Map<string, NotificationEventConfig>([
+  [
+    NotificationEventType.PERMISSION_ASKED,
+    {
+      preferencesKey: "permissionAsked",
+      titleFn: (data) => getPermissionLabel(parseJsonString(data.action) ?? ""),
+      bodyFn: (data) => getPermissionDetail(permissionLikeFromEventData(data)).primary || "Approval required",
     },
-  },
-  [NotificationEventType.SESSION_IDLE]: {
-    preferencesKey: "sessionIdle",
-    titleFn: () => "Session complete",
-    bodyFn: () => "Your session has finished processing",
-  },
-};
+  ],
+  [
+    NotificationEventType.FORM_CREATED,
+    {
+      preferencesKey: "questionAsked",
+      titleFn: () => "Question",
+      bodyFn: (data) => getFormText({ title: parseJsonObject(data.form)?.title }) || "A question needs your answer",
+    },
+  ],
+  [
+    NotificationEventType.SESSION_FAILED,
+    {
+      preferencesKey: "sessionError",
+      titleFn: () => "Error",
+      bodyFn: (data) => parseJsonString(parseJsonObject(data.error)?.message) ?? "A session encountered an error",
+    },
+  ],
+  [
+    NotificationEventType.SESSION_IDLE,
+    {
+      preferencesKey: "sessionIdle",
+      titleFn: () => "Session complete",
+      bodyFn: () => "Your session has finished processing",
+    },
+  ],
+]);
 
 const MAX_BODY_LENGTH = 140;
+
+const pushSubscriptionRowSchema = z.object({
+  id: z.number(),
+  user_id: z.string(),
+  endpoint: z.string(),
+  p256dh: z.string(),
+  auth: z.string(),
+  device_name: z.string().nullish(),
+  created_at: z.number(),
+  last_used_at: z.number().nullish(),
+});
+
+const userIdRowSchema = z.object({ user_id: z.string() });
+
+type PushSubscriptionRow = z.infer<typeof pushSubscriptionRowSchema>;
+
+function subscriptionFromRow(row: PushSubscriptionRow): PushSubscriptionRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    endpoint: row.endpoint,
+    p256dh: row.p256dh,
+    auth: row.auth,
+    deviceName: row.device_name ?? null,
+    createdAt: row.created_at,
+    lastUsedAt: row.last_used_at ?? null,
+  };
+}
 
 const RUN_OUTCOME_EVENTS = new Set<string>([
   NotificationEventType.SESSION_IDLE,
@@ -141,7 +191,7 @@ export function buildEventNotificationPayload(
     url: string;
   }
 ): PushNotificationPayload | null {
-  const config = EVENT_CONFIG[event.type];
+  const config = EVENT_CONFIG.get(event.type);
   if (!config) return null;
 
   const title = config.titleFn(event.data);
@@ -208,11 +258,6 @@ export class NotificationService {
     return this.vapidConfig !== null;
   }
 
-  /**
-   * Stores a device's push subscription, returning null when the session that registered it was
-   * revoked or expired before the write. The session check and the upsert share one synchronous
-   * transaction so a concurrent logout cannot land between them.
-   */
   saveSubscription(
     userId: string,
     endpoint: string,
@@ -251,30 +296,13 @@ export class NotificationService {
       )
       .run(userId, endpoint, p256dh, auth, deviceName ?? null, sessionId ?? null, now, now);
 
-    const row = this.db
-      .prepare("SELECT * FROM push_subscriptions WHERE endpoint = ?")
-      .get(endpoint) as {
-      id: number;
-      user_id: string;
-      endpoint: string;
-      p256dh: string;
-      auth: string;
-      device_name: string | null;
-      session_id: string | null;
-      created_at: number;
-      last_used_at: number | null;
-    };
+    const row = pushSubscriptionRowSchema.parse(
+      this.db
+        .prepare("SELECT * FROM push_subscriptions WHERE endpoint = ?")
+        .get(endpoint)
+    );
 
-    return {
-      id: row.id,
-      userId: row.user_id,
-      endpoint: row.endpoint,
-      p256dh: row.p256dh,
-      auth: row.auth,
-      deviceName: row.device_name,
-      createdAt: row.created_at,
-      lastUsedAt: row.last_used_at,
-    };
+    return subscriptionFromRow(row);
   }
 
   removeSubscription(endpoint: string, userId?: string): boolean {
@@ -298,39 +326,22 @@ export class NotificationService {
   }
 
   getSubscriptions(userId: string): PushSubscriptionRecord[] {
-    const rows = this.db
-      .prepare("SELECT * FROM push_subscriptions WHERE user_id = ? ORDER BY created_at DESC")
-      .all(userId) as Array<{
-      id: number;
-      user_id: string;
-      endpoint: string;
-      p256dh: string;
-      auth: string;
-      device_name: string | null;
-      created_at: number;
-      last_used_at: number | null;
-    }>;
+    const rows = pushSubscriptionRowSchema.array().parse(
+      this.db
+        .prepare("SELECT * FROM push_subscriptions WHERE user_id = ? ORDER BY created_at DESC")
+        .all(userId)
+    );
 
-    return rows.map((row) => ({
-      id: row.id,
-      userId: row.user_id,
-      endpoint: row.endpoint,
-      p256dh: row.p256dh,
-      auth: row.auth,
-      deviceName: row.device_name,
-      createdAt: row.created_at,
-      lastUsedAt: row.last_used_at,
-    }));
+    return rows.map(subscriptionFromRow);
   }
 
   getAllUserIds(): string[] {
-    const rows = this.db
-      .prepare("SELECT DISTINCT user_id FROM push_subscriptions")
-      .all() as Array<{ user_id: string }>;
-    return rows.map((r) => r.user_id);
+    const rows = userIdRowSchema.array().parse(
+      this.db.prepare("SELECT DISTINCT user_id FROM push_subscriptions").all()
+    );
+    return rows.map((row) => row.user_id);
   }
 
-  /** Returns the run report URL when the session was started by a scheduled run. */
   getScheduleRunReportUrl(sessionId: string | undefined): string | null {
     if (!sessionId) return null;
     const run = getScheduleRunBySessionId(this.db, sessionId);
@@ -362,7 +373,7 @@ export class NotificationService {
     event: SSEEvent,
     serverId: string = LOCAL_OPENCODE_SERVER_ID
   ): Promise<void> {
-    const config = EVENT_CONFIG[event.type];
+    const config = EVENT_CONFIG.get(event.type);
     if (!config) return;
 
     const sessionId = resolveEventSessionId(event);
@@ -522,7 +533,7 @@ export class NotificationService {
           
           delivered++
         } catch (error) {
-          const statusCode = (error as { statusCode?: number }).statusCode;
+          const statusCode = getStatusCode(error);
 
           if (statusCode === 404 || statusCode === 410) {
             expiredEndpoints.push(sub.endpoint);

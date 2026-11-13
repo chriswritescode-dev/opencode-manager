@@ -1,11 +1,18 @@
 import type { Context, DialogSelectOption } from '@opencode/plugin/tui/context'
+import type { OcmTuiContext } from './tui-context.js'
 
-export function confirmDialog(context: Context, props: { title: string; message: string }): Promise<boolean> {
+export type DialogHost = {
+  readonly ui: {
+    readonly dialog: Pick<Context['ui']['dialog'], 'confirm' | 'select'>
+  }
+}
+
+export function confirmDialog(context: DialogHost, props: { title: string; message: string }): Promise<boolean> {
   return context.ui.dialog.confirm(props).then((value) => value === true)
 }
 
 export function selectDialog<Value>(
-  context: Context,
+  context: DialogHost,
   title: string,
   options: readonly DialogSelectOption<Value>[],
 ): Promise<Value | undefined> {
@@ -16,8 +23,7 @@ type SessionInfo = NonNullable<ReturnType<Context['data']['session']['get']>>
 
 export type SessionTarget = { sessionID: string; directory: string; session: SessionInfo }
 
-/** Resolves the routed session and its directory, or shows an error toast and returns undefined. */
-export function requireSessionTarget(context: Context): SessionTarget | undefined {
+export function requireSessionTarget(context: OcmTuiContext): SessionTarget | undefined {
   const route = context.ui.router.current()
   if (route.type !== 'session') {
     context.ui.toast.show({ variant: 'error', message: 'Not in a session' })

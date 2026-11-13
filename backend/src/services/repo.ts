@@ -22,10 +22,36 @@ import { buildAssistantRepo } from './assistant-mode'
 import type { OpenCodeClient } from './opencode/client'
 import { openCodeLocation } from '@opencode-manager/shared/opencode'
 import { canonicalPathSync, mkdirSafe } from '../utils/fs-safe'
+import { getErrorCode } from './error-code'
 
 const GIT_CLONE_TIMEOUT = 300000
 const DEFAULT_DISCOVERY_MAX_DEPTH = 4
 const DISCOVERY_SKIP_DIRECTORIES = new Set(['.git', 'node_modules'])
+
+interface NormalizedRepoUrl {
+  url: string
+  name: string
+}
+
+interface RepoLocation {
+  fullPath: string
+  localPath: string
+}
+
+interface CreatedRepoRow {
+  repo: Repo
+  created: boolean
+}
+
+export class RepoCollisionError extends Error {
+  readonly statusCode: 409
+
+  constructor(message: string) {
+    super(message)
+    this.name = 'RepoCollisionError'
+    this.statusCode = 409
+  }
+}
 
 export class RepoInputError extends Error {
   readonly statusCode: 400
@@ -122,7 +148,7 @@ async function pathExists(targetPath: string): Promise<boolean> {
     await fs.lstat(targetPath)
     return true
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (getErrorCode(error) === 'ENOENT') {
       return false
     }
     throw error
@@ -135,7 +161,7 @@ async function isGitRepoRootPath(targetPath: string): Promise<boolean> {
     const stats = await fs.lstat(gitPath)
     return stats.isDirectory() || stats.isFile()
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (getErrorCode(error) === 'ENOENT') {
       return false
     }
     throw error
@@ -200,7 +226,7 @@ async function isWorkspaceAliasAvailable(alias: string, sourcePath?: string): Pr
     const existingTarget = await fs.readlink(aliasPath)
     return path.resolve(path.dirname(aliasPath), existingTarget) === sourcePath
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (getErrorCode(error) === 'ENOENT') {
       return true
     }
     throw error
@@ -355,8 +381,8 @@ export async function discoverLocalRepos(
   errors: Array<{ path: string; error: string }>
 }> {
   const normalizedRootPath = normalizeAbsolutePath(rootPath)
-  const rootStats = await fs.stat(normalizedRootPath).catch((error: unknown) => {
-    throw new RepoInputError(`Failed to access '${normalizedRootPath}': ${getErrorMessage(error)}`)
+  const rootStats = await fs.stat(normalizedRootPath).catch((cause) => {
+    throw new RepoInputError(`Failed to access '${normalizedRootPath}': ${getErrorMessage(cause)}`)
   })
 
   if (!rootStats.isDirectory()) {
@@ -671,10 +697,8 @@ export async function cloneRepo(
   try {
     await gitAuthService.setupSSHForRepoUrl(effectiveUrl, database, skipSSHVerification)
 
-    const env = {
-      ...gitAuthService.getGitEnvironment(),
-      ...(isSSH ? gitAuthService.getSSHEnvironment() : {})
-    }
+    const env = gitAuthService.getGitEnvironment()
+    if (isSSH) Object.assign(env, gitAuthService.getSSHEnvironment())
 
     if (shouldUseWorktree) {
       logger.info(`Creating worktree for branch: ${branch}`)
@@ -758,9 +782,7 @@ export async function cloneRepo(
           ).then((output) => output.trim()).catch(() => '')
 
           if (existingOriginUrl && normalizeRepoUrlForCompare(existingOriginUrl) !== normalizeRepoUrlForCompare(normalizedRepoUrl)) {
-            const collisionError = new Error(`Directory '${baseRepoDirName}' already contains a different repository (${existingOriginUrl}). Choose a different directory name.`) as Error & { statusCode: number }
-            collisionError.statusCode = 409
-            throw collisionError
+            throw new RepoCollisionError(`Directory '${baseRepoDirName}' already contains a different repository (${existingOriginUrl}). Choose a different directory name.`)
           }
 
           logger.info(`Valid repository found: ${normalizedRepoUrl}`)
@@ -999,9 +1021,9 @@ async function removeWorkspaceAlias(aliasPath: string): Promise<void> {
     if (stats.isSymbolicLink()) {
       await fs.unlink(aliasPath)
     }
-  } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw error
+  } catch (cause) {
+    if (getErrorCode(cause) !== 'ENOENT') {
+      throw cause
     }
   }
 }
@@ -1032,7 +1054,7 @@ export async function deleteRepoFiles(database: Database, repoId: number): Promi
   deleteRepo(database, repoId)
 }
 
-function normalizeRepoUrl(url: string, preserveSSH: boolean = false): { url: string; name: string } {
+function normalizeRepoUrl(url: string, preserveSSH: boolean = false): NormalizedRepoUrl {
   const sshMatch = url.match(SCP_STYLE_URL_PATTERN)
   if (sshMatch) {
     const [, , host, pathPart] = sshMatch
@@ -1113,7 +1135,6 @@ export async function removeWorktree(
   try {
     await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'remove', '--force', worktreePath], env ? { env } : undefined)
   } catch {
-    // fall through to prune + rm
   } finally {
     await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'prune'], env ? { env } : undefined).catch(() => {})
   }
@@ -1155,7 +1176,7 @@ export async function createWorktreeSafely(baseRepoPath: string, worktreePath: s
   }
 }
 
-export function ensureMirrorTargetPath(name: string): { fullPath: string; localPath: string } {
+export function ensureMirrorTargetPath(name: string): RepoLocation {
   const slugified = name
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, '-')
@@ -1172,16 +1193,17 @@ export function ensureMirrorTargetPath(name: string): { fullPath: string; localP
     suffix += 1
   }
 
-  return {
+  const location: RepoLocation = {
     fullPath: path.join(reposRoot, candidate),
     localPath: candidate,
   }
+  return location
 }
 
 export function createRepoRow(
   database: Database,
   params: { name: string; originUrl?: string; localPath: string; fullPath: string; branch?: string }
-): { repo: Repo; created: boolean } {
+): CreatedRepoRow {
   const { originUrl, localPath, branch } = params
 
   const existing = originUrl
@@ -1192,15 +1214,25 @@ export function createRepoRow(
     return { repo: existing, created: false }
   }
 
-  const repo = createRepo(database, {
-    repoUrl: originUrl,
-    localPath,
-    branch,
-    defaultBranch: branch || 'main',
-    cloneStatus: 'ready',
-    clonedAt: Date.now(),
-    isLocal: !originUrl,
-  } as CreateRepoInput)
+  const createInput: CreateRepoInput = originUrl === undefined
+    ? {
+      localPath,
+      branch,
+      defaultBranch: branch || 'main',
+      cloneStatus: 'ready',
+      clonedAt: Date.now(),
+      isLocal: true,
+    }
+    : {
+      repoUrl: originUrl,
+      localPath,
+      branch,
+      defaultBranch: branch || 'main',
+      cloneStatus: 'ready',
+      clonedAt: Date.now(),
+      isLocal: false,
+    }
+  const repo = createRepo(database, createInput)
 
   return { repo, created: true }
 }
@@ -1226,11 +1258,6 @@ export async function resolveRepoProjectId(openCodeClient: OpenCodeClient, direc
   return project.id
 }
 
-/**
- * Resolves the registered repository a directory belongs to. Beyond the repository's own
- * location, a directory is only attributed to a repository that shares its Git metadata, so a
- * separate clone of the same origin, whose project id matches, is not mistaken for it.
- */
 export async function resolveRepoForDirectory(
   database: Database,
   directory: string,
@@ -1359,12 +1386,12 @@ export async function getSiblingRepos(
 
   const worktreeSiblings = entries
     .filter((_, index) => !mainChecks[index])
-    .map(([key, candidate]) => {
+    .map(([key, candidate]): RepoSibling => {
       const schedule = describeSchedule(key)
       const worktreeSource: RepoWorktreeSource | undefined = schedule
         ? 'schedule'
         : candidate.strategy ? 'opencode' : candidate.inGit ? 'git' : undefined
-      return {
+      const sibling: RepoSibling = {
         id: -1,
         repoUrl: target.repoUrl,
         localPath: path.basename(candidate.directory),
@@ -1372,23 +1399,20 @@ export async function getSiblingRepos(
         sourcePath: candidate.directory,
         branch: candidate.branch,
         defaultBranch: target.defaultBranch,
-        cloneStatus: 'ready' as const,
+        cloneStatus: 'ready',
         clonedAt: Date.now(),
         isWorktree: true,
         isLocal: true,
         currentBranch: candidate.branch,
         worktreeSource,
-        ...(schedule ? { schedule } : {}),
       }
+      if (schedule) sibling.schedule = schedule
+      return sibling
     })
 
   return [...repoSiblings, ...worktreeSiblings]
 }
 
-/**
- * Lists a repository's siblings in its OpenCode project without resolving their branches,
- * optionally narrowed by a caller-supplied filter (for example worktree-only siblings).
- */
 export async function listRepoSiblings(
   database: Database,
   repoId: number,
@@ -1411,9 +1435,6 @@ async function listOpenCodeWorktrees(openCodeClient: OpenCodeClient | undefined,
   }
 }
 
-/**
- * Lists a repository's git worktrees with their checked-out branch; the main worktree comes first.
- */
 export async function listGitWorktrees(repoPath: string, env: Record<string, string> | undefined): Promise<Array<{ path: string; branch: string | null }>> {
   try {
     const output = await executeCommand(['git', '-C', repoPath, 'worktree', 'list', '--porcelain'], { env, silent: true })

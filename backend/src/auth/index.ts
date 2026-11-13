@@ -9,45 +9,59 @@ import { devicePairing } from './device-pairing'
 import { closeSessionConnections } from '../services/session-connections'
 import { deletePushSubscriptionsForSession } from '../db/push-subscriptions'
 
+export type AuthEnv = { -readonly [Key in keyof typeof ENV.AUTH]: (typeof ENV.AUTH)[Key] }
+
 export type AuthInstance = ReturnType<typeof createAuth>
 
-export function isAdminConfigured(): boolean {
-  return !!(ENV.AUTH.ADMIN_EMAIL && ENV.AUTH.ADMIN_PASSWORD)
+export interface AuthServerConfig {
+  trustedOrigins: string[]
+  port: number
 }
 
-export function createAuth(db: Database) {
+export function isAdminConfigured(env: AuthEnv = ENV.AUTH): boolean {
+  return !!(env.ADMIN_EMAIL && env.ADMIN_PASSWORD)
+}
+
+export function createAuth(
+  db: Database,
+  env: AuthEnv = ENV.AUTH,
+  serverConfig: AuthServerConfig = { trustedOrigins: getTrustedOrigins(), port: ENV.SERVER.PORT },
+) {
   const socialProviders: Record<string, { clientId: string; clientSecret: string }> = {}
 
-  if (ENV.AUTH.GITHUB_CLIENT_ID && ENV.AUTH.GITHUB_CLIENT_SECRET) {
+  if (env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET) {
     socialProviders.github = {
-      clientId: ENV.AUTH.GITHUB_CLIENT_ID,
-      clientSecret: ENV.AUTH.GITHUB_CLIENT_SECRET,
+      clientId: env.GITHUB_CLIENT_ID,
+      clientSecret: env.GITHUB_CLIENT_SECRET,
     }
   }
 
-  if (ENV.AUTH.GOOGLE_CLIENT_ID && ENV.AUTH.GOOGLE_CLIENT_SECRET) {
+  if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
     socialProviders.google = {
-      clientId: ENV.AUTH.GOOGLE_CLIENT_ID,
-      clientSecret: ENV.AUTH.GOOGLE_CLIENT_SECRET,
+      clientId: env.GOOGLE_CLIENT_ID,
+      clientSecret: env.GOOGLE_CLIENT_SECRET,
     }
   }
 
-  if (ENV.AUTH.DISCORD_CLIENT_ID && ENV.AUTH.DISCORD_CLIENT_SECRET) {
+  if (env.DISCORD_CLIENT_ID && env.DISCORD_CLIENT_SECRET) {
     socialProviders.discord = {
-      clientId: ENV.AUTH.DISCORD_CLIENT_ID,
-      clientSecret: ENV.AUTH.DISCORD_CLIENT_SECRET,
+      clientId: env.DISCORD_CLIENT_ID,
+      clientSecret: env.DISCORD_CLIENT_SECRET,
     }
   }
 
-  const trustedOrigins = getTrustedOrigins()
-  const baseURL = trustedOrigins[0] || `http://localhost:${ENV.SERVER.PORT}`
+  const { trustedOrigins } = serverConfig
+  const baseURL = trustedOrigins[0] || `http://localhost:${serverConfig.port}`
   
   const auth = betterAuth({
     baseURL,
     basePath: '/api/auth',
     database: db,
-    secret: ENV.AUTH.SECRET,
+    secret: env.SECRET,
     trustedOrigins,
+    rateLimit: {
+      max: env.RATE_LIMIT_MAX,
+    },
     emailAndPassword: {
       enabled: true,
       minPasswordLength: 8,
@@ -66,7 +80,7 @@ export function createAuth(db: Database) {
       user: {
         create: {
           before: async (user, context) => {
-            if (isAdminConfigured() && (context?.request || user.email.toLowerCase() !== ENV.AUTH.ADMIN_EMAIL!.toLowerCase())) {
+            if (isAdminConfigured(env) && (context?.request || user.email.toLowerCase() !== (env.ADMIN_EMAIL ?? '').toLowerCase())) {
               throw new APIError('FORBIDDEN', { message: 'Registration is disabled' })
             }
           },
@@ -75,9 +89,9 @@ export function createAuth(db: Database) {
     },
     plugins: [
       passkey({
-        rpID: ENV.AUTH.PASSKEY_RP_ID,
-        rpName: ENV.AUTH.PASSKEY_RP_NAME,
-        origin: ENV.AUTH.PASSKEY_ORIGIN,
+        rpID: env.PASSKEY_RP_ID,
+        rpName: env.PASSKEY_RP_NAME,
+        origin: env.PASSKEY_ORIGIN,
         authenticatorSelection: {
           residentKey: 'required',
           userVerification: 'required',
@@ -103,7 +117,7 @@ export function createAuth(db: Database) {
     },
     advanced: {
       cookiePrefix: AUTH_COOKIE_PREFIX,
-      useSecureCookies: ENV.AUTH.SECURE_COOKIES,
+      useSecureCookies: env.SECURE_COOKIES,
       ipAddress: {
         ipAddressHeaders: [AUTH_SOCKET_IP_HEADER],
       },
@@ -133,6 +147,6 @@ export type Session = {
     image?: string | null
     createdAt: Date
     updatedAt: Date
-    role?: string
+    role?: string | null
   }
 }

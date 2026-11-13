@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { Database } from 'bun:sqlite'
-import { migrate } from '../../src/db/migration-runner'
-import { allMigrations } from '../../src/db/migrations'
+import type { Database } from 'bun:sqlite'
+import type { CreatePromptTemplateRequest } from '@opencode-manager/shared/schemas'
 import {
   listPromptTemplates,
   getPromptTemplateById,
@@ -9,8 +8,9 @@ import {
   updatePromptTemplate,
   deletePromptTemplate,
 } from '../../src/db/prompt-templates'
+import { createTestDatabase } from '../helpers/test-database'
 
-function createTemplateInput(overrides: Record<string, unknown> = {}) {
+function createTemplateInput(overrides: Partial<CreatePromptTemplateRequest> = {}): CreatePromptTemplateRequest {
   return {
     title: 'Daily standup',
     category: 'standup',
@@ -27,8 +27,7 @@ describe('prompt template repository', () => {
   let db: Database
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
+    db = createTestDatabase()
   })
 
   afterEach(() => {

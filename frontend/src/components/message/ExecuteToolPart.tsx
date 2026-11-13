@@ -1,6 +1,7 @@
 import { memo, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { Loader2 } from 'lucide-react'
+import { z } from 'zod'
 import { toolContentText, type SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
 import { useSettings } from '@/hooks/useSettings'
 import { useMobile } from '@/hooks/useMobile'
@@ -9,6 +10,8 @@ import { clampDisplayText } from '@/lib/clampDisplayText'
 import { cn } from '@/lib/utils'
 import { markdownRehypePlugins } from '@/lib/markdownRehypePlugins'
 import { CopyButton } from '@/components/ui/copy-button'
+import { JsonObjectSchema, JsonValueSchema, type JsonObject } from '@opencode-manager/shared/utils'
+import { jsonPrimitiveSchema, readJsonArray, readJsonObject, readJsonString } from '@/components/jsonValue'
 import { FileReferenceText } from './FileReferenceText'
 import { ToolContentFiles } from './ToolContentFiles'
 import { ToolDetails, useToolDetailsState } from './ToolDetails'
@@ -17,12 +20,18 @@ import { TRANSCRIPT_DETAIL_CLASS, TRANSCRIPT_ROW_CLASS } from './transcriptStyle
 const PREVIEW_CALL_LIMIT = 5
 const MOBILE_PREVIEW_CALL_LIMIT = 3
 
+const executeCallSchema = z.object({
+  tool: z.string(),
+  status: z.enum(['running', 'completed', 'error']),
+  input: JsonValueSchema.optional(),
+})
+
 type ExecuteCallStatus = 'running' | 'completed' | 'error'
 
 interface ExecuteCall {
   tool: string
   status: ExecuteCallStatus
-  input?: Record<string, unknown>
+  input?: JsonObject
 }
 
 interface ExecuteToolPartProps {
@@ -38,26 +47,15 @@ interface ParsedOutput {
 
 const OUTPUT_TAIL_PATTERN = /\n\n(Warnings|Logs):\n/
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function executeCalls(value: unknown): ExecuteCall[] {
-  if (!Array.isArray(value)) return []
-  return value.flatMap((call) => {
-    if (!isRecord(call)) return []
-    const tool = call.tool
-    const status = call.status
-    if (typeof tool !== 'string') return []
-    if (status !== 'running' && status !== 'completed' && status !== 'error') return []
-    return [{ tool, status, input: isRecord(call.input) ? call.input : undefined }]
+function executeCalls(metadata: JsonObject): ExecuteCall[] {
+  return (readJsonArray(metadata.toolCalls) ?? []).flatMap((call) => {
+    const parsed = executeCallSchema.safeParse(call)
+    return parsed.success ? [{ ...parsed.data, input: readJsonObject(parsed.data.input) }] : []
   })
 }
 
-function primitiveInputSummary(input: Record<string, unknown>): string {
-  const entries = Object.entries(input).filter(([, value]) => (
-    typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
-  ))
+function primitiveInputSummary(input: JsonObject): string {
+  const entries = Object.entries(input).filter(([, value]) => jsonPrimitiveSchema.safeParse(value).success)
   if (entries.length === 0) return ''
   return `[${entries.map(([key, value]) => `${key}=${String(value)}`).join(', ')}]`
 }
@@ -69,8 +67,8 @@ function executeCallSummary(call: ExecuteCall): string {
 
 function executeCode(part: SessionMessageAssistantTool): string | undefined {
   if (part.state.status === 'streaming') return undefined
-  const code = part.state.input.code
-  return typeof code === 'string' && code ? code : undefined
+  const code = readJsonString(part.state.input.code)
+  return code || undefined
 }
 
 function executeOutputText(part: SessionMessageAssistantTool): string {
@@ -180,7 +178,7 @@ function ExecuteCallRow({ call, onFileClick }: { call: ExecuteCall; onFileClick?
               <span className="shrink-0 text-muted-foreground">{key}:</span>
               <span className="whitespace-pre-wrap break-words">
                 <FileReferenceText
-                  text={typeof value === 'string' ? value : JSON.stringify(value, null, 2)}
+                  text={readJsonString(value) ?? JSON.stringify(value, null, 2)}
                   onFileClick={onFileClick}
                 />
               </span>
@@ -196,8 +194,9 @@ export function ExecuteToolPart({ part, isWaitingPermission, onFileClick }: Exec
   const { preferences } = useSettings()
   const [detailsOpen, setDetailsOpen] = useToolDetailsState(preferences?.expandToolCalls ?? false)
   const previewCallLimit = useMobile() ? MOBILE_PREVIEW_CALL_LIMIT : PREVIEW_CALL_LIMIT
-  const metadata = toolMetadata(part)
-  const calls = executeCalls(metadata.toolCalls)
+  const metadataParse = JsonObjectSchema.safeParse(toolMetadata(part))
+  const metadata = metadataParse.success ? metadataParse.data : {}
+  const calls = executeCalls(metadata)
   const code = executeCode(part)
   const output = executeOutputText(part)
   const displayOutput = useMemo(() => clampDisplayText(output), [output])

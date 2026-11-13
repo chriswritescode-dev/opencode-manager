@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Mock } from 'vitest'
 import { Hono } from 'hono'
 import type { ChangeWalkthroughState } from '@opencode-manager/shared/schemas'
 import { createChangeWalkthroughRoutes } from '../../src/routes/change-walkthroughs'
+import type { ChangeWalkthroughRoutesService } from '../../src/routes/change-walkthroughs'
 import { ChangeWalkthroughError } from '../../src/services/change-walkthrough-error'
-import type { ChangeWalkthroughService } from '../../src/services/change-walkthroughs'
 
 const SESSION_ID = 'ses_walkthrough'
 
@@ -20,24 +21,46 @@ function state(overrides: Partial<ChangeWalkthroughState> = {}): ChangeWalkthrou
   }
 }
 
+function createChangeWalkthroughFakes(
+  overrides: Partial<ChangeWalkthroughRoutesService> = {},
+): ChangeWalkthroughRoutesService {
+  return {
+    cancelGeneration: vi.fn<ChangeWalkthroughRoutesService['cancelGeneration']>(async () => true),
+    getState: vi.fn<ChangeWalkthroughRoutesService['getState']>(async () => state()),
+    listHelperSessionIds: vi.fn<ChangeWalkthroughRoutesService['listHelperSessionIds']>(() => ['ses_helper']),
+    publishFromWalkthroughSession: vi.fn<ChangeWalkthroughRoutesService['publishFromWalkthroughSession']>(
+      async () => ({ path: '/tmp/walkthrough.md' }),
+    ),
+    readChangesForWalkthroughSession: vi.fn<ChangeWalkthroughRoutesService['readChangesForWalkthroughSession']>(
+      async () => '',
+    ),
+    refine: vi.fn<ChangeWalkthroughRoutesService['refine']>(async () => state({ generating: true })),
+    startGeneration: vi.fn<ChangeWalkthroughRoutesService['startGeneration']>(async () => state({ generating: true })),
+    ...overrides,
+  }
+}
+
 describe('change walkthrough routes', () => {
-  let getState: ReturnType<typeof vi.fn>
-  let startGeneration: ReturnType<typeof vi.fn>
-  let cancelGeneration: ReturnType<typeof vi.fn>
-  let refine: ReturnType<typeof vi.fn>
-  let listHelperSessionIds: ReturnType<typeof vi.fn>
+  let getState: Mock<ChangeWalkthroughRoutesService['getState']>
+  let startGeneration: Mock<ChangeWalkthroughRoutesService['startGeneration']>
+  let cancelGeneration: Mock<ChangeWalkthroughRoutesService['cancelGeneration']>
+  let refine: Mock<ChangeWalkthroughRoutesService['refine']>
   let app: Hono
 
   beforeEach(() => {
-    getState = vi.fn(async () => state())
-    startGeneration = vi.fn(async () => state({ generating: true }))
-    cancelGeneration = vi.fn(async () => true)
-    refine = vi.fn(async () => state({ generating: true }))
-    listHelperSessionIds = vi.fn(() => ['ses_helper'])
+    getState = vi.fn<ChangeWalkthroughRoutesService['getState']>(async () => state())
+    startGeneration = vi.fn<ChangeWalkthroughRoutesService['startGeneration']>(async () => state({ generating: true }))
+    cancelGeneration = vi.fn<ChangeWalkthroughRoutesService['cancelGeneration']>(async () => true)
+    refine = vi.fn<ChangeWalkthroughRoutesService['refine']>(async () => state({ generating: true }))
     app = new Hono()
     app.route(
       '/change-walkthroughs',
-      createChangeWalkthroughRoutes({ getState, startGeneration, cancelGeneration, refine, listHelperSessionIds } as unknown as ChangeWalkthroughService),
+      createChangeWalkthroughRoutes(createChangeWalkthroughFakes({
+        getState,
+        startGeneration,
+        cancelGeneration,
+        refine,
+      })),
     )
   })
 

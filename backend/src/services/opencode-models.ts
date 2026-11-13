@@ -1,5 +1,6 @@
 import type { ModelInfo, ModelRef } from '@opencode-manager/shared/opencode'
 import { findModelInfo, formatOpenCodeModelRef, openCodeLocation, parseOpenCodeModelRef, selectConfiguredModelRef, selectEffectiveModelRef } from '@opencode-manager/shared/opencode'
+import { z } from 'zod'
 import type { OpenCodeClient } from './opencode/client'
 
 export type ResolvedOpenCodeModel = ModelRef & { model: string }
@@ -22,12 +23,13 @@ function normalizeModelCandidate(model: string | null | undefined): string | nul
 }
 
 function toResolvedModel(ref: ModelRef): ResolvedOpenCodeModel {
-  return {
+  const resolved: ResolvedOpenCodeModel = {
     providerID: ref.providerID,
     id: ref.id,
-    ...(ref.variant ? { variant: ref.variant } : {}),
     model: formatOpenCodeModelRef(ref),
   }
+  if (ref.variant) resolved.variant = ref.variant
+  return resolved
 }
 
 function findAvailable(models: ModelInfo[], ref: ModelRef): ModelInfo | undefined {
@@ -80,21 +82,27 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 
 type PollingResult<T> = { ok: true; value: T } | { ok: false }
 
-function isAbortLike(error: unknown, signal: AbortSignal): boolean {
-  if (error === signal.reason) {
+const abortLikeErrorSchema = z.object({
+  name: z.string().optional(),
+  cause: z.unknown().optional(),
+})
+
+function isAbortLike(cause: unknown, signal: AbortSignal): boolean {
+  if (cause === signal.reason) {
     return true
   }
 
-  if (typeof error !== 'object' || error === null) {
+  const error = abortLikeErrorSchema.safeParse(cause)
+  if (!error.success) {
     return false
   }
 
-  if ((error as { name?: unknown }).name === 'AbortError') {
+  if (error.data.name === 'AbortError') {
     return true
   }
 
-  const cause = (error as { cause?: unknown }).cause
-  return cause !== undefined && cause !== error && isAbortLike(cause, signal)
+  const nestedCause = error.data.cause
+  return nestedCause !== undefined && nestedCause !== cause && isAbortLike(nestedCause, signal)
 }
 
 async function runPollingRequest<T>(

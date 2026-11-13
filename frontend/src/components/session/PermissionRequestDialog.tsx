@@ -36,12 +36,6 @@ interface PermissionRequestDialogProps {
   onOpenChange?: (open: boolean) => void
 }
 
-/**
- * Renders a modal prompt for the current pending permission request with
- * allow-once, always-allow, and reject actions plus a count of further queued
- * requests. Focus starts on allow-once, and the rejection reason resets
- * whenever the request changes.
- */
 export function PermissionRequestDialog({
   permission,
   pendingCount,
@@ -66,10 +60,6 @@ export function PermissionRequestDialog({
   if (!permission) return null
   if (parentOpen === false) return null
 
-  /**
-   * Sends the user's reply for the current permission request, passing the trimmed rejection reason
-   * only for rejections, and reports failures as a toast while clearing the pending action state.
-   */
   const handleResponse = async (response: PermissionReply) => {
     setIsLoading(true)
     setLoadingAction(response)

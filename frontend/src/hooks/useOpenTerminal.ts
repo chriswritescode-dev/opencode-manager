@@ -9,9 +9,6 @@ export function useTerminalDialogParam(): [boolean, (open: boolean) => void] {
   return useDialogParam(TERMINAL_DIALOG, TERMINAL_DIALOG_PARAMS)
 }
 
-/**
- * The directory the terminal dialog was opened for, such as a repo worktree; null means the repo itself.
- */
 export function useTerminalDirectoryParam(): string | null {
   const { searchParams } = useUrlParams()
   return searchParams.get('terminalDirectory')
@@ -25,7 +22,10 @@ export function useOpenTerminal(): (
 
   return useCallback(
     (terminalId: string | null, extraParams?: Record<string, string>) => {
-      openDialogParam(updateParams, TERMINAL_DIALOG, { ...(terminalId ? { terminal: terminalId } : {}), ...extraParams })
+      const params: Record<string, string> = terminalId
+        ? { terminal: terminalId, ...extraParams }
+        : { ...extraParams }
+      openDialogParam(updateParams, TERMINAL_DIALOG, params)
     },
     [updateParams],
   )

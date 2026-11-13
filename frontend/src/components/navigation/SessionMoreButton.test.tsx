@@ -1,42 +1,44 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { SessionMoreButton } from './SessionMoreButton'
+import { renderWithProviders } from '@/test/render'
+import { LocationCatcher } from '@/test/test-components'
+import { appRoutes } from '@/test/fixtures/appRoutes'
 
-const mocks = vi.hoisted(() => ({
-  open: vi.fn(),
-  useUnreadScheduleRuns: vi.fn(),
-}))
-
-vi.mock('@/hooks/useMobileTabBar', () => ({
-  useMobileTabBar: () => ({ open: mocks.open, openSheet: null, close: vi.fn() }),
-}))
-
-vi.mock('@/hooks/useSchedules', () => ({
-  useUnreadScheduleRuns: mocks.useUnreadScheduleRuns,
-}))
+function renderButton(unreadTotal = 0) {
+  const capturedSearch = { current: '' }
+  const result = renderWithProviders(
+    <>
+      <SessionMoreButton />
+      <LocationCatcher capturedSearch={capturedSearch} />
+    </>,
+    {
+      route: '/repos/1/sessions/ses_1',
+      auth: false,
+      theme: false,
+      toaster: false,
+      fetchRoutes: appRoutes({ unreadSchedules: { runs: [], total: unreadTotal, failed: 0 } }),
+    },
+  )
+  return { ...result, capturedSearch }
+}
 
 describe('SessionMoreButton', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
+  it('shows the unread report count and opens the drawer', async () => {
+    const { capturedSearch } = renderButton(4)
 
-  it('shows the unread report count and opens the drawer', () => {
-    mocks.useUnreadScheduleRuns.mockReturnValue({ data: { runs: [], total: 4, failed: 0 } })
-    render(<SessionMoreButton />)
-
-    const button = screen.getByRole('button', { name: 'More, 4 unread reports' })
+    const button = await screen.findByRole('button', { name: 'More, 4 unread reports' })
     expect(screen.getByText('4')).toBeInTheDocument()
 
     fireEvent.click(button)
 
-    expect(mocks.open).toHaveBeenCalledWith('more')
+    await waitFor(() => expect(capturedSearch.current).toBe('?mobileTab=more'))
   })
 
-  it('shows no count when there are no unread reports', () => {
-    mocks.useUnreadScheduleRuns.mockReturnValue({ data: { runs: [], total: 0, failed: 0 } })
-    render(<SessionMoreButton />)
+  it('shows no count when there are no unread reports', async () => {
+    renderButton(0)
 
-    expect(screen.getByRole('button', { name: 'More' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'More' })).toBeInTheDocument()
     expect(screen.queryByText('0')).not.toBeInTheDocument()
   })
 })

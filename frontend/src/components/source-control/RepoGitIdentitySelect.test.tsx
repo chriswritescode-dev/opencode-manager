@@ -1,117 +1,102 @@
-import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { z } from 'zod'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
-import type { UserPreferences } from '@/api/types/settings'
-import { useSettings } from '@/hooks/useSettings'
-import { createUseSettingsMock } from '@/test/test-utils'
+import { installPointerCapture } from '@/test/browserFakes'
+import { makeSettingsResponse, makeUserPreferences } from '@/test/fixtures/api'
+import { renderWithProviders } from '@/test/render'
+import type { FetchRoute } from '@/test/fetchFake'
+import type { RepoGitIdentity } from '@opencode-manager/shared'
 import { RepoGitIdentitySelect } from './RepoGitIdentitySelect'
-
-const { getRepoGitIdentityMock, updateRepoGitIdentityMock, showToastMock } = vi.hoisted(() => ({
-  getRepoGitIdentityMock: vi.fn(),
-  updateRepoGitIdentityMock: vi.fn(),
-  showToastMock: { success: vi.fn(), error: vi.fn(), loading: vi.fn() },
-}))
-
-vi.mock('@/api/repos', () => ({
-  getRepoGitIdentity: getRepoGitIdentityMock,
-  updateRepoGitIdentity: updateRepoGitIdentityMock,
-}))
-
-vi.mock('@/api/git', () => ({
-  getApiErrorMessage: (error: unknown) => (error instanceof Error ? error.message : String(error)),
-}))
-
-vi.mock('@/lib/toast', () => ({ showToast: showToastMock }))
-vi.mock('@/hooks/useSettings')
 
 const preset = { id: 'a', name: 'Alpha', email: 'alpha@example.com' }
 
-function buildPreferences(overrides: Partial<UserPreferences> = {}): UserPreferences {
-  return {
-    theme: 'dark',
-    mode: 'build',
-    autoScroll: true,
-    expandDiffs: true,
-    expandToolCalls: false,
-    showReasoning: false,
-    simpleChatMode: false,
-    keyboardShortcuts: {},
-    customCommands: [],
-    gitIdentities: [preset],
-    ...overrides,
-  }
+const identityPatchSchema = z.object({ identityId: z.string().nullable() })
+
+const repositoryPreset: RepoGitIdentity = { name: 'Alpha', email: 'alpha@example.com', scope: 'repository', presetId: 'a' }
+const customIdentity: RepoGitIdentity = { name: 'Custom', email: 'custom@example.com', scope: 'repository', presetId: null }
+
+function identityForSelection(identityId: string | null): RepoGitIdentity {
+  if (identityId === 'a') return repositoryPreset
+  return { name: null, email: null, scope: 'none', presetId: null }
 }
 
-function renderSelect(preferences: Partial<UserPreferences> = {}) {
-  vi.mocked(useSettings).mockReturnValue(
-    createUseSettingsMock({ preferences: buildPreferences(preferences) }),
-  )
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+function renderSelect(identity: RepoGitIdentity) {
+  const routes: FetchRoute[] = [
+    { method: 'GET', path: '/api/repos/7/git-identity', respond: () => ({ json: identity }) },
+    {
+      method: 'PATCH',
+      path: '/api/repos/7/git-identity',
+      respond: (request) => {
+        const patch = identityPatchSchema.safeParse(request.body)
+        return { json: identityForSelection(patch.success ? patch.data.identityId : null) }
+      },
+    },
+    {
+      method: 'GET',
+      path: '/api/settings',
+      respond: () => ({
+        json: makeSettingsResponse({ preferences: makeUserPreferences({ gitIdentities: [preset] }) }),
+      }),
+    },
+  ]
+
+  return renderWithProviders(<RepoGitIdentitySelect repoId={7} />, {
+    auth: false,
+    theme: false,
+    fetchRoutes: routes,
   })
-  function Wrapper({ children }: { children: ReactNode }) {
-    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  }
-  return render(<RepoGitIdentitySelect repoId={7} />, { wrapper: Wrapper })
 }
 
-function openSelect(user: ReturnType<typeof userEvent.setup>) {
-  return user.click(screen.getByRole('combobox', { name: 'Commit identity' }))
+async function openSelect(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole('combobox', { name: 'Commit identity' }))
 }
 
 describe('RepoGitIdentitySelect', () => {
-  beforeAll(() => {
-    Element.prototype.hasPointerCapture ??= () => false
-    Element.prototype.setPointerCapture ??= () => {}
-    Element.prototype.releasePointerCapture ??= () => {}
-  })
-
   beforeEach(() => {
-    vi.clearAllMocks()
+    installPointerCapture()
   })
 
-  it('shows the effective default identity and its Manager source', async () => {
-    getRepoGitIdentityMock.mockResolvedValue({ name: 'Ada', email: 'ada@example.com', scope: 'default', presetId: null })
-    renderSelect()
-
-    await waitFor(() =>
-      expect(screen.getByRole('combobox', { name: 'Commit identity' }))
-        .toHaveTextContent('Default — Ada <ada@example.com> (Manager default)'))
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
-  it('shows the global git config source and the not-configured fallback', async () => {
-    getRepoGitIdentityMock.mockResolvedValue({ name: 'Ada', email: 'ada@example.com', scope: 'global', presetId: null })
-    const { unmount } = renderSelect()
+  it.each([
+    {
+      label: 'the Manager default identity',
+      identity: { name: 'Ada', email: 'ada@example.com', scope: 'default', presetId: null },
+      expected: 'Default — Ada <ada@example.com> (Manager default)',
+    },
+    {
+      label: 'the git global config identity',
+      identity: { name: 'Ada', email: 'ada@example.com', scope: 'global', presetId: null },
+      expected: 'Default — Ada <ada@example.com> (git global config)',
+    },
+    {
+      label: 'the not-configured fallback',
+      identity: { name: null, email: null, scope: 'none', presetId: null },
+      expected: 'Default — not configured',
+    },
+  ])('shows $label as the effective default', async ({ identity, expected }) => {
+    renderSelect(identity)
 
     await waitFor(() =>
-      expect(screen.getByRole('combobox', { name: 'Commit identity' }))
-        .toHaveTextContent('Default — Ada <ada@example.com> (git global config)'))
-    unmount()
-
-    getRepoGitIdentityMock.mockResolvedValue({ name: null, email: null, scope: 'none', presetId: null })
-    renderSelect()
-
-    await waitFor(() =>
-      expect(screen.getByRole('combobox', { name: 'Commit identity' }))
-        .toHaveTextContent('Default — not configured'))
+      expect(screen.getByRole('combobox', { name: 'Commit identity' })).toHaveTextContent(expected),
+    )
   })
 
   it('selects the matching preset for a repository identity', async () => {
-    getRepoGitIdentityMock.mockResolvedValue({ name: 'Alpha', email: 'alpha@example.com', scope: 'repository', presetId: 'a' })
-    renderSelect()
+    renderSelect(repositoryPreset)
 
     await waitFor(() =>
-      expect(screen.getByRole('combobox', { name: 'Commit identity' }))
-        .toHaveTextContent('Alpha <alpha@example.com>'))
+      expect(screen.getByRole('combobox', { name: 'Commit identity' })).toHaveTextContent('Alpha <alpha@example.com>'),
+    )
   })
 
   it('shows a custom repository identity and confirms before replacing it', async () => {
     const user = userEvent.setup()
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    getRepoGitIdentityMock.mockResolvedValue({ name: 'Custom', email: 'custom@example.com', scope: 'repository', presetId: null })
-    renderSelect()
+    const { fetchFake } = renderSelect(customIdentity)
 
     await openSelect(user)
     const customOption = screen.getByRole('option', { name: 'Custom (Custom <custom@example.com>)' })
@@ -119,28 +104,31 @@ describe('RepoGitIdentitySelect', () => {
 
     await user.click(screen.getByRole('option', { name: 'Alpha <alpha@example.com>' }))
     expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('Custom <custom@example.com>'))
-    expect(updateRepoGitIdentityMock).not.toHaveBeenCalled()
+    expect(fetchFake.findRequests('PATCH', '/api/repos/7/git-identity')).toHaveLength(0)
 
     confirmSpy.mockReturnValue(true)
     await openSelect(user)
     await user.click(screen.getByRole('option', { name: 'Alpha <alpha@example.com>' }))
 
-    await waitFor(() => expect(updateRepoGitIdentityMock).toHaveBeenCalledWith(7, 'a'))
+    await waitFor(() =>
+      expect(fetchFake.lastRequest('PATCH', '/api/repos/7/git-identity')?.body).toEqual({ identityId: 'a' }),
+    )
   })
 
   it('sends null when choosing Default and the preset id when choosing a preset', async () => {
     const user = userEvent.setup()
-    getRepoGitIdentityMock.mockResolvedValue({ name: 'Alpha', email: 'alpha@example.com', scope: 'repository', presetId: 'a' })
-    updateRepoGitIdentityMock.mockResolvedValue({ name: null, email: null, scope: 'none', presetId: null })
-    renderSelect()
+    const { fetchFake } = renderSelect(repositoryPreset)
 
     await openSelect(user)
     await user.click(screen.getByRole('option', { name: 'Default' }))
-    await waitFor(() => expect(updateRepoGitIdentityMock).toHaveBeenCalledWith(7, null))
+    await waitFor(() =>
+      expect(fetchFake.lastRequest('PATCH', '/api/repos/7/git-identity')?.body).toEqual({ identityId: null }),
+    )
 
-    updateRepoGitIdentityMock.mockResolvedValue({ name: 'Alpha', email: 'alpha@example.com', scope: 'repository', presetId: 'a' })
     await openSelect(user)
     await user.click(screen.getByRole('option', { name: 'Alpha <alpha@example.com>' }))
-    await waitFor(() => expect(updateRepoGitIdentityMock).toHaveBeenCalledWith(7, 'a'))
+    await waitFor(() =>
+      expect(fetchFake.lastRequest('PATCH', '/api/repos/7/git-identity')?.body).toEqual({ identityId: 'a' }),
+    )
   })
 })

@@ -2,8 +2,8 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import type { Database } from 'bun:sqlite'
 import { SandboxRuntimeService } from '../../services/sandbox/runtime'
-import type { SessionSandboxService } from '../../services/session-sandbox'
-import type { RepoEnvService } from '../../services/repo-env'
+import type { SessionSandboxRoutesService } from '../session-sandbox'
+import type { RepoEnvResolver } from '../../services/repo-env'
 import { logger } from '../../utils/logger'
 
 const SandboxShellRequestSchema = z.object({
@@ -15,8 +15,8 @@ const SandboxShellRequestSchema = z.object({
 
 export function createInternalSandboxRoutes(
   db: Database,
-  sessionSandbox: SessionSandboxService,
-  repoEnvService: RepoEnvService,
+  sessionSandbox: SessionSandboxRoutesService,
+  repoEnvService: RepoEnvResolver,
 ) {
   const app = new Hono()
 

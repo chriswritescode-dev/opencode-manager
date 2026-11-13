@@ -1,6 +1,12 @@
 import { fetchWrapperBlob } from '@/api/fetchWrapper'
 import { showToast } from './toast'
 
+declare global {
+  interface Navigator {
+    standalone?: boolean
+  }
+}
+
 function isIosHomeScreenApp(): boolean {
   const isIos =
     /iPad|iPhone|iPod/.test(navigator.userAgent) ||
@@ -8,7 +14,7 @@ function isIosHomeScreenApp(): boolean {
   if (!isIos) return false
 
   const isStandalone =
-    (navigator as Navigator & { standalone?: boolean }).standalone === true ||
+    navigator.standalone === true ||
     window.matchMedia('(display-mode: standalone)').matches
   return isStandalone
 }

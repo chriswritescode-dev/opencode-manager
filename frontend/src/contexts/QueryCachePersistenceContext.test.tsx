@@ -1,41 +1,37 @@
 import { act, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { z } from 'zod'
 import { QueryClient, QueryClientProvider, dehydrate, useIsRestoring } from '@tanstack/react-query'
 import { createSyncStoragePersister } from '@tanstack/query-sync-storage-persister'
+import { MemoryRouter } from 'react-router-dom'
+import { parseJsonText, type JsonValue } from '@opencode-manager/shared/utils'
+import { createFetchFake, type FetchRouteResult } from '@/test/fetchFake'
+import { makeAuthConfig, makeAuthSession, type AuthSessionFixture } from '@/test/fixtures/api'
+import { AuthProvider } from './AuthContext'
 import { QueryCachePersistenceProvider } from './QueryCachePersistenceContext'
+import { authClient } from '@/lib/auth-client'
 import {
   QUERY_CACHE_STORAGE_KEY,
   queryCacheBuster,
   type QueryCachePersister,
 } from '@/lib/queryPersistence'
 
-const mocks = vi.hoisted(() => ({
-  useAuth: vi.fn(),
-}))
+type FixtureUser = AuthSessionFixture['user']
 
-vi.mock('@/hooks/useAuth', () => ({ useAuth: mocks.useAuth }))
+const USER_ONE: FixtureUser = { id: 'user-1', email: 'user-1@example.com', name: 'user-1' }
+const USER_TWO: FixtureUser = { id: 'user-2', email: 'user-2@example.com', name: 'user-2' }
 
-interface AuthStub {
-  user: { id: string; email: string; name: string } | null
-  isAuthenticated: boolean
-  isLoading: boolean
+interface SessionState {
+  user: FixtureUser | null
+  pending: boolean
 }
 
-function signedIn(userId = 'user-1'): AuthStub {
-  return {
-    user: { id: userId, email: `${userId}@example.com`, name: userId },
-    isAuthenticated: true,
-    isLoading: false,
-  }
-}
-
-function signedOut(): AuthStub {
-  return { user: null, isAuthenticated: false, isLoading: false }
-}
-
-function loading(): AuthStub {
-  return { user: null, isAuthenticated: false, isLoading: true }
-}
+const persistedClientSchema = z.object({
+  buster: z.string(),
+  clientState: z.object({
+    queries: z.array(z.object({ queryKey: z.array(z.unknown()) })),
+  }),
+})
 
 function createStorage() {
   const store = new Map<string, string>()
@@ -71,7 +67,7 @@ function seed(
   storage: TestStorage,
   buster: string,
   queryKey: readonly unknown[] = ['repos'],
-  data: unknown = [{ id: 1 }],
+  data: JsonValue = [{ id: 1 }],
 ): void {
   const seedClient = new QueryClient()
   seedClient.setQueryData(queryKey, data)
@@ -80,6 +76,30 @@ function seed(
     JSON.stringify({ buster, timestamp: Date.now(), clientState: dehydrate(seedClient) }),
   )
   seedClient.clear()
+}
+
+function installAuthRoutes(state: SessionState): void {
+  const fetchFake = createFetchFake([
+    {
+      method: 'GET',
+      path: '/api/auth/get-session',
+      respond: (): FetchRouteResult | Promise<FetchRouteResult> => {
+        if (state.pending) return new Promise<FetchRouteResult>(() => undefined)
+        return { json: state.user ? makeAuthSession({ user: state.user }) : null }
+      },
+    },
+    { method: 'GET', path: '/api/auth-info/config', respond: () => ({ json: makeAuthConfig() }) },
+    { method: 'POST', path: '/api/auth/sign-out', respond: () => {
+      state.user = null
+      return { json: {} }
+    } },
+  ])
+  fetchFake.install()
+}
+
+function resetSessionAtom(): void {
+  const atom = authClient.$store.atoms.session
+  atom.set({ ...atom.get(), data: null, error: null, isPending: true, isRefetching: false })
 }
 
 let restoringValue: boolean | undefined
@@ -100,18 +120,16 @@ function createClient(): QueryClient {
   return client
 }
 
-function tree(
-  auth: AuthStub,
-  persister: QueryCachePersister,
-  client: QueryClient,
-  persistThrottleMs = 0,
-) {
-  mocks.useAuth.mockReturnValue(auth)
+function tree(persister: QueryCachePersister, client: QueryClient, persistThrottleMs = 0) {
   return (
     <QueryClientProvider client={client}>
-      <QueryCachePersistenceProvider persister={persister} persistThrottleMs={persistThrottleMs}>
-        <RestoringProbe />
-      </QueryCachePersistenceProvider>
+      <MemoryRouter>
+        <AuthProvider>
+          <QueryCachePersistenceProvider persister={persister} persistThrottleMs={persistThrottleMs}>
+            <RestoringProbe />
+          </QueryCachePersistenceProvider>
+        </AuthProvider>
+      </MemoryRouter>
     </QueryClientProvider>
   )
 }
@@ -122,11 +140,19 @@ async function settle(): Promise<void> {
   })
 }
 
+async function signOutThroughProvider(): Promise<void> {
+  await act(async () => {
+    await authClient.signOut()
+    authClient.$store.notify('$sessionSignal')
+  })
+}
+
 beforeEach(() => {
   restoringValue = undefined
   restoringHistory = []
-  mocks.useAuth.mockReset()
   localStorage.clear()
+  resetSessionAtom()
+  authClient.$store.notify('$sessionSignal')
 })
 
 afterEach(() => {
@@ -135,11 +161,12 @@ afterEach(() => {
 
 describe('QueryCachePersistenceProvider', () => {
   it('restores the cache written for the current user', async () => {
+    installAuthRoutes({ user: USER_ONE, pending: false })
     const { store, storage } = createStorage()
     seed(storage, queryCacheBuster('user-1'))
     const client = createClient()
 
-    render(tree(signedIn(), createTestPersister(storage), client))
+    render(tree(createTestPersister(storage), client))
 
     await waitFor(() => expect(client.getQueryData(['repos'])).toEqual([{ id: 1 }]))
     await waitFor(() => expect(restoringValue).toBe(false))
@@ -147,11 +174,12 @@ describe('QueryCachePersistenceProvider', () => {
   })
 
   it('discards a cache written for another user', async () => {
+    installAuthRoutes({ user: USER_ONE, pending: false })
     const { store, storage } = createStorage()
     seed(storage, queryCacheBuster('user-2'))
     const client = createClient()
 
-    render(tree(signedIn('user-1'), createTestPersister(storage), client))
+    render(tree(createTestPersister(storage), client))
 
     await waitFor(() => expect(restoringValue).toBe(false))
     expect(client.getQueryData(['repos'])).toBeUndefined()
@@ -159,11 +187,12 @@ describe('QueryCachePersistenceProvider', () => {
   })
 
   it('keeps the stored cache while the session is still loading', async () => {
+    installAuthRoutes({ user: null, pending: true })
     const { store, storage } = createStorage()
     seed(storage, queryCacheBuster('user-1'))
     const client = createClient()
 
-    render(tree(loading(), createTestPersister(storage), client))
+    render(tree(createTestPersister(storage), client))
     await settle()
 
     expect(client.getQueryData(['repos'])).toBeUndefined()
@@ -172,10 +201,11 @@ describe('QueryCachePersistenceProvider', () => {
   })
 
   it('persists allowlisted successful queries only', async () => {
+    installAuthRoutes({ user: USER_ONE, pending: false })
     const { store, storage } = createStorage()
     const client = createClient()
 
-    render(tree(signedIn(), createTestPersister(storage), client))
+    render(tree(createTestPersister(storage), client))
     await waitFor(() => expect(restoringValue).toBe(false))
 
     act(() => {
@@ -187,8 +217,8 @@ describe('QueryCachePersistenceProvider', () => {
     })
     await settle()
 
-    const persisted = JSON.parse(store.get(QUERY_CACHE_STORAGE_KEY) ?? '{}')
-    const roots = persisted.clientState.queries.map((query: { queryKey: unknown[] }) => query.queryKey[0])
+    const persisted = persistedClientSchema.parse(parseJsonText(store.get(QUERY_CACHE_STORAGE_KEY) ?? '{}'))
+    const roots = persisted.clientState.queries.map((query) => query.queryKey[0])
 
     expect(persisted.buster).toBe(queryCacheBuster('user-1'))
     expect(roots.sort()).toEqual(['opencode', 'repos'])
@@ -197,6 +227,7 @@ describe('QueryCachePersistenceProvider', () => {
   })
 
   it('is restoring until the restore resolves', async () => {
+    installAuthRoutes({ user: USER_ONE, pending: false })
     let resolveRestore: () => void = () => {}
     const persister: QueryCachePersister = {
       persistClient: vi.fn(),
@@ -209,38 +240,44 @@ describe('QueryCachePersistenceProvider', () => {
       hasPersistedClient: () => true,
     }
 
-    render(tree(signedIn(), persister, createClient()))
-    expect(restoringValue).toBe(true)
+    render(tree(persister, createClient()))
+    await waitFor(() => expect(restoringValue).toBe(true))
 
     act(() => resolveRestore())
     await waitFor(() => expect(restoringValue).toBe(false))
   })
 
   it('clears the persisted cache and the in-memory cache on sign-out', async () => {
+    installAuthRoutes({ user: USER_ONE, pending: false })
     const { store, storage } = createStorage()
     seed(storage, queryCacheBuster('user-1'))
     const persister = createTestPersister(storage)
     const client = createClient()
 
-    const view = render(tree(signedIn(), persister, client))
+    render(tree(persister, client))
     await waitFor(() => expect(client.getQueryData(['repos'])).toEqual([{ id: 1 }]))
 
-    view.rerender(tree(signedOut(), persister, client))
+    await signOutThroughProvider()
 
     await waitFor(() => expect(store.has(QUERY_CACHE_STORAGE_KEY)).toBe(false))
     expect(client.getQueryData(['repos'])).toBeUndefined()
   })
 
   it('clears the in-memory cache when the validated user changes', async () => {
+    const session: SessionState = { user: USER_ONE, pending: false }
+    installAuthRoutes(session)
     const { store, storage } = createStorage()
     seed(storage, queryCacheBuster('user-1'))
     const persister = createTestPersister(storage)
     const client = createClient()
 
-    const view = render(tree(signedIn('user-1'), persister, client))
+    render(tree(persister, client))
     await waitFor(() => expect(client.getQueryData(['repos'])).toEqual([{ id: 1 }]))
 
-    view.rerender(tree(signedIn('user-2'), persister, client))
+    session.user = USER_TWO
+    act(() => {
+      authClient.$store.notify('$sessionSignal')
+    })
 
     await waitFor(() => expect(client.getQueryData(['repos'])).toBeUndefined())
     await waitFor(() => expect(store.has(QUERY_CACHE_STORAGE_KEY)).toBe(false))
@@ -248,26 +285,28 @@ describe('QueryCachePersistenceProvider', () => {
   })
 
   it('subscribes without a restoring pass when nothing is persisted yet', async () => {
+    installAuthRoutes({ user: USER_ONE, pending: false })
     const { store, storage } = createStorage()
     const client = createClient()
     const persister = createTestPersister(storage)
 
-    render(tree(signedIn(), persister, client))
+    render(tree(persister, client))
 
     expect(restoringHistory).not.toContain(true)
 
-    act(() => {
-      client.setQueryData(['repos'], [{ id: 1 }])
+    await waitFor(() => {
+      act(() => {
+        client.setQueryData(['repos'], [{ id: 1 }])
+      })
+      expect(store.has(QUERY_CACHE_STORAGE_KEY)).toBe(true)
     })
-    await settle()
-
-    expect(store.has(QUERY_CACHE_STORAGE_KEY)).toBe(true)
     expect(restoringHistory).not.toContain(true)
   })
 
   it('saves an allowlisted update but not a transcript update', async () => {
+    installAuthRoutes({ user: USER_ONE, pending: false })
     const client = createClient()
-    const persistClient = vi.fn()
+    const persistClient = vi.fn<QueryCachePersister['persistClient']>()
     const persister: QueryCachePersister = {
       persistClient,
       restoreClient: () => undefined,
@@ -275,7 +314,7 @@ describe('QueryCachePersistenceProvider', () => {
       hasPersistedClient: () => false,
     }
 
-    render(tree(signedIn(), persister, client))
+    render(tree(persister, client))
 
     act(() => {
       client.setQueryData(['opencode', 'transcript', 'ses_1'], [{ text: 'streamed' }])
@@ -291,22 +330,21 @@ describe('QueryCachePersistenceProvider', () => {
     expect(persistClient).toHaveBeenCalledTimes(1)
     const persisted = persistClient.mock.calls[0][0]
     expect(persisted.buster).toBe(queryCacheBuster('user-1'))
-    expect(persisted.clientState.queries.map((query: { queryKey: unknown[] }) => query.queryKey)).toEqual([
-      ['repos'],
-    ])
+    expect(persisted.clientState.queries.map((query) => query.queryKey)).toEqual([['repos']])
   })
 
   it('drops a save scheduled before sign-out instead of rewriting the cache', async () => {
+    installAuthRoutes({ user: USER_ONE, pending: false })
     const { store, storage } = createStorage()
     const client = createClient()
     const persister = createTestPersister(storage)
 
-    const view = render(tree(signedIn(), persister, client, 20))
+    render(tree(persister, client, 20))
     act(() => {
       client.setQueryData(['repos'], [{ id: 1 }])
     })
 
-    view.rerender(tree(signedOut(), persister, client, 20))
+    await signOutThroughProvider()
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 60))
     })

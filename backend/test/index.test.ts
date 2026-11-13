@@ -1,360 +1,240 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { createServer, type Server } from 'node:net'
 import { join } from 'node:path'
+import { z } from 'zod'
+import type { AssistantModeStatus } from '@opencode-manager/shared/types'
+import type { OpenCodeLifecycleState, OpenCodeLifecycleStatus } from '@opencode-manager/shared/opencode'
+import type {
+  BackendApp,
+  BackendAppDependencies,
+  BackendOpenCodeSupervisor,
+  BackendScheduleRunner,
+} from '../src/backend-app'
+import type { TempWorkspace } from './helpers/test-env'
+import { applyTestEnv, createTempWorkspace } from './helpers/test-env'
 
-interface MockServeServer {
-  on: (event: string, handler: (...args: unknown[]) => void) => void
-  emit: (event: string, ...args: unknown[]) => void
+const RootResponseSchema = z.object({
+  name: z.string(),
+  version: z.string(),
+  status: z.string(),
+  endpoints: z.record(z.string(), z.string()),
+})
+
+const HealthResponseSchema = z.object({
+  status: z.string(),
+  database: z.string(),
+  opencode: z.string(),
+  opencodeMinVersion: z.string(),
+})
+
+const ASSISTANT_FILE = { path: '', exists: true, created: false }
+
+const ASSISTANT_STATUS: AssistantModeStatus = {
+  repoId: 1,
+  directory: 'repos/assistant',
+  relativePath: 'repos/assistant',
+  files: { agentsMd: ASSISTANT_FILE, opencodeJson: ASSISTANT_FILE },
 }
 
-const serveServers = vi.hoisted(() => [] as MockServeServer[])
-
-const serveMock = vi.fn<(options: unknown) => MockServeServer>(() => {
-  const handlers = new Map<string, Array<(...args: unknown[]) => void>>()
-  const server: MockServeServer = {
-    on: (event, handler) => {
-      const registered = handlers.get(event) ?? []
-      registered.push(handler)
-      handlers.set(event, registered)
-    },
-    emit: (event, ...args) => {
-      for (const handler of handlers.get(event) ?? []) handler(...args)
-    },
-  }
-  serveServers.push(server)
-  return server
-})
-
-vi.mock('@hono/node-server', () => ({
-  serve: serveMock,
-}))
-
-const previewAvailabilityInstances = vi.hoisted(() => [] as Array<{ isEnabled: () => boolean }>)
-
-vi.mock('../src/routes/preview', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/routes/preview')>()
+function lifecycleStatus(state: OpenCodeLifecycleState, healthy: boolean): OpenCodeLifecycleStatus {
   return {
-    ...actual,
-    createPreviewAvailability: (initialEnabled: boolean) => {
-      const availability = actual.createPreviewAvailability(initialEnabled)
-      previewAvailabilityInstances.push(availability)
-      return availability
+    state,
+    healthy,
+    port: 5551,
+    version: '2.2.5',
+    minVersion: '2.2.5',
+    versionSupported: true,
+    lastError: null,
+    activeRecoveryAction: null,
+    attemptedRecoveryActions: [],
+    nextRecoveryAction: null,
+    failureCount: 0,
+    watching: false,
+    updatedAt: new Date(0).toISOString(),
+  }
+}
+
+function createSupervisor(): BackendOpenCodeSupervisor {
+  return {
+    start: async () => lifecycleStatus('healthy', true),
+    stop: async () => {},
+    restart: async () => lifecycleStatus('starting', false),
+    getStatus: () => lifecycleStatus('healthy', true),
+    checkNow: async () => lifecycleStatus('healthy', true),
+  }
+}
+
+const scheduleRunner: BackendScheduleRunner = {
+  start: async () => {},
+  stop: () => {},
+}
+
+const backendDependencies: BackendAppDependencies = {
+  createSupervisor: () => createSupervisor(),
+  createScheduleRunner: () => scheduleRunner,
+  installAssistantWorkspace: async () => ASSISTANT_STATUS,
+  migrateGlobalSkills: async () => {},
+}
+
+let workspace: TempWorkspace
+let restoreHomeEnv: () => void
+const startedApps: Array<{ backend: BackendApp }> = []
+
+async function startBackendApp(overrides: BackendAppDependencies = {}): Promise<BackendApp> {
+  vi.resetModules()
+  const { createBackendApp } = await import('../src/backend-app')
+  const backend = createBackendApp({ ...backendDependencies, ...overrides })
+  startedApps.push({ backend })
+  await backend.initialize()
+  return backend
+}
+
+async function reservePort(): Promise<{ port: number; release: () => Promise<void> }> {
+  const server: Server = createServer()
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+  const address = z.object({ port: z.number() }).parse(server.address())
+  return {
+    port: address.port,
+    release: async () => {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
     },
   }
+}
+
+beforeEach(() => {
+  workspace = createTempWorkspace('ocm-entrypoint-')
+  restoreHomeEnv = applyTestEnv({
+    HOME: workspace.path,
+    XDG_CONFIG_HOME: join(workspace.path, '.config'),
+    XDG_STATE_HOME: join(workspace.path, '.local', 'state'),
+    XDG_DATA_HOME: join(workspace.path, '.local', 'share'),
+  })
 })
 
-const supervisorMock = vi.hoisted(() => ({
-  start: vi.fn().mockResolvedValue({ healthy: true, port: 5551, state: 'running' }),
-  stop: vi.fn().mockResolvedValue(undefined),
-  restart: vi.fn().mockResolvedValue({ healthy: true }),
-  getLastStartupError: vi.fn().mockReturnValue(null),
-}))
-
-vi.mock('../src/services/opencode-supervisor', () => ({
-  OpenCodeSupervisor: vi.fn().mockImplementation(() => supervisorMock),
-}))
-
-const scheduleRunnerMock = vi.hoisted(() => ({
-  start: vi.fn(),
-  stop: vi.fn(),
-}))
-
-vi.mock('../src/services/schedules', () => ({
-  ScheduleService: vi.fn().mockImplementation(() => ({
-    getActiveRunSessions: vi.fn().mockResolvedValue([]),
-    setWorktreeRemovedHandler: vi.fn(),
-  })),
-  ScheduleRunner: vi.fn().mockImplementation(() => scheduleRunnerMock),
-}))
-
-vi.mock('../src/services/sandbox/runtime', () => ({
-  SandboxRuntimeService: vi.fn().mockImplementation(() => ({
-    prepareSandboxOnBoot: vi.fn().mockResolvedValue(undefined),
-  })),
-  stopSandboxesOnShutdown: vi.fn().mockResolvedValue(undefined),
-}))
-
-const ipcServerMock = vi.hoisted(() => ({
-  ipcHandlePath: '/tmp/opencode-test-ipc.sock',
-  dispose: vi.fn().mockResolvedValue(undefined),
-}))
-
-vi.mock('../src/ipc/ipcServer', () => ({
-  createIPCServer: vi.fn().mockResolvedValue(ipcServerMock),
-}))
-
-vi.mock('../src/services/opencode-import', () => ({
-  getOpenCodeImportStatus: vi.fn().mockResolvedValue({
-    configSourcePath: null,
-    configSourcePaths: [],
-    stateSourcePath: null,
-    workspaceConfigPath: '/tmp/test-workspace/.config/opencode/opencode.json',
-    workspaceConfigPathsToRemove: [],
-    workspaceStatePath: '/tmp/test-workspace/.opencode/state/opencode',
-    workspaceStateExists: true,
-  }),
-  syncOpenCodeImport: vi.fn().mockResolvedValue({ configImported: false, stateImported: false }),
-}))
-
-vi.mock('../src/services/assistant-mode', () => ({
-  installAssistantWorkspace: vi.fn().mockResolvedValue(undefined),
-}))
-
-const seedOpenCodeConfigFileMock = vi.hoisted(() => vi.fn().mockResolvedValue({
-  path: '',
-  rawContent: '',
-  content: {},
-  isValid: true,
-  updatedAt: 0,
-  sources: [],
-  revision: '',
-}))
-
-vi.mock('../src/services/opencode-config-apply', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../src/services/opencode-config-apply')>()),
-  seedOpenCodeConfigFile: seedOpenCodeConfigFileMock,
-}))
-
-vi.mock('../src/services/skills', () => ({
-  migrateGlobalSkills: vi.fn().mockResolvedValue(undefined),
-}))
-
-const sseAggregatorMock = vi.hoisted(() => ({
-  onEvent: vi.fn(),
-  onServerEvent: vi.fn(),
-  onUpstreamConnected: vi.fn(),
-  onServerConnected: vi.fn(),
-  setOpenCodeClient: vi.fn(),
-  setResyncGate: vi.fn(),
-  releasePendingResync: vi.fn(),
-  setScheduledSessionsResolver: vi.fn(),
-  setRemoteReplayHandler: vi.fn(),
-  setRemoteSubagentResolver: vi.fn(),
-  notifyServerEvent: vi.fn(),
-  notifyServerConnected: vi.fn(),
-  start: vi.fn(),
-  shutdown: vi.fn(),
-  reconnect: vi.fn(),
-}))
-
-vi.mock('../src/services/sse-aggregator', () => ({
-  sseAggregator: sseAggregatorMock,
-}))
-
-const serverManagerMock = vi.hoisted(() => ({
-  getVersion: vi.fn().mockReturnValue('1.2.27'),
-  fetchVersion: vi.fn().mockResolvedValue('1.2.27'),
-  setDatabase: vi.fn(),
-  start: vi.fn().mockResolvedValue({ healthy: true, port: 5551, state: 'running' }),
-  stop: vi.fn().mockResolvedValue(undefined),
-  getEffectiveServerHost: vi.fn().mockReturnValue('127.0.0.1'),
-  getLastStartupError: vi.fn().mockReturnValue(null),
-  clearStartupError: vi.fn(),
-  markRestartPending: vi.fn(),
-  isRestartPending: vi.fn().mockReturnValue(false),
-  restart: vi.fn().mockResolvedValue(undefined),
-  checkHealth: vi.fn().mockResolvedValue(true),
-  isLifecycleInitialized: vi.fn().mockReturnValue(false),
-  onLifecycleInitialized: vi.fn(),
-}))
-
-vi.mock('../src/services/opencode-single-server', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/services/opencode-single-server')>()
-  return {
-    ...actual,
-    opencodeServerManager: serverManagerMock,
+afterEach(async () => {
+  for (const entry of startedApps.splice(0)) {
+    await entry.backend.shutdown()
   }
+  restoreHomeEnv()
+  workspace.restore()
 })
 
-vi.mock('../src/services/git-auth', () => ({
-  GitAuthService: vi.fn().mockImplementation(() => ({
-    initialize: vi.fn().mockResolvedValue(undefined),
-    getGitEnvironment: vi.fn().mockReturnValue({}),
-  })),
-}))
-
-vi.mock('../src/services/schedule-worktree', () => ({
-  ScheduleWorktreeManager: vi.fn().mockImplementation(() => ({})),
-}))
-
-vi.mock('../src/services/credential-provider', () => ({
-  CredentialProvider: vi.fn().mockImplementation(() => ({})),
-}))
-
-describe('backend entrypoint', () => {
-  let tempWorkspace: string
-  let previousWorkspace: string | undefined
-
-  beforeEach(async () => {
-    vi.resetModules()
-    vi.clearAllMocks()
-    serveServers.length = 0
-    previewAvailabilityInstances.length = 0
-    tempWorkspace = await mkdtemp(join(tmpdir(), 'ocm-entrypoint-'))
-    previousWorkspace = process.env.WORKSPACE_PATH
-    process.env.WORKSPACE_PATH = tempWorkspace
-  })
-
-  afterEach(async () => {
-    const { sseAggregator } = await import('../src/services/sse-aggregator')
-    sseAggregator.shutdown()
-    if (previousWorkspace === undefined) {
-      delete process.env.WORKSPACE_PATH
-    } else {
-      process.env.WORKSPACE_PATH = previousWorkspace
-    }
-    await rm(tempWorkspace, { recursive: true, force: true })
-  })
-
-  it('initializes the workspace, registers every route group, and serves the app', async () => {
-    await import('../src/index')
-
-    expect(serveMock).toHaveBeenCalledTimes(2)
-    const options = serveMock.mock.calls[0]![0] as { fetch: unknown; port: number; hostname: string }
-    expect(typeof options.fetch).toBe('function')
-    expect(options.port).toBe(3001)
-    expect(options.hostname).toBeDefined()
-
-    expect(serverManagerMock.setDatabase).toHaveBeenCalledTimes(1)
-    expect(supervisorMock.start).toHaveBeenCalledTimes(1)
-    expect(scheduleRunnerMock.start).toHaveBeenCalledTimes(1)
-    expect(sseAggregatorMock.start).toHaveBeenCalledTimes(1)
-    expect(ipcServerMock.dispose).not.toHaveBeenCalled()
-  })
-
-  it('marks the preview gateway unavailable instead of crashing when its port cannot be bound', async () => {
-    await import('../src/index')
-
-    expect(serveServers).toHaveLength(2)
-    const availability = previewAvailabilityInstances[0]
-    expect(availability?.isEnabled()).toBe(false)
-
-    const previewServer = serveServers[1]!
-    previewServer.emit('listening')
-    expect(availability?.isEnabled()).toBe(true)
-
-    const error = Object.assign(new Error('bind failed'), { code: 'EADDRINUSE' })
-    expect(() => previewServer.emit('error', error)).not.toThrow()
-    expect(availability?.isEnabled()).toBe(false)
-  })
-
-  it('imports home state without rewriting an existing valid config', async () => {
-    const configDir = join(tempWorkspace, '.config', 'opencode')
-    await mkdir(configDir, { recursive: true })
-    await writeFile(join(configDir, 'opencode.json'), '{"$schema":"https://opencode.ai/config.json"}')
-
-    const { getOpenCodeImportStatus, syncOpenCodeImport } = await import('../src/services/opencode-import')
-    vi.mocked(getOpenCodeImportStatus).mockResolvedValueOnce({
-      configSourcePath: '/import/opencode.json',
-      configSourcePaths: ['/import/opencode.json'],
-      stateSourcePath: '/import/state',
-      workspaceConfigPath: join(configDir, 'opencode.json'),
-      workspaceConfigPathsToRemove: [],
-      workspaceStatePath: join(tempWorkspace, '.opencode', 'state', 'opencode'),
-      workspaceStateExists: false,
-    })
-    vi.mocked(syncOpenCodeImport).mockResolvedValueOnce({
-      configSourcePath: '/import/opencode.json',
-      configSourcePaths: ['/import/opencode.json'],
-      stateSourcePath: '/import/state',
-      workspaceConfigPath: join(configDir, 'opencode.json'),
-      workspaceConfigPathsToRemove: [],
-      workspaceStatePath: join(tempWorkspace, '.opencode', 'state', 'opencode'),
-      workspaceStateExists: false,
-      configImported: false,
-      stateImported: true,
-    })
-
-    await import('../src/index')
-
-    expect(syncOpenCodeImport).toHaveBeenCalledWith(expect.objectContaining({
-      overwriteState: false,
-      importConfig: false,
-    }))
-  })
-
-  it('seeds the default config when no workspace or importable host config exists', async () => {
-    await import('../src/index')
-
-    expect(seedOpenCodeConfigFileMock).toHaveBeenCalledTimes(1)
-  })
-
-  it('holds the upstream resync until the OpenCode lifecycle gate opens', async () => {
-    await import('../src/index')
-
-    const isGateOpen = sseAggregatorMock.setResyncGate.mock.calls[0]![0] as () => boolean
-    serverManagerMock.isLifecycleInitialized.mockReturnValueOnce(true)
-    expect(isGateOpen()).toBe(true)
-
-    const onGateOpen = serverManagerMock.onLifecycleInitialized.mock.calls[0]![0] as () => void
-    onGateOpen()
-    expect(sseAggregatorMock.releasePendingResync).toHaveBeenCalledTimes(1)
-  })
-
+describe('backend app wiring', { timeout: 30000 }, () => {
   it('answers the root route with service metadata outside production', async () => {
-    await import('../src/index')
+    const backend = await startBackendApp()
 
-    const options = serveMock.mock.calls[0]![0] as { fetch: (request: Request) => Promise<Response> }
-    const response = await options.fetch(new Request('http://localhost/'))
-    const body = await response.json() as { name: string; status: string; endpoints: Record<string, string> }
+    const response = await backend.app.request('http://localhost/')
 
     expect(response.status).toBe(200)
+    const body = RootResponseSchema.parse(await response.json())
     expect(body.name).toBe('OpenCode WebUI')
     expect(body.status).toBe('running')
     expect(body.endpoints.repos).toBe('/api/repos')
   })
 
+  it('answers unknown API routes with the not-found handler', async () => {
+    const backend = await startBackendApp()
+
+    const response = await backend.app.request('http://localhost/unknown-route')
+
+    expect(response.status).toBe(404)
+  })
+
+  it('reports database connectivity and OpenCode availability on the health route', async () => {
+    const backend = await startBackendApp()
+
+    const response = await backend.app.request('http://localhost/api/health')
+
+    expect(response.status).toBe(200)
+    const body = HealthResponseSchema.parse(await response.json())
+    expect(body.database).toBe('connected')
+    expect(body.opencodeMinVersion).toBe('2.2.5')
+  })
+
+  it('creates the workspace directories, AGENTS.md and a seed OpenCode config on startup', async () => {
+    await startBackendApp()
+
+    const configDir = join(workspace.path, '.config', 'opencode')
+    expect(await readdir(join(workspace.path, 'repos'))).toEqual([])
+    expect(await readdir(configDir)).toEqual(expect.arrayContaining(['AGENTS.md', 'opencode.jsonc']))
+    expect(await readFile(join(configDir, 'AGENTS.md'), 'utf-8')).toContain('AGENTS.md')
+  })
+
   it.each(['opencode.jsonc', 'opencode.json'])('preserves an existing %s without seeding', async (name) => {
-    const configDir = join(tempWorkspace, '.config', 'opencode')
+    const configDir = join(workspace.path, '.config', 'opencode')
     const rawContent = '{\n  // preserve this source\n  "model": "test/model"\n}\n'
     await mkdir(configDir, { recursive: true })
     await writeFile(join(configDir, name), rawContent)
 
-    await import('../src/index')
+    await startBackendApp()
 
     expect(await readFile(join(configDir, name), 'utf8')).toBe(rawContent)
-    expect(seedOpenCodeConfigFileMock).not.toHaveBeenCalled()
   })
 
-  it('promotes a legacy config.json to opencode.json on startup without seeding', async () => {
-    const configDir = join(tempWorkspace, '.config', 'opencode')
+  it('promotes a legacy config.json to opencode.json on startup and archives the legacy source', async () => {
+    const configDir = join(workspace.path, '.config', 'opencode')
     const rawContent = '{\n  // legacy source\n  "model": "test/model"\n}\n'
     await mkdir(configDir, { recursive: true })
     await writeFile(join(configDir, 'config.json'), rawContent)
 
-    await import('../src/index')
+    await startBackendApp()
 
-    expect(seedOpenCodeConfigFileMock).not.toHaveBeenCalled()
     expect(await readFile(join(configDir, 'opencode.json'), 'utf8')).toBe(rawContent)
     await expect(readFile(join(configDir, 'config.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
-    const archived = await readdir(join(tempWorkspace, '.config', 'opencode-configs-archive'))
+    const archived = await readdir(join(workspace.path, '.config', 'opencode-configs-archive'))
     expect(archived).toHaveLength(1)
-    expect(await readFile(join(tempWorkspace, '.config', 'opencode-configs-archive', archived[0]!), 'utf8')).toBe(rawContent)
+    const archivedName = archived[0] ?? ''
+    expect(await readFile(join(workspace.path, '.config', 'opencode-configs-archive', archivedName), 'utf8')).toBe(rawContent)
   })
 
   it('folds legacy config.json keys into an existing opencode.json on startup', async () => {
-    const configDir = join(tempWorkspace, '.config', 'opencode')
+    const configDir = join(workspace.path, '.config', 'opencode')
     await mkdir(configDir, { recursive: true })
     await writeFile(join(configDir, 'opencode.json'), '{\n  // target source\n  "theme": "dark"\n}\n')
     await writeFile(join(configDir, 'config.json'), '{"model":"test/model"}')
 
-    await import('../src/index')
+    await startBackendApp()
 
-    expect(seedOpenCodeConfigFileMock).not.toHaveBeenCalled()
     const merged = await readFile(join(configDir, 'opencode.json'), 'utf8')
     expect(merged).toContain('// target source')
     expect(merged).toContain('"theme": "dark"')
     expect(merged).toContain('"model": "test/model"')
     await expect(readFile(join(configDir, 'config.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
+})
 
-  it('ignores unknown API routes through the not-found handler', async () => {
-    await import('../src/index')
+describe('preview gateway startup', { timeout: 30000 }, () => {
+  it('marks the preview gateway available once its port accepts connections', async () => {
+    const { port, release } = await reservePort()
+    await release()
+    const backend = await startBackendApp()
+    const { startPreviewGateway } = await import('../src/backend-app')
 
-    const options = serveMock.mock.calls[0]![0] as { fetch: (request: Request) => Promise<Response> }
-    const response = await options.fetch(new Request('http://localhost/unknown-route'))
+    const server = startPreviewGateway({ preview: backend.preview, port, hostname: '127.0.0.1' })
 
-    expect(response.status).toBe(404)
+    await vi.waitFor(() => expect(backend.preview.availability.isEnabled()).toBe(true))
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  })
+
+  it('marks the preview gateway unavailable instead of crashing when its port is taken', async () => {
+    const { port, release } = await reservePort()
+    const backend = await startBackendApp()
+    const { startPreviewGateway } = await import('../src/backend-app')
+
+    try {
+      const server = startPreviewGateway({ preview: backend.preview, port, hostname: '127.0.0.1' })
+      const bindFailure = new Promise<string>((resolve) => {
+        server.once('error', (cause: NodeJS.ErrnoException) => resolve(cause.code ?? ''))
+      })
+
+      await expect(bindFailure).resolves.toBe('EADDRINUSE')
+      expect(backend.preview.availability.isEnabled()).toBe(false)
+
+      const response = await backend.app.request('http://localhost/')
+      expect(response.status).toBe(200)
+    } finally {
+      await release()
+    }
   })
 })

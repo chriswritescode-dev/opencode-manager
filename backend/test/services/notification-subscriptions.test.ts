@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { Database } from 'bun:sqlite'
+import { z } from 'zod'
+import { selectRow, selectRows } from '../../src/db/rows'
 import { NotificationService } from '../../src/services/notification'
 import {
   deletePushSubscriptionsForSession,
@@ -22,26 +24,26 @@ const LEGACY_TABLE = `
   )
 `
 
+const ColumnInfoSchema = z.object({ name: z.string() })
+const SubscriptionSessionSchema = z.object({ session_id: z.string().nullable() })
+const SubscriptionEndpointSchema = z.object({ endpoint: z.string() })
+
 function columnNames(db: Database, table: string): string[] {
-  return (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
-    .map((column) => column.name)
+  return selectRows(db, ColumnInfoSchema, `PRAGMA table_info(${table})`).map((column) => column.name)
 }
 
 function indexNames(db: Database, table: string): string[] {
-  return (db.prepare(`PRAGMA index_list(${table})`).all() as Array<{ name: string }>)
-    .map((index) => index.name)
+  return selectRows(db, ColumnInfoSchema, `PRAGMA index_list(${table})`).map((index) => index.name)
 }
 
 function sessionIdOf(db: Database, endpoint: string): string | null {
-  const row = db
-    .prepare('SELECT session_id FROM push_subscriptions WHERE endpoint = ?')
-    .get(endpoint) as { session_id: string | null } | undefined
-  expect(row).toBeDefined()
-  return row!.session_id
+  const row = selectRow(db, SubscriptionSessionSchema, 'SELECT session_id FROM push_subscriptions WHERE endpoint = ?', endpoint)
+  expect(row).not.toBeNull()
+  return row?.session_id ?? null
 }
 
 function endpointsOf(db: Database): string[] {
-  return (db.prepare('SELECT endpoint FROM push_subscriptions ORDER BY endpoint').all() as Array<{ endpoint: string }>)
+  return selectRows(db, SubscriptionEndpointSchema, 'SELECT endpoint FROM push_subscriptions ORDER BY endpoint')
     .map((row) => row.endpoint)
 }
 

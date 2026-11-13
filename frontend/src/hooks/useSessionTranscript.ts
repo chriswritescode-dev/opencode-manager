@@ -11,7 +11,7 @@ import { listSessionMessages, readSessionSnapshot } from '@/api/opencode'
 import { openCodeEventStream } from '@/lib/opencode-event-stream'
 import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
 import { serverScopedKey } from '@/lib/serverScope'
-import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/opencode-server-context'
 import { useOpenCodeServerStatuses } from '@/hooks/useOpenCodeServers'
 import {
   applySessionEvents,
@@ -29,12 +29,6 @@ interface NewestPageRead {
 
 const TRANSCRIPT_FALLBACK_POLL_INTERVAL_MS = 5000
 
-/**
- * Returns the live transcript for one session: messages, pending tool calls, and status, kept
- * current by applying stream events on animation frames and re-reading the newest page whenever
- * events are missed or the stream reconnects. `fetchOlder` pages backwards through history, and
- * polling stands in while the stream is not healthy.
- */
 export function useSessionTranscript(sessionID: string, directory: string) {
   const serverId = useOpenCodeServerId()
   const isRemoteServer = !isLocalOpenCodeServer(serverId)
@@ -143,10 +137,6 @@ export function useSessionTranscript(sessionID: string, directory: string) {
       void readNewestPage().catch(() => undefined)
     }
 
-    /**
-     * Applies the events queued since the last frame to the cached transcript and requests a resync
-     * when the projection reports the cache fell behind.
-     */
     const flush = () => {
       frameRef.current = null
       const events = queuedEventsRef.current

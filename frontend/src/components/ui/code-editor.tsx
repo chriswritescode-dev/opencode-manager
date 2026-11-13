@@ -187,10 +187,11 @@ export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(funct
   const combinedRef = useCallback(
     (node: HTMLTextAreaElement | null) => {
       textareaRef.current = node
-      if (typeof ref === 'function') {
-        ref(node)
-      } else if (ref) {
+      if (ref === null) return
+      if ('current' in ref) {
         ref.current = node
+      } else {
+        ref(node)
       }
     },
     [ref],

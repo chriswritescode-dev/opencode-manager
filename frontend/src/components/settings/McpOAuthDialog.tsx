@@ -96,7 +96,6 @@ export function McpOAuthDialog({
           setStep('error')
         }
       } catch {
-        // ignore
       }
     }, 1500)
   }, [handleSuccess, stopAllPolling])
@@ -112,7 +111,6 @@ export function McpOAuthDialog({
           handleSuccess()
         }
       } catch {
-        // ignore
       }
     }, 2000)
   }, [onCheckStatus, handleSuccess])
@@ -138,6 +136,12 @@ export function McpOAuthDialog({
     }, 500)
   }, [startFlowPolling, startStatusPolling])
 
+  const onStartAuthRef = useRef(onStartAuth)
+
+  useEffect(() => {
+    onStartAuthRef.current = onStartAuth
+  })
+
   useEffect(() => {
     if (!open) return
 
@@ -145,7 +149,7 @@ export function McpOAuthDialog({
 
     const initAuth = async () => {
       try {
-        const result = await onStartAuth()
+        const result = await onStartAuthRef.current()
         setAuthUrl(result.authorizationUrl)
         flowIdRef.current = result.flowId
         setStep('ready')
@@ -156,7 +160,7 @@ export function McpOAuthDialog({
     }
 
     initAuth()
-  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, resetState])
 
   useEffect(() => {
     return () => {

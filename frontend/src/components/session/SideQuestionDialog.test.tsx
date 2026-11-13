@@ -1,28 +1,66 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { stubMatchMedia } from '@/test/test-utils'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi } from 'vitest'
 import { useState } from 'react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { SIDE_QUESTION_INSTRUCTIONS } from '@/api/opencode'
+import { installMatchMedia } from '@/test/browserFakes'
+import type { FetchRoute, FetchRouteResult, RecordedFetchRequest } from '@/test/fetchFake'
+import { renderWithProviders } from '@/test/render'
 import { SideQuestionDialog } from './SideQuestionDialog'
 
-const mocks = vi.hoisted(() => ({
-  askSideQuestion: vi.fn(),
-}))
+interface GenerationServer {
+  route: FetchRoute
+  requests: RecordedFetchRequest[]
+  signals: Array<AbortSignal | null | undefined>
+  resolve: (index: number, result: FetchRouteResult) => void
+}
 
-vi.mock('@/api/opencode', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/api/opencode')>()),
-  askSideQuestion: mocks.askSideQuestion,
-}))
+function createGenerationServer(plan: Array<FetchRouteResult | 'pending'>): GenerationServer {
+  const requests: RecordedFetchRequest[] = []
+  const signals: Array<AbortSignal | null | undefined> = []
+  const resolvers: Array<(result: FetchRouteResult) => void> = []
 
-const renderDialog = (props: Partial<React.ComponentProps<typeof SideQuestionDialog>> = {}) =>
-  render(
-    <SideQuestionDialog
-      open
-      onOpenChange={vi.fn()}
-      sessionID="ses_1"
-      initialQuestion=""
-      {...props}
-    />,
+  const route: FetchRoute = {
+    method: 'POST',
+    path: '/api/opencode/api/session/ses_1/generate',
+    respond: (request, _params, init) => {
+      const index = requests.length
+      requests.push(request)
+      signals.push(init?.signal)
+      const outcome = plan[index] ?? { status: 500, json: { error: 'unexpected request' } }
+      if (outcome !== 'pending') return outcome
+      return new Promise<FetchRouteResult>((resolve) => {
+        resolvers[index] = resolve
+      })
+    },
+  }
+
+  return {
+    route,
+    requests,
+    signals,
+    resolve: (index, result) => resolvers[index]?.(result),
+  }
+}
+
+function renderDialog(
+  server: GenerationServer,
+  props: Partial<React.ComponentProps<typeof SideQuestionDialog>> = {},
+) {
+  return renderWithProviders(
+    <SideQuestionDialog open onOpenChange={vi.fn()} sessionID="ses_1" {...props} />,
+    {
+      auth: false,
+      theme: false,
+      tts: false,
+      toaster: false,
+      fetchRoutes: [server.route],
+    },
   )
+}
+
+function expectedPrompt(question: string): string {
+  return `${SIDE_QUESTION_INSTRUCTIONS}\n\n${question}`
+}
 
 function FocusHost() {
   const [open, setOpen] = useState(false)
@@ -44,16 +82,8 @@ function FocusHost() {
 }
 
 describe('SideQuestionDialog', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  afterEach(() => {
-    Reflect.deleteProperty(window, 'matchMedia')
-  })
-
   it('focuses its input on open and returns focus to the previous element on Escape', async () => {
-    stubMatchMedia(true)
+    installMatchMedia(true)
     render(<FocusHost />)
     const prompt = screen.getByLabelText('prompt')
     prompt.focus()
@@ -69,158 +99,103 @@ describe('SideQuestionDialog', () => {
   })
 
   it('asks a non-empty initial question once on mount and renders the answer', async () => {
-    mocks.askSideQuestion.mockResolvedValue('**42**')
+    const server = createGenerationServer([{ json: { data: { text: '**42**' } } }])
 
-    renderDialog({ initialQuestion: 'what is the answer?' })
+    renderDialog(server, { initialQuestion: 'what is the answer?' })
 
-    await waitFor(() => expect(mocks.askSideQuestion).toHaveBeenCalledTimes(1))
-    expect(mocks.askSideQuestion).toHaveBeenCalledWith(
-      'ses_1',
-      'what is the answer?',
-      expect.any(AbortSignal),
-      'local',
-    )
+    await waitFor(() => expect(server.requests).toHaveLength(1))
+    expect(server.requests[0].body).toEqual({ prompt: expectedPrompt('what is the answer?') })
     expect(await screen.findByText('42')).toBeInTheDocument()
   })
 
   it('asks nothing until the user types and submits when the initial question is empty', async () => {
-    mocks.askSideQuestion.mockResolvedValue('because')
+    const server = createGenerationServer([{ json: { data: { text: 'because' } } }])
 
-    renderDialog()
+    renderDialog(server)
 
-    expect(mocks.askSideQuestion).not.toHaveBeenCalled()
+    expect(server.requests).toHaveLength(0)
 
     fireEvent.change(screen.getByPlaceholderText('Ask a side question'), {
       target: { value: 'why?' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
 
-    await waitFor(() =>
-      expect(mocks.askSideQuestion).toHaveBeenCalledWith('ses_1', 'why?', expect.any(AbortSignal), 'local'),
-    )
+    await waitFor(() => expect(server.requests).toHaveLength(1))
+    expect(server.requests[0].body).toEqual({ prompt: expectedPrompt('why?') })
     expect(await screen.findByText('because')).toBeInTheDocument()
   })
 
-  it('shows Retry on failure and asks again when clicked', async () => {
-    mocks.askSideQuestion.mockRejectedValueOnce(new Error('nope'))
+  it('shows Retry on failure and asks the same question again when clicked', async () => {
+    const server = createGenerationServer([
+      { status: 500, json: { error: 'nope' } },
+      { json: { data: { text: 'retried answer' } } },
+    ])
 
-    renderDialog({ initialQuestion: 'why?' })
+    renderDialog(server, { initialQuestion: 'why?' })
 
     await screen.findByText('Failed to get an answer')
-
-    mocks.askSideQuestion.mockResolvedValueOnce('retried answer')
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
 
-    await waitFor(() => expect(mocks.askSideQuestion).toHaveBeenCalledTimes(2))
-    expect(mocks.askSideQuestion).toHaveBeenLastCalledWith('ses_1', 'why?', expect.any(AbortSignal), 'local')
+    await waitFor(() => expect(server.requests).toHaveLength(2))
+    expect(server.requests[1].body).toEqual({ prompt: expectedPrompt('why?') })
     expect(await screen.findByText('retried answer')).toBeInTheDocument()
   })
 
-  it('retries the failed question even when the draft was edited to another value', async () => {
-    mocks.askSideQuestion.mockRejectedValueOnce(new Error('nope'))
+  it.each([
+    ['another value', 'question B'],
+    ['cleared', ''],
+  ] as const)('retries the failed question even when the draft was %s', async (_label, draft) => {
+    const server = createGenerationServer([
+      { status: 500, json: { error: 'nope' } },
+      { json: { data: { text: 'retried answer' } } },
+    ])
 
-    renderDialog({ initialQuestion: 'question A' })
-
-    await screen.findByText('Failed to get an answer')
-
-    fireEvent.change(screen.getByPlaceholderText('Ask a side question'), {
-      target: { value: 'question B' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
-
-    await waitFor(() => expect(mocks.askSideQuestion).toHaveBeenCalledTimes(2))
-    expect(mocks.askSideQuestion).toHaveBeenLastCalledWith(
-      'ses_1',
-      'question A',
-      expect.any(AbortSignal),
-      'local',
-    )
-  })
-
-  it('retries the failed question even when the draft was cleared', async () => {
-    mocks.askSideQuestion.mockRejectedValueOnce(new Error('nope'))
-
-    renderDialog({ initialQuestion: 'question A' })
+    renderDialog(server, { initialQuestion: 'question A' })
 
     await screen.findByText('Failed to get an answer')
 
     fireEvent.change(screen.getByPlaceholderText('Ask a side question'), {
-      target: { value: '' },
+      target: { value: draft },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
 
-    await waitFor(() => expect(mocks.askSideQuestion).toHaveBeenCalledTimes(2))
-    expect(mocks.askSideQuestion).toHaveBeenLastCalledWith(
-      'ses_1',
-      'question A',
-      expect.any(AbortSignal),
-      'local',
-    )
+    await waitFor(() => expect(server.requests).toHaveLength(2))
+    expect(server.requests[1].body).toEqual({ prompt: expectedPrompt('question A') })
   })
 
   it('cancels the pending request when a replacement question is submitted', async () => {
-    let resolveA: (value: string) => void = () => {}
-    let resolveB: (value: string) => void = () => {}
-    let signalA: AbortSignal | undefined
-    let signalB: AbortSignal | undefined
+    const server = createGenerationServer(['pending', 'pending'])
+    renderDialog(server, { initialQuestion: 'question A' })
 
-    mocks.askSideQuestion
-      .mockImplementationOnce((_sessionID: string, _question: string, signal?: AbortSignal) => {
-        signalA = signal
-        return new Promise<string>((resolve) => {
-          resolveA = resolve
-        })
-      })
-      .mockImplementationOnce((_sessionID: string, _question: string, signal?: AbortSignal) => {
-        signalB = signal
-        return new Promise<string>((resolve) => {
-          resolveB = resolve
-        })
-      })
-
-    renderDialog({ initialQuestion: 'question A' })
-
-    await waitFor(() => expect(signalA).toBeDefined())
+    await waitFor(() => expect(server.requests).toHaveLength(1))
 
     fireEvent.change(screen.getByPlaceholderText('Ask a side question'), {
       target: { value: 'question B' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
 
-    await waitFor(() => expect(mocks.askSideQuestion).toHaveBeenCalledTimes(2))
-    expect(mocks.askSideQuestion).toHaveBeenLastCalledWith(
-      'ses_1',
-      'question B',
-      expect.any(AbortSignal),
-      'local',
-    )
-    expect(signalB).toBeDefined()
-    expect(signalA?.aborted).toBe(true)
+    await waitFor(() => expect(server.requests).toHaveLength(2))
+    expect(server.requests[1].body).toEqual({ prompt: expectedPrompt('question B') })
+    expect(server.signals[0]?.aborted).toBe(true)
+    expect(server.signals[1]?.aborted).toBe(false)
 
-    resolveB('answer B')
+    server.resolve(1, { json: { data: { text: 'answer B' } } })
     expect(await screen.findByText('answer B')).toBeInTheDocument()
 
-    resolveA('answer A')
+    server.resolve(0, { json: { data: { text: 'answer A' } } })
     await waitFor(() => expect(screen.queryByText('answer A')).not.toBeInTheDocument())
     expect(screen.getByText('answer B')).toBeInTheDocument()
   })
 
   it('aborts the in-flight request when unmounted', async () => {
-    let capturedSignal: AbortSignal | undefined
-    mocks.askSideQuestion.mockImplementation(
-      (_sessionID: string, _question: string, signal?: AbortSignal) => {
-        capturedSignal = signal
-        return new Promise<string>(() => {})
-      },
-    )
+    const server = createGenerationServer(['pending'])
+    const { unmount } = renderDialog(server, { initialQuestion: 'why?' })
 
-    const { unmount } = renderDialog({ initialQuestion: 'why?' })
-
-    await waitFor(() => expect(capturedSignal).toBeDefined())
-    expect(capturedSignal?.aborted).toBe(false)
+    await waitFor(() => expect(server.signals).toHaveLength(1))
+    expect(server.signals[0]?.aborted).toBe(false)
 
     unmount()
 
-    expect(capturedSignal?.aborted).toBe(true)
+    expect(server.signals[0]?.aborted).toBe(true)
   })
 })

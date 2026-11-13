@@ -1,92 +1,166 @@
-import { describe, it, expect, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
-import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
+import type { Database } from 'bun:sqlite'
+import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
+import { LOCAL_OPENCODE_SERVER_ID, TerminalInfoSchema } from '@opencode-manager/shared/schemas'
+import { z } from 'zod'
+import type { JsonValue } from '@opencode-manager/shared/utils'
 import {
   createOpenCodeServerTerminalRoutes,
   type ServerTerminalServiceResolver,
 } from '../../src/routes/opencode-server-terminals'
 import { TerminalService } from '../../src/services/terminal'
+import { FetchOpenCodeClient } from '../../src/services/opencode/client'
 import { OpenCodeServerNotFoundError } from '../../src/services/opencode-server-registry'
-import type { OpenCodeClient } from '../../src/services/opencode/client'
-import type { CredentialProvider } from '../../src/services/credential-provider'
+import { CredentialProvider } from '../../src/services/credential-provider'
+import { createFetchStub, type FetchStub } from '../helpers/fetch-stub'
 import { createStubRepoEnvService } from '../helpers/stub-repo-env-service'
+import { createTestDatabase } from '../helpers/test-database'
+import { readJson } from '../helpers/read-json'
 
 const DIRECTORY = '/home/me/app'
 const SERVER_ID = 'srv_kitchen'
 const UNKNOWN_SERVER_ID = 'srv_missing'
+const REMOTE_BASE_URL = 'https://remote.internal'
 const jsonHeaders = { 'Content-Type': 'application/json' }
 
-function createPty(overrides: Record<string, unknown> = {}) {
+type RemotePty = Awaited<ReturnType<OpenCodeApi['pty']['list']>>['data'][number]
+
+const TerminalsResponseSchema = z.object({ terminals: z.array(TerminalInfoSchema) })
+const SuccessResponseSchema = z.object({ success: z.boolean() })
+const ErrorResponseSchema = z.object({ error: z.string() })
+const PtyCreateBodySchema = z.object({
+  title: z.string().optional(),
+  env: z.record(z.string(), z.string()).optional(),
+})
+const PtyUpdateBodySchema = z.object({
+  size: z.object({ rows: z.number(), cols: z.number() }).optional(),
+})
+
+interface RecordedClientRequest {
+  method: string
+  pathname: string
+  search: string
+  body: string
+  headers: Headers
+}
+
+function createPty(overrides: Partial<RemotePty> = {}): RemotePty {
   return {
     id: 'pty-1',
     title: 'Terminal',
     command: 'sh',
     args: [],
     cwd: DIRECTORY,
-    status: 'running' as const,
+    status: 'running',
     pid: 1,
     ...overrides,
   }
 }
 
-function createRemoteClient(terminals: Array<Record<string, unknown>> = [createPty()]) {
-  const list = vi.fn(async ({ location }: { location: { directory: string } }) => ({
-    location,
-    data: terminals,
-  }))
-  const create = vi.fn(async (input: { location: { directory: string }; title: string; env: Record<string, string> }) => ({
-    location: input.location,
-    data: createPty({ id: 'pty-new', title: input.title }),
-  }))
-  const update = vi.fn(async () => ({ location: { directory: DIRECTORY }, data: createPty() }))
-  const remove = vi.fn(async () => undefined)
-  const client = { api: { pty: { list, create, update, remove } } } as unknown as OpenCodeClient
-  return { client, list, create, update, remove }
+function jsonResponse(payload: JsonValue): Response {
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })
 }
 
-function createService(includeLocalEnv = false, terminals?: Array<Record<string, unknown>>) {
-  const remote = createRemoteClient(terminals)
-  const credentialProvider = {
-    getGhCliEnv: vi.fn(() => ({ GH_TOKEN: 'local-token' })),
-  } as unknown as CredentialProvider
-  const service = new TerminalService(
-    { client: remote.client, baseUrl: () => 'https://remote.internal', includeLocalEnv },
-    credentialProvider,
-    createStubRepoEnvService(),
+function createRemoteClient(terminals: RemotePty[] = [createPty()]) {
+  const fetchFn: FetchStub = createFetchStub(async (input, init) => {
+    const url = new URL(String(input))
+    const method = init?.method ?? 'GET'
+    if (url.pathname === '/api/pty' && method === 'GET') {
+      return jsonResponse({ location: { directory: DIRECTORY }, data: terminals })
+    }
+    if (url.pathname === '/api/pty' && method === 'POST') {
+      const body = PtyCreateBodySchema.parse(JSON.parse(String(init?.body)))
+      return jsonResponse({
+        location: { directory: DIRECTORY },
+        data: createPty({ id: 'pty-new', title: body.title ?? 'Terminal' }),
+      })
+    }
+    if (url.pathname.startsWith('/api/pty/') && method === 'PUT') {
+      return jsonResponse({ location: { directory: DIRECTORY }, data: createPty() })
+    }
+    if (url.pathname.startsWith('/api/pty/') && method === 'DELETE') {
+      return new Response(null, { status: 204 })
+    }
+    return new Response(null, { status: 404 })
+  })
+  const client = new FetchOpenCodeClient({
+    baseUrl: REMOTE_BASE_URL,
+    basicAuth: null,
+    defaultDirectory: false,
+    fetchFn,
+  })
+  return { client, fetchFn }
+}
+
+async function recordedRequests(fetchFn: FetchStub): Promise<RecordedClientRequest[]> {
+  return Promise.all(
+    fetchFn.mock.calls.map(async ([input, init]) => {
+      const url = new URL(String(input))
+      return {
+        method: init?.method ?? 'GET',
+        pathname: url.pathname,
+        search: url.search,
+        body: await new Response(init?.body ?? null).text(),
+        headers: new Headers(init?.headers),
+      }
+    }),
   )
-  return { service, credentialProvider, ...remote }
-}
-
-function createResolver(service: TerminalService): ServerTerminalServiceResolver {
-  return (serverId) => {
-    if (serverId === UNKNOWN_SERVER_ID) throw new OpenCodeServerNotFoundError(serverId)
-    return service
-  }
-}
-
-function createApp(service: TerminalService): Hono {
-  const app = new Hono()
-  app.route('/', createOpenCodeServerTerminalRoutes(createResolver(service)))
-  return app
 }
 
 describe('OpenCode Server Terminal Routes', () => {
+  let db: Database
+  let credentialProvider: CredentialProvider
+
+  beforeEach(() => {
+    db = createTestDatabase()
+    credentialProvider = new CredentialProvider(db)
+  })
+
+  function createService(includeLocalEnv = false, terminals?: RemotePty[]) {
+    const remote = createRemoteClient(terminals)
+    const service = new TerminalService(
+      { client: remote.client, baseUrl: () => REMOTE_BASE_URL, includeLocalEnv },
+      credentialProvider,
+      createStubRepoEnvService(),
+    )
+    return { service, ...remote }
+  }
+
+  function createApp(service: TerminalService): Hono {
+    const resolveService: ServerTerminalServiceResolver = (serverId) => {
+      if (serverId === UNKNOWN_SERVER_ID) throw new OpenCodeServerNotFoundError(serverId)
+      return service
+    }
+    const app = new Hono()
+    app.route('/', createOpenCodeServerTerminalRoutes(resolveService))
+    return app
+  }
+
   describe('GET /:serverId/terminals', () => {
     it('lists the terminals of the remote directory', async () => {
-      const { service, list } = createService()
+      const { service, fetchFn } = createService()
+
       const res = await createApp(service).request(
         `/${SERVER_ID}/terminals?directory=${encodeURIComponent(DIRECTORY)}`,
       )
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({
+      await expect(readJson(res, TerminalsResponseSchema)).resolves.toEqual({
         terminals: [{ id: 'pty-1', title: 'Terminal', kind: 'shell', cwd: DIRECTORY, status: 'running' }],
       })
-      expect(list).toHaveBeenCalledWith({ location: { directory: DIRECTORY } })
+      const [request] = await recordedRequests(fetchFn)
+      expect(request?.method).toBe('GET')
+      expect(request?.pathname).toBe('/api/pty')
+      expect(new URLSearchParams(request?.search).get('location[directory]')).toBe(DIRECTORY)
     })
 
     it('rejects the local server', async () => {
       const { service } = createService()
+
       const res = await createApp(service).request(
         `/${LOCAL_OPENCODE_SERVER_ID}/terminals?directory=${encodeURIComponent(DIRECTORY)}`,
       )
@@ -96,28 +170,31 @@ describe('OpenCode Server Terminal Routes', () => {
 
     it('returns 404 for an unknown server', async () => {
       const { service } = createService()
+
       const res = await createApp(service).request(
         `/${UNKNOWN_SERVER_ID}/terminals?directory=${encodeURIComponent(DIRECTORY)}`,
       )
 
       expect(res.status).toBe(404)
-      expect(await res.json()).toEqual({ error: `OpenCode server not found: ${UNKNOWN_SERVER_ID}` })
+      await expect(readJson(res, ErrorResponseSchema)).resolves.toEqual({
+        error: `OpenCode server not found: ${UNKNOWN_SERVER_ID}`,
+      })
     })
 
-    it('requires an absolute directory', async () => {
+    it.each(['', '?directory=relative/path'])('requires an absolute directory (%s)', async (query) => {
       const { service } = createService()
-      const app = createApp(service)
 
-      for (const path of [`/${SERVER_ID}/terminals`, `/${SERVER_ID}/terminals?directory=relative/path`]) {
-        const res = await app.request(path)
-        expect(res.status).toBe(400)
-      }
+      const res = await createApp(service).request(`/${SERVER_ID}/terminals${query}`)
+
+      expect(res.status).toBe(400)
     })
   })
 
   describe('POST /:serverId/terminals', () => {
     it('creates a shell without local credentials', async () => {
-      const { service, create, credentialProvider } = createService()
+      const { service, fetchFn } = createService()
+      const getGhCliEnv = vi.spyOn(credentialProvider, 'getGhCliEnv')
+
       const res = await createApp(service).request(`/${SERVER_ID}/terminals`, {
         method: 'POST',
         headers: jsonHeaders,
@@ -125,13 +202,11 @@ describe('OpenCode Server Terminal Routes', () => {
       })
 
       expect(res.status).toBe(200)
-      expect(credentialProvider.getGhCliEnv).not.toHaveBeenCalled()
-      expect(create).toHaveBeenCalledWith({
-        location: { directory: DIRECTORY },
-        title: 'Remote shell',
-        env: {},
-      })
-      expect(await res.json()).toEqual({
+      expect(getGhCliEnv).not.toHaveBeenCalled()
+      const [request] = await recordedRequests(fetchFn)
+      expect(request?.method).toBe('POST')
+      expect(request?.pathname).toBe('/api/pty')
+      await expect(readJson(res, TerminalInfoSchema)).resolves.toEqual({
         id: 'pty-new',
         title: 'Remote shell',
         kind: 'shell',
@@ -140,30 +215,38 @@ describe('OpenCode Server Terminal Routes', () => {
       })
     })
 
-    it('defaults the title and rejects a missing directory', async () => {
-      const { service, create } = createService()
-      const app = createApp(service)
+    it('forwards an empty environment and defaults the title', async () => {
+      const { service, fetchFn } = createService()
 
-      const created = await app.request(`/${SERVER_ID}/terminals`, {
+      const res = await createApp(service).request(`/${SERVER_ID}/terminals`, {
         method: 'POST',
         headers: jsonHeaders,
         body: JSON.stringify({ directory: DIRECTORY }),
       })
-      expect(created.status).toBe(200)
-      expect(create).toHaveBeenCalledWith(expect.objectContaining({ title: 'Terminal' }))
 
-      const missing = await app.request(`/${SERVER_ID}/terminals`, {
+      expect(res.status).toBe(200)
+      const [request] = await recordedRequests(fetchFn)
+      expect(PtyCreateBodySchema.parse(JSON.parse(request?.body ?? ''))).toEqual({ title: 'Terminal', env: {} })
+    })
+
+    it('rejects a missing directory', async () => {
+      const { service, fetchFn } = createService()
+
+      const res = await createApp(service).request(`/${SERVER_ID}/terminals`, {
         method: 'POST',
         headers: jsonHeaders,
         body: JSON.stringify({}),
       })
-      expect(missing.status).toBe(400)
+
+      expect(res.status).toBe(400)
+      expect(fetchFn).not.toHaveBeenCalled()
     })
   })
 
   describe('PATCH /:serverId/terminals/:ptyID', () => {
     it('resizes a terminal of the remote server', async () => {
-      const { service, update } = createService()
+      const { service, fetchFn } = createService()
+
       const res = await createApp(service).request(`/${SERVER_ID}/terminals/pty-1`, {
         method: 'PATCH',
         headers: jsonHeaders,
@@ -171,16 +254,17 @@ describe('OpenCode Server Terminal Routes', () => {
       })
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ success: true })
-      expect(update).toHaveBeenCalledWith({
-        ptyID: 'pty-1',
-        location: { directory: DIRECTORY },
-        size: { cols: 120, rows: 40 },
+      await expect(readJson(res, SuccessResponseSchema)).resolves.toEqual({ success: true })
+      const request = (await recordedRequests(fetchFn)).find((entry) => entry.method === 'PUT')
+      expect(request?.pathname).toBe('/api/pty/pty-1')
+      expect(PtyUpdateBodySchema.parse(JSON.parse(request?.body ?? ''))).toEqual({
+        size: { rows: 40, cols: 120 },
       })
     })
 
     it('returns 404 for an unknown PTY id', async () => {
-      const { service } = createService(false, [])
+      const { service, fetchFn } = createService(false, [])
+
       const res = await createApp(service).request(`/${SERVER_ID}/terminals/missing`, {
         method: 'PATCH',
         headers: jsonHeaders,
@@ -188,30 +272,35 @@ describe('OpenCode Server Terminal Routes', () => {
       })
 
       expect(res.status).toBe(404)
+      expect((await recordedRequests(fetchFn)).some((entry) => entry.method === 'PUT')).toBe(false)
     })
   })
 
   describe('DELETE /:serverId/terminals/:ptyID', () => {
     it('removes a terminal of the remote server', async () => {
-      const { service, remove } = createService()
+      const { service, fetchFn } = createService()
+
       const res = await createApp(service).request(
         `/${SERVER_ID}/terminals/pty-1?directory=${encodeURIComponent(DIRECTORY)}`,
         { method: 'DELETE' },
       )
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ success: true })
-      expect(remove).toHaveBeenCalledWith({ ptyID: 'pty-1', location: { directory: DIRECTORY } })
+      await expect(readJson(res, SuccessResponseSchema)).resolves.toEqual({ success: true })
+      const request = (await recordedRequests(fetchFn)).find((entry) => entry.method === 'DELETE')
+      expect(request?.pathname).toBe('/api/pty/pty-1')
     })
 
     it('returns 404 for an unknown PTY id', async () => {
-      const { service } = createService(false, [])
+      const { service, fetchFn } = createService(false, [])
+
       const res = await createApp(service).request(
         `/${SERVER_ID}/terminals/missing?directory=${encodeURIComponent(DIRECTORY)}`,
         { method: 'DELETE' },
       )
 
       expect(res.status).toBe(404)
+      expect((await recordedRequests(fetchFn)).some((entry) => entry.method === 'DELETE')).toBe(false)
     })
   })
 })

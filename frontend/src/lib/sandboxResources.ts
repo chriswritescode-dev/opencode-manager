@@ -1,10 +1,14 @@
-import { SessionSandboxResourcesSchema, type SessionSandboxResources } from '@opencode-manager/shared/schemas'
+import {
+  SessionSandboxCpusSchema,
+  SessionSandboxMemoryMibSchema,
+  type SessionSandboxResources,
+} from '@opencode-manager/shared/schemas'
 import type { useSandboxToggle } from '@/hooks/useSandboxToggle'
 
 export type SandboxToggleState = ReturnType<typeof useSandboxToggle>
 
-const cpusSchema = SessionSandboxResourcesSchema.shape.cpus
-const memoryMibSchema = SessionSandboxResourcesSchema.shape.memoryMib
+const cpusSchema = SessionSandboxCpusSchema
+const memoryMibSchema = SessionSandboxMemoryMibSchema
 
 export const SANDBOX_CPUS_MIN = cpusSchema.minValue ?? 1
 export const SANDBOX_CPUS_MAX = cpusSchema.maxValue ?? 64

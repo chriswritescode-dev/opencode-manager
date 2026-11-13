@@ -1,88 +1,157 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, renderHook } from '@testing-library/react'
+import { act, waitFor } from '@testing-library/react'
+import type { SessionInfo } from '@opencode-manager/shared/opencode'
 import { useSessionSearch } from './useSessionSearch'
+import { renderHookWithProviders } from '@/test/render'
+import { makeSession } from '@/test/fixtures/api'
+import type { FetchFake, FetchRoute, RecordedFetchRequest } from '@/test/fetchFake'
 
-const helperSessionIdsRef = vi.hoisted(() => ({ current: new Set<string>() }))
+const hookProviders = {
+  auth: false,
+  theme: false,
+  tts: false,
+  toaster: false,
+} as const
 
-vi.mock('@/hooks/useChangeWalkthrough', () => ({
-  useWalkthroughHelperSessionIds: () => helperSessionIdsRef.current,
-}))
+const SESSION_ROUTE = '/api/opencode/api/session'
+const HELPER_ROUTE = '/api/change-walkthroughs/helper-sessions'
 
-const { sessionsData, lastArgsRef, flagsRef } = vi.hoisted(() => ({
-  sessionsData: [] as Array<{ id: string; title: string; location: { directory: string }; parentID?: string; time: { updated: number } }>,
-  lastArgsRef: { current: undefined as { directories: string[]; options?: { search?: string; limit?: number; keepPreviousResults?: boolean; allDirectories?: boolean; project?: { id: string; subpath: string } } } | undefined },
-  flagsRef: { current: { hasNextPage: false, isFetchingNextPage: false, isFetchNextPageError: false, isPlaceholderData: false, isError: false } },
-}))
+interface SessionServer {
+  routes: FetchRoute[]
+  setSessions: (sessions: SessionInfo[]) => void
+  setNextCursor: (cursor: string | null) => void
+  setFailure: (failure: { status: number } | null) => void
+  setHelperSessionIds: (ids: string[]) => void
+  deferNextPage: () => () => void
+}
 
-vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/hooks/useOpenCode')>()
+function sessionServer(initial: SessionInfo[] = []): SessionServer {
+  let sessions = initial
+  let nextCursor: string | null = null
+  let failure: { status: number } | null = null
+  let helperSessionIds: string[] = []
+  let pendingNextPage: Promise<void> | null = null
+
   return {
-    ...actual,
-    useSessionsAcrossDirectories: (directories: string[], options?: { search?: string; limit?: number; keepPreviousResults?: boolean; allDirectories?: boolean; project?: { id: string; subpath: string } }) => {
-      lastArgsRef.current = { directories, options }
-      const search = options?.search?.toLowerCase() ?? ''
-      const data = search
-        ? sessionsData.filter((session) => session.title.toLowerCase().includes(search))
-        : sessionsData
-      return {
-        data,
-        isLoading: false,
-        isError: flagsRef.current.isError,
-        isPlaceholderData: flagsRef.current.isPlaceholderData,
-        fetchNextPage: vi.fn(),
-        hasNextPage: flagsRef.current.hasNextPage,
-        isFetchingNextPage: flagsRef.current.isFetchingNextPage,
-        isFetchNextPageError: flagsRef.current.isFetchNextPageError,
+    setSessions: (next) => {
+      sessions = next
+    },
+    setNextCursor: (next) => {
+      nextCursor = next
+    },
+    setFailure: (next) => {
+      failure = next
+    },
+    setHelperSessionIds: (ids) => {
+      helperSessionIds = ids
+    },
+    deferNextPage: () => {
+      let release = () => {}
+      pendingNextPage = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      return () => {
+        pendingNextPage = null
+        release()
       }
     },
+    routes: [
+      {
+        method: 'GET',
+        path: SESSION_ROUTE,
+        respond: async (request) => {
+          if (request.searchParams.get('cursor') !== null && pendingNextPage) await pendingNextPage
+          if (failure) return { status: failure.status, json: { error: 'failed' } }
+          const search = request.searchParams.get('search')?.toLowerCase() ?? ''
+          const data = search
+            ? sessions.filter((session) => (session.title ?? '').toLowerCase().includes(search))
+            : sessions
+          return { json: { data, cursor: nextCursor === null ? {} : { next: nextCursor } } }
+        },
+      },
+      {
+        method: 'GET',
+        path: HELPER_ROUTE,
+        respond: () => ({ json: { sessionIds: helperSessionIds } }),
+      },
+    ],
   }
-})
+}
+
+function makeTestSession(id: string, title: string, directory: string, updated: number): SessionInfo {
+  return makeSession({ id, title, location: { directory }, time: { created: updated - 10, updated } })
+}
+
+function sessionRequests(fetchFake: FetchFake): RecordedFetchRequest[] {
+  return fetchFake.findRequests('GET', SESSION_ROUTE)
+}
+
+function lastSessionRequest(fetchFake: FetchFake): RecordedFetchRequest | undefined {
+  const requests = sessionRequests(fetchFake)
+  return requests[requests.length - 1]
+}
+
+function renderSearch(
+  directories: string[],
+  options: Parameters<typeof useSessionSearch>[1],
+  server: SessionServer,
+) {
+  return renderHookWithProviders(() => useSessionSearch(directories, options), {
+    ...hookProviders,
+    fetchRoutes: server.routes,
+  })
+}
 
 describe('useSessionSearch', () => {
+  let server: SessionServer
+
   beforeEach(() => {
-    sessionsData.splice(0, sessionsData.length,
-      { id: 'ses_alpha', title: 'alpha task', location: { directory: '/w/a' }, time: { updated: 2 } },
-      { id: 'ses_beta', title: 'beta task', location: { directory: '/w/a' }, time: { updated: 1 } },
-    )
-    lastArgsRef.current = undefined
-    helperSessionIdsRef.current = new Set()
-    flagsRef.current = { hasNextPage: false, isFetchingNextPage: false, isFetchNextPageError: false, isPlaceholderData: false, isError: false }
+    server = sessionServer([
+      makeTestSession('ses_alpha', 'alpha task', '/w/a', 2),
+      makeTestSession('ses_beta', 'beta task', '/w/a', 1),
+    ])
   })
 
   afterEach(() => {
     vi.useRealTimers()
   })
 
-  it('filters sessions locally by title immediately', () => {
-    const { result } = renderHook(() => useSessionSearch(['/w/a']))
+  it('filters sessions locally by title immediately', async () => {
+    const { result, fetchFake } = renderSearch(['/w/a'], {}, server)
+
+    await waitFor(() => expect(result.current.filteredSessions).toHaveLength(2))
 
     act(() => {
       result.current.setQuery('alpha')
     })
 
     expect(result.current.filteredSessions.map((session) => session.title)).toEqual(['alpha task'])
-    expect(lastArgsRef.current?.options?.search).toBe('')
+    expect(lastSessionRequest(fetchFake)?.searchParams.get('search')).toBeNull()
   })
 
-  it('passes the debounced search to useSessionsAcrossDirectories with keepPreviousResults', () => {
+  it('passes the debounced search to the session list request', async () => {
     vi.useFakeTimers()
-    const { result } = renderHook(() => useSessionSearch(['/w/a']))
+    const { result, fetchFake } = renderSearch(['/w/a'], {}, server)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
 
     act(() => {
       result.current.setQuery('deploy')
     })
-    act(() => {
-      vi.advanceTimersByTime(150)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150)
     })
 
-    expect(lastArgsRef.current?.options?.search).toBe('deploy')
-    expect(lastArgsRef.current?.options?.limit).toBe(25)
-    expect(lastArgsRef.current?.options?.keepPreviousResults).toBe(true)
+    const request = lastSessionRequest(fetchFake)
+    expect(request?.searchParams.get('search')).toBe('deploy')
+    expect(request?.searchParams.get('limit')).toBe('25')
   })
 
-  it('reports a pending search before the debounce settles', () => {
+  it('reports a pending search before the debounce settles', async () => {
     vi.useFakeTimers()
-    const { result } = renderHook(() => useSessionSearch(['/w/a']))
+    const { result } = renderSearch(['/w/a'], {}, server)
 
     act(() => {
       result.current.setQuery('deploy')
@@ -90,62 +159,68 @@ describe('useSessionSearch', () => {
 
     expect(result.current.isSearchPending).toBe(true)
 
-    act(() => {
-      vi.advanceTimersByTime(150)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150)
+    })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
     })
 
     expect(result.current.isSearchPending).toBe(false)
   })
 
-  it('passes allDirectories through to useSessionsAcrossDirectories', () => {
-    renderHook(() => useSessionSearch(['/w/a'], { allDirectories: true }))
+  it('omits the directory filter when reading all directories', async () => {
+    const { fetchFake } = renderSearch(['/w/a'], { allDirectories: true }, server)
 
-    expect(lastArgsRef.current?.options?.allDirectories).toBe(true)
+    await waitFor(() => expect(sessionRequests(fetchFake).length).toBeGreaterThan(0))
+
+    expect(lastSessionRequest(fetchFake)?.searchParams.get('directory')).toBeNull()
   })
 
-  it('forwards a project scope and skips directory filtering', () => {
-    sessionsData.splice(
-      0,
-      sessionsData.length,
-      { id: 'ses_root', title: 'root', location: { directory: '/w/a' }, time: { updated: 2 } },
-      { id: 'ses_wt', title: 'worktree', location: { directory: '/w/other' }, time: { updated: 1 } },
-    )
+  it('forwards a project scope and skips directory filtering', async () => {
+    server.setSessions([
+      makeTestSession('ses_root', 'root', '/w/a', 2),
+      makeTestSession('ses_wt', 'worktree', '/w/other', 1),
+    ])
+    const { result, fetchFake } = renderSearch(['/w/a'], { project: { id: 'proj_x', subpath: '' } }, server)
 
-    const { result } = renderHook(() =>
-      useSessionSearch(['/w/a'], { project: { id: 'proj_x', subpath: '' } }),
-    )
+    await waitFor(() => expect(result.current.filteredSessions).toHaveLength(2))
 
-    expect(lastArgsRef.current?.options?.project).toEqual({ id: 'proj_x', subpath: '' })
     expect(result.current.filteredSessions.map((session) => session.id)).toEqual(['ses_root', 'ses_wt'])
+    const request = lastSessionRequest(fetchFake)
+    expect(request?.searchParams.get('project')).toBe('proj_x')
+    expect(request?.searchParams.get('directory')).toBeNull()
   })
 
-  it('hides walkthrough helper sessions from the session list', () => {
-    sessionsData.splice(
-      0,
-      sessionsData.length,
-      { id: 'ses_user', title: 'user task', location: { directory: '/w/a' }, time: { updated: 2 } },
-      { id: 'ses_walk', title: 'Walkthrough · user task', location: { directory: '/w/a' }, time: { updated: 1 } },
-    )
-    helperSessionIdsRef.current = new Set(['ses_walk'])
+  it('hides walkthrough helper sessions from the session list', async () => {
+    server.setSessions([
+      makeTestSession('ses_user', 'user task', '/w/a', 2),
+      makeTestSession('ses_walk', 'Walkthrough · user task', '/w/a', 1),
+    ])
+    server.setHelperSessionIds(['ses_walk'])
 
-    const { result } = renderHook(() => useSessionSearch(['/w/a']))
+    const { result } = renderSearch(['/w/a'], {}, server)
 
-    expect(result.current.filteredSessions.map((session) => session.id)).toEqual(['ses_user'])
+    await waitFor(() => expect(result.current.filteredSessions.map((session) => session.id)).toEqual(['ses_user']))
   })
 
-  it('passes isError through from useSessionsAcrossDirectories', () => {
-    flagsRef.current = { hasNextPage: false, isFetchingNextPage: false, isFetchNextPageError: false, isPlaceholderData: false, isError: true }
+  it('passes a session list failure through', async () => {
+    server.setFailure({ status: 500 })
 
-    const { result } = renderHook(() => useSessionSearch(['/w/a']))
+    const { result } = renderSearch(['/w/a'], {}, server)
 
-    expect(result.current.isError).toBe(true)
+    await waitFor(() => expect(result.current.isError).toBe(true))
   })
 
-  it('blocks pagination while a search is pending', () => {
+  it('blocks pagination while a search is pending', async () => {
+    server.setNextCursor('cursor_1')
     vi.useFakeTimers()
-    flagsRef.current = { hasNextPage: true, isFetchingNextPage: false, isFetchNextPageError: false, isPlaceholderData: false, isError: false }
-    const { result } = renderHook(() => useSessionSearch(['/w/a']))
+    const { result } = renderSearch(['/w/a'], {}, server)
 
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
     expect(result.current.canFetchNextPage).toBe(true)
 
     act(() => {
@@ -155,32 +230,50 @@ describe('useSessionSearch', () => {
     expect(result.current.isSearchPending).toBe(true)
     expect(result.current.canFetchNextPage).toBe(false)
 
-    act(() => {
-      vi.advanceTimersByTime(150)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150)
+    })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
     })
 
     expect(result.current.isSearchPending).toBe(false)
     expect(result.current.canFetchNextPage).toBe(true)
   })
 
-  it('exposes canFetchNextPage only when paging is safe', () => {
-    const { result, rerender } = renderHook(() => useSessionSearch(['/w/a']))
+  it('blocks pagination while the next page is still loading', async () => {
+    server.setNextCursor('cursor_1')
+    const { result } = renderSearch(['/w/a'], {}, server)
+
+    await waitFor(() => expect(result.current.canFetchNextPage).toBe(true))
+
+    const release = server.deferNextPage()
+    act(() => {
+      void result.current.fetchNextPage()
+    })
+
+    await waitFor(() => expect(result.current.isFetchingNextPage).toBe(true))
     expect(result.current.canFetchNextPage).toBe(false)
 
-    flagsRef.current = { hasNextPage: true, isFetchingNextPage: false, isFetchNextPageError: false, isPlaceholderData: false, isError: false }
-    rerender()
-    expect(result.current.canFetchNextPage).toBe(true)
+    await act(async () => {
+      release()
+      await Promise.resolve()
+    })
+  })
 
-    flagsRef.current = { hasNextPage: true, isFetchingNextPage: true, isFetchNextPageError: false, isPlaceholderData: false, isError: false }
-    rerender()
-    expect(result.current.canFetchNextPage).toBe(false)
+  it('blocks pagination when the next page fails', async () => {
+    server.setNextCursor('cursor_1')
+    const { result } = renderSearch(['/w/a'], {}, server)
 
-    flagsRef.current = { hasNextPage: true, isFetchingNextPage: false, isFetchNextPageError: true, isPlaceholderData: false, isError: false }
-    rerender()
-    expect(result.current.canFetchNextPage).toBe(false)
+    await waitFor(() => expect(result.current.canFetchNextPage).toBe(true))
 
-    flagsRef.current = { hasNextPage: true, isFetchingNextPage: false, isFetchNextPageError: false, isPlaceholderData: true, isError: false }
-    rerender()
+    server.setFailure({ status: 500 })
+    await act(async () => {
+      await result.current.fetchNextPage()
+    })
+
+    await waitFor(() => expect(result.current.isFetchNextPageError).toBe(true))
     expect(result.current.canFetchNextPage).toBe(false)
   })
 })

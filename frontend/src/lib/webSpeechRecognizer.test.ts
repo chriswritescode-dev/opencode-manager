@@ -1,77 +1,58 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import type {
+  SpeechRecognitionAlternativeListLike,
+  SpeechRecognitionFakeInstance,
+  SpeechRecognitionResultEventLike,
+} from '@/test/browserFakes'
+import { installSpeechRecognition } from '@/test/browserFakes'
 import { WebSpeechRecognizer } from './webSpeechRecognizer'
 
-interface FakeSpeechRecognition {
-  continuous: boolean
-  interimResults: boolean
-  lang: string
-  maxAlternatives: number
-  onstart: ((event: Event) => void) | null
-  onend: ((event: Event) => void) | null
-  onerror: ((event: { error: string }) => void) | null
-  onresult: ((event: Record<string, unknown>) => void) | null
-  start: ReturnType<typeof vi.fn>
-  stop: ReturnType<typeof vi.fn>
-  abort: ReturnType<typeof vi.fn>
+interface ResultEntry {
+  isFinal: boolean
+  transcript: string
+  confidence: number
 }
 
-function createFakeSpeechRecognition(): FakeSpeechRecognition {
+function resultEntry(entry: ResultEntry): SpeechRecognitionAlternativeListLike {
   return {
-    continuous: false,
-    interimResults: false,
-    lang: '',
-    maxAlternatives: 1,
-    onstart: null,
-    onend: null,
-    onerror: null,
-    onresult: null,
-    start: vi.fn(function (this: FakeSpeechRecognition) {
-      setTimeout(() => {
-        if (this.onstart) this.onstart(new Event('start'))
-      }, 0)
-    }),
-    stop: vi.fn(),
-    abort: vi.fn(),
+    0: { transcript: entry.transcript, confidence: entry.confidence },
+    length: 1,
+    isFinal: entry.isFinal,
   }
 }
 
 function makeResultEvent(
   resultIndex: number,
-  resultsLength: number,
-  entries: Array<{
-    isFinal: boolean
-    transcript: string
-    confidence: number
-  }>,
-): Record<string, unknown> {
-  const results: Record<number, Record<string, unknown>> = {}
-  for (let i = 0; i < entries.length; i++) {
-    results[i] = {
-      isFinal: entries[i].isFinal,
-      0: { transcript: entries[i].transcript, confidence: entries[i].confidence },
-    }
-  }
+  entries: ResultEntry[],
+): SpeechRecognitionResultEventLike {
   return {
     resultIndex,
-    results: { ...results, length: resultsLength },
+    results: entries.map(resultEntry),
   }
 }
 
 describe('WebSpeechRecognizer', () => {
-  let fakeRec: FakeSpeechRecognition
+  let instances: SpeechRecognitionFakeInstance[]
+  let fakeRec: SpeechRecognitionFakeInstance
+
+  function createRecognizer(): WebSpeechRecognizer {
+    const recognizer = new WebSpeechRecognizer()
+    const created = instances[instances.length - 1]
+    if (!created) throw new Error('speech recognition was not constructed')
+    fakeRec = created
+    return recognizer
+  }
 
   beforeEach(() => {
-    fakeRec = createFakeSpeechRecognition()
-    ;(window as any).SpeechRecognition = vi.fn(() => fakeRec)
+    instances = installSpeechRecognition().instances
   })
 
   afterEach(() => {
     vi.useRealTimers()
-    delete (window as any).SpeechRecognition
   })
 
   it('configures continuous=true, interimResults=true, maxAlternatives=1, and lang on start()', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     await rec.start({ language: 'en-US', interimResults: true, maxAlternatives: 1 })
 
     expect(fakeRec.continuous).toBe(true)
@@ -81,16 +62,16 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('appends multiple final result segments instead of replacing', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     const results: Array<{ transcript: string; isFinal: boolean; confidence: number }> = []
     rec.onResult((r) => results.push(r))
     await rec.start()
 
-    fakeRec.onresult!(makeResultEvent(0, 1, [
+    fakeRec.onresult!(makeResultEvent(0, [
       { isFinal: true, transcript: 'hello', confidence: 0.9 },
     ]))
 
-    fakeRec.onresult!(makeResultEvent(1, 2, [
+    fakeRec.onresult!(makeResultEvent(1, [
       { isFinal: false, transcript: 'hello', confidence: 0.9 },
       { isFinal: true, transcript: 'world', confidence: 0.8 },
     ]))
@@ -102,16 +83,16 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('emits combined final+interim transcript on interim events', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     const interims: string[] = []
     rec.onInterimResult((t) => interims.push(t))
     await rec.start()
 
-    fakeRec.onresult!(makeResultEvent(0, 1, [
+    fakeRec.onresult!(makeResultEvent(0, [
       { isFinal: true, transcript: 'hello', confidence: 0.9 },
     ]))
 
-    fakeRec.onresult!(makeResultEvent(1, 2, [
+    fakeRec.onresult!(makeResultEvent(1, [
       { isFinal: true, transcript: 'hello', confidence: 0.9 },
       { isFinal: false, transcript: 'world', confidence: 0.0 },
     ]))
@@ -121,12 +102,12 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('calls native stop after 2 seconds of inactivity following a result', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     await rec.start()
 
     vi.useFakeTimers()
 
-    fakeRec.onresult!(makeResultEvent(0, 1, [
+    fakeRec.onresult!(makeResultEvent(0, [
       { isFinal: true, transcript: 'test', confidence: 1.0 },
     ]))
 
@@ -139,10 +120,10 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('abort() clears accumulated transcript and inactivity timer', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     await rec.start()
 
-    fakeRec.onresult!(makeResultEvent(0, 1, [
+    fakeRec.onresult!(makeResultEvent(0, [
       { isFinal: true, transcript: 'hello', confidence: 0.9 },
     ]))
 
@@ -159,12 +140,12 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('onend clears inactivity timer and sets state to idle', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     const onEnd = vi.fn()
     rec.onEnd(onEnd)
     await rec.start()
 
-    fakeRec.onresult!(makeResultEvent(0, 1, [
+    fakeRec.onresult!(makeResultEvent(0, [
       { isFinal: true, transcript: 'test', confidence: 1.0 },
     ]))
 
@@ -180,7 +161,7 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('removes one-shot start/error listeners after resolve so late errors do not leak', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     const onError = vi.fn()
     rec.onError(onError)
 
@@ -193,7 +174,7 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('onend after error resets state to idle', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     const onEnd = vi.fn()
     rec.onEnd(onEnd)
     await rec.start()
@@ -209,12 +190,12 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('clearCallbacks clears pending inactivity timeout', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     await rec.start()
 
     vi.useFakeTimers()
 
-    fakeRec.onresult!(makeResultEvent(0, 1, [
+    fakeRec.onresult!(makeResultEvent(0, [
       { isFinal: true, transcript: 'test', confidence: 1.0 },
     ]))
 
@@ -226,12 +207,12 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('uses the provided inactivity timeout instead of the default', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     await rec.start({ inactivityTimeoutMs: 500 })
 
     vi.useFakeTimers()
 
-    fakeRec.onresult!(makeResultEvent(0, 1, [
+    fakeRec.onresult!(makeResultEvent(0, [
       { isFinal: true, transcript: 'test', confidence: 1.0 },
     ]))
 
@@ -244,7 +225,7 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('reports a pause endpoint with the final transcript after pauseMs', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     const onEndOfSpeech = vi.fn()
     const onEnd = vi.fn()
     rec.onEnd(onEnd)
@@ -252,7 +233,7 @@ describe('WebSpeechRecognizer', () => {
 
     vi.useFakeTimers()
 
-    fakeRec.onresult!(makeResultEvent(0, 1, [
+    fakeRec.onresult!(makeResultEvent(0, [
       { isFinal: true, transcript: 'hello', confidence: 1.0 },
     ]))
 
@@ -273,7 +254,7 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('reports a no-speech endpoint when no result arrives within noSpeechTimeoutMs', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     const onEndOfSpeech = vi.fn()
     const onError = vi.fn()
     rec.onError(onError)
@@ -296,7 +277,7 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('cancels the no-speech timeout once a result arrives', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     const onEndOfSpeech = vi.fn()
 
     vi.useFakeTimers()
@@ -305,7 +286,7 @@ describe('WebSpeechRecognizer', () => {
     await vi.advanceTimersByTimeAsync(0)
     await startPromise
 
-    fakeRec.onresult!(makeResultEvent(0, 1, [
+    fakeRec.onresult!(makeResultEvent(0, [
       { isFinal: true, transcript: 'hi', confidence: 1.0 },
     ]))
 
@@ -319,7 +300,7 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('reports no-speech instead of an error when Chrome raises no-speech after the deadline', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     const onEndOfSpeech = vi.fn()
     const onError = vi.fn()
     const onEnd = vi.fn()
@@ -348,7 +329,7 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('restarts transparently when Chrome raises no-speech before the deadline', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     const onEndOfSpeech = vi.fn()
     const onError = vi.fn()
     const onEnd = vi.fn()
@@ -395,7 +376,7 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('restarts when recognition ends unexpectedly before the deadline without speech', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     const onEndOfSpeech = vi.fn()
     const onError = vi.fn()
     const onEnd = vi.fn()
@@ -427,7 +408,7 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('reports a pause with the final transcript when recognition ends unexpectedly', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     const onEndOfSpeech = vi.fn()
     const onEnd = vi.fn()
     rec.onEnd(onEnd)
@@ -441,7 +422,7 @@ describe('WebSpeechRecognizer', () => {
     await vi.advanceTimersByTimeAsync(0)
     await startPromise
 
-    fakeRec.onresult!(makeResultEvent(0, 1, [
+    fakeRec.onresult!(makeResultEvent(0, [
       { isFinal: true, transcript: 'hello world', confidence: 1.0 },
     ]))
 
@@ -455,7 +436,7 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('keeps the accumulated transcript across transparent restarts', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     const onEndOfSpeech = vi.fn()
 
     vi.useFakeTimers()
@@ -467,7 +448,7 @@ describe('WebSpeechRecognizer', () => {
     await vi.advanceTimersByTimeAsync(0)
     await startPromise
 
-    fakeRec.onresult!(makeResultEvent(0, 1, [
+    fakeRec.onresult!(makeResultEvent(0, [
       { isFinal: true, transcript: 'hello', confidence: 1.0 },
     ]))
 
@@ -478,7 +459,7 @@ describe('WebSpeechRecognizer', () => {
 
     expect(rec.getFinalTranscript()).toBe('hello')
 
-    fakeRec.onresult!(makeResultEvent(0, 1, [
+    fakeRec.onresult!(makeResultEvent(0, [
       { isFinal: true, transcript: 'world', confidence: 1.0 },
     ]))
     fakeRec.onend!(new Event('end'))
@@ -489,7 +470,7 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('reports a pause with the interim transcript when recognition ends unexpectedly before a final result', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     const onEndOfSpeech = vi.fn()
 
     vi.useFakeTimers()
@@ -501,7 +482,7 @@ describe('WebSpeechRecognizer', () => {
     await vi.advanceTimersByTimeAsync(0)
     await startPromise
 
-    fakeRec.onresult!(makeResultEvent(0, 1, [
+    fakeRec.onresult!(makeResultEvent(0, [
       { isFinal: false, transcript: 'hello there', confidence: 0.0 },
     ]))
 
@@ -513,7 +494,7 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('cancels a pending restart when stop() is called', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     const onEndOfSpeech = vi.fn()
     const onEnd = vi.fn()
     rec.onEnd(onEnd)
@@ -540,7 +521,7 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('surfaces an error when a transparent restart throws', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     const onEndOfSpeech = vi.fn()
     const onError = vi.fn()
     const onEnd = vi.fn()
@@ -573,7 +554,7 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('stops restarting after the transparent restart cap', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     const onEndOfSpeech = vi.fn()
     const onEnd = vi.fn()
     rec.onEnd(onEnd)
@@ -602,7 +583,7 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('stops restarting when a restarted session ends immediately without audio', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     const onEndOfSpeech = vi.fn()
 
     vi.useFakeTimers()
@@ -628,7 +609,7 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('surfaces Chrome no-speech as an error when endpointing is off', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     const onError = vi.fn()
     const onEnd = vi.fn()
     rec.onError(onError)
@@ -647,13 +628,13 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('does not report end of speech for a manual stop', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     const onEndOfSpeech = vi.fn()
     await rec.start({ endpointing: { pauseMs: 800, noSpeechTimeoutMs: 5000 }, onEndOfSpeech })
 
     vi.useFakeTimers()
 
-    fakeRec.onresult!(makeResultEvent(0, 1, [
+    fakeRec.onresult!(makeResultEvent(0, [
       { isFinal: true, transcript: 'hello', confidence: 1.0 },
     ]))
 
@@ -666,13 +647,13 @@ describe('WebSpeechRecognizer', () => {
   })
 
   it('does not report end of speech for an abort during endpointing', async () => {
-    const rec = new WebSpeechRecognizer()
+    const rec = createRecognizer()
     const onEndOfSpeech = vi.fn()
     await rec.start({ endpointing: { pauseMs: 800, noSpeechTimeoutMs: 5000 }, onEndOfSpeech })
 
     vi.useFakeTimers()
 
-    fakeRec.onresult!(makeResultEvent(0, 1, [
+    fakeRec.onresult!(makeResultEvent(0, [
       { isFinal: true, transcript: 'hello', confidence: 1.0 },
     ]))
 

@@ -15,47 +15,46 @@ function extractFileFromPath(path: string): string {
   return parts[parts.length - 1] || path
 }
 
-/** Maps a file name to the lowlight language name used for previews. */
 export function detectLanguage(fileName: string): string {
   const ext = fileName.split('.').pop()?.toLowerCase()
 
-  const langMap: Record<string, string> = {
-    ts: 'typescript',
-    tsx: 'typescript',
-    js: 'javascript',
-    jsx: 'javascript',
-    py: 'python',
-    rb: 'ruby',
-    go: 'go',
-    rs: 'rust',
-    java: 'java',
-    cs: 'csharp',
-    cpp: 'cpp',
-    c: 'c',
-    h: 'c',
-    json: 'json',
-    yaml: 'yaml',
-    yml: 'yaml',
-    toml: 'toml',
-    xml: 'xml',
-    html: 'html',
-    css: 'css',
-    scss: 'scss',
-    sass: 'sass',
-    svg: 'svg',
-    md: 'markdown',
-    sh: 'bash',
-    bash: 'bash',
-    zsh: 'bash',
-    fish: 'bash',
-    sql: 'sql',
-    php: 'php',
-    swift: 'swift',
-    kt: 'kotlin',
-    dart: 'dart',
-  }
+  const langMap = new Map<string, string>([
+    ['ts', 'typescript'],
+    ['tsx', 'typescript'],
+    ['js', 'javascript'],
+    ['jsx', 'javascript'],
+    ['py', 'python'],
+    ['rb', 'ruby'],
+    ['go', 'go'],
+    ['rs', 'rust'],
+    ['java', 'java'],
+    ['cs', 'csharp'],
+    ['cpp', 'cpp'],
+    ['c', 'c'],
+    ['h', 'c'],
+    ['json', 'json'],
+    ['yaml', 'yaml'],
+    ['yml', 'yaml'],
+    ['toml', 'toml'],
+    ['xml', 'xml'],
+    ['html', 'html'],
+    ['css', 'css'],
+    ['scss', 'scss'],
+    ['sass', 'sass'],
+    ['svg', 'svg'],
+    ['md', 'markdown'],
+    ['sh', 'bash'],
+    ['bash', 'bash'],
+    ['zsh', 'bash'],
+    ['fish', 'bash'],
+    ['sql', 'sql'],
+    ['php', 'php'],
+    ['swift', 'swift'],
+    ['kt', 'kotlin'],
+    ['dart', 'dart'],
+  ])
 
-  return langMap[ext || ''] || 'plaintext'
+  return langMap.get(ext || '') ?? 'plaintext'
 }
 
 export function CodePreview({ fileName, content }: CodePreviewProps) {

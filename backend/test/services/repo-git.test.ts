@@ -5,16 +5,30 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { Database } from 'bun:sqlite'
+import { z } from 'zod'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import { createRepo, getRepoById, getRepoByLocalPath } from '../../src/db/queries'
 import { resolveOpenCodeProjectId } from '@opencode-manager/shared/project-id'
 import { isWorktreeSibling } from '@opencode-manager/shared/utils'
 import { getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
+import { RepoInputError } from '../../src/services/repo'
 import { cloneOrigin, createCommittedRepo, createGitAuthService, createOrigin, git, uniqueName } from '../helpers/git-fixtures'
+import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
 import type { GitAuthService } from '../../src/services/git-auth'
-import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { Repo } from '../../src/types/repo'
+
+const AddressSchema = z.object({ port: z.number() })
+
+async function rejectedRepoInput(promise: Promise<unknown>): Promise<RepoInputError> {
+  try {
+    await promise
+  } catch (error) {
+    if (error instanceof RepoInputError) return error
+    throw error
+  }
+  throw new Error('expected a RepoInputError rejection')
+}
 
 
 const workspaceRoot = mkdtempSync(path.join(tmpdir(), 'repo-git-'))
@@ -36,8 +50,7 @@ async function withTlsServer<T>(status: number, fn: (port: number) => Promise<T>
   })
 
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
-  const address = server.address()
-  const port = typeof address === 'object' && address ? address.port : 0
+  const port = AddressSchema.parse(server.address()).port
 
   try {
     return await fn(port)
@@ -180,7 +193,7 @@ describe('repo service real git', () => {
       const repo = await initLocalRepo(db, gitAuth, sourcePath)
 
       expect(repo.localPath).toBe(path.basename(sourcePath))
-      expect(repo.sourcePath).toBeNull()
+      expect(repo.sourcePath).toBeUndefined()
     })
 
     it('marks a linked worktree as a worktree when registering an absolute path', async () => {
@@ -206,11 +219,11 @@ describe('repo service real git', () => {
     it('rejects a missing absolute path', async () => {
       const { initLocalRepo, RepoInputError } = await import('../../src/services/repo')
 
-      const error = await initLocalRepo(db, gitAuth, path.join(projectsRoot, 'missing-absolute')).catch((thrown: unknown) => thrown)
+      const error = await rejectedRepoInput(initLocalRepo(db, gitAuth, path.join(projectsRoot, 'missing-absolute')))
 
       expect(error).toBeInstanceOf(RepoInputError)
-      expect((error as { statusCode: number }).statusCode).toBe(400)
-      expect((error as Error).message).toMatch(/No such directory/)
+      expect(error.statusCode).toBe(400)
+      expect(error.message).toMatch(/No such directory/)
     })
 
     it('rejects the repos root itself as a source', async () => {
@@ -416,10 +429,10 @@ describe('repo service real git', () => {
       createCommittedRepo(repoPath)
       const repo = registerLocalRepo(path.basename(repoPath))
 
-      const error = await createBranch(db, gitAuth, repo.id, 'bad name..x').catch((thrown: unknown) => thrown)
+      const error = await rejectedRepoInput(createBranch(db, gitAuth, repo.id, 'bad name..x'))
 
       expect(error).toBeInstanceOf(RepoInputError)
-      expect((error as Error).message).toBe("Invalid branch name: 'bad name..x'.")
+      expect(error.message).toBe("Invalid branch name: 'bad name..x'.")
       expect(git(['rev-parse', '--abbrev-ref', 'HEAD'], repoPath)).toBe('main')
     })
   })
@@ -432,7 +445,7 @@ describe('repo service real git', () => {
       const repo = registerLocalRepo(path.basename(repoPath))
 
       await expect(pullRepo(db, gitAuth, repo.id)).resolves.toBeUndefined()
-      expect(getRepoById(db, repo.id)?.lastPulled).toBeNull()
+      expect(getRepoById(db, repo.id)?.lastPulled).toBeUndefined()
     })
 
     it('pulls a remote-backed repo and records the pull time', async () => {
@@ -733,12 +746,13 @@ describe('repo service real git', () => {
       const { cloneRepo, RepoInputError } = await import('../../src/services/repo')
       const name = uniqueName('clone-missing-source')
 
-      const error = await cloneRepo(db, gitAuth, path.join(workspaceRoot, 'no-such-origin'), { directoryName: name })
-        .catch((thrown: unknown) => thrown)
+      const error = await rejectedRepoInput(
+        cloneRepo(db, gitAuth, path.join(workspaceRoot, 'no-such-origin'), { directoryName: name }),
+      )
 
       expect(error).toBeInstanceOf(RepoInputError)
-      expect((error as Error).message).toMatch(/Repository not found or access denied/)
-      expect((error as { statusCode: number }).statusCode).toBe(400)
+      expect(error.message).toMatch(/Repository not found or access denied/)
+      expect(error.statusCode).toBe(400)
       expect(getRepoByLocalPath(db, name)).toBeNull()
     })
 
@@ -746,13 +760,12 @@ describe('repo service real git', () => {
       const { cloneRepo, RepoInputError } = await import('../../src/services/repo')
       const name = uniqueName('clone-bad-url')
 
-      const error = await cloneRepo(db, gitAuth, 'not a url !!', { directoryName: name })
-        .catch((thrown: unknown) => thrown)
+      const error = await rejectedRepoInput(cloneRepo(db, gitAuth, 'not a url !!', { directoryName: name }))
 
       expect(error).toBeInstanceOf(RepoInputError)
-      expect((error as Error).message).not.toMatch(/Command failed/)
-      expect((error as Error).message).toMatch(/Repository not found or access denied/)
-      expect((error as { statusCode: number }).statusCode).toBe(400)
+      expect(error.message).not.toMatch(/Command failed/)
+      expect(error.message).toMatch(/Repository not found or access denied/)
+      expect(error.statusCode).toBe(400)
       expect(getRepoByLocalPath(db, name)).toBeNull()
     })
 
@@ -1051,7 +1064,7 @@ describe('repo service real git', () => {
       const orphanPath = realpathSync(orphanDir)
       const manualPath = realpathSync(manualDir)
 
-      const client = {
+      const client = createStubOpenCodeClient({
         api: {
           location: {
             get: async () => ({ directory: repoA, project: { id: projectId, directory: repoA, canonical: repoA } }),
@@ -1067,7 +1080,7 @@ describe('repo service real git', () => {
             ],
           },
         },
-      } as unknown as OpenCodeClient
+      })
 
       const siblings = await getSiblingRepos(db, a.id, {}, client)
       const worktreeSiblings = siblings.filter((repo) => isWorktreeSibling(repo))
@@ -1139,18 +1152,16 @@ describe('repo service real git', () => {
         cloneStatus: 'ready',
         clonedAt: Date.now(),
       })
-      const client = {
+      const client = createStubOpenCodeClient({
         api: {
           location: {
             get: async () => {
               throw new Error('upstream unavailable')
             },
           },
-          worktree: {
-            list: async () => [],
-          },
+          worktree: { list: async () => [] },
         },
-      } as unknown as OpenCodeClient
+      })
 
       const siblings = await getSiblingRepos(db, a.id, {}, client)
 

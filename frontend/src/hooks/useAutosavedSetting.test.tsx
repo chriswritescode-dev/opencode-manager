@@ -35,6 +35,27 @@ describe('useAutosavedSetting', () => {
     }
   })
 
+  it('commits a clear that returns to the stale debounced value inside the delay', () => {
+    vi.useFakeTimers()
+    try {
+      const save = vi.fn()
+      const { result, rerender } = renderTrimmedSetting(undefined, save)
+
+      rerender({ value: 'x' })
+      expect(result.current.draft).toBe('x')
+
+      act(() => result.current.setDraft(''))
+      act(() => {
+        vi.advanceTimersByTime(800)
+      })
+
+      expect(save).toHaveBeenCalledTimes(1)
+      expect(save).toHaveBeenCalledWith('', 'x')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('skips an unchanged value and resyncs from the stored value', () => {
     const save = vi.fn()
     const { result, rerender } = renderTrimmedSetting('a', save)

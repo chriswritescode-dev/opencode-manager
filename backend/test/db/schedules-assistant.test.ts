@@ -13,37 +13,31 @@ describe('assistant repo (repo_id=0) in global aggregate queries', () => {
 
   beforeEach(() => {
     db = new Database(':memory:')
-    // Disable FK enforcement to match bun:sqlite default behavior (OFF)
     db.exec('PRAGMA foreign_keys = OFF')
     migrate(db, allMigrations)
 
     const now = Date.now()
 
-    // Insert a real repo (id=1)
     db.exec(
       `INSERT INTO repos (id, repo_url, local_path, branch, default_branch, clone_status, cloned_at)
        VALUES (1, 'https://github.com/test/my-repo', 'repos/my-repo', 'main', 'main', 'ready', ${now})`,
     )
 
-    // Insert a schedule job for the real repo
     db.exec(
       `INSERT INTO schedule_jobs (id, repo_id, name, enabled, schedule_mode, prompt, created_at, updated_at)
        VALUES (1, 1, 'Real repo job', 1, 'interval', 'Run the real repo job', ${now}, ${now})`,
     )
 
-    // Insert a schedule job for the assistant (repo_id=0)
     db.exec(
       `INSERT INTO schedule_jobs (id, repo_id, name, enabled, schedule_mode, prompt, created_at, updated_at)
        VALUES (2, 0, 'Assistant job', 1, 'interval', 'Run the assistant job', ${now}, ${now})`,
     )
 
-    // Insert a schedule run for the real repo job
     db.exec(
       `INSERT INTO schedule_runs (id, job_id, repo_id, trigger_source, status, started_at, created_at)
        VALUES (1, 1, 1, 'manual', 'completed', ${now}, ${now})`,
     )
 
-    // Insert a schedule run for the assistant job
     db.exec(
       `INSERT INTO schedule_runs (id, job_id, repo_id, trigger_source, status, started_at, created_at)
        VALUES (2, 2, 0, 'manual', 'completed', ${now}, ${now})`,

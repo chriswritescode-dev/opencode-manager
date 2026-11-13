@@ -14,9 +14,6 @@ interface OpenDirectoryDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
-/**
- * Dialog that starts a new session in an absolute directory on the linked server.
- */
 export function OpenDirectoryDialog({ serverId, open, onOpenChange }: OpenDirectoryDialogProps) {
   const navigate = useNavigate()
   const [directory, setDirectory] = useState('')

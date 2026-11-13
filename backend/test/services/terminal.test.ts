@@ -1,22 +1,39 @@
-import { describe, it, expect, vi } from 'vitest'
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
+import { z } from 'zod'
 import { TerminalService, TerminalNotFoundError } from '../../src/services/terminal'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { CredentialProvider } from '../../src/services/credential-provider'
+import { createStubOpenCodeClient, sessionInfo, type OpenCodeApiOverrides } from '../helpers/stub-opencode-client'
 import { createStubRepoEnvService } from '../helpers/stub-repo-env-service'
+import { FakePeer, FakeWebSocket } from '../helpers/fake-websocket'
 
-interface PtyRecord {
-  id: string
-  title: string
-  command: string
-  args: string[]
-  cwd: string
-  status: 'running' | 'exited'
-  pid: number
-  exitCode?: number
+type PtyApi = OpenCodeClient['api']['pty']
+type PersistentPtyApi = OpenCodeClient['api']['experimental']['persistentPty']
+type SessionApi = OpenCodeClient['api']['session']
+type OpenCodePty = Awaited<ReturnType<PtyApi['list']>>['data'][number]
+type PersistentPty = Awaited<ReturnType<PersistentPtyApi['list']>>[number]
+type PtyCreateInput = Parameters<PtyApi['create']>[0]
+type SessionInfo = Awaited<ReturnType<SessionApi['list']>>['data'][number]
+
+function createPty(overrides: Partial<OpenCodePty> = {}): OpenCodePty {
+  return { id: 'pty-1', title: 'Terminal', command: 'sh', args: [], cwd: '/repo', status: 'running', pid: 1, ...overrides }
 }
 
-function createPty(overrides: Partial<PtyRecord> = {}): PtyRecord {
-  return { id: 'pty-1', title: 'Terminal', command: 'sh', args: [], cwd: '/repo', status: 'running', pid: 1, ...overrides }
+function createPersistentPty(id: string, sessionID: string): PersistentPty {
+  return {
+    id,
+    sessionID,
+    title: 'Terminal',
+    command: 'sh',
+    args: [],
+    cwd: '/repo',
+    status: 'running',
+    pid: 1,
+    userTitle: null,
+    foregroundProcess: null,
+    size: { cols: 80, rows: 24 },
+    output: { head: 0, tail: 0 },
+  }
 }
 
 const DEFERRED_SCRIPT = 'stty -echo 2>/dev/null; IFS= read -r _; stty echo 2>/dev/null; exec "$@"'
@@ -25,30 +42,52 @@ function deferredArgs(command: string, args: string[]): string[] {
   return ['-c', DEFERRED_SCRIPT, 'ocm-terminal', command, ...args]
 }
 
-function createClient(pty: Record<string, unknown>, api: Record<string, unknown> = {}): OpenCodeClient {
-  const hubToken = vi.fn(async () => ({ data: { ticket: 'hub-ticket', expires_in: 60 } }))
-  return { api: { pty: { connect: { token: hubToken }, ...pty }, ...api } } as unknown as OpenCodeClient
+function createClient(pty: OpenCodeApiOverrides['pty'] = {}, api: OpenCodeApiOverrides = {}): OpenCodeClient {
+  return createStubOpenCodeClient({
+    api: {
+      ...api,
+      pty: {
+        connect: {
+          token: vi.fn<PtyApi['connect']['token']>(async () => ({
+            location: { directory: '/repo' },
+            data: { ticket: 'hub-ticket', expires_in: 60 },
+          })),
+        },
+        ...pty,
+      },
+    },
+  })
 }
 
-function createSocketFactory(): { openSocket: (url: string) => WebSocket; sockets: FakeUpstreamSocket[] } {
-  const sockets: FakeUpstreamSocket[] = []
+interface SocketFactory {
+  openSocket: (url: string) => WebSocket
+  sockets: FakeWebSocket[]
+}
+
+function createSocketFactory(): SocketFactory {
+  const sockets: FakeWebSocket[] = []
   return {
     sockets,
     openSocket: (url) => {
-      const socket = new FakeUpstreamSocket(url)
+      const socket = new FakeWebSocket(url)
       sockets.push(socket)
-      return socket as unknown as WebSocket
+      return socket
     },
   }
 }
 
-function createCredentialProvider(shellEnv: Record<string, string> = {}): CredentialProvider {
-  return { getGhCliEnv: vi.fn(() => shellEnv) } as unknown as CredentialProvider
+function createCredentialProvider(shellEnv: Record<string, string> = {}): Pick<CredentialProvider, 'getGhCliEnv'> {
+  return { getGhCliEnv: vi.fn(() => shellEnv) }
+}
+
+function stubPersistentPtys(client: OpenCodeClient, overrides: Partial<PersistentPtyApi>): OpenCodeClient {
+  Object.assign(client.api.experimental.persistentPty, overrides)
+  return client
 }
 
 function createTerminalService(
   client: OpenCodeClient,
-  provider: CredentialProvider,
+  provider: Pick<CredentialProvider, 'getGhCliEnv'>,
   openSocket: (url: string) => WebSocket = createSocketFactory().openSocket,
   baseUrl = 'http://127.0.0.1:5551',
   includeLocalEnv = true,
@@ -61,62 +100,20 @@ function createTerminalService(
   )
 }
 
-class FakeUpstreamSocket {
-  binaryType: 'blob' | 'arraybuffer' = 'blob'
-  readonly sent: Array<string | Uint8Array> = []
-  readonly url: string
-  close = vi.fn()
-  private readonly listeners = new Map<string, Set<(event: unknown) => void>>()
+const MetaFrameSchema = z.object({ cursor: z.number() })
 
-  constructor(url: string) {
-    this.url = url
+function metaCursor(chunk: string | Uint8Array<ArrayBuffer> | undefined): number {
+  if (!(chunk instanceof Uint8Array)) {
+    throw new Error('Expected a binary terminal meta frame')
   }
-
-  addEventListener(type: string, listener: (event: unknown) => void): void {
-    const set = this.listeners.get(type) ?? new Set<(event: unknown) => void>()
-    set.add(listener)
-    this.listeners.set(type, set)
-  }
-
-  send(data: string | Uint8Array): void {
-    this.sent.push(data)
-  }
-
-  emit(type: string, event: unknown): void {
-    for (const listener of this.listeners.get(type) ?? []) listener(event)
-  }
-}
-
-interface FakePeer {
-  sent: Array<string | Uint8Array>
-  closeCalls: Array<{ code?: number; reason?: string }>
-  send(data: string | Uint8Array): void
-  close(code?: number, reason?: string): void
-  bufferedAmount(): number
-}
-
-function createPeer(): FakePeer {
-  const sent: Array<string | Uint8Array> = []
-  const closeCalls: Array<{ code?: number; reason?: string }> = []
-  return {
-    sent,
-    closeCalls,
-    send(data) {
-      sent.push(data)
-    },
-    close(code, reason) {
-      closeCalls.push({ code, reason })
-    },
-    bufferedAmount() {
-      return 0
-    },
-  }
+  expect(chunk[0]).toBe(0)
+  return MetaFrameSchema.parse(JSON.parse(new TextDecoder().decode(chunk.subarray(1)))).cursor
 }
 
 describe('TerminalService', () => {
   describe('list', () => {
     it('passes the location and decodes each terminal title', async () => {
-      const list = vi.fn(async () => ({
+      const list = vi.fn<PtyApi['list']>(async () => ({
         location: { directory: '/repo' },
         data: [
           createPty({ id: 'a', title: 'Terminal' }),
@@ -139,7 +136,7 @@ describe('TerminalService', () => {
 
   describe('create', () => {
     it('sends the location, encoded title and merged environment', async () => {
-      const create = vi.fn(async () => ({
+      const create = vi.fn<PtyApi['create']>(async () => ({
         location: { directory: '/repo' },
         data: createPty({ id: 'pty-new', title: 'ocm:action:dev:Dev server' }),
       }))
@@ -174,8 +171,8 @@ describe('TerminalService', () => {
     })
 
     it('omits command and args for a plain shell', async () => {
-      let captured: Record<string, unknown> | undefined
-      const create = vi.fn(async (input: Record<string, unknown>) => {
+      let captured: PtyCreateInput | undefined
+      const create = vi.fn<PtyApi['create']>(async (input) => {
         captured = input
         return {
           location: { directory: '/repo' },
@@ -193,7 +190,7 @@ describe('TerminalService', () => {
     })
 
     it('defers a setup command until the manager has attached to the new PTY', async () => {
-      const create = vi.fn(async () => ({
+      const create = vi.fn<PtyApi['create']>(async () => ({
         location: { directory: '/repo' },
         data: createPty({ id: 'pty-setup', title: 'ocm:setup:Worktree setup' }),
       }))
@@ -215,8 +212,8 @@ describe('TerminalService', () => {
     })
 
     it('keeps a plain shell command without deferring it', async () => {
-      let captured: Record<string, unknown> | undefined
-      const create = vi.fn(async (input: Record<string, unknown>) => {
+      let captured: PtyCreateInput | undefined
+      const create = vi.fn<PtyApi['create']>(async (input) => {
         captured = input
         return { location: { directory: '/repo' }, data: createPty({ id: 'pty-1', title: 'Terminal' }) }
       })
@@ -228,7 +225,7 @@ describe('TerminalService', () => {
     })
 
     it('merges the repository env between the GitHub env and the input env', async () => {
-      const create = vi.fn(async () => ({
+      const create = vi.fn<PtyApi['create']>(async () => ({
         location: { directory: '/repo' },
         data: createPty({ id: 'pty-new', title: 'Terminal' }),
       }))
@@ -251,8 +248,8 @@ describe('TerminalService', () => {
 
   describe('hub capture', () => {
     function createCapturingService(actionTerminal = createPty({ id: 'pty-action', title: 'ocm:action:say:Say hi' })) {
-      const create = vi.fn(async () => ({ location: { directory: '/repo' }, data: actionTerminal }))
-      const list = vi.fn(async () => ({ location: { directory: '/repo' }, data: [actionTerminal] }))
+      const create = vi.fn<PtyApi['create']>(async () => ({ location: { directory: '/repo' }, data: actionTerminal }))
+      const list = vi.fn<PtyApi['list']>(async () => ({ location: { directory: '/repo' }, data: [actionTerminal] }))
       const factory = createSocketFactory()
       const service = createTerminalService(
         createClient({ create, list }),
@@ -262,9 +259,9 @@ describe('TerminalService', () => {
       return { service, sockets: factory.sockets }
     }
 
-    function createSingleTerminalService(terminal: PtyRecord) {
-      const create = vi.fn(async () => ({ location: { directory: '/repo' }, data: terminal }))
-      const list = vi.fn(async () => ({ location: { directory: '/repo' }, data: [terminal] }))
+    function createSingleTerminalService(terminal: OpenCodePty) {
+      const create = vi.fn<PtyApi['create']>(async () => ({ location: { directory: '/repo' }, data: terminal }))
+      const list = vi.fn<PtyApi['list']>(async () => ({ location: { directory: '/repo' }, data: [terminal] }))
       const factory = createSocketFactory()
       const service = createTerminalService(
         createClient({ create, list }),
@@ -274,11 +271,19 @@ describe('TerminalService', () => {
       return { service, sockets: factory.sockets }
     }
 
-    async function openHub(sockets: FakeUpstreamSocket[]): Promise<FakeUpstreamSocket> {
+    async function openHub(sockets: FakeWebSocket[]): Promise<FakeWebSocket> {
       await vi.waitFor(() => expect(sockets).toHaveLength(1))
-      sockets[0]!.emit('open', {})
+      sockets[0]!.open()
       return sockets[0]!
     }
+
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
 
     const actionInput = {
       kind: 'action' as const,
@@ -316,7 +321,7 @@ describe('TerminalService', () => {
       await service.create('/repo', { kind: 'shell', name: 'Terminal' })
       expect(sockets).toHaveLength(0)
 
-      await service.connect('/repo', 'pty-shell', 12, createPeer())
+      await service.connect('/repo', 'pty-shell', 12, new FakePeer())
 
       expect(sockets).toHaveLength(1)
       expect(new URL(sockets[0]!.url).searchParams.get('cursor')).toBe('12')
@@ -328,17 +333,15 @@ describe('TerminalService', () => {
 
       await service.create('/repo', actionInput)
       const socket = await openHub(sockets)
-      socket.emit('message', { data: 'hi\r\n' })
-      socket.emit('close', { code: 1000 })
+      socket.emitMessage('hi\r\n')
+      socket.emitClose(1000)
 
-      const peer = createPeer()
+      const peer = new FakePeer()
       await service.connect('/repo', 'pty-action', undefined, peer)
 
       expect(peer.sent[0]).toBe('hi\r\n')
       expect(peer.sent[1]).toBeInstanceOf(Uint8Array)
-      const meta = peer.sent[1] as Uint8Array
-      expect(meta[0]).toBe(0)
-      expect(JSON.parse(new TextDecoder().decode(meta.subarray(1)))).toEqual({ cursor: 4 })
+      expect(metaCursor(peer.sent[1])).toBe(4)
       expect(peer.closeCalls).toEqual([{ code: 1000, reason: undefined }])
       expect(sockets).toHaveLength(1)
     })
@@ -348,7 +351,7 @@ describe('TerminalService', () => {
 
       await service.create('/repo', actionInput)
       const socket = await openHub(sockets)
-      const peer = createPeer()
+      const peer = new FakePeer()
       const bridge = await service.connect('/repo', 'pty-action', undefined, peer)
 
       bridge.send('ls\r')
@@ -361,11 +364,11 @@ describe('TerminalService', () => {
 
       await service.create('/repo', actionInput)
       const socket = await openHub(sockets)
-      socket.emit('message', { data: 'old' })
-      const peer = createPeer()
+      socket.emitMessage('old')
+      const peer = new FakePeer()
       await service.connect('/repo', 'pty-action', undefined, peer)
 
-      socket.emit('message', { data: 'new' })
+      socket.emitMessage('new')
 
       expect(peer.sent[0]).toBe('old')
       expect(peer.sent[2]).toBe('new')
@@ -376,19 +379,19 @@ describe('TerminalService', () => {
 
       await service.create('/repo', actionInput)
       const socket = await openHub(sockets)
-      const attached = createPeer()
+      const attached = new FakePeer()
       await service.connect('/repo', 'pty-action', undefined, attached)
 
-      socket.emit('close', { code: 1006 })
+      socket.emitClose(1006)
 
       expect(attached.closeCalls).toEqual([{ code: 1011, reason: undefined }])
 
-      const peer = createPeer()
+      const peer = new FakePeer()
       await service.connect('/repo', 'pty-action', 7, peer)
 
       expect(sockets).toHaveLength(2)
       expect(new URL(sockets[1]!.url).searchParams.get('cursor')).toBe('7')
-      sockets[1]!.emit('open', {})
+      sockets[1]!.open()
       expect(sockets[1]!.sent).toEqual([])
     })
 
@@ -397,30 +400,36 @@ describe('TerminalService', () => {
 
       await service.create('/repo', actionInput)
       await vi.waitFor(() => expect(sockets).toHaveLength(1))
-      sockets[0]!.emit('close', { code: 1006 })
-      await vi.waitFor(() => expect(sockets).toHaveLength(2), { timeout: 3000 })
-      sockets[1]!.emit('close', { code: 1006 })
-      await vi.waitFor(() => expect(sockets).toHaveLength(3), { timeout: 3000 })
-      sockets[2]!.emit('close', { code: 1006 })
+      sockets[0]!.emitClose(1006)
+      await vi.advanceTimersByTimeAsync(100)
+      expect(sockets).toHaveLength(2)
+      sockets[1]!.emitClose(1006)
+      await vi.advanceTimersByTimeAsync(100)
+      expect(sockets).toHaveLength(3)
+      sockets[2]!.emitClose(1006)
 
-      const peer = createPeer()
+      const peer = new FakePeer()
       await service.connect('/repo', 'pty-action', undefined, peer)
       expect(sockets).toHaveLength(4)
-      sockets[3]!.emit('open', {})
+      sockets[3]!.open()
       expect(sockets[3]!.sent).toEqual(['\n'])
 
-      await service.connect('/repo', 'pty-action', undefined, createPeer())
+      await service.connect('/repo', 'pty-action', undefined, new FakePeer())
       expect(sockets).toHaveLength(5)
-      sockets[4]!.emit('open', {})
+      sockets[4]!.open()
       expect(sockets[4]!.sent).toEqual([])
     })
 
     it('drops the captured upstream when the terminal is removed', async () => {
       const removed = createPty({ id: 'pty-action', title: 'Terminal', status: 'exited', exitCode: 0 })
-      const remove = vi.fn(async () => undefined)
+      const remove = vi.fn<PtyApi['remove']>(async () => undefined)
       const factory = createSocketFactory()
       const service = createTerminalService(
-        createClient({ create: vi.fn(async () => ({ data: removed })), list: vi.fn(async () => ({ data: [removed] })), remove }),
+        createClient({
+          create: vi.fn<PtyApi['create']>(async () => ({ location: { directory: '/repo' }, data: removed })),
+          list: vi.fn<PtyApi['list']>(async () => ({ location: { directory: '/repo' }, data: [removed] })),
+          remove,
+        }),
         createCredentialProvider(),
         factory.openSocket,
       )
@@ -429,7 +438,7 @@ describe('TerminalService', () => {
       await openHub(factory.sockets)
       await service.remove('/repo', 'pty-action')
 
-      const peer = createPeer()
+      const peer = new FakePeer()
       await service.connect('/repo', 'pty-action', undefined, peer)
 
       expect(remove).toHaveBeenCalledWith({ ptyID: 'pty-action', location: { directory: '/repo' } })
@@ -440,7 +449,7 @@ describe('TerminalService', () => {
 
   describe('remote target', () => {
     it('does not inject local GitHub credentials or repository environment when creating a terminal', async () => {
-      const create = vi.fn(async () => ({
+      const create = vi.fn<PtyApi['create']>(async () => ({
         location: { directory: '/repo' },
         data: createPty({ id: 'pty-remote', title: 'Terminal' }),
       }))
@@ -460,8 +469,8 @@ describe('TerminalService', () => {
     })
 
     it('keeps a remote shell environment empty without input env', async () => {
-      let captured: Record<string, unknown> | undefined
-      const create = vi.fn(async (input: Record<string, unknown>) => {
+      let captured: PtyCreateInput | undefined
+      const create = vi.fn<PtyApi['create']>(async (input) => {
         captured = input
         return { location: { directory: '/repo' }, data: createPty() }
       })
@@ -479,22 +488,22 @@ describe('TerminalService', () => {
     })
 
     it('builds the connect URL from the target base URL', async () => {
-      const list = vi.fn(async ({ location }: { location: { directory: string } }) => ({
-        location,
+      const list = vi.fn<PtyApi['list']>(async (input) => ({
+        location: { directory: input?.location?.directory ?? '/repo' },
         data: [createPty({ id: 'pty-1' })],
       }))
-      const token = vi.fn(async () => ({
+      const token = vi.fn<PtyApi['connect']['token']>(async () => ({
         location: { directory: '/repo' },
         data: { ticket: 'remote-ticket', expires_in: 60 },
       }))
       const remoteClient = createClient({ list, connect: { token } })
-      let opened: FakeUpstreamSocket | undefined
+      let opened: FakeWebSocket | undefined
       const service = createTerminalService(
         createClient({}),
         createCredentialProvider(),
         (url) => {
-          opened = new FakeUpstreamSocket(url)
-          return opened as unknown as WebSocket
+          opened = new FakeWebSocket(url)
+          return opened
         },
         'https://local.internal',
       )
@@ -504,10 +513,11 @@ describe('TerminalService', () => {
         includeLocalEnv: false,
       })
 
-      await remote.connect('/repo', 'pty-1', undefined, createPeer())
+      await remote.connect('/repo', 'pty-1', undefined, new FakePeer())
 
       expect(list).toHaveBeenCalledWith({ location: { directory: '/repo' } })
-      const url = new URL(opened!.url)
+      if (!opened) throw new Error('Expected the remote connect to open a socket')
+      const url = new URL(opened.url)
       expect(url.protocol).toBe('wss:')
       expect(url.host).toBe('remote.internal')
       expect(url.pathname).toBe('/api/pty/pty-1/connect')
@@ -517,7 +527,7 @@ describe('TerminalService', () => {
 
   describe('requireTerminal', () => {
     it('returns the terminal when the id exists in the directory', async () => {
-      const list = vi.fn(async () => ({
+      const list = vi.fn<PtyApi['list']>(async () => ({
         location: { directory: '/repo' },
         data: [createPty({ id: 'pty-1' })],
       }))
@@ -527,9 +537,9 @@ describe('TerminalService', () => {
     })
 
     it('rejects a PTY id from another directory', async () => {
-      const list = vi.fn(async ({ location }: { location: { directory: string } }) => ({
-        location: { directory: location.directory },
-        data: location.directory === '/repo' ? [createPty({ id: 'pty-1' })] : [],
+      const list = vi.fn<PtyApi['list']>(async (input) => ({
+        location: { directory: input?.location?.directory ?? '/other' },
+        data: input?.location?.directory === '/repo' ? [createPty({ id: 'pty-1' })] : [],
       }))
       const service = createTerminalService(createClient({ list }), createCredentialProvider())
 
@@ -539,7 +549,10 @@ describe('TerminalService', () => {
 
   describe('resize', () => {
     it('updates the terminal size with the location', async () => {
-      const update = vi.fn(async () => ({ location: { directory: '/repo' }, data: createPty() }))
+      const update = vi.fn<PtyApi['update']>(async () => ({
+        location: { directory: '/repo' },
+        data: createPty(),
+      }))
       const service = createTerminalService(createClient({ update }), createCredentialProvider())
 
       await service.resize('/repo', 'pty-1', { cols: 120, rows: 40 })
@@ -550,7 +563,7 @@ describe('TerminalService', () => {
 
   describe('remove', () => {
     it('removes the terminal with the location', async () => {
-      const remove = vi.fn(async () => undefined)
+      const remove = vi.fn<PtyApi['remove']>(async () => undefined)
       const service = createTerminalService(createClient({ remove }), createCredentialProvider())
 
       await service.remove('/repo', 'pty-1')
@@ -560,9 +573,9 @@ describe('TerminalService', () => {
   })
 
   describe('removeAll', () => {
-    function createSessionApi(pages: Array<{ data: Array<{ id: string }>; next: string | null }>) {
+    function createSessionApi(pages: Array<{ data: SessionInfo[]; next: string | null }>) {
       let index = 0
-      const list = vi.fn(async () => {
+      const list = vi.fn<SessionApi['list']>(async () => {
         const page = pages[index] ?? { data: [], next: null }
         index += 1
         return { data: page.data, cursor: { next: page.next } }
@@ -571,12 +584,12 @@ describe('TerminalService', () => {
     }
 
     it('removes every terminal and tolerates a 404', async () => {
-      const list = vi.fn(async () => ({
+      const list = vi.fn<PtyApi['list']>(async () => ({
         location: { directory: '/repo' },
         data: [createPty({ id: 'a' }), createPty({ id: 'b' })],
       }))
-      const notFound = Object.assign(new Error('not found'), { _tag: 'PtyNotFoundError' })
-      const remove = vi.fn(async ({ ptyID }: { ptyID: string }) => {
+      const notFound = Object.assign(new Error('not found'), { _tag: 'PtyNotFoundError' as const })
+      const remove = vi.fn<PtyApi['remove']>(async ({ ptyID }) => {
         if (ptyID === 'a') throw notFound
       })
       const { list: sessionList } = createSessionApi([])
@@ -590,11 +603,11 @@ describe('TerminalService', () => {
     })
 
     it('propagates a non-404 removal failure', async () => {
-      const list = vi.fn(async () => ({
+      const list = vi.fn<PtyApi['list']>(async () => ({
         location: { directory: '/repo' },
         data: [createPty({ id: 'a' })],
       }))
-      const remove = vi.fn(async () => {
+      const remove = vi.fn<PtyApi['remove']>(async () => {
         throw new Error('boom')
       })
       const { list: sessionList } = createSessionApi([])
@@ -606,24 +619,21 @@ describe('TerminalService', () => {
     })
 
     it('removes every persistent PTY across paginated sessions', async () => {
-      const list = vi.fn(async () => ({ location: { directory: '/repo' }, data: [] }))
-      const remove = vi.fn(async () => undefined)
+      const list = vi.fn<PtyApi['list']>(async () => ({ location: { directory: '/repo' }, data: [] }))
+      const remove = vi.fn<PtyApi['remove']>(async () => undefined)
       const { list: sessionList } = createSessionApi([
-        { data: [{ id: 'ses-1' }], next: 'page-2' },
-        { data: [{ id: 'ses-2' }], next: null },
+        { data: [sessionInfo({ id: 'ses-1' })], next: 'page-2' },
+        { data: [sessionInfo({ id: 'ses-2' })], next: null },
       ])
-      const persistentList = vi.fn(async ({ sessionID }: { sessionID: string }) => [
-        { id: `${sessionID}-a` },
-        { id: `${sessionID}-b` },
+      const persistentList = vi.fn<PersistentPtyApi['list']>(async ({ sessionID }) => [
+        createPersistentPty(`${sessionID}-a`, sessionID),
+        createPersistentPty(`${sessionID}-b`, sessionID),
       ])
-      const persistentRemove = vi.fn(async () => undefined)
-      const client = createClient(
-        { list, remove },
-        {
-          session: { list: sessionList },
-          experimental: { persistentPty: { list: persistentList, remove: persistentRemove } },
-        },
-      )
+      const persistentRemove = vi.fn<PersistentPtyApi['remove']>(async () => undefined)
+      const client = stubPersistentPtys(createClient({ list, remove }, { session: { list: sessionList } }), {
+        list: persistentList,
+        remove: persistentRemove,
+      })
       const service = createTerminalService(client, createCredentialProvider())
 
       await expect(service.removeAll('/repo')).resolves.toBeUndefined()
@@ -640,21 +650,18 @@ describe('TerminalService', () => {
     })
 
     it('treats a 404 from listing persistent PTYs as none', async () => {
-      const list = vi.fn(async () => ({ location: { directory: '/repo' }, data: [] }))
-      const remove = vi.fn(async () => undefined)
-      const { list: sessionList } = createSessionApi([{ data: [{ id: 'ses-1' }], next: null }])
-      const notFound = Object.assign(new Error('not found'), { _tag: 'PtyNotFoundError' })
-      const persistentList = vi.fn(async () => {
+      const list = vi.fn<PtyApi['list']>(async () => ({ location: { directory: '/repo' }, data: [] }))
+      const remove = vi.fn<PtyApi['remove']>(async () => undefined)
+      const { list: sessionList } = createSessionApi([{ data: [sessionInfo({ id: 'ses-1' })], next: null }])
+      const notFound = Object.assign(new Error('not found'), { _tag: 'PtyNotFoundError' as const })
+      const persistentList = vi.fn<PersistentPtyApi['list']>(async () => {
         throw notFound
       })
-      const persistentRemove = vi.fn(async () => undefined)
-      const client = createClient(
-        { list, remove },
-        {
-          session: { list: sessionList },
-          experimental: { persistentPty: { list: persistentList, remove: persistentRemove } },
-        },
-      )
+      const persistentRemove = vi.fn<PersistentPtyApi['remove']>(async () => undefined)
+      const client = stubPersistentPtys(createClient({ list, remove }, { session: { list: sessionList } }), {
+        list: persistentList,
+        remove: persistentRemove,
+      })
       const service = createTerminalService(client, createCredentialProvider())
 
       await expect(service.removeAll('/repo')).resolves.toBeUndefined()
@@ -662,21 +669,21 @@ describe('TerminalService', () => {
     })
 
     it('tolerates a 404 while removing a persistent PTY', async () => {
-      const list = vi.fn(async () => ({ location: { directory: '/repo' }, data: [] }))
-      const remove = vi.fn(async () => undefined)
-      const { list: sessionList } = createSessionApi([{ data: [{ id: 'ses-1' }], next: null }])
-      const notFound = Object.assign(new Error('not found'), { _tag: 'PtyNotFoundError' })
-      const persistentList = vi.fn(async () => [{ id: 'pp-1' }, { id: 'pp-2' }])
-      const persistentRemove = vi.fn(async ({ ptyID }: { ptyID: string }) => {
+      const list = vi.fn<PtyApi['list']>(async () => ({ location: { directory: '/repo' }, data: [] }))
+      const remove = vi.fn<PtyApi['remove']>(async () => undefined)
+      const { list: sessionList } = createSessionApi([{ data: [sessionInfo({ id: 'ses-1' })], next: null }])
+      const notFound = Object.assign(new Error('not found'), { _tag: 'PtyNotFoundError' as const })
+      const persistentList = vi.fn<PersistentPtyApi['list']>(async ({ sessionID }) => [
+        createPersistentPty('pp-1', sessionID),
+        createPersistentPty('pp-2', sessionID),
+      ])
+      const persistentRemove = vi.fn<PersistentPtyApi['remove']>(async ({ ptyID }) => {
         if (ptyID === 'pp-1') throw notFound
       })
-      const client = createClient(
-        { list, remove },
-        {
-          session: { list: sessionList },
-          experimental: { persistentPty: { list: persistentList, remove: persistentRemove } },
-        },
-      )
+      const client = stubPersistentPtys(createClient({ list, remove }, { session: { list: sessionList } }), {
+        list: persistentList,
+        remove: persistentRemove,
+      })
       const service = createTerminalService(client, createCredentialProvider())
 
       await expect(service.removeAll('/repo')).resolves.toBeUndefined()
@@ -686,39 +693,32 @@ describe('TerminalService', () => {
     })
 
     it('propagates a non-404 failure from listing persistent PTYs', async () => {
-      const list = vi.fn(async () => ({ location: { directory: '/repo' }, data: [] }))
-      const remove = vi.fn(async () => undefined)
-      const { list: sessionList } = createSessionApi([{ data: [{ id: 'ses-1' }], next: null }])
-      const persistentList = vi.fn(async () => {
+      const list = vi.fn<PtyApi['list']>(async () => ({ location: { directory: '/repo' }, data: [] }))
+      const remove = vi.fn<PtyApi['remove']>(async () => undefined)
+      const { list: sessionList } = createSessionApi([{ data: [sessionInfo({ id: 'ses-1' })], next: null }])
+      const persistentList = vi.fn<PersistentPtyApi['list']>(async () => {
         throw new Error('boom')
       })
-      const client = createClient(
-        { list, remove },
-        {
-          session: { list: sessionList },
-          experimental: { persistentPty: { list: persistentList, remove: vi.fn(async () => undefined) } },
-        },
-      )
+      const client = stubPersistentPtys(createClient({ list, remove }, { session: { list: sessionList } }), {
+        list: persistentList,
+      })
       const service = createTerminalService(client, createCredentialProvider())
 
       await expect(service.removeAll('/repo')).rejects.toThrow('boom')
     })
 
     it('propagates a non-404 failure from removing a persistent PTY', async () => {
-      const list = vi.fn(async () => ({ location: { directory: '/repo' }, data: [] }))
-      const remove = vi.fn(async () => undefined)
-      const { list: sessionList } = createSessionApi([{ data: [{ id: 'ses-1' }], next: null }])
-      const persistentList = vi.fn(async () => [{ id: 'pp-1' }])
-      const persistentRemove = vi.fn(async () => {
+      const list = vi.fn<PtyApi['list']>(async () => ({ location: { directory: '/repo' }, data: [] }))
+      const remove = vi.fn<PtyApi['remove']>(async () => undefined)
+      const { list: sessionList } = createSessionApi([{ data: [sessionInfo({ id: 'ses-1' })], next: null }])
+      const persistentList = vi.fn<PersistentPtyApi['list']>(async ({ sessionID }) => [createPersistentPty('pp-1', sessionID)])
+      const persistentRemove = vi.fn<PersistentPtyApi['remove']>(async () => {
         throw new Error('boom')
       })
-      const client = createClient(
-        { list, remove },
-        {
-          session: { list: sessionList },
-          experimental: { persistentPty: { list: persistentList, remove: persistentRemove } },
-        },
-      )
+      const client = stubPersistentPtys(createClient({ list, remove }, { session: { list: sessionList } }), {
+        list: persistentList,
+        remove: persistentRemove,
+      })
       const service = createTerminalService(client, createCredentialProvider())
 
       await expect(service.removeAll('/repo')).rejects.toThrow('boom')
@@ -726,26 +726,26 @@ describe('TerminalService', () => {
   })
 
   describe('connect', () => {
-    function createConnectClient(options: { ticket?: string; terminals?: PtyRecord[] } = {}) {
-      const list = vi.fn(async ({ location }: { location: { directory: string } }) => ({
-        location,
+    function createConnectClient(options: { ticket?: string; terminals?: OpenCodePty[] } = {}) {
+      const list = vi.fn<PtyApi['list']>(async (input) => ({
+        location: { directory: input?.location?.directory ?? '/repo' },
         data: options.terminals ?? [createPty({ id: 'pty-1' })],
       }))
-      const token = vi.fn(async () => ({
+      const token = vi.fn<PtyApi['connect']['token']>(async () => ({
         location: { directory: '/repo' },
         data: { ticket: options.ticket ?? 'ticket-abc', expires_in: 60 },
       }))
-      return { client: { api: { pty: { list, connect: { token } } } } as unknown as OpenCodeClient, list, token }
+      return { client: createClient({ list, connect: { token } }), list, token }
     }
 
     it('resolves the terminal, requests a ticket, and bridges the upstream socket', async () => {
       const { client, list, token } = createConnectClient()
-      let opened: FakeUpstreamSocket | undefined
+      let opened: FakeWebSocket | undefined
       const service = createTerminalService(client, createCredentialProvider(), (url) => {
-        opened = new FakeUpstreamSocket(url)
-        return opened as unknown as WebSocket
+        opened = new FakeWebSocket(url)
+        return opened
       })
-      const peer = createPeer()
+      const peer = new FakePeer()
 
       const bridge = await service.connect('/repo', 'pty-1', 12, peer)
 
@@ -756,52 +756,54 @@ describe('TerminalService', () => {
         'x-opencode-ticket': '1',
       })
 
-      expect(opened).toBeDefined()
-      const url = new URL(opened!.url)
+      if (!opened) throw new Error('Expected connect to open a socket')
+      const url = new URL(opened.url)
       expect(url.protocol).toBe('ws:')
       expect(url.pathname).toBe('/api/pty/pty-1/connect')
       expect(url.searchParams.get('ticket')).toBe('ticket-abc')
       expect(url.searchParams.get('location[directory]')).toBe('/repo')
       expect(url.searchParams.get('cursor')).toBe('12')
 
-      opened!.emit('open', {})
+      opened.open()
       bridge.send('hello')
-      expect(opened!.sent).toEqual(['hello'])
+      expect(opened.sent).toEqual(['hello'])
 
-      opened!.emit('message', { data: new Uint8Array([7]).buffer })
+      opened.emitMessage(new Uint8Array([7]).buffer)
       expect(peer.sent).toEqual([new Uint8Array([7])])
     })
 
     it('omits the cursor parameter when no cursor is provided', async () => {
       const { client } = createConnectClient()
-      let opened: FakeUpstreamSocket | undefined
+      let opened: FakeWebSocket | undefined
       const service = createTerminalService(client, createCredentialProvider(), (url) => {
-        opened = new FakeUpstreamSocket(url)
-        return opened as unknown as WebSocket
+        opened = new FakeWebSocket(url)
+        return opened
       })
 
-      await service.connect('/repo', 'pty-1', undefined, createPeer())
+      await service.connect('/repo', 'pty-1', undefined, new FakePeer())
 
-      const url = new URL(opened!.url)
+      if (!opened) throw new Error('Expected connect to open a socket')
+      const url = new URL(opened.url)
       expect(url.searchParams.has('cursor')).toBe(false)
     })
 
     it('uses wss when the upstream base is https', async () => {
       const { client } = createConnectClient()
-      let opened: FakeUpstreamSocket | undefined
+      let opened: FakeWebSocket | undefined
       const service = createTerminalService(
         client,
         createCredentialProvider(),
         (url) => {
-          opened = new FakeUpstreamSocket(url)
-          return opened as unknown as WebSocket
+          opened = new FakeWebSocket(url)
+          return opened
         },
         'https://opencode.internal',
       )
 
-      await service.connect('/repo', 'pty-1', undefined, createPeer())
+      await service.connect('/repo', 'pty-1', undefined, new FakePeer())
 
-      const url = new URL(opened!.url)
+      if (!opened) throw new Error('Expected connect to open a socket')
+      const url = new URL(opened.url)
       expect(url.protocol).toBe('wss:')
       expect(url.pathname).toBe('/api/pty/pty-1/connect')
     })
@@ -810,7 +812,7 @@ describe('TerminalService', () => {
       const { client, token } = createConnectClient({ terminals: [] })
       const service = createTerminalService(client, createCredentialProvider())
 
-      await expect(service.connect('/repo', 'missing', undefined, createPeer())).rejects.toBeInstanceOf(TerminalNotFoundError)
+      await expect(service.connect('/repo', 'missing', undefined, new FakePeer())).rejects.toBeInstanceOf(TerminalNotFoundError)
       expect(token).not.toHaveBeenCalled()
     })
   })

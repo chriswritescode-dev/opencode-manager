@@ -105,27 +105,27 @@ function TreeNode({ file, level, onFileSelect, onDirectoryClick, selectedFile, o
     }
     
     const ext = file.name.split('.').pop()?.toLowerCase()
-    const iconMap: Record<string, string> = {
-      'js': '🟨',
-      'ts': '🔷',
-      'jsx': '🟨',
-      'tsx': '🔷',
-      'json': '📋',
-      'md': '📝',
-      'html': '🌐',
-      'css': '🎨',
-      'png': '🖼️',
-      'jpg': '🖼️',
-      'jpeg': '🖼️',
-      'gif': '🖼️',
-      'svg': '🖼️',
-      'pdf': '📄',
-      'zip': '📦',
-    }
+    const iconMap = new Map<string, string>([
+      ['js', '🟨'],
+      ['ts', '🔷'],
+      ['jsx', '🟨'],
+      ['tsx', '🔷'],
+      ['json', '📋'],
+      ['md', '📝'],
+      ['html', '🌐'],
+      ['css', '🎨'],
+      ['png', '🖼️'],
+      ['jpg', '🖼️'],
+      ['jpeg', '🖼️'],
+      ['gif', '🖼️'],
+      ['svg', '🖼️'],
+      ['pdf', '📄'],
+      ['zip', '📦'],
+    ])
     
     return (
       <span className="w-4 h-4 flex items-center justify-center text-xs">
-        {iconMap[ext || ''] || <File className="w-4 h-4" />}
+        {iconMap.get(ext || '') || <File className="w-4 h-4" />}
       </span>
     )
   }

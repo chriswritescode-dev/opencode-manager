@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import { API_BASE_URL } from '@/config'
 import { fetchWrapper } from './fetchWrapper'
 import { callOpenCode } from './opencodeApi'
@@ -10,16 +11,21 @@ import {
 
 export type { McpServerConfig, McpStatus } from '@opencode-manager/shared/opencode'
 
-export interface McpAuthStartResponse {
-  authorizationUrl: string
-  flowId: string
-}
+const mcpAuthStartResponseSchema = z.object({
+  authorizationUrl: z.string(),
+  flowId: z.string(),
+})
 
-type McpOAuthFlowStatus =
-  | { status: 'pending' }
-  | { status: 'completed'; serverName: string }
-  | { status: 'failed'; error: string }
-  | { status: 'unknown' }
+export type McpAuthStartResponse = z.infer<typeof mcpAuthStartResponseSchema>
+
+const mcpOAuthFlowStatusSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('pending') }),
+  z.object({ status: z.literal('completed'), serverName: z.string() }),
+  z.object({ status: z.literal('failed'), error: z.string() }),
+  z.object({ status: z.literal('unknown') }),
+])
+
+type McpOAuthFlowStatus = z.infer<typeof mcpOAuthFlowStatusSchema>
 
 export const mcpApi = {
   async getStatus(directory?: string, serverId?: string): Promise<McpStatusMap> {
@@ -52,7 +58,7 @@ export const mcpApi = {
   },
 
   async startAuth(name: string, directory?: string): Promise<McpAuthStartResponse> {
-    return fetchWrapper(`${API_BASE_URL}/api/mcp-oauth-proxy/start`, {
+    return fetchWrapper(`${API_BASE_URL}/api/mcp-oauth-proxy/start`, mcpAuthStartResponseSchema, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ serverName: name, directory }),
@@ -61,14 +67,20 @@ export const mcpApi = {
 
   async checkFlowStatus(flowId: string): Promise<McpOAuthFlowStatus> {
     try {
-      return await fetchWrapper(`${API_BASE_URL}/api/mcp-oauth-proxy/status/${encodeURIComponent(flowId)}`)
+      return await fetchWrapper(
+        `${API_BASE_URL}/api/mcp-oauth-proxy/status/${encodeURIComponent(flowId)}`,
+        mcpOAuthFlowStatusSchema,
+      )
     } catch {
       return { status: 'unknown' }
     }
   },
 
   async removeAuth(name: string, directory?: string): Promise<{ success: true }> {
-    return fetchWrapper(`${API_BASE_URL}/api/mcp-oauth-proxy/credentials/${encodeURIComponent(name)}`, {
+    return fetchWrapper(
+      `${API_BASE_URL}/api/mcp-oauth-proxy/credentials/${encodeURIComponent(name)}`,
+      z.object({ success: z.literal(true) }),
+      {
       method: 'DELETE',
       params: directory ? { directory } : undefined,
     })

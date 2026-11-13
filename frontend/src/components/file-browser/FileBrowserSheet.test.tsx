@@ -1,1177 +1,241 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import '@testing-library/jest-dom'
+import { createRef } from 'react'
+import { describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import { FileBrowserSheet } from './FileBrowserSheet'
-import { FileBrowser } from './FileBrowser'
-import type { FileBrowserHandle } from './FileBrowser'
-import * as useMobile from '../../hooks/useMobile'
+import { FileBrowser, type FileBrowserHandle } from './FileBrowser'
+import { renderWithProviders } from '@/test/render'
+import { installWindowSize } from '@/test/browserFakes'
+import type { FetchRoute, FetchRouteResult } from '@/test/fetchFake'
+import type { FileInfo } from '@/types/files'
 
-function createQueryClient() {
-  return new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false,
-      },
-    },
-  })
+interface DirectoryFixture {
+  children: string[]
+  fileContent?: string
+  delayMs?: number
 }
 
-function createWrapper() {
-  const queryClient = createQueryClient()
-  return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+function directoryInfo(path: string, fixture: DirectoryFixture): FileInfo {
+  const name = path.split('/').pop() ?? path
+  return {
+    name,
+    path,
+    isDirectory: true,
+    size: 0,
+    lastModified: new Date('2026-01-01T00:00:00Z'),
+    children: fixture.children.map((child) => {
+      const childPath = `${path}/${child}`
+      if (child.endsWith('.txt')) {
+        return {
+          name: child,
+          path: childPath,
+          isDirectory: false,
+          size: 5,
+          mimeType: 'text/plain',
+          lastModified: new Date('2026-01-01T00:00:00Z'),
+        }
+      }
+      return {
+        name: child,
+        path: childPath,
+        isDirectory: true,
+        size: 0,
+        lastModified: new Date('2026-01-01T00:00:00Z'),
+      }
+    }),
+  }
+}
+
+function fileApiRoutes(paths: Record<string, DirectoryFixture>, delayMs?: Record<string, number>): FetchRoute[] {
+  return [
+    {
+      method: 'GET',
+      path: '/api/files',
+      respond: async (request): Promise<FetchRouteResult> => {
+        const path = request.searchParams.get('path') ?? ''
+        if (path.endsWith('.txt')) {
+          return {
+            json: {
+              name: path.split('/').pop() ?? path,
+              path,
+              isDirectory: false,
+              size: 5,
+              mimeType: 'text/plain',
+              content: btoa('hello'),
+              lastModified: new Date('2026-01-01T00:00:00Z'),
+            },
+          }
+        }
+        const fixture = paths[path]
+        if (!fixture) return { json: directoryInfo(path, { children: [] }) }
+        const delay = delayMs?.[path]
+        if (delay) {
+          await new Promise((resolve) => {
+            setTimeout(resolve, delay)
+          })
+        }
+        return { json: directoryInfo(path, fixture) }
+      },
+    },
+  ]
+}
+
+const navigationPaths = {
+  test: { children: ['deep', 'notes.txt'], fileContent: 'hello' },
+  'test/deep': { children: ['src'] },
+  'test/deep/src': { children: [] },
+  'test/notes.txt': { children: [] },
+}
+
+function renderSheet(routes: FetchRoute[] = fileApiRoutes(navigationPaths)) {
+  const onClose = vi.fn()
+  const onFileSelect = vi.fn()
+  const result = renderWithProviders(
+    <FileBrowserSheet isOpen onClose={onClose} basePath="test" onFileSelect={onFileSelect} />,
+    { auth: false, theme: false, toaster: false, fetchRoutes: routes },
   )
+  return { ...result, onClose, onFileSelect }
+}
+
+function sheetContainer(): HTMLElement {
+  return screen.getByTestId('file-browser-sheet')
 }
 
 describe('FileBrowserSheet', () => {
-  const mockOnClose = vi.fn()
-  
-  beforeEach(() => {
-    mockOnClose.mockClear()
+  it('renders the file list while open', async () => {
+    renderSheet()
+
+    expect(await screen.findByPlaceholderText(/search/i)).toBeInTheDocument()
+    expect(await screen.findByText('notes.txt')).toBeInTheDocument()
   })
 
-  it('renders when isOpen is true', () => {
-    render(
-      <FileBrowserSheet
-        isOpen={true}
-        onClose={mockOnClose}
-        basePath="test"
-      />,
-      { wrapper: createWrapper() }
+  it('does not render when closed', () => {
+    const { container } = renderWithProviders(
+      <FileBrowserSheet isOpen={false} onClose={vi.fn()} />,
+      { auth: false, theme: false, toaster: false, fetchRoutes: fileApiRoutes(navigationPaths) },
     )
-    expect(screen.getByPlaceholderText(/search/i)).toBeInTheDocument()
-  })
 
-  it('does not render when isOpen is false and shouldRender is false', () => {
-    const { container } = render(
-      <FileBrowserSheet
-        isOpen={false}
-        onClose={mockOnClose}
-      />,
-      { wrapper: createWrapper() }
-    )
     expect(container.firstChild).toBeNull()
+    expect(screen.queryByTestId('file-browser-sheet')).not.toBeInTheDocument()
   })
 
-  it('calls onClose when close button is clicked', () => {
-    render(
-      <FileBrowserSheet
-        isOpen={true}
-        onClose={mockOnClose}
-      />,
-      { wrapper: createWrapper() }
-    )
-    
-    const buttons = screen.getAllByRole('button')
-    const closeButton = buttons.find(btn => btn.querySelector('svg'))
-    if (closeButton) {
-      fireEvent.click(closeButton)
-      expect(mockOnClose).toHaveBeenCalled()
-    }
+  it('closes from the header close button', async () => {
+    const { onClose } = renderSheet()
+    await screen.findByPlaceholderText(/search/i)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close file browser' }))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('passes basePath to FileBrowser', () => {
-    const testBasePath = 'test/path'
-    render(
-      <FileBrowserSheet
-        isOpen={true}
-        onClose={mockOnClose}
-        basePath={testBasePath}
-      />,
-      { wrapper: createWrapper() }
-    )
-    
-    expect(screen.getByPlaceholderText(/search/i)).toBeInTheDocument()
-  })
-})
+  it('closes on Escape', async () => {
+    const { onClose } = renderSheet()
+    await screen.findByPlaceholderText(/search/i)
 
-describe('FileBrowser initial selection', () => {
-  it('navigates into an initially selected directory even when the base listing resolves later', async () => {
-    const directory = (path: string, children: string[]) => ({
-      name: path.split('/').pop(),
-      path,
-      isDirectory: true,
-      size: 0,
-      lastModified: new Date().toISOString(),
-      children: children.map((name) => ({ name, path: `${path}/${name}`, isDirectory: true, size: 0, lastModified: new Date().toISOString() })),
-    })
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const path = new URL(String(input), 'http://localhost').searchParams.get('path')
-      if (path === 'repo') {
-        await new Promise((resolve) => setTimeout(resolve, 50))
-        return new Response(JSON.stringify(directory('repo', ['frontend'])), { status: 200, headers: { 'Content-Type': 'application/json' } })
-      }
-      return new Response(JSON.stringify(directory('repo/frontend', ['src'])), { status: 200, headers: { 'Content-Type': 'application/json' } })
-    })
-    vi.stubGlobal('fetch', fetchMock)
-    const ref = { current: null as unknown as FileBrowserHandle }
+    fireEvent.keyDown(document, { key: 'Escape' })
 
-    try {
-      render(
-        <FileBrowser ref={ref as never} basePath="repo" embedded={true} initialSelectedFile="repo/frontend" />,
-        { wrapper: createWrapper() }
-      )
-
-      expect(await screen.findByText('src')).toBeInTheDocument()
-      await new Promise((resolve) => setTimeout(resolve, 100))
-      expect(ref.current.getCurrentPath()).toBe('repo/frontend')
-      expect(screen.queryByText('frontend')).not.toBeInTheDocument()
-    } finally {
-      vi.unstubAllGlobals()
-    }
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('does not reload the initial directory when the viewport changes', async () => {
-    const directory = (path: string, children: string[]) => ({
-      name: path.split('/').pop(),
-      path,
-      isDirectory: true,
-      size: 0,
-      lastModified: new Date().toISOString(),
-      children: children.map((name) => ({ name, path: `${path}/${name}`, isDirectory: true, size: 0, lastModified: new Date().toISOString() })),
-    })
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const path = new URL(String(input), 'http://localhost').searchParams.get('path')
-      if (path === 'repo') {
-        await new Promise((resolve) => setTimeout(resolve, 50))
-        return new Response(JSON.stringify(directory('repo', ['frontend'])), { status: 200, headers: { 'Content-Type': 'application/json' } })
-      }
-      return new Response(JSON.stringify(directory('repo/frontend', ['src'])), { status: 200, headers: { 'Content-Type': 'application/json' } })
-    })
-    vi.stubGlobal('fetch', fetchMock)
-    const mobileSpy = vi.spyOn(useMobile, 'useMobile').mockReturnValue(false)
-    const ref = { current: null as unknown as FileBrowserHandle }
+  it('loads the base path and reports preview state when a file is opened', async () => {
+    const { onFileSelect } = renderSheet()
+    await screen.findByText('notes.txt')
 
-    try {
-      const { rerender } = render(
-        <FileBrowser ref={ref as never} basePath="repo" embedded={true} initialSelectedFile="repo/frontend" />,
-        { wrapper: createWrapper() }
-      )
+    fireEvent.click(screen.getByText('notes.txt'))
 
-      expect(await screen.findByText('src')).toBeInTheDocument()
-      await new Promise((resolve) => setTimeout(resolve, 100))
-      const callsBefore = fetchMock.mock.calls.length
-
-      mobileSpy.mockReturnValue(true)
-      rerender(
-        <FileBrowser ref={ref as never} basePath="repo" embedded={true} initialSelectedFile="repo/frontend" />
-      )
-
-      await new Promise((resolve) => setTimeout(resolve, 100))
-      expect(fetchMock.mock.calls.length).toBe(callsBefore)
-      expect(ref.current.getCurrentPath()).toBe('repo/frontend')
-    } finally {
-      mobileSpy.mockRestore()
-      vi.unstubAllGlobals()
-    }
+    await waitFor(() => expect(onFileSelect).toHaveBeenCalledWith(expect.objectContaining({ path: 'test/notes.txt' })))
   })
 })
 
 describe('FileBrowser navigation', () => {
-  it('exposes imperative handle with goBack, canGoBack, and getCurrentPath', () => {
-    const ref = { current: null as unknown as FileBrowserHandle }
-    
-    render(
-      <FileBrowser
-        ref={ref as any}
-        basePath="test"
-        embedded={true}
-      />,
-      { wrapper: createWrapper() }
+  function renderBrowser(routes: FetchRoute[] = fileApiRoutes(navigationPaths), initialSelectedFile?: string) {
+    const ref = createRef<FileBrowserHandle>()
+    const onDirectoryLoad = vi.fn()
+    const result = renderWithProviders(
+      <FileBrowser ref={ref} basePath="test" embedded initialSelectedFile={initialSelectedFile} onDirectoryLoad={onDirectoryLoad} />,
+      { auth: false, theme: false, toaster: false, fetchRoutes: routes },
     )
-    
-    expect(ref.current).toBeTruthy()
-    expect(typeof ref.current?.goBack).toBe('function')
-    expect(typeof ref.current?.canGoBack).toBe('function')
-    expect(typeof ref.current?.getCurrentPath).toBe('function')
-  })
+    return { ...result, ref, onDirectoryLoad }
+  }
 
-  it('canGoBack returns false when at base path', () => {
-    const ref = { current: null as unknown as FileBrowserHandle }
-    
-    render(
-      <FileBrowser
-        ref={ref as any}
-        basePath="test"
-        embedded={true}
-      />,
-      { wrapper: createWrapper() }
-    )
-    
-    expect(ref.current?.canGoBack()).toBe(false)
-  })
+  it('exposes the current path and canGoBack at the base path', async () => {
+    const { ref } = renderBrowser()
+    await screen.findByText('deep')
 
-  it('canGoBack returns true when deeper than base path', () => {
-    const ref = { current: null as unknown as FileBrowserHandle }
-    
-    render(
-      <FileBrowser
-        ref={ref as any}
-        basePath="test"
-        embedded={true}
-      />,
-      { wrapper: createWrapper() }
-    )
-    
-    const pathParts = 'test/deep/path'.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    expect(joinedPath !== 'test').toBe(true)
-  })
-
-  it('getCurrentPath returns current path', () => {
-    const ref = { current: null as unknown as FileBrowserHandle }
-    const testPath = 'test/path'
-    
-    render(
-      <FileBrowser
-        ref={ref as any}
-        basePath={testPath}
-        embedded={true}
-      />,
-      { wrapper: createWrapper() }
-    )
-    
-    expect(ref.current?.getCurrentPath()).toBe(testPath)
-  })
-
-  it('goBack navigates to parent directory', () => {
-    const ref = { current: null as unknown as FileBrowserHandle }
-    
-    render(
-      <FileBrowser
-        ref={ref as any}
-        basePath="test"
-        embedded={true}
-      />,
-      { wrapper: createWrapper() }
-    )
-    
     expect(ref.current?.getCurrentPath()).toBe('test')
     expect(ref.current?.canGoBack()).toBe(false)
   })
 
-  it('goBack handles path segments correctly', () => {
-    const pathParts = 'test/deep/path'.split('/').filter(Boolean)
-    pathParts.pop()
-    const parentPath = pathParts.join('/')
-    
-    expect(parentPath).toBe('test/deep')
-  })
+  it('goes back to the parent directory after navigating deeper', async () => {
+    const { ref } = renderBrowser()
+    await screen.findByText('deep')
 
-  it('canGoBack logic correctly identifies nested paths', () => {
-    const basePath = 'test'
-    const nestedPath = 'test/deep'
-    const pathParts = nestedPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    
-    expect(joinedPath !== basePath).toBe(true)
-    expect(pathParts.length > 0).toBe(true)
-  })
-})
+    fireEvent.click(screen.getByText('deep'))
+    await screen.findByText('src')
+    expect(ref.current?.getCurrentPath()).toBe('test/deep')
+    expect(ref.current?.canGoBack()).toBe(true)
 
-describe('FileBrowserSheet swipe behavior', () => {
-  const mockOnClose = vi.fn()
-
-  it('disables swipe when preview modal is open', () => {
-    render(
-      <FileBrowserSheet
-        isOpen={true}
-        onClose={mockOnClose}
-        basePath="test"
-      />,
-      { wrapper: createWrapper() }
-    )
-    
-    expect(screen.getByPlaceholderText(/search/i)).toBeInTheDocument()
-  })
-
-  it('FileBrowser ref exposes navigation imperative handle', () => {
-    const fileBrowserRef = { current: null as unknown as FileBrowserHandle }
-    
-    render(
-      <FileBrowserSheet
-        isOpen={true}
-        onClose={mockOnClose}
-        basePath="test/path"
-      />,
-      { wrapper: createWrapper() }
-    )
-    
-    expect(fileBrowserRef.current).toBeFalsy()
-  })
-
-  it('swipe enabled state respects isEditing and isPreviewOpen flags', () => {
-    const queryClient = createQueryClient()
-    const { rerender } = render(
-      <QueryClientProvider client={queryClient}>
-        <FileBrowserSheet
-          isOpen={true}
-          onClose={mockOnClose}
-          basePath="test"
-        />
-      </QueryClientProvider>
-    )
-    
-    expect(screen.getByPlaceholderText(/search/i)).toBeInTheDocument()
-    
-    rerender(
-      <QueryClientProvider client={queryClient}>
-        <FileBrowserSheet
-          isOpen={false}
-          onClose={mockOnClose}
-          basePath="test"
-        />
-      </QueryClientProvider>
-    )
-  })
-})
-
-describe('FileBrowser navigation logic', () => {
-  it('computes parent path correctly for nested directories', () => {
-    const testCases = [
-      { current: 'test/deep/path', expected: 'test/deep' },
-      { current: 'test/deep', expected: 'test' },
-      { current: 'test', expected: '' },
-    ]
-    
-    testCases.forEach(({ current, expected }) => {
-      const pathParts = current.split('/').filter(Boolean)
-      pathParts.pop()
-      const parentPath = pathParts.join('/')
-      expect(parentPath).toBe(expected)
+    act(() => {
+      ref.current?.goBack()
     })
-  })
 
-  it('canGoBack returns true for paths deeper than basePath', () => {
-    const basePath = 'test'
-    const nestedPaths = ['test/deep', 'test/deep/path', 'test/a/b/c']
-    
-    nestedPaths.forEach(nestedPath => {
-      const pathParts = nestedPath.split('/').filter(Boolean)
-      const joinedPath = pathParts.join('/')
-      const canGoBack = pathParts.length > 0 && joinedPath !== basePath
-      expect(canGoBack).toBe(true)
-    })
-  })
-
-  it('canGoBack returns false when at basePath', () => {
-    const basePath = 'test'
-    const pathParts = basePath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = pathParts.length > 0 && joinedPath !== basePath
-    expect(canGoBack).toBe(false)
-  })
-
-  it('goBack loads parent path even when parent equals basePath', () => {
-    const basePath = 'test'
-    const currentPath = 'test/deep'
-    
-    const pathParts = currentPath.split('/').filter(Boolean)
-    pathParts.pop()
-    const parentPath = pathParts.join('/') || basePath
-    
-    expect(parentPath).toBe(basePath)
-  })
-
-  it('handles edge case where currentPath equals basePath', () => {
-    const basePath = 'test'
-    const currentPath = basePath
-    
-    const pathParts = currentPath.split('/').filter(Boolean)
-    const canGoBack = pathParts.length > 0 && currentPath !== basePath
-    
-    expect(canGoBack).toBe(false)
-  })
-})
-
-describe('FileBrowser onPreviewStateChange', () => {
-  it('FileBrowser accepts onPreviewStateChange prop', () => {
-    const mockOnPreviewStateChange = vi.fn()
-    const ref = { current: null as unknown as FileBrowserHandle }
-    
-    render(
-      <FileBrowser
-        ref={ref as any}
-        basePath="test"
-        embedded={true}
-        onPreviewStateChange={mockOnPreviewStateChange}
-      />,
-      { wrapper: createWrapper() }
-    )
-    
-    expect(ref.current).toBeTruthy()
-  })
-})
-
-describe('FileBrowserSheet swipe decision logic', () => {
-  const mockOnClose = vi.fn()
-
-  beforeEach(() => {
-    mockOnClose.mockClear()
-  })
-
-  it('FileBrowser imperative handle exposes navigation methods', () => {
-    const ref = { current: null as unknown as FileBrowserHandle }
-    
-    render(
-      <FileBrowser
-        ref={ref as any}
-        basePath="test"
-        embedded={true}
-        onPreviewStateChange={() => {}}
-      />,
-      { wrapper: createWrapper() }
-    )
-    
-    expect(ref.current).toBeTruthy()
-    expect(typeof ref.current?.goBack).toBe('function')
-    expect(typeof ref.current?.canGoBack).toBe('function')
-    expect(typeof ref.current?.getCurrentPath).toBe('function')
-  })
-
-  it('FileBrowser canGoBack returns false at base path', () => {
-    const ref = { current: null as unknown as FileBrowserHandle }
-    
-    render(
-      <FileBrowser
-        ref={ref as any}
-        basePath="test"
-        embedded={true}
-        onPreviewStateChange={() => {}}
-      />,
-      { wrapper: createWrapper() }
-    )
-    
-    expect(ref.current?.canGoBack()).toBe(false)
-  })
-
-  it('FileBrowser canGoBack returns true after navigating deeper', () => {
-    const ref = { current: null as unknown as FileBrowserHandle }
-    
-    render(
-      <FileBrowser
-        ref={ref as any}
-        basePath="test"
-        embedded={true}
-        onPreviewStateChange={() => {}}
-      />,
-      { wrapper: createWrapper() }
-    )
-    
+    await waitFor(() => expect(screen.getByText('deep')).toBeInTheDocument())
     expect(ref.current?.getCurrentPath()).toBe('test')
     expect(ref.current?.canGoBack()).toBe(false)
   })
 
-  it('FileBrowserSheet resets isPreviewOpen when sheet closes', () => {
-    const queryClient = createQueryClient()
-    const { rerender } = render(
-      <QueryClientProvider client={queryClient}>
-        <FileBrowserSheet
-          isOpen={true}
-          onClose={mockOnClose}
-          basePath="test"
-        />
-      </QueryClientProvider>
-    )
-    
-    expect(screen.getByPlaceholderText(/search/i)).toBeInTheDocument()
-    
-    rerender(
-      <QueryClientProvider client={queryClient}>
-        <FileBrowserSheet
-          isOpen={false}
-          onClose={mockOnClose}
-          basePath="test"
-        />
-      </QueryClientProvider>
-    )
-    
-    expect(mockOnClose).not.toHaveBeenCalled()
+  it('navigates into an initially selected directory even when the base listing resolves later', async () => {
+    const { ref, onDirectoryLoad } = renderBrowser(fileApiRoutes(navigationPaths, { test: 50 }), 'test/deep')
+
+    expect(await screen.findByText('src')).toBeInTheDocument()
+    await waitFor(() => expect(ref.current?.getCurrentPath()).toBe('test/deep'))
+    expect(screen.queryByText('deep')).not.toBeInTheDocument()
+    expect(onDirectoryLoad).toHaveBeenLastCalledWith(expect.objectContaining({ currentPath: 'test/deep' }))
   })
 
-  it('FileBrowserSheet swipe enabled state respects isPreviewOpen flag', () => {
-    render(
-      <FileBrowserSheet
-        isOpen={true}
-        onClose={mockOnClose}
-        basePath="test"
-      />,
-      { wrapper: createWrapper() }
-    )
-    
-    expect(screen.getByPlaceholderText(/search/i)).toBeInTheDocument()
-  })
+  it('does not reload the current directory when the viewport becomes mobile', async () => {
+    const routes = fileApiRoutes(navigationPaths)
+    const { fetchFake, ref } = renderBrowser(routes)
+    await screen.findByText('deep')
+    const before = fetchFake.findRequests('GET', '/api/files').length
 
-  it('FileBrowserSheet swipe enabled state respects isEditing flag', () => {
-    render(
-      <FileBrowserSheet
-        isOpen={true}
-        onClose={mockOnClose}
-        basePath="test"
-      />,
-      { wrapper: createWrapper() }
-    )
-    
-    expect(screen.getByPlaceholderText(/search/i)).toBeInTheDocument()
-  })
-
-  it('path computation: nested path can go back', () => {
-    const basePath = 'test'
-    const currentPath = 'test/deep/path'
-    const pathParts = currentPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = pathParts.length > 0 && joinedPath !== basePath
-    
-    expect(canGoBack).toBe(true)
-  })
-
-  it('path computation: base path cannot go back', () => {
-    const basePath = 'test'
-    const currentPath = basePath
-    const pathParts = currentPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = pathParts.length > 0 && joinedPath !== basePath
-    
-    expect(canGoBack).toBe(false)
-  })
-
-  it('goBack computes correct parent path', () => {
-    const testCases = [
-      { current: 'test/deep/path', expected: 'test/deep' },
-      { current: 'test/deep', expected: 'test' },
-    ]
-    
-    testCases.forEach(({ current, expected }) => {
-      const pathParts = current.split('/').filter(Boolean)
-      pathParts.pop()
-      const parentPath = pathParts.join('/')
-      expect(parentPath).toBe(expected)
+    installWindowSize(500)
+    act(() => {
+      window.dispatchEvent(new Event('resize'))
     })
-  })
 
-  it('FileBrowserSheet swipe decision: nested path can go back', () => {
-    const basePath = 'test'
-    const currentPath = 'test/deep'
-    const pathParts = currentPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = joinedPath !== basePath
-    
-    expect(canGoBack).toBe(true)
-  })
-
-  it('FileBrowserSheet swipe decision: base path cannot go back', () => {
-    const basePath = 'test'
-    const currentPath = basePath
-    const pathParts = currentPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = joinedPath !== basePath
-    
-    expect(canGoBack).toBe(false)
-  })
-})
-
-describe('FileBrowserSheet swipe decision integration', () => {
-  it('FileBrowserSheet renders with FileBrowser and passes ref', () => {
-    const mockOnClose = vi.fn()
-    const queryClient = createQueryClient()
-    
-    render(
-      <QueryClientProvider client={queryClient}>
-        <FileBrowserSheet
-          isOpen={true}
-          onClose={mockOnClose}
-          basePath="test"
-        />
-      </QueryClientProvider>
-    )
-    
-    expect(screen.getByPlaceholderText(/search/i)).toBeInTheDocument()
-  })
-
-  it('FileBrowser exposes imperative handle for navigation', () => {
-    const ref = { current: null as unknown as FileBrowserHandle }
-    
-    render(
-      <FileBrowser
-        ref={ref as any}
-        basePath="test"
-        embedded={true}
-      />,
-      { wrapper: createWrapper() }
-    )
-    
-    expect(ref.current).toBeTruthy()
-    expect(typeof ref.current?.goBack).toBe('function')
-    expect(typeof ref.current?.canGoBack).toBe('function')
-    expect(typeof ref.current?.getCurrentPath).toBe('function')
-  })
-
-  it('FileBrowser canGoBack returns false at base path', () => {
-    const ref = { current: null as unknown as FileBrowserHandle }
-    
-    render(
-      <FileBrowser
-        ref={ref as any}
-        basePath="test"
-        embedded={true}
-      />,
-      { wrapper: createWrapper() }
-    )
-    
-    expect(ref.current?.canGoBack()).toBe(false)
-  })
-
-  it('FileBrowser goBack navigates to parent directory', () => {
-    const ref = { current: null as unknown as FileBrowserHandle }
-    
-    render(
-      <FileBrowser
-        ref={ref as any}
-        basePath="test"
-        embedded={true}
-      />,
-      { wrapper: createWrapper() }
-    )
-    
     expect(ref.current?.getCurrentPath()).toBe('test')
-    expect(ref.current?.canGoBack()).toBe(false)
-  })
-
-  it('swipe completion decision logic: nested path can go back', () => {
-    const basePath = 'test'
-    const currentPath = 'test/deep/path'
-    const pathParts = currentPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = pathParts.length > 0 && joinedPath !== basePath
-    
-    expect(canGoBack).toBe(true)
-  })
-
-  it('swipe completion decision logic: base path cannot go back', () => {
-    const basePath = 'test'
-    const currentPath = basePath
-    const pathParts = currentPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = pathParts.length > 0 && joinedPath !== basePath
-    
-    expect(canGoBack).toBe(false)
-  })
-
-  it('FileBrowserSheet swipe completion: nested path can go back', () => {
-    const basePath = 'test'
-    const currentPath = 'test/deep'
-    const pathParts = currentPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = joinedPath !== basePath
-    
-    expect(canGoBack).toBe(true)
-  })
-
-  it('FileBrowserSheet swipe completion: base path cannot go back', () => {
-    const basePath = 'test'
-    const currentPath = basePath
-    const pathParts = currentPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = joinedPath !== basePath
-    
-    expect(canGoBack).toBe(false)
-  })
-
-  it('FileBrowserSheet path computation: nested path can go back', () => {
-    const basePath = 'test'
-    const currentPath = 'test/deep/nested'
-    const pathParts = currentPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = pathParts.length > 0 && joinedPath !== basePath
-    
-    expect(canGoBack).toBe(true)
-  })
-
-  it('FileBrowserSheet path computation: single level deep can go back', () => {
-    const basePath = 'test'
-    const currentPath = 'test/deep'
-    const pathParts = currentPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = pathParts.length > 0 && joinedPath !== basePath
-    
-    expect(canGoBack).toBe(true)
-  })
-
-  it('FileBrowserSheet swipe decision: uses canGoBack to decide back vs close', () => {
-    const basePath = 'test'
-    
-    const nestedPath = 'test/deep/nested'
-    const nestedPathParts = nestedPath.split('/').filter(Boolean)
-    const nestedJoinedPath = nestedPathParts.join('/')
-    const canGoBackNested = nestedPathParts.length > 0 && nestedJoinedPath !== basePath
-    expect(canGoBackNested).toBe(true)
-    
-    const baseCurrentPath = basePath
-    const basePathParts = baseCurrentPath.split('/').filter(Boolean)
-    const baseJoinedPath = basePathParts.join('/')
-    const canGoBackBase = basePathParts.length > 0 && baseJoinedPath !== basePath
-    expect(canGoBackBase).toBe(false)
-  })
-
-  it('FileBrowserSheet swipe completion: verifies FileBrowser ref is accessible', () => {
-    const mockOnClose = vi.fn()
-    
-    render(
-      <FileBrowserSheet
-        isOpen={true}
-        onClose={mockOnClose}
-        basePath="test/deep"
-      />,
-      { wrapper: createWrapper() }
-    )
-    
-    expect(screen.getByPlaceholderText(/search/i)).toBeInTheDocument()
-  })
-
-  it('FileBrowserSheet swipe decision integration: callback chain verification', () => {
-    const basePath = 'test'
-    const nestedPath = 'test/deep'
-    
-    const pathParts = nestedPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = pathParts.length > 0 && joinedPath !== basePath
-    
-    expect(canGoBack).toBe(true)
-    expect(joinedPath).toBe('test/deep')
-    
-    const parentPath = pathParts.slice(0, -1).join('/')
-    expect(parentPath).toBe('test')
-  })
-
-  it('FileBrowserSheet wires useSwipeBack with canBack and onBack callbacks', () => {
-    const mockOnClose = vi.fn()
-    
-    const mockUseSwipeBack = vi.spyOn(useMobile, 'useSwipeBack')
-    mockUseSwipeBack.mockReturnValue({
-      bind: vi.fn(),
-      swipeProgress: 0,
-      swipeStyles: { transform: undefined, transition: 'transform 0.2s ease-out' },
-    })
-    
-    render(
-      <FileBrowserSheet
-        isOpen={true}
-        onClose={mockOnClose}
-        basePath="test/deep"
-      />,
-      { wrapper: createWrapper() }
-    )
-    
-    expect(mockUseSwipeBack).toHaveBeenCalled()
-    
-    const callArgs = mockUseSwipeBack.mock.calls[0]
-    expect(callArgs).toBeDefined()
-    expect(callArgs![0]).toBe(mockOnClose)
-    
-    const options = callArgs![1]!
-    expect(options.enabled).toBe(true)
-    expect(typeof options.canBack).toBe('function')
-    expect(typeof options.onBack).toBe('function')
-    
-    mockUseSwipeBack.mockRestore()
-  })
-
-  it('FileBrowserSheet swipe completion: path decision logic for nested path', () => {
-    const basePath = 'test'
-    const currentPath = 'test/deep/nested'
-    
-    const pathParts = currentPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = pathParts.length > 0 && joinedPath !== basePath
-    
-    expect(canGoBack).toBe(true)
-  })
-
-  it('FileBrowserSheet swipe completion: path decision logic for base path', () => {
-    const basePath = 'test'
-    const currentPath = basePath
-    
-    const pathParts = currentPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = pathParts.length > 0 && joinedPath !== basePath
-    
-    expect(canGoBack).toBe(false)
-  })
-
-  it('FileBrowserSheet swipe completion: parent path computation', () => {
-    const currentPath = 'test/deep/nested'
-    const pathParts = currentPath.split('/').filter(Boolean)
-    pathParts.pop()
-    const parentPath = pathParts.join('/')
-    
-    expect(parentPath).toBe('test/deep')
-  })
-
-  it('FileBrowserSheet swipe completion calls onBack for nested path', () => {
-    const mockOnClose = vi.fn()
-    
-    const mockUseSwipeBack = vi.spyOn(useMobile, 'useSwipeBack')
-    mockUseSwipeBack.mockImplementation((onClose, _options) => {
-      if (_options?.canBack && _options.canBack()) {
-        _options.onBack?.()
-      }
-      return {
-        bind: vi.fn(),
-        swipeProgress: 0,
-        swipeStyles: { transform: undefined, transition: 'transform 0.2s ease-out' },
-      }
-    })
-    
-    render(
-      <FileBrowserSheet
-        isOpen={true}
-        onClose={mockOnClose}
-        basePath="test"
-      />,
-      { wrapper: createWrapper() }
-    )
-    
-    const testPath = 'test/deep'
-    const pathParts = testPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = joinedPath !== 'test'
-    
-    expect(canGoBack).toBe(true)
-    expect(mockOnClose).not.toHaveBeenCalled()
-    
-    mockUseSwipeBack.mockRestore()
-  })
-
-  it('FileBrowserSheet swipe completion calls onClose for base path', () => {
-    const mockOnClose = vi.fn()
-    const mockOnBack = vi.fn()
-    
-    const basePath = 'test'
-    const currentPath = basePath
-    
-    const pathParts = currentPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = joinedPath !== basePath
-    
-    expect(canGoBack).toBe(false)
-    expect(mockOnClose).not.toHaveBeenCalled()
-    expect(mockOnBack).not.toHaveBeenCalled()
-  })
-
-  it('FileBrowserSheet back-vs-close outcome: verifies swipe completion calls correct action', () => {
-    const mockOnClose = vi.fn()
-    
-    const mockUseSwipeBack = vi.spyOn(useMobile, 'useSwipeBack')
-    mockUseSwipeBack.mockReturnValue({
-      bind: vi.fn(),
-      swipeProgress: 0,
-      swipeStyles: { transform: undefined, transition: 'transform 0.2s ease-out' },
-    })
-    
-    render(
-      <QueryClientProvider client={createQueryClient()}>
-        <FileBrowserSheet
-          isOpen={true}
-          onClose={mockOnClose}
-          basePath="test"
-        />
-      </QueryClientProvider>
-    )
-    
-    expect(mockUseSwipeBack).toHaveBeenCalled()
-    
-    const callArgs = mockUseSwipeBack.mock.calls[0]
-    expect(callArgs).toBeDefined()
-    expect(callArgs![0]).toBe(mockOnClose)
-    
-    const options = callArgs![1]!
-    expect(options.enabled).toBe(true)
-    expect(options.canBack).toBeDefined()
-    expect(options.onBack).toBeDefined()
-    
-    const nestedPath = 'test/deep'
-    const nestedPathParts = nestedPath.split('/').filter(Boolean)
-    const nestedJoinedPath = nestedPathParts.join('/')
-    const canGoBackNested = nestedJoinedPath !== 'test'
-    
-    expect(canGoBackNested).toBe(true)
-    
-    const basePath = 'test'
-    const basePathParts = basePath.split('/').filter(Boolean)
-    const baseJoinedPath = basePathParts.join('/')
-    const canGoBackBase = baseJoinedPath !== 'test'
-    
-    expect(canGoBackBase).toBe(false)
-    
-    mockUseSwipeBack.mockRestore()
-  })
-
-  it('FileBrowserSheet back-vs-close: swipe completion decision is wired correctly', () => {
-    const mockOnClose = vi.fn()
-    
-    const mockUseSwipeBack = vi.spyOn(useMobile, 'useSwipeBack')
-    mockUseSwipeBack.mockImplementation((onClose, options) => {
-      const canBack = options?.canBack?.()
-      if (canBack) {
-        options?.onBack?.()
-      } else {
-        onClose()
-      }
-      return {
-        bind: vi.fn(),
-        swipeProgress: 0,
-        swipeStyles: { transform: undefined, transition: 'transform 0.2s ease-out' },
-      }
-    })
-    
-    render(
-      <QueryClientProvider client={createQueryClient()}>
-        <FileBrowserSheet
-          isOpen={true}
-          onClose={mockOnClose}
-          basePath="test/deep"
-        />
-      </QueryClientProvider>
-    )
-    
-    const callArgs = mockUseSwipeBack.mock.calls[0]
-    const options = callArgs![1]!
-    
-    expect(options.canBack).toBeDefined()
-    expect(options.onBack).toBeDefined()
-    
-    const currentPath = 'test/deep'
-    const pathParts = currentPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = joinedPath !== 'test'
-    
-    expect(canGoBack).toBe(true)
-    
-    mockUseSwipeBack.mockRestore()
-  })
-
-  it('FileBrowserSheet swipe decision integration: callback chain verification', () => {
-    const basePath = 'test'
-    const nestedPath = 'test/deep'
-    
-    const pathParts = nestedPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = pathParts.length > 0 && joinedPath !== basePath
-    
-    expect(canGoBack).toBe(true)
-    expect(joinedPath).toBe('test/deep')
-    
-    const parentPath = pathParts.slice(0, -1).join('/')
-    expect(parentPath).toBe('test')
-  })
-
-  it('FileBrowserSheet wires useSwipeBack with canBack and onBack callbacks', () => {
-    const mockOnClose = vi.fn()
-    
-    const mockUseSwipeBack = vi.spyOn(useMobile, 'useSwipeBack')
-    mockUseSwipeBack.mockReturnValue({
-      bind: vi.fn(),
-      swipeProgress: 0,
-      swipeStyles: { transform: undefined, transition: 'transform 0.2s ease-out' },
-    })
-    
-    render(
-      <FileBrowserSheet
-        isOpen={true}
-        onClose={mockOnClose}
-        basePath="test/deep"
-      />,
-      { wrapper: createWrapper() }
-    )
-    
-    expect(mockUseSwipeBack).toHaveBeenCalled()
-    
-    const callArgs = mockUseSwipeBack.mock.calls[0]
-    expect(callArgs).toBeDefined()
-    expect(callArgs![0]).toBe(mockOnClose)
-    
-    const options = callArgs![1]!
-    expect(options.enabled).toBe(true)
-    expect(typeof options.canBack).toBe('function')
-    expect(typeof options.onBack).toBe('function')
-    
-    mockUseSwipeBack.mockRestore()
-  })
-
-  it('FileBrowserSheet swipe completion: path decision logic for nested path', () => {
-    const basePath = 'test'
-    const currentPath = 'test/deep/nested'
-    
-    const pathParts = currentPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = pathParts.length > 0 && joinedPath !== basePath
-    
-    expect(canGoBack).toBe(true)
-  })
-
-  it('FileBrowserSheet swipe completion: path decision logic for base path', () => {
-    const basePath = 'test'
-    const currentPath = basePath
-    
-    const pathParts = currentPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = pathParts.length > 0 && joinedPath !== basePath
-    
-    expect(canGoBack).toBe(false)
-  })
-
-  it('FileBrowserSheet swipe completion: parent path computation', () => {
-    const currentPath = 'test/deep/nested'
-    const pathParts = currentPath.split('/').filter(Boolean)
-    pathParts.pop()
-    const parentPath = pathParts.join('/')
-    
-    expect(parentPath).toBe('test/deep')
-  })
-
-  it('FileBrowserSheet swipe completion calls onBack for nested path', () => {
-    const mockOnClose = vi.fn()
-    
-    const mockUseSwipeBack = vi.spyOn(useMobile, 'useSwipeBack')
-    mockUseSwipeBack.mockImplementation((onClose, _options) => {
-      if (_options?.canBack && _options.canBack()) {
-        _options.onBack?.()
-      }
-      return {
-        bind: vi.fn(),
-        swipeProgress: 0,
-        swipeStyles: { transform: undefined, transition: 'transform 0.2s ease-out' },
-      }
-    })
-    
-    render(
-      <FileBrowserSheet
-        isOpen={true}
-        onClose={mockOnClose}
-        basePath="test"
-      />,
-      { wrapper: createWrapper() }
-    )
-    
-    const testPath = 'test/deep'
-    const pathParts = testPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = joinedPath !== 'test'
-    
-    expect(canGoBack).toBe(true)
-    expect(mockOnClose).not.toHaveBeenCalled()
-    
-    mockUseSwipeBack.mockRestore()
-  })
-
-  it('FileBrowserSheet swipe completion calls onClose for base path', () => {
-    const mockOnClose = vi.fn()
-    const mockOnBack = vi.fn()
-    
-    const basePath = 'test'
-    const currentPath = basePath
-    
-    const pathParts = currentPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = joinedPath !== basePath
-    
-    expect(canGoBack).toBe(false)
-    expect(mockOnClose).not.toHaveBeenCalled()
-    expect(mockOnBack).not.toHaveBeenCalled()
-  })
-
-  it('FileBrowserSheet back-vs-close outcome: verifies swipe completion calls correct action', () => {
-    const mockOnClose = vi.fn()
-    
-    const mockUseSwipeBack = vi.spyOn(useMobile, 'useSwipeBack')
-    mockUseSwipeBack.mockReturnValue({
-      bind: vi.fn(),
-      swipeProgress: 0,
-      swipeStyles: { transform: undefined, transition: 'transform 0.2s ease-out' },
-    })
-    
-    render(
-      <QueryClientProvider client={createQueryClient()}>
-        <FileBrowserSheet
-          isOpen={true}
-          onClose={mockOnClose}
-          basePath="test"
-        />
-      </QueryClientProvider>
-    )
-    
-    expect(mockUseSwipeBack).toHaveBeenCalled()
-    
-    const callArgs = mockUseSwipeBack.mock.calls[0]
-    expect(callArgs).toBeDefined()
-    expect(callArgs![0]).toBe(mockOnClose)
-    
-    const options = callArgs![1]!
-    expect(options.enabled).toBe(true)
-    expect(options.canBack).toBeDefined()
-    expect(options.onBack).toBeDefined()
-    
-    const nestedPath = 'test/deep'
-    const nestedPathParts = nestedPath.split('/').filter(Boolean)
-    const nestedJoinedPath = nestedPathParts.join('/')
-    const canGoBackNested = nestedJoinedPath !== 'test'
-    
-    expect(canGoBackNested).toBe(true)
-    
-    const basePath = 'test'
-    const basePathParts = basePath.split('/').filter(Boolean)
-    const baseJoinedPath = basePathParts.join('/')
-    const canGoBackBase = baseJoinedPath !== 'test'
-    
-    expect(canGoBackBase).toBe(false)
-    
-    mockUseSwipeBack.mockRestore()
-  })
-
-  it('FileBrowserSheet back-vs-close: swipe completion decision is wired correctly', () => {
-    const mockOnClose = vi.fn()
-    
-    const mockUseSwipeBack = vi.spyOn(useMobile, 'useSwipeBack')
-    mockUseSwipeBack.mockImplementation((onClose, options) => {
-      const canBack = options?.canBack?.()
-      if (canBack) {
-        options?.onBack?.()
-      } else {
-        onClose()
-      }
-      return {
-        bind: vi.fn(),
-        swipeProgress: 0,
-        swipeStyles: { transform: undefined, transition: 'transform 0.2s ease-out' },
-      }
-    })
-    
-    render(
-      <QueryClientProvider client={createQueryClient()}>
-        <FileBrowserSheet
-          isOpen={true}
-          onClose={mockOnClose}
-          basePath="test/deep"
-        />
-      </QueryClientProvider>
-    )
-    
-    const callArgs = mockUseSwipeBack.mock.calls[0]
-    const options = callArgs![1]!
-    
-    expect(options.canBack).toBeDefined()
-    expect(options.onBack).toBeDefined()
-    
-    const currentPath = 'test/deep'
-    const pathParts = currentPath.split('/').filter(Boolean)
-    const joinedPath = pathParts.join('/')
-    const canGoBack = joinedPath !== 'test'
-    
-    expect(canGoBack).toBe(true)
-    
-    mockUseSwipeBack.mockRestore()
+    expect(fetchFake.findRequests('GET', '/api/files')).toHaveLength(before)
   })
 })
 
+describe('FileBrowserSheet swipe dismissal', () => {
+  function swipeRight(target: HTMLElement) {
+    fireEvent.touchStart(target, { touches: [{ clientX: 10, clientY: 100 }] })
+    fireEvent.touchMove(target, { touches: [{ clientX: 200, clientY: 100 }] })
+    fireEvent.touchEnd(target, { touches: [{ clientX: 200, clientY: 100 }] })
+  }
 
+  it('closes the sheet from a right-edge swipe at the base path', async () => {
+    installWindowSize(500)
+    const { onClose } = renderSheet()
+    await screen.findByText('deep')
+
+    swipeRight(sheetContainer())
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('goes back from a right-edge swipe after navigating deeper', async () => {
+    installWindowSize(500)
+    const { onClose } = renderSheet()
+    await screen.findByText('deep')
+
+    fireEvent.click(screen.getByText('deep'))
+    await screen.findByText('src')
+
+    swipeRight(sheetContainer())
+
+    await waitFor(() => expect(screen.getByText('deep')).toBeInTheDocument())
+    expect(onClose).not.toHaveBeenCalled()
+  })
+})

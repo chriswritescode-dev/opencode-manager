@@ -2,6 +2,7 @@ import indexHtml from '../../../index.html?raw'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   APPEARANCE_STORAGE_KEY,
+  AppearanceSnapshotSchema,
   applyColorTheme,
   readableTextColor,
   resolveColorThemeTokens,
@@ -11,10 +12,10 @@ function themeColorMeta(): string | null {
   return document.querySelector('meta[name="theme-color"]')?.getAttribute('content') ?? null
 }
 
-function appearanceSnapshot(): Record<string, unknown> {
+function appearanceSnapshot() {
   const raw = window.localStorage.getItem(APPEARANCE_STORAGE_KEY)
   if (!raw) throw new Error('appearance snapshot missing')
-  return JSON.parse(raw) as Record<string, unknown>
+  return AppearanceSnapshotSchema.parse(JSON.parse(raw))
 }
 
 describe('applyColorTheme', () => {
@@ -131,7 +132,7 @@ describe('applyColorTheme', () => {
     const snapshot = appearanceSnapshot()
     expect(snapshot.dark).toBe(true)
     expect(snapshot.themeColor).toBe('#1d1e28')
-    expect((snapshot.tokens as Record<string, string>).background).toBe('#1d1e28')
+    expect(snapshot.tokens?.background).toBe('#1d1e28')
   })
 
   it('persists a null token map for the manager theme', () => {

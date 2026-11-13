@@ -1,149 +1,198 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
+import { z } from 'zod'
+import { ScheduleJobSchema, ScheduleRunSchema, ScheduleRunStatusSchema } from '@opencode-manager/shared/schemas'
+import { createScheduleRoutes } from '../../src/routes/schedules'
 import { ScheduleServiceError } from '../../src/services/schedules'
+import { readJson } from '../helpers/read-json'
+import {
+  buildScheduleJob,
+  buildScheduleJobWithRepo,
+  buildScheduleRun,
+  buildScheduleRunWithContext,
+  buildUnreadScheduleRun,
+  createFakeScheduleService,
+} from '../helpers/fake-schedule-service'
 
-const scheduleService = {
-  listJobs: vi.fn(),
-  createJob: vi.fn(),
-  getJob: vi.fn(),
-  updateJob: vi.fn(),
-  deleteJob: vi.fn(),
-  runJob: vi.fn(),
-  listRuns: vi.fn(),
-  getRun: vi.fn(),
-  cancelRun: vi.fn(),
-  clearRunHistory: vi.fn(),
-  deleteRun: vi.fn(),
-  listAllEnabledJobs: vi.fn(),
-  listAllJobsWithRepos: vi.fn(),
-  listAllRuns: vi.fn(),
-  listUnreadRuns: vi.fn(),
-  countUnreadRuns: vi.fn(),
-  markRunViewed: vi.fn(),
-  markAllRunsViewed: vi.fn(),
-  recoverRunningRuns: vi.fn(),
-  setJobChangeHandler: vi.fn(),
-}
-
-vi.mock('../../src/services/schedules', async () => {
-  const actual = await vi.importActual('../../src/services/schedules')
-  return {
-    ...actual,
-    ScheduleService: vi.fn().mockImplementation(() => scheduleService),
-  }
+const RunSummarySchema = z.object({
+  id: z.number(),
+  status: ScheduleRunStatusSchema,
+  startedAt: z.number(),
+  finishedAt: z.number().nullable(),
+  viewedAt: z.number().nullable(),
+  preview: z.string().nullable(),
 })
 
-vi.mock('../../src/utils/logger', () => ({
-  logger: {
-    error: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-  },
-}))
+const ScheduleJobWithRepoSchema = ScheduleJobSchema.extend({
+  repoName: z.string(),
+  repoPath: z.string(),
+  repoUrl: z.string(),
+  serverName: z.string().nullable(),
+  lastRun: RunSummarySchema.nullable(),
+  retainedWorktreeCount: z.number(),
+})
 
-import { createScheduleRoutes } from '../../src/routes/schedules'
+const ScheduleRunWithContextSchema = ScheduleRunSchema.extend({
+  jobName: z.string(),
+  repoName: z.string(),
+  repoPath: z.string(),
+  serverName: z.string().nullable(),
+})
 
-describe('Schedule Routes', () => {
-  let app: Hono
+const JobsEnvelopeSchema = z.object({ jobs: z.array(ScheduleJobSchema) })
+const JobEnvelopeSchema = z.object({ job: ScheduleJobSchema })
+const RunsEnvelopeSchema = z.object({ runs: z.array(ScheduleRunSchema) })
+const RunEnvelopeSchema = z.object({ run: ScheduleRunSchema })
+const AllJobsEnvelopeSchema = z.object({ jobs: z.array(ScheduleJobWithRepoSchema) })
+const AllRunsEnvelopeSchema = z.object({ runs: z.array(ScheduleRunWithContextSchema) })
+const UnreadRunsEnvelopeSchema = z.object({
+  runs: z.array(ScheduleRunWithContextSchema.extend({ preview: z.string().nullable() })),
+  total: z.number(),
+  failed: z.number(),
+})
+const ErrorEnvelopeSchema = z.object({ error: z.string() })
+const SuccessEnvelopeSchema = z.object({ success: z.boolean() })
 
-  beforeEach(() => {
-    vi.clearAllMocks()
-    app = new Hono()
-    app.route('/repos/:id/schedules', createScheduleRoutes(scheduleService as unknown as import('../../src/services/schedules').ScheduleService))
-  })
+const jsonHeaders = { 'Content-Type': 'application/json' }
 
-  it('lists jobs for a repo', async () => {
-    scheduleService.listJobs.mockReturnValue([{ id: 7, name: 'Weekly engineering summary' }])
+function createApp(service = createFakeScheduleService()): Hono {
+  const app = new Hono()
+  app.route('/repos/:id/schedules', createScheduleRoutes(service))
+  return app
+}
+
+describe('schedule routes', () => {
+  it('lists the jobs of a repo', async () => {
+    const app = createApp(createFakeScheduleService({ listJobs: vi.fn(() => [buildScheduleJob({ id: 7, name: 'Weekly engineering summary' })]) }))
 
     const response = await app.request('/repos/42/schedules')
-    const body = await response.json() as { jobs: Array<{ id: number }> }
+    const body = await readJson(response, JobsEnvelopeSchema)
 
     expect(response.status).toBe(200)
-    expect(body.jobs).toHaveLength(1)
-    expect(scheduleService.listJobs).toHaveBeenCalledWith(42)
+    expect(body.jobs.map((job) => job.name)).toEqual(['Weekly engineering summary'])
   })
 
-  it('creates a schedule from a valid request body', async () => {
-    scheduleService.createJob.mockReturnValue({ id: 7, name: 'Daily release summary' })
+  it.each([
+    {
+      label: 'interval',
+      request: { name: 'Daily release summary', scheduleMode: 'interval', intervalMinutes: 60, prompt: 'Summarize release readiness.' },
+      expected: { scheduleMode: 'interval', intervalMinutes: 60, cronExpression: null },
+    },
+    {
+      label: 'cron',
+      request: {
+        name: 'Morning report',
+        scheduleMode: 'cron',
+        cronExpression: '0 9 * * *',
+        timezone: 'America/New_York',
+        prompt: 'Generate the daily report.',
+      },
+      expected: { scheduleMode: 'cron', cronExpression: '0 9 * * *', timezone: 'America/New_York' },
+    },
+  ])('creates a $label schedule from a validated request body', async ({ request, expected }) => {
+    let receivedRepoId = 0
+    const app = createApp(createFakeScheduleService({
+      createJob: vi.fn(async (repoId, input) => {
+        receivedRepoId = repoId
+        return buildScheduleJob({
+          name: input.name,
+          scheduleMode: input.scheduleMode,
+          intervalMinutes: input.intervalMinutes ?? null,
+          cronExpression: input.cronExpression ?? null,
+          timezone: input.timezone ?? null,
+        })
+      }),
+    }))
 
     const response = await app.request('/repos/42/schedules', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'Daily release summary',
-        enabled: true,
-        scheduleMode: 'interval',
-        intervalMinutes: 60,
-        prompt: 'Summarize release readiness.',
-      }),
+      headers: jsonHeaders,
+      body: JSON.stringify(request),
     })
-    const body = await response.json() as { job: { id: number } }
+    const body = await readJson(response, JobEnvelopeSchema)
 
     expect(response.status).toBe(201)
-    expect(body.job.id).toBe(7)
-    expect(scheduleService.createJob).toHaveBeenCalledWith(42, expect.objectContaining({ name: 'Daily release summary' }))
+    expect(receivedRepoId).toBe(42)
+    expect(body.job).toMatchObject({ name: request.name, ...expected })
   })
 
   it('runs a schedule manually', async () => {
-    scheduleService.runJob.mockResolvedValue({ id: 5, status: 'running' })
+    const app = createApp(createFakeScheduleService({
+      runJob: vi.fn(async (_repoId, _jobId, triggerSource) => buildScheduleRun({
+        status: 'running',
+        finishedAt: null,
+        triggerSource,
+      })),
+    }))
 
-    const response = await app.request('/repos/42/schedules/7/run', {
-      method: 'POST',
-    })
-    const body = await response.json() as { run: { id: number; status: string } }
+    const response = await app.request('/repos/42/schedules/7/run', { method: 'POST' })
+    const body = await readJson(response, RunEnvelopeSchema)
 
     expect(response.status).toBe(200)
-    expect(body.run).toEqual({ id: 5, status: 'running' })
-    expect(scheduleService.runJob).toHaveBeenCalledWith(42, 7, 'manual')
+    expect(body.run).toMatchObject({ status: 'running', triggerSource: 'manual' })
   })
 
   it('cancels a running schedule run', async () => {
-    scheduleService.cancelRun.mockResolvedValue({ id: 5, status: 'cancelled' })
+    const app = createApp(createFakeScheduleService({
+      cancelRun: vi.fn(async () => buildScheduleRun({ id: 5, status: 'cancelled' })),
+    }))
 
-    const response = await app.request('/repos/42/schedules/7/runs/5/cancel', {
-      method: 'POST',
-    })
-    const body = await response.json() as { run: { status: string } }
+    const response = await app.request('/repos/42/schedules/7/runs/5/cancel', { method: 'POST' })
+    const body = await readJson(response, RunEnvelopeSchema)
 
     expect(response.status).toBe(200)
-    expect(body.run.status).toBe('cancelled')
-    expect(scheduleService.cancelRun).toHaveBeenCalledWith(42, 7, 5)
+    expect(body.run).toMatchObject({ id: 5, status: 'cancelled' })
   })
 
   it('maps service conflicts to HTTP 409 responses', async () => {
-    scheduleService.runJob.mockRejectedValue(new ScheduleServiceError('Schedule is already running', 409))
+    const app = createApp(createFakeScheduleService({
+      runJob: vi.fn(async () => {
+        throw new ScheduleServiceError('Schedule is already running', 409)
+      }),
+    }))
 
-    const response = await app.request('/repos/42/schedules/7/run', {
-      method: 'POST',
-    })
-    const body = await response.json() as { error: string }
+    const response = await app.request('/repos/42/schedules/7/run', { method: 'POST' })
+    const body = await readJson(response, ErrorEnvelopeSchema)
 
     expect(response.status).toBe(409)
     expect(body.error).toBe('Schedule is already running')
   })
 
-  it('returns 400 for invalid route ids before reaching the service', async () => {
+  it('returns 400 for an invalid repo id', async () => {
+    const app = createApp()
+
     const response = await app.request('/repos/not-a-number/schedules')
-    const body = await response.json() as { error: string }
+    const body = await readJson(response, ErrorEnvelopeSchema)
 
     expect(response.status).toBe(400)
     expect(body.error).toBe('Invalid repo id')
-    expect(scheduleService.listJobs).not.toHaveBeenCalled()
+  })
+
+  it('returns 404 when the schedule job is not found', async () => {
+    const app = createApp(createFakeScheduleService({ getJob: vi.fn(() => null) }))
+
+    const response = await app.request('/repos/42/schedules/7')
+    const body = await readJson(response, ErrorEnvelopeSchema)
+
+    expect(response.status).toBe(404)
+    expect(body.error).toBe('Schedule not found')
   })
 
   it('loads and updates a single schedule job', async () => {
-    scheduleService.getJob.mockReturnValue({ id: 7, name: 'Weekly engineering summary' })
-    scheduleService.updateJob.mockReturnValue({ id: 7, name: 'Updated engineering summary' })
+    const app = createApp(createFakeScheduleService({
+      getJob: vi.fn(() => buildScheduleJob({ name: 'Weekly engineering summary' })),
+      updateJob: vi.fn(async (_repoId, _jobId, input) => buildScheduleJob({ name: input.name ?? 'Weekly engineering summary' })),
+    }))
 
     const getResponse = await app.request('/repos/42/schedules/7')
-    const getBody = await getResponse.json() as { job: { name: string } }
+    const getBody = await readJson(getResponse, JobEnvelopeSchema)
 
     const patchResponse = await app.request('/repos/42/schedules/7', {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: jsonHeaders,
       body: JSON.stringify({ name: 'Updated engineering summary' }),
     })
-    const patchBody = await patchResponse.json() as { job: { name: string } }
+    const patchBody = await readJson(patchResponse, JobEnvelopeSchema)
 
     expect(getResponse.status).toBe(200)
     expect(getBody.job.name).toBe('Weekly engineering summary')
@@ -151,256 +200,241 @@ describe('Schedule Routes', () => {
     expect(patchBody.job.name).toBe('Updated engineering summary')
   })
 
-  it('lists runs, loads a single run, and deletes a schedule', async () => {
-    scheduleService.listRuns.mockReturnValue([{ id: 5, status: 'completed' }])
-    scheduleService.getRun.mockReturnValue({ id: 5, status: 'completed' })
-    scheduleService.deleteJob.mockReturnValue(undefined)
+  it('lists runs and a single run, then deletes the schedule', async () => {
+    const app = createApp(createFakeScheduleService({
+      listRuns: vi.fn((_repoId, _jobId, limit) => [buildScheduleRun({ id: limit })],),
+      getRun: vi.fn(() => buildScheduleRun({ id: 5 })),
+    }))
 
     const runsResponse = await app.request('/repos/42/schedules/7/runs?limit=5')
-    const runsBody = await runsResponse.json() as { runs: Array<{ id: number }> }
+    const runsBody = await readJson(runsResponse, RunsEnvelopeSchema)
 
     const runResponse = await app.request('/repos/42/schedules/7/runs/5')
-    const runBody = await runResponse.json() as { run: { id: number } }
+    const runBody = await readJson(runResponse, RunEnvelopeSchema)
 
-    const deleteResponse = await app.request('/repos/42/schedules/7', {
-      method: 'DELETE',
-    })
-    const deleteBody = await deleteResponse.json() as { success: boolean }
+    const deleteResponse = await app.request('/repos/42/schedules/7', { method: 'DELETE' })
+    const deleteBody = await readJson(deleteResponse, SuccessEnvelopeSchema)
 
     expect(runsResponse.status).toBe(200)
-    expect(runsBody.runs[0]?.id).toBe(5)
+    expect(runsBody.runs.map((run) => run.id)).toEqual([5])
     expect(runResponse.status).toBe(200)
     expect(runBody.run.id).toBe(5)
     expect(deleteResponse.status).toBe(200)
     expect(deleteBody.success).toBe(true)
-    expect(scheduleService.deleteJob).toHaveBeenCalledWith(42, 7)
   })
 
   it('rejects non-positive run list limits', async () => {
+    const app = createApp()
+
     const response = await app.request('/repos/42/schedules/7/runs?limit=0')
-    const body = await response.json() as { error: string }
+    const body = await readJson(response, ErrorEnvelopeSchema)
 
     expect(response.status).toBe(400)
     expect(body.error).toBe('Limit must be greater than 0')
-    expect(scheduleService.listRuns).not.toHaveBeenCalled()
   })
 
   it('clamps large run list limits', async () => {
-    scheduleService.listRuns.mockReturnValue([])
+    const app = createApp(createFakeScheduleService({
+      listRuns: vi.fn((_repoId, _jobId, limit) => [buildScheduleRun({ id: limit })]),
+    }))
 
     const response = await app.request('/repos/42/schedules/7/runs?limit=500')
+    const body = await readJson(response, RunsEnvelopeSchema)
 
     expect(response.status).toBe(200)
-    expect(scheduleService.listRuns).toHaveBeenCalledWith(42, 7, 100)
-  })
-
-  it('returns 404 when schedule job is not found', async () => {
-    scheduleService.getJob.mockReturnValue(null)
-
-    const response = await app.request('/repos/42/schedules/7')
-    const body = await response.json() as { error: string }
-
-    expect(response.status).toBe(404)
-    expect(body.error).toBe('Schedule not found')
-  })
-
-  it('creates a cron schedule from a valid request body', async () => {
-    scheduleService.createJob.mockReturnValue({ id: 8, name: 'Morning report' })
-
-    const response = await app.request('/repos/42/schedules', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'Morning report',
-        enabled: true,
-        scheduleMode: 'cron',
-        cronExpression: '0 9 * * *',
-        timezone: 'America/New_York',
-        prompt: 'Generate the daily report.',
-      }),
-    })
-    const body = await response.json() as { job: { id: number } }
-
-    expect(response.status).toBe(201)
-    expect(body.job.id).toBe(8)
-    expect(scheduleService.createJob).toHaveBeenCalledWith(42, expect.objectContaining({
-      scheduleMode: 'cron',
-      cronExpression: '0 9 * * *',
-      timezone: 'America/New_York',
-    }))
+    expect(body.runs.map((run) => run.id)).toEqual([100])
   })
 
   it('lists all schedules across all repos', async () => {
-    scheduleService.listAllJobsWithRepos.mockReturnValue([
-      { id: 1, name: 'Job 1', repoName: 'Repo A', repoPath: '/path/a', repoUrl: 'https://repo-a' },
-      { id: 2, name: 'Job 2', repoName: 'Repo B', repoPath: '/path/b', repoUrl: 'https://repo-b' },
-    ])
+    const app = createApp(createFakeScheduleService({
+      listAllJobsWithRepos: vi.fn(() => [
+        buildScheduleJobWithRepo({ id: 1, name: 'Job 1', repoName: 'Repo A' }),
+        buildScheduleJobWithRepo({ id: 2, name: 'Job 2', repoName: 'Repo B' }),
+      ]),
+    }))
 
     const response = await app.request('/repos/42/schedules/all')
-    const body = await response.json() as { jobs: Array<{ id: number; name: string; repoName: string }> }
+    const body = await readJson(response, AllJobsEnvelopeSchema)
 
     expect(response.status).toBe(200)
-    expect(body.jobs).toHaveLength(2)
-    expect(body.jobs[0]).toEqual(expect.objectContaining({
-      id: 1,
-      name: 'Job 1',
-      repoName: 'Repo A',
-    }))
-    expect(scheduleService.listAllJobsWithRepos).toHaveBeenCalled()
+    expect(body.jobs.map((job) => [job.name, job.repoName])).toEqual([['Job 1', 'Repo A'], ['Job 2', 'Repo B']])
   })
 
-  it('lists all runs with no filters', async () => {
-    scheduleService.listAllRuns.mockReturnValue([
-      { id: 1, jobId: 7, repoId: 42, status: 'completed', jobName: 'Test', repoName: 'repo', repoPath: '/repo' },
-    ])
+  it('uses the default run list paging for all runs', async () => {
+    let receivedLimit = 0
+    let receivedOffset = -1
+    const app = createApp(createFakeScheduleService({
+      listAllRuns: vi.fn((options) => {
+        receivedLimit = options.limit ?? 0
+        receivedOffset = options.offset ?? -1
+        return [buildScheduleRunWithContext({ id: 1 })]
+      }),
+    }))
 
     const response = await app.request('/repos/42/schedules/all/runs')
-    const body = await response.json() as { runs: Array<{ id: number }> }
+    const body = await readJson(response, AllRunsEnvelopeSchema)
 
     expect(response.status).toBe(200)
-    expect(body.runs).toHaveLength(1)
-    expect(scheduleService.listAllRuns).toHaveBeenCalledWith(expect.objectContaining({ limit: 20, offset: 0 }))
+    expect(body.runs.map((run) => run.id)).toEqual([1])
+    expect(receivedLimit).toBe(20)
+    expect(receivedOffset).toBe(0)
   })
 
-  it('passes query params to service for all runs', async () => {
-    scheduleService.listAllRuns.mockReturnValue([])
+  it('passes every run filter query param to the service', async () => {
+    let received = { limit: 0, offset: -1, status: '', repoId: -1, jobId: -1, triggerSource: '', runId: -1 }
+    const app = createApp(createFakeScheduleService({
+      listAllRuns: vi.fn((options) => {
+        received = {
+          limit: options.limit ?? 0,
+          offset: options.offset ?? -1,
+          status: options.status ?? '',
+          repoId: options.repoId ?? -1,
+          jobId: options.jobId ?? -1,
+          triggerSource: options.triggerSource ?? '',
+          runId: options.runId ?? -1,
+        }
+        return []
+      }),
+    }))
 
-    const response = await app.request('/repos/42/schedules/all/runs?limit=10&offset=5&status=failed&repoId=42&jobId=7&triggerSource=manual')
-    const body = await response.json() as { runs: Array<unknown> }
+    const response = await app.request('/repos/42/schedules/all/runs?limit=10&offset=5&status=failed&repoId=42&jobId=7&triggerSource=manual&runId=99')
 
     expect(response.status).toBe(200)
-    expect(body.runs).toHaveLength(0)
-    expect(scheduleService.listAllRuns).toHaveBeenCalledWith({
+    expect(received).toEqual({
       limit: 10,
       offset: 5,
       status: 'failed',
       repoId: 42,
       jobId: 7,
       triggerSource: 'manual',
+      runId: 99,
     })
   })
 
-  it('passes a runId bound to the service for all runs', async () => {
-    scheduleService.listAllRuns.mockReturnValue([])
-
-    const response = await app.request('/repos/42/schedules/all/runs?runId=99')
-    const body = await response.json() as { runs: Array<unknown> }
-
-    expect(response.status).toBe(200)
-    expect(body.runs).toHaveLength(0)
-    expect(scheduleService.listAllRuns).toHaveBeenCalledWith(expect.objectContaining({ runId: 99 }))
-  })
-
   it.each(['abc', '1abc', '1.5', '-1', ''])('rejects an invalid runId format %s for all runs', async (runId) => {
+    const app = createApp()
+
     const response = await app.request(`/repos/42/schedules/all/runs?runId=${encodeURIComponent(runId)}`)
-    const body = await response.json() as { error: string }
+    const body = await readJson(response, ErrorEnvelopeSchema)
 
     expect(response.status).toBe(400)
     expect(body.error).toBe('Invalid run id')
-    expect(scheduleService.listAllRuns).not.toHaveBeenCalled()
   })
 
   it.each(['0', '99999999999999999999'])('rejects a non-positive or unsafe runId %s for all runs', async (runId) => {
+    const app = createApp()
+
     const response = await app.request(`/repos/42/schedules/all/runs?runId=${runId}`)
-    const body = await response.json() as { error: string }
+    const body = await readJson(response, ErrorEnvelopeSchema)
 
     expect(response.status).toBe(400)
     expect(body.error).toBe('Run id must be a positive integer')
-    expect(scheduleService.listAllRuns).not.toHaveBeenCalled()
   })
 
   it('lists unread runs with counts using the default limit', async () => {
-    scheduleService.listUnreadRuns.mockReturnValue([
-      { id: 5, status: 'failed', preview: 'Deploy failed' },
-    ])
-    scheduleService.countUnreadRuns.mockReturnValue({ total: 3, failed: 1 })
+    let receivedLimit = 0
+    const app = createApp(createFakeScheduleService({
+      listUnreadRuns: vi.fn((limit) => {
+        receivedLimit = limit
+        return [buildUnreadScheduleRun({ id: 5, status: 'failed', preview: 'Deploy failed' })]
+      }),
+      countUnreadRuns: vi.fn(() => ({ total: 3, failed: 1 })),
+    }))
 
     const response = await app.request('/repos/42/schedules/all/runs/unread')
-    const body = await response.json() as { runs: Array<{ id: number }>; total: number; failed: number }
+    const body = await readJson(response, UnreadRunsEnvelopeSchema)
 
     expect(response.status).toBe(200)
-    expect(body.runs).toHaveLength(1)
+    expect(body.runs.map((run) => run.preview)).toEqual(['Deploy failed'])
     expect(body.total).toBe(3)
     expect(body.failed).toBe(1)
-    expect(scheduleService.listUnreadRuns).toHaveBeenCalledWith(20)
+    expect(receivedLimit).toBe(20)
   })
 
-  it('passes a bounded limit to the unread runs query', async () => {
-    scheduleService.listUnreadRuns.mockReturnValue([])
-    scheduleService.countUnreadRuns.mockReturnValue({ total: 0, failed: 0 })
+  it('clamps the unread runs limit', async () => {
+    const app = createApp(createFakeScheduleService({
+      listUnreadRuns: vi.fn((limit) => [buildUnreadScheduleRun({ id: limit })]),
+      countUnreadRuns: vi.fn(() => ({ total: 0, failed: 0 })),
+    }))
 
     const response = await app.request('/repos/42/schedules/all/runs/unread?limit=500')
+    const body = await readJson(response, UnreadRunsEnvelopeSchema)
 
     expect(response.status).toBe(200)
-    expect(scheduleService.listUnreadRuns).toHaveBeenCalledWith(100)
+    expect(body.runs.map((run) => run.id)).toEqual([100])
   })
 
   it('marks all finished runs viewed', async () => {
-    scheduleService.markAllRunsViewed.mockReturnValue(4)
+    const app = createApp(createFakeScheduleService({ markAllRunsViewed: vi.fn(() => 4) }))
 
     const response = await app.request('/repos/42/schedules/all/runs/viewed', { method: 'POST' })
-    const body = await response.json() as { updated: number }
+    const body = await readJson(response, z.object({ updated: z.number() }))
 
     expect(response.status).toBe(200)
     expect(body.updated).toBe(4)
-    expect(scheduleService.markAllRunsViewed).toHaveBeenCalled()
   })
 
   it('marks a single run viewed', async () => {
-    scheduleService.markRunViewed.mockReturnValue(true)
+    const app = createApp(createFakeScheduleService({ markRunViewed: vi.fn(() => true) }))
 
     const response = await app.request('/repos/42/schedules/all/runs/5/viewed', { method: 'POST' })
-    const body = await response.json() as { updated: boolean }
+    const body = await readJson(response, z.object({ updated: z.boolean() }))
 
     expect(response.status).toBe(200)
     expect(body.updated).toBe(true)
-    expect(scheduleService.markRunViewed).toHaveBeenCalledWith(5)
   })
 
   it('rejects an invalid run id when marking a run viewed', async () => {
+    const app = createApp()
+
     const response = await app.request('/repos/42/schedules/all/runs/not-a-number/viewed', { method: 'POST' })
-    const body = await response.json() as { error: string }
+    const body = await readJson(response, ErrorEnvelopeSchema)
 
     expect(response.status).toBe(400)
     expect(body.error).toBe('Invalid run id')
-    expect(scheduleService.markRunViewed).not.toHaveBeenCalled()
   })
 
-  it('clears run history with the default commit worktrees mode', async () => {
-    scheduleService.clearRunHistory.mockResolvedValue({ cleared: 2 })
+  it.each([
+    { query: '', expectedMode: 'commit' },
+    { query: '?worktrees=discard', expectedMode: 'discard' },
+  ])('clears run history with worktrees mode "$expectedMode"', async ({ query, expectedMode }) => {
+    let receivedMode = ''
+    const app = createApp(createFakeScheduleService({
+      clearRunHistory: vi.fn(async (_repoId, _jobId, worktrees) => {
+        receivedMode = worktrees
+        return { cleared: 2 }
+      }),
+    }))
 
-    const response = await app.request('/repos/42/schedules/7/runs', { method: 'DELETE' })
-    const body = await response.json() as { cleared: number }
+    const response = await app.request(`/repos/42/schedules/7/runs${query}`, { method: 'DELETE' })
+    const body = await readJson(response, z.object({ cleared: z.number() }))
 
     expect(response.status).toBe(200)
     expect(body.cleared).toBe(2)
-    expect(scheduleService.clearRunHistory).toHaveBeenCalledWith(42, 7, 'commit')
-  })
-
-  it('passes the discard worktrees mode to clearRunHistory', async () => {
-    scheduleService.clearRunHistory.mockResolvedValue({ cleared: 1 })
-
-    const response = await app.request('/repos/42/schedules/7/runs?worktrees=discard', { method: 'DELETE' })
-
-    expect(response.status).toBe(200)
-    expect(scheduleService.clearRunHistory).toHaveBeenCalledWith(42, 7, 'discard')
+    expect(receivedMode).toBe(expectedMode)
   })
 
   it('rejects an invalid worktrees mode when clearing run history', async () => {
+    const app = createApp()
+
     const response = await app.request('/repos/42/schedules/7/runs?worktrees=nope', { method: 'DELETE' })
-    const body = await response.json() as { error: string }
+    const body = await readJson(response, ErrorEnvelopeSchema)
 
     expect(response.status).toBe(400)
     expect(body.error).toBe('Invalid worktrees mode')
-    expect(scheduleService.clearRunHistory).not.toHaveBeenCalled()
   })
 
   it('deletes a run with the requested worktrees mode', async () => {
-    scheduleService.deleteRun.mockResolvedValue(undefined)
+    let receivedMode = ''
+    const app = createApp(createFakeScheduleService({
+      deleteRun: vi.fn(async (_repoId, _jobId, _runId, worktrees) => {
+        receivedMode = worktrees
+      }),
+    }))
 
     const response = await app.request('/repos/42/schedules/7/runs/5?worktrees=discard', { method: 'DELETE' })
 
     expect(response.status).toBe(200)
-    expect(scheduleService.deleteRun).toHaveBeenCalledWith(42, 7, 5, 'discard')
+    expect(receivedMode).toBe('discard')
   })
 })

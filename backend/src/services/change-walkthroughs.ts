@@ -26,6 +26,7 @@ import {
   type WalkthroughGenerationError,
   type WalkthroughSource,
 } from '@opencode-manager/shared/schemas'
+import { JsonValueSchema } from '@opencode-manager/shared/utils'
 import {
   claimChangeWalkthroughGeneration,
   deleteChangeWalkthroughs,
@@ -138,16 +139,16 @@ function noTextChangesMessage(source: WalkthroughSource): string {
   return `The ${describeWalkthroughSource(source)} ${sourceChangesVerb(source)} no text changes`
 }
 
-function toGenerationError(error: unknown): WalkthroughGenerationError {
-  if (error instanceof ServiceError) {
-    return {
-      message: error.message,
-      ...(error.code ? { code: error.code } : {}),
-      ...(error.details !== undefined ? { details: error.details } : {}),
-    }
+function toGenerationError(cause: unknown): WalkthroughGenerationError {
+  if (cause instanceof ServiceError) {
+    const generationError: WalkthroughGenerationError = { message: cause.message }
+    if (cause.code) generationError.code = cause.code
+    const details = JsonValueSchema.safeParse(cause.details)
+    if (details.success) generationError.details = details.data
+    return generationError
   }
 
-  return { message: getErrorMessage(error) || 'Failed to generate the change walkthrough' }
+  return { message: getErrorMessage(cause) || 'Failed to generate the change walkthrough' }
 }
 
 export class ChangeWalkthroughService {
@@ -172,7 +173,6 @@ export class ChangeWalkthroughService {
     this.walkthroughsRoot = options.walkthroughsRoot ?? getWalkthroughsPath()
   }
 
-  /** Sessions the walkthrough runs were created in, which are helper sessions rather than user sessions. */
   listHelperSessionIds(): string[] {
     return listChangeWalkthroughSessionIds(this.db)
   }
@@ -478,7 +478,6 @@ export class ChangeWalkthroughService {
     return this.getState(sessionId, source)
   }
 
-  /** Applies session lifecycle events to the stored walkthrough records and their output directories. */
   handleEvent(event: SSEEvent): void {
     switch (event.type) {
       case 'session.deleted': {
@@ -632,8 +631,8 @@ export class ChangeWalkthroughService {
       record.status === 'generating' ? ['generating'] : ['ready', 'failed', 'cancelled'],
       patch,
       {
-        ...(record.walkthroughSessionId ? { walkthroughSessionId: record.walkthroughSessionId } : {}),
-        ...(record.status === 'generating' ? {} : { running: true }),
+        walkthroughSessionId: record.walkthroughSessionId ?? undefined,
+        running: record.status === 'generating' ? undefined : true,
       },
     )
     if (record.walkthroughSessionId) {
@@ -824,12 +823,6 @@ export class ChangeWalkthroughService {
     }
   }
 
-  /**
-   * Resolves the model for the walkthrough session, preferring the configured walkthrough model, then the request
-   * model, then the target session model. Waits once for OpenCode's lazily-loaded global catalog so an explicit model
-   * is registered before the session is created. A failed wait is swallowed because generation proceeds and lets
-   * OpenCode surface its own error.
-   */
   private async resolveWalkthroughModel(session: SessionInfo, requestModel?: string): Promise<ModelRef> {
     const configured = this.settingsService.getSettings().preferences.walkthroughModel?.trim()
     const parsedConfigured = configured ? parseOpenCodeModelRef(configured) : undefined

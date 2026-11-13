@@ -9,7 +9,17 @@ import type { ChangeWalkthroughService } from '../services/change-walkthroughs'
 import { handleServiceError, parseJsonBody } from '../utils/route-helpers'
 import { ServiceError } from '../utils/service-error'
 
-export function createChangeWalkthroughRoutes(service: ChangeWalkthroughService) {
+export type ChangeWalkthroughRoutesService = Pick<ChangeWalkthroughService,
+  | 'cancelGeneration'
+  | 'getState'
+  | 'listHelperSessionIds'
+  | 'publishFromWalkthroughSession'
+  | 'readChangesForWalkthroughSession'
+  | 'refine'
+  | 'startGeneration'
+>
+
+export function createChangeWalkthroughRoutes(service: ChangeWalkthroughRoutesService) {
   const app = new Hono()
 
   app.get('/helper-sessions', (c) => {

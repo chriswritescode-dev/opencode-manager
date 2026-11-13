@@ -32,67 +32,37 @@ import { useTTS } from '@/hooks/useTTS'
 import { sanitizeForTTS } from '@/lib/utils'
 import type { SttEndOfSpeechReason } from '@/lib/webSpeechRecognizer'
 
-/** Everything the voice conversation loop needs from the view that owns it. */
 export interface UseVoiceConversationInput {
-  /** Id of the session the conversation belongs to. */
   sessionID: string
-  /** Server that owns the session, when it is not the local one. */
   serverId?: string
-  /** The session transcript, oldest first. */
   messages: SessionMessageInfo[]
-  /** Prompts the user queued on the session that have not started yet. */
   pending: SessionInboxInfo[]
-  /** Reported session status for the conversation's session. */
   status: VoiceSessionStatus
-  /** Whether the session is waiting for the user to approve a tool or a form. */
   hasPendingApproval: boolean
-  /** Silence after speech, in milliseconds, that ends a turn. */
   pauseMs: number
-  /** Sends one transcribed turn to the session, queueing it while the session is busy. */
   sendTurn: (text: string, options: { busy: boolean }) => Promise<void>
-  /** Aborts the reply that the session is currently producing. */
   interrupt: () => Promise<void>
-  /** Hands a captured transcript to the composer for editing. */
   onEditInTextBox: (text: string) => void
 }
 
-/** The state, status and controls a voice conversation view renders. */
 export interface VoiceConversationController {
-  /** Whether voice mode is running, including while paused. */
   isActive: boolean
-  /** Current stage of the conversation loop. */
   phase: VoicePhase
-  /** Short status text for the conversation. */
   label: string
-  /** Action hint shown under the orb for the current phase, or an empty string. */
   hint: string
-  /** Action the orb performs in the current phase, for assistive technology. */
   orbLabel: string
-  /** Live transcript of the current dictation, or an empty string. */
   liveTranscript: string
-  /** Whether the finished or in-progress transcript can be moved into the composer. */
   canEditInTextBox: boolean
-  /** Whether voice mode is running and the agent can be stopped. */
   canStopAgent: boolean
-  /** Whether the conversation is paused while a reply was held mid-read. */
   hasHeldReading: boolean
-  /** Whether the live capture will end the turn on its own after a pause in speech. */
   isEndpointing: boolean
-  /** Notice for the user, such as unavailable speech-to-text, or null when there is none. */
   notice: string | null
-  /** Starts the conversation loop. */
   start: () => void
-  /** Stops the conversation loop and removes its session instruction. */
   exit: () => void
-  /** Stops the conversation loop and hands its transcript to the composer. */
   editInTextBox: () => void
-  /** Handles a tap on the conversation orb for the current phase. */
   tapOrb: () => void
-  /** Pauses the conversation loop until the user resumes it. */
   pause: () => void
-  /** Resumes the conversation loop, continuing a reply that was held mid-read. */
   resume: () => void
-  /** Aborts the reply the session is currently producing. */
   stopAgent: () => void
 }
 
@@ -139,7 +109,7 @@ const STT_STOP_TIMEOUT_MS = 10_000
 
 const STT_PLACEHOLDERS = ['Recording...', 'Processing...']
 
-const ORB_LABELS: Record<VoicePhase, string> = {
+const ORB_LABELS = {
   off: 'Voice conversation',
   listening: 'Send now',
   sending: 'Sending',
@@ -149,35 +119,16 @@ const ORB_LABELS: Record<VoicePhase, string> = {
   paused: 'Resume voice conversation',
 }
 
-/**
- * Cancels the timeout held by a ref and releases the handle.
- *
- * @param ref The ref that holds the pending timeout, if any.
- */
 function clearTimeoutRef(ref: TimeoutRef): void {
   if (ref.current === null) return
   clearTimeout(ref.current)
   ref.current = null
 }
 
-/**
- * Returns the id of the newest message of any role, which is the baseline for a
- * turn that begins now, so an earlier reply is never spoken again.
- *
- * @param messages The session transcript, oldest first.
- * @returns The newest message id, or null when the transcript is empty.
- */
 function latestMessageBaseline(messages: readonly SessionMessageInfo[]): string | null {
   return messages[messages.length - 1]?.id ?? null
 }
 
-/**
- * Returns the id of the newest user message, which is the baseline for a turn
- * that starts or resumes with a reply already in flight.
- *
- * @param messages The session transcript, oldest first.
- * @returns The newest user message id, or null when the transcript has none.
- */
 function currentTurnBaseline(messages: readonly SessionMessageInfo[]): string | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
@@ -186,48 +137,22 @@ function currentTurnBaseline(messages: readonly SessionMessageInfo[]): string | 
   return null
 }
 
-/**
- * Returns the dictated words the user can still act on. The web speech engines
- * publish placeholders while they capture and transcribe, and those stand in
- * for audio rather than words, so they count as no capture at all.
- *
- * @param text The live transcript or the captured turn text.
- * @returns The trimmed text, or an empty string for a placeholder.
- */
 function capturedWords(text: string): string {
   const trimmed = text.trim()
   return STT_PLACEHOLDERS.includes(trimmed) ? '' : trimmed
 }
 
-/**
- * Describes a failed request to the user.
- *
- * @param error The rejection value.
- * @returns The error message, or a generic fallback.
- */
-function errorMessage(error: unknown): string {
-  return error instanceof Error && error.message ? error.message : 'The turn could not be sent'
+function errorMessage(cause: unknown): string {
+  return cause instanceof Error && cause.message ? cause.message : 'The turn could not be sent'
 }
 
-/**
- * Fires the short vibration the native app uses as an impact haptic.
- */
 function fireImpactHaptic(): void {
-  if (typeof navigator === 'undefined') return
+  if (!('navigator' in globalThis)) return
   navigator.vibrate?.(10)
 }
 
-/**
- * Removes the voice instruction once any pending install has settled, skipping
- * the removal when the conversation restarted or exited in the meantime.
- *
- * @param sessionID The session that received the instruction.
- * @param serverId The server that owns the session.
- * @param epochRef The ref holding the live instruction epoch.
- * @param epoch The epoch captured when the conversation was left.
- * @param pendingPut The install request that must settle first, if any.
- */
 function removeVoiceInstructionAfterInstall(
+  removeInstruction: VoiceConversationCollaborators['removeSessionInstruction'],
   sessionID: string,
   serverId: string | undefined,
   epochRef: RefObject<number>,
@@ -238,20 +163,11 @@ function removeVoiceInstructionAfterInstall(
   void settledInstall
     .then(() => {
       if (epochRef.current !== epoch) return
-      return removeSessionInstruction(sessionID, VOICE_MODE_INSTRUCTION_KEY, serverId)
+      return removeInstruction(sessionID, VOICE_MODE_INSTRUCTION_KEY, serverId)
     })
     .catch(() => {})
 }
 
-/**
- * Names the action the orb performs, which changes while a reply is read and
- * while a reading is held after a pause.
- *
- * @param phase The current stage of the conversation loop.
- * @param canStopAgent Whether the agent can be stopped from the orb.
- * @param hasHeldReading Whether the conversation is paused mid-reply.
- * @returns The accessibility label for the orb.
- */
 function orbLabelFor(
   phase: VoicePhase,
   canStopAgent: boolean,
@@ -262,23 +178,25 @@ function orbLabelFor(
   return ORB_LABELS[phase]
 }
 
-/**
- * Runs a hands-free voice conversation for one session: listens through
- * speech-to-text, sends each finished turn, reads every assistant message the
- * turn produces as soon as it completes — including replies to messages queued
- * while the agent works — and listens again once the turn is over. When
- * text-to-speech is unavailable each reply is marked as heard without being
- * spoken, so the loop keeps its rhythm but stays silent. The loop pauses on a
- * hidden page, on a turn that produced no speech, on a failed send and on a
- * session that needs approval, and leaves the voice instruction on the session
- * only while it runs.
- *
- * @param input The session, its transcript, status and queued prompts, and the
- * turn controls owned by the caller.
- * @returns The conversation state, its status, its orb labels and the controls for it.
- */
+export interface VoiceConversationCollaborators {
+  useStt: () => ReturnType<typeof useSTT>
+  useTts: () => ReturnType<typeof useTTS>
+  putSessionInstruction: typeof putSessionInstruction
+  removeSessionInstruction: typeof removeSessionInstruction
+  listSessionInstructionKeys: typeof listSessionInstructionKeys
+}
+
+const DEFAULT_COLLABORATORS = {
+  useStt: useSTT,
+  useTts: useTTS,
+  putSessionInstruction,
+  removeSessionInstruction,
+  listSessionInstructionKeys,
+} satisfies VoiceConversationCollaborators
+
 export function useVoiceConversation(
   input: UseVoiceConversationInput,
+  collaborators: Partial<VoiceConversationCollaborators> = {},
 ): VoiceConversationController {
   const {
     sessionID,
@@ -292,8 +210,13 @@ export function useVoiceConversation(
     interrupt,
     onEditInTextBox,
   } = input
-  const tts = useTTS()
-  const stt = useSTT()
+  const sttHook = collaborators.useStt ?? DEFAULT_COLLABORATORS.useStt
+  const ttsHook = collaborators.useTts ?? DEFAULT_COLLABORATORS.useTts
+  const putInstruction = collaborators.putSessionInstruction ?? DEFAULT_COLLABORATORS.putSessionInstruction
+  const removeInstruction = collaborators.removeSessionInstruction ?? DEFAULT_COLLABORATORS.removeSessionInstruction
+  const listInstructionKeys = collaborators.listSessionInstructionKeys ?? DEFAULT_COLLABORATORS.listSessionInstructionKeys
+  const tts = ttsHook()
+  const stt = sttHook()
 
   const [state, dispatch] = useReducer(
     reduceVoiceConversation,
@@ -724,13 +647,13 @@ export function useVoiceConversation(
       busy: latest.status !== 'idle',
       baselineId: currentTurnBaseline(latest.messages),
     })
-    instructionPutRef.current = putSessionInstruction(
+    instructionPutRef.current = putInstruction(
       latest.sessionID,
       VOICE_MODE_INSTRUCTION_KEY,
       VOICE_MODE_INSTRUCTIONS,
       latest.serverId,
     ).catch(() => setNotice(VOICE_INSTRUCTIONS_NOTICE))
-  }, [canStart, invalidateTurn])
+  }, [canStart, invalidateTurn, putInstruction])
 
   const requestPause = useCallback(
     (reason: VoicePauseReason) => {
@@ -791,6 +714,7 @@ export function useVoiceConversation(
       const pendingPut = instructionPutRef.current
       instructionPutRef.current = null
       removeVoiceInstructionAfterInstall(
+        removeInstruction,
         capturedSessionID,
         latest.serverId,
         instructionEpochRef,
@@ -798,7 +722,7 @@ export function useVoiceConversation(
         pendingPut,
       )
     },
-    [invalidateTurn, setHeldPlayback],
+    [invalidateTurn, removeInstruction, setHeldPlayback],
   )
 
   const readCapturedText = useCallback((): string => {
@@ -925,6 +849,7 @@ export function useVoiceConversation(
       const pendingPut = instructionPutRef.current
       instructionPutRef.current = null
       removeVoiceInstructionAfterInstall(
+        removeInstruction,
         capturedSessionID,
         capturedServerId,
         instructionEpochRef,
@@ -933,6 +858,7 @@ export function useVoiceConversation(
       )
     }
   }, [
+    removeInstruction,
     sessionID,
     clearWorkingTimers,
     clearSpeakingWatchdog,
@@ -942,18 +868,18 @@ export function useVoiceConversation(
 
   useEffect(() => {
     let cancelled = false
-    void listSessionInstructionKeys(sessionID, serverId)
+    void listInstructionKeys(sessionID, serverId)
       .then((keys) => {
         if (cancelled) return
         if (phaseRef.current !== 'off') return
         if (!keys.includes(VOICE_MODE_INSTRUCTION_KEY)) return
-        return removeSessionInstruction(sessionID, VOICE_MODE_INSTRUCTION_KEY, serverId)
+        return removeInstruction(sessionID, VOICE_MODE_INSTRUCTION_KEY, serverId)
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [sessionID, serverId])
+  }, [listInstructionKeys, removeInstruction, sessionID, serverId])
 
   useEffect(() => {
     const handleVisibilityChange = () => {

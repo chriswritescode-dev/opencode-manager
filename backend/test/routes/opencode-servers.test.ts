@@ -1,50 +1,89 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createOpenCodeServerRoutes } from '../../src/routes/opencode-servers'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { Database } from 'bun:sqlite'
+import { Hono } from 'hono'
 import {
-  OpenCodeServerCredentialsRequiredError,
-  OpenCodeServerNotFoundError,
-  OpenCodeServerPairingError,
-  type OpenCodeServerRegistry,
-} from '../../src/services/opencode-server-registry'
+  OpenCodeServerSchema,
+  OpenCodeServerStatusSchema,
+  OpenCodeServerTestResultSchema,
+  type OpenCodeServerStatus,
+  type TestOpenCodeServerRequest,
+  type UpdateOpenCodeServerRequest,
+} from '@opencode-manager/shared/schemas'
+import { OPENCODE_MIN_VERSION } from '@opencode-manager/shared/opencode'
+import type { JsonValue } from '@opencode-manager/shared/utils'
+import { z } from 'zod'
+import { createOpenCodeServerRoutes } from '../../src/routes/opencode-servers'
+import { OpenCodeServerRegistry } from '../../src/services/opencode-server-registry'
+import { createTestDatabase, seedOpenCodeServer } from '../helpers/test-database'
+import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
+import { createFetchStub, type FetchStub } from '../helpers/fetch-stub'
+import { readJson } from '../helpers/read-json'
 
-const SERVER = {
-  id: 'srv_1',
-  name: 'Studio',
-  baseUrl: 'https://studio.example.com',
-  username: 'opencode',
-  enabled: true,
-  hasPassword: true,
-  createdAt: 1,
-  updatedAt: 1,
+const ErrorResponseSchema = z.object({ error: z.string() })
+const ServerListResponseSchema = z.object({ servers: z.array(OpenCodeServerSchema) })
+const ServerResponseSchema = z.object({ server: OpenCodeServerSchema })
+const CreatedServerResponseSchema = z.object({ server: OpenCodeServerSchema, test: OpenCodeServerTestResultSchema })
+const StatusesResponseSchema = z.object({ statuses: z.array(OpenCodeServerStatusSchema) })
+
+const SERVER_BASE_URL = 'https://studio.example.com'
+const STORED_PASSWORD = 'stored-password'
+
+function infoResponse(version = OPENCODE_MIN_VERSION): Response {
+  return new Response(JSON.stringify({ version }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })
 }
 
-const TEST_RESULT = { ok: true, version: '2.0.15', versionSupported: true, error: null }
-
 describe('opencode server routes', () => {
-  const registry = {
-    list: vi.fn(),
-    get: vi.fn(),
-    create: vi.fn(),
-    update: vi.fn(),
-    delete: vi.fn(),
-    test: vi.fn(),
-  }
-  let app: ReturnType<typeof createOpenCodeServerRoutes>
+  let db: Database
+  let registry: OpenCodeServerRegistry
+  let fetchMock: FetchStub
+  let app: Hono
+  let statusProvider: () => OpenCodeServerStatus[]
 
   beforeEach(() => {
-    vi.clearAllMocks()
-    registry.list.mockReturnValue([])
-    registry.get.mockReturnValue(null)
-    app = createOpenCodeServerRoutes(registry as unknown as OpenCodeServerRegistry, () => [])
+    db = createTestDatabase()
+    fetchMock = createFetchStub(async () => infoResponse())
+    statusProvider = () => []
+    registry = new OpenCodeServerRegistry(db, createStubOpenCodeClient(), fetchMock)
+    app = new Hono()
+    app.route('/', createOpenCodeServerRoutes(registry, () => statusProvider()))
   })
 
+  afterEach(() => {
+    db.close()
+  })
+
+  const patch = (path: string, body: UpdateOpenCodeServerRequest) =>
+    app.request(path, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+  const createServer = (body: JsonValue) =>
+    app.request('/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+  const testServer = (body: TestOpenCodeServerRequest) =>
+    app.request('/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
   it('lists servers', async () => {
-    registry.list.mockReturnValue([SERVER])
+    const server = seedOpenCodeServer(db, { name: 'Studio', baseUrl: SERVER_BASE_URL })
 
     const response = await app.request('/')
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ servers: [SERVER] })
+    const body = await readJson(response, ServerListResponseSchema)
+    expect(body.servers).toEqual([server])
   })
 
   it('returns 404 for an unknown server id', async () => {
@@ -54,205 +93,181 @@ describe('opencode server routes', () => {
   })
 
   it('returns the server for a known id', async () => {
-    registry.get.mockReturnValue(SERVER)
+    const server = seedOpenCodeServer(db, { name: 'Studio', baseUrl: SERVER_BASE_URL })
 
-    const response = await app.request('/srv_1')
+    const response = await app.request(`/${server.id}`)
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ server: SERVER })
+    const body = await readJson(response, ServerResponseSchema)
+    expect(body.server).toEqual(server)
   })
 
   it('returns 400 for an invalid create body', async () => {
-    const response = await app.request('/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Studio' }),
-    })
+    const response = await createServer({ name: 'Studio' })
 
     expect(response.status).toBe(400)
-    expect(registry.create).not.toHaveBeenCalled()
+    expect(registry.list()).toEqual([])
   })
 
   it('returns 400 for an invalid draft test body', async () => {
-    const response = await app.request('/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ baseUrl: 'ftp://studio.example.com' }),
-    })
+    const response = await testServer({ baseUrl: 'ftp://studio.example.com' })
 
     expect(response.status).toBe(400)
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('returns 400 for an invalid update body', async () => {
-    const response = await app.request('/srv_1', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: '' }),
-    })
+    const server = seedOpenCodeServer(db, { name: 'Studio', baseUrl: SERVER_BASE_URL })
+
+    const response = await patch(`/${server.id}`, { name: '' })
 
     expect(response.status).toBe(400)
-    expect(registry.update).not.toHaveBeenCalled()
+    expect(registry.get(server.id)?.name).toBe('Studio')
   })
 
   it('creates a server and returns its test result', async () => {
-    registry.create.mockResolvedValue(SERVER)
-    registry.test.mockResolvedValue(TEST_RESULT)
-
-    const response = await app.request('/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Studio', baseUrl: 'https://studio.example.com', password: 'super-secret' }),
+    const response = await createServer({
+      name: 'Studio',
+      baseUrl: SERVER_BASE_URL,
+      password: 'super-secret',
     })
 
     expect(response.status).toBe(201)
-    expect(await response.json()).toEqual({ server: SERVER, test: TEST_RESULT })
-    expect(registry.create).toHaveBeenCalledWith({
+    const body = await readJson(response, CreatedServerResponseSchema)
+    expect(body.server).toMatchObject({
       name: 'Studio',
-      baseUrl: 'https://studio.example.com',
+      baseUrl: SERVER_BASE_URL,
       username: 'opencode',
-      password: 'super-secret',
       enabled: true,
+      hasPassword: true,
     })
-    expect(registry.test).toHaveBeenCalledWith({ serverId: 'srv_1' })
+    expect(body.test).toEqual({ ok: true, version: OPENCODE_MIN_VERSION, versionSupported: true, error: null })
+    expect(registry.list()).toEqual([body.server])
   })
 
   it('returns 502 when pairing fails', async () => {
-    registry.create.mockRejectedValue(new OpenCodeServerPairingError('Pairing was rejected with status 403'))
+    fetchMock.mockImplementation(async (input) => {
+      expect(String(input)).toBe(`${SERVER_BASE_URL}/pair`)
+      return new Response(null, { status: 403 })
+    })
 
-    const response = await app.request('/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'Studio',
-        baseUrl: 'https://studio.example.com',
-        pairing: { pairUrl: 'https://studio.example.com/pair', code: '0123456789abcdef' },
-      }),
+    const response = await createServer({
+      name: 'Studio',
+      baseUrl: SERVER_BASE_URL,
+      pairing: { pairUrl: `${SERVER_BASE_URL}/pair`, code: '0123456789abcdef' },
     })
 
     expect(response.status).toBe(502)
+    expect(registry.list()).toEqual([])
   })
 
   it('updates a server', async () => {
-    registry.update.mockResolvedValue({ ...SERVER, name: 'Renamed' })
+    const server = seedOpenCodeServer(db, { name: 'Studio', baseUrl: SERVER_BASE_URL })
 
-    const response = await app.request('/srv_1', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Renamed' }),
-    })
+    const response = await patch(`/${server.id}`, { name: 'Renamed' })
 
     expect(response.status).toBe(200)
-    expect(registry.update).toHaveBeenCalledWith('srv_1', { name: 'Renamed' })
+    const body = await readJson(response, ServerResponseSchema)
+    expect(body.server).toMatchObject({ id: server.id, name: 'Renamed' })
+    expect(registry.get(server.id)?.name).toBe('Renamed')
   })
 
   it('returns 400 when an origin change would reuse the stored password', async () => {
-    registry.update.mockRejectedValue(new OpenCodeServerCredentialsRequiredError())
+    const server = seedOpenCodeServer(db, { baseUrl: SERVER_BASE_URL, password: STORED_PASSWORD })
 
-    const response = await app.request('/srv_1', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ baseUrl: 'https://other-host.example.com' }),
-    })
+    const response = await patch(`/${server.id}`, { baseUrl: 'https://other-host.example.com' })
 
     expect(response.status).toBe(400)
-    expect(await response.json()).toEqual({
+    await expect(readJson(response, ErrorResponseSchema)).resolves.toEqual({
       error: 'Changing the server address requires re-entering the password or pairing again',
     })
+    expect(registry.get(server.id)?.baseUrl).toBe(SERVER_BASE_URL)
   })
 
   it('returns 404 when updating an unknown server', async () => {
-    registry.update.mockRejectedValue(new OpenCodeServerNotFoundError('srv_missing'))
-
-    const response = await app.request('/srv_missing', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Renamed' }),
-    })
+    const response = await patch('/srv_missing', { name: 'Renamed' })
 
     expect(response.status).toBe(404)
   })
 
   it('deletes a server', async () => {
-    const response = await app.request('/srv_1', { method: 'DELETE' })
+    const server = seedOpenCodeServer(db, { baseUrl: SERVER_BASE_URL })
+
+    const response = await app.request(`/${server.id}`, { method: 'DELETE' })
 
     expect(response.status).toBe(204)
-    expect(registry.delete).toHaveBeenCalledWith('srv_1')
+    expect(registry.list()).toEqual([])
   })
 
   it('returns 404 when deleting an unknown server', async () => {
-    registry.delete.mockImplementation(() => {
-      throw new OpenCodeServerNotFoundError('srv_missing')
-    })
-
     const response = await app.request('/srv_missing', { method: 'DELETE' })
 
     expect(response.status).toBe(404)
   })
 
   it('tests a stored server', async () => {
-    registry.test.mockResolvedValue(TEST_RESULT)
+    const server = seedOpenCodeServer(db, { baseUrl: SERVER_BASE_URL, password: STORED_PASSWORD })
 
-    const response = await app.request('/srv_1/test', { method: 'POST' })
+    const response = await app.request(`/${server.id}/test`, { method: 'POST' })
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual(TEST_RESULT)
-    expect(registry.test).toHaveBeenCalledWith({ serverId: 'srv_1' })
+    await expect(readJson(response, OpenCodeServerTestResultSchema)).resolves.toEqual({
+      ok: true,
+      version: OPENCODE_MIN_VERSION,
+      versionSupported: true,
+      error: null,
+    })
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(String(url)).toBe(`${SERVER_BASE_URL}/api/info`)
+    expect(new Headers(init?.headers).get('authorization')).toBe(
+      `Basic ${Buffer.from(`opencode:${STORED_PASSWORD}`).toString('base64')}`,
+    )
   })
 
-  it('tests a draft server', async () => {
-    registry.test.mockResolvedValue(TEST_RESULT)
-
-    const response = await app.request('/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ baseUrl: 'https://studio.example.com' }),
-    })
+  it('tests a draft server without credentials', async () => {
+    const response = await testServer({ baseUrl: SERVER_BASE_URL })
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual(TEST_RESULT)
-    expect(registry.test).toHaveBeenCalledWith({ baseUrl: 'https://studio.example.com', username: 'opencode' })
+    await expect(readJson(response, OpenCodeServerTestResultSchema)).resolves.toEqual({
+      ok: true,
+      version: OPENCODE_MIN_VERSION,
+      versionSupported: true,
+      error: null,
+    })
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(String(url)).toBe(`${SERVER_BASE_URL}/api/info`)
+    expect(new Headers(init?.headers).get('authorization')).toBeNull()
   })
 
   it('tests a draft server against a saved server id', async () => {
-    registry.test.mockResolvedValue(TEST_RESULT)
+    const server = seedOpenCodeServer(db, { baseUrl: SERVER_BASE_URL, password: STORED_PASSWORD })
 
-    const response = await app.request('/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ baseUrl: 'https://studio.example.com/opencode', serverId: 'srv_1' }),
-    })
+    const response = await testServer({ baseUrl: `${SERVER_BASE_URL}/opencode`, serverId: server.id })
 
     expect(response.status).toBe(200)
-    expect(registry.test).toHaveBeenCalledWith({
-      baseUrl: 'https://studio.example.com/opencode',
-      username: 'opencode',
-      serverId: 'srv_1',
-    })
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(String(url)).toBe(`${SERVER_BASE_URL}/opencode/api/info`)
+    expect(new Headers(init?.headers).get('authorization')).toBe(
+      `Basic ${Buffer.from(`opencode:${STORED_PASSWORD}`).toString('base64')}`,
+    )
   })
 
   it('returns 404 when testing a draft against an unknown server id', async () => {
-    registry.test.mockRejectedValue(new OpenCodeServerNotFoundError('srv_missing'))
-
-    const response = await app.request('/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ baseUrl: 'https://studio.example.com', serverId: 'srv_missing' }),
-    })
+    const response = await testServer({ baseUrl: SERVER_BASE_URL, serverId: 'srv_missing' })
 
     expect(response.status).toBe(404)
-    expect(await response.json()).toEqual({ error: 'OpenCode server not found: srv_missing' })
+    await expect(readJson(response, ErrorResponseSchema)).resolves.toEqual({
+      error: 'OpenCode server not found: srv_missing',
+    })
   })
 
   it('returns the remote event statuses from the provider', async () => {
-    const statuses = [{ serverId: 'srv_1', connected: true, version: '2.0.15', error: null }]
-    const statusApp = createOpenCodeServerRoutes(
-      registry as unknown as OpenCodeServerRegistry,
-      () => statuses,
-    )
+    statusProvider = () => [{ serverId: 'srv_1', connected: true, version: '2.0.15', error: null }]
 
-    const response = await statusApp.request('/status')
+    const response = await app.request('/status')
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ statuses })
+    const body = await readJson(response, StatusesResponseSchema)
+    expect(body.statuses).toEqual([{ serverId: 'srv_1', connected: true, version: '2.0.15', error: null }])
   })
 })

@@ -1,154 +1,182 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { createElement } from 'react'
+import { act } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
 import { useRefreshMessage } from './useRemoveMessage'
+import { renderHookWithProviders } from '@/test/render'
+import { makeSession } from '@/test/fixtures/api'
+import type { FetchRoute } from '@/test/fetchFake'
 
-const mocks = vi.hoisted(() => ({
-  stageRevert: vi.fn(),
-  commitRevert: vi.fn(),
-  sendPrompt: vi.fn(),
-  switchSessionModel: vi.fn(),
-  switchSessionAgent: vi.fn(),
-}))
+const hookProviders = {
+  auth: false,
+  theme: false,
+  tts: false,
+  toaster: false,
+} as const
 
-vi.mock('@/api/opencode', async () => {
-  const actual = await vi.importActual('@/api/opencode')
-  return {
-    ...actual,
-    stageRevert: mocks.stageRevert,
-    commitRevert: mocks.commitRevert,
-    sendPrompt: mocks.sendPrompt,
-    switchSessionModel: mocks.switchSessionModel,
-    switchSessionAgent: mocks.switchSessionAgent,
-  }
-})
+const sessionKey = ['opencode', 'session', 'test-session', '/test'] as const
 
-vi.mock('@/lib/toast', () => ({
-  showToast: { error: vi.fn(), success: vi.fn() },
-}))
-
-const createTestQueryClient = () => new QueryClient({
-  defaultOptions: {
-    queries: { retry: false },
-    mutations: { retry: false },
+const sessionRoutes: FetchRoute[] = [
+  {
+    method: 'POST',
+    path: '/api/opencode/api/session/test-session/interrupt',
+    respond: () => ({ json: { data: {} } }),
   },
-})
+  {
+    method: 'POST',
+    path: '/api/opencode/api/experimental/session/test-session/wait',
+    respond: () => ({ status: 204 }),
+  },
+  {
+    method: 'POST',
+    path: '/api/opencode/api/session/test-session/revert/stage',
+    respond: () => ({ json: { data: {} } }),
+  },
+  {
+    method: 'POST',
+    path: '/api/opencode/api/session/test-session/revert/commit',
+    respond: () => ({ status: 204 }),
+  },
+  {
+    method: 'POST',
+    path: '/api/opencode/api/session/test-session/model',
+    respond: () => ({ status: 204 }),
+  },
+  {
+    method: 'POST',
+    path: '/api/opencode/api/session/test-session/agent',
+    respond: () => ({ status: 204 }),
+  },
+  {
+    method: 'POST',
+    path: '/api/opencode/api/session/test-session/prompt',
+    respond: () => ({
+      json: {
+        data: {
+          id: 'inbox_1',
+          sessionID: 'test-session',
+          time: { created: 1 },
+          type: 'user',
+          payload: { text: 'edited text' },
+          delivery: 'queue',
+        },
+      },
+    }),
+  },
+]
 
-const sessionInfo = (overrides: Record<string, unknown> = {}) => ({
-  id: 'test-session',
-  projectID: 'proj_1',
-  time: { created: 1000, updated: 1000 },
-  location: { directory: '/test' },
-  agent: 'build',
-  model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
-  ...overrides,
-})
+function renderRefresh(model: { providerID: string; id: string; variant?: string } = {
+  providerID: 'anthropic',
+  id: 'claude-sonnet-4',
+}) {
+  const rendered = renderHookWithProviders(() => useRefreshMessage({ sessionId: 'test-session', directory: '/test' }), {
+    ...hookProviders,
+    fetchRoutes: sessionRoutes,
+  })
+  rendered.queryClient.setQueryData(
+    sessionKey,
+    makeSession({ id: 'test-session', agent: 'build', model, location: { directory: '/test' } }),
+  )
+  return rendered
+}
+
+function requestPaths(fetchFake: ReturnType<typeof renderRefresh>['fetchFake']) {
+  return fetchFake.requests.map((request) => `${request.method} ${request.path}`)
+}
 
 describe('useRefreshMessage', () => {
-  let queryClient: QueryClient
-
-  const renderRefresh = () =>
-    renderHook(() => useRefreshMessage({ sessionId: 'test-session', directory: '/test' }), {
-      wrapper: ({ children }) =>
-        createElement(QueryClientProvider, { client: queryClient }, children),
-    })
-
-  const setSession = (session: Record<string, unknown>) => {
-    queryClient.setQueryData(['opencode', 'session', 'test-session', '/test'], session)
-  }
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    queryClient = createTestQueryClient()
-    mocks.stageRevert.mockResolvedValue(undefined)
-    mocks.commitRevert.mockResolvedValue(undefined)
-    mocks.sendPrompt.mockResolvedValue({})
-    mocks.switchSessionModel.mockResolvedValue(undefined)
-    mocks.switchSessionAgent.mockResolvedValue(undefined)
-  })
-
   it('resends the edited text without synthesizing an agent attachment or unchanged switches', async () => {
-    setSession(sessionInfo())
+    const { result, fetchFake } = renderRefresh()
 
-    const { result } = renderRefresh()
-
-    await result.current.mutateAsync({
-      assistantMessageID: 'assistant-1',
-      userMessageContent: 'edited text',
-      model: 'anthropic/claude-sonnet-4',
-      agent: 'build',
+    await act(async () => {
+      await result.current.mutateAsync({
+        assistantMessageID: 'assistant-1',
+        userMessageContent: 'edited text',
+        model: 'anthropic/claude-sonnet-4',
+        agent: 'build',
+      })
     })
 
-    expect(mocks.stageRevert).toHaveBeenCalledWith('test-session', 'assistant-1', 'local')
-    expect(mocks.commitRevert).toHaveBeenCalledWith('test-session', 'local')
-    expect(mocks.sendPrompt).toHaveBeenCalledWith({
-      sessionID: 'test-session',
+    expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/revert/stage')?.body).toEqual({
+      messageID: 'assistant-1',
+    })
+    expect(fetchFake.findRequests('POST', '/api/opencode/api/session/test-session/model')).toHaveLength(0)
+    expect(fetchFake.findRequests('POST', '/api/opencode/api/session/test-session/agent')).toHaveLength(0)
+    expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/prompt')?.body).toEqual({
       text: 'edited text',
-    }, 'local')
-    expect(mocks.switchSessionModel).not.toHaveBeenCalled()
-    expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
+      metadata: { ocmClient: 'desktop' },
+    })
+    expect(requestPaths(fetchFake)).toEqual([
+      'POST /api/opencode/api/session/test-session/interrupt',
+      'POST /api/opencode/api/experimental/session/test-session/wait',
+      'POST /api/opencode/api/session/test-session/revert/stage',
+      'POST /api/opencode/api/session/test-session/revert/commit',
+      'POST /api/opencode/api/session/test-session/prompt',
+    ])
   })
 
   it('preserves the session variant when resending with the same full ref', async () => {
-    setSession(sessionInfo({
-      model: { providerID: 'anthropic', id: 'claude-sonnet-4', variant: 'high' },
-    }))
+    const { result, fetchFake } = renderRefresh({ providerID: 'anthropic', id: 'claude-sonnet-4', variant: 'high' })
 
-    const { result } = renderRefresh()
-
-    await result.current.mutateAsync({
-      assistantMessageID: 'assistant-1',
-      userMessageContent: 'edited text',
-      model: 'anthropic/claude-sonnet-4#high',
-      agent: 'build',
+    await act(async () => {
+      await result.current.mutateAsync({
+        assistantMessageID: 'assistant-1',
+        userMessageContent: 'edited text',
+        model: 'anthropic/claude-sonnet-4#high',
+        agent: 'build',
+      })
     })
 
-    expect(mocks.switchSessionModel).not.toHaveBeenCalled()
-    expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
+    expect(fetchFake.findRequests('POST', '/api/opencode/api/session/test-session/model')).toHaveLength(0)
+    expect(fetchFake.findRequests('POST', '/api/opencode/api/session/test-session/agent')).toHaveLength(0)
   })
 
   it('switches the model before resending when the edited message model changed', async () => {
-    setSession(sessionInfo())
+    const { result, fetchFake } = renderRefresh()
 
-    const { result } = renderRefresh()
-
-    await result.current.mutateAsync({
-      assistantMessageID: 'assistant-1',
-      userMessageContent: 'edited text',
-      model: 'openai/gpt-4',
-      agent: 'build',
+    await act(async () => {
+      await result.current.mutateAsync({
+        assistantMessageID: 'assistant-1',
+        userMessageContent: 'edited text',
+        model: 'openai/gpt-4',
+        agent: 'build',
+      })
     })
 
-    expect(mocks.switchSessionModel).toHaveBeenCalledWith('test-session', {
-      providerID: 'openai',
-      id: 'gpt-4',
-    }, 'local')
-    expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
-    expect(mocks.switchSessionModel.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.sendPrompt.mock.invocationCallOrder[0],
+    expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/model')?.body).toEqual({
+      model: { providerID: 'openai', id: 'gpt-4' },
+    })
+    expect(fetchFake.findRequests('POST', '/api/opencode/api/session/test-session/agent')).toHaveLength(0)
+
+    const paths = requestPaths(fetchFake)
+    expect(paths.indexOf('POST /api/opencode/api/session/test-session/model')).toBeLessThan(
+      paths.indexOf('POST /api/opencode/api/session/test-session/prompt'),
     )
   })
 
   it('switches the agent before resending when the selected agent changed', async () => {
-    setSession(sessionInfo())
+    const { result, fetchFake } = renderRefresh()
 
-    const { result } = renderRefresh()
-
-    await result.current.mutateAsync({
-      assistantMessageID: 'assistant-1',
-      userMessageContent: 'edited text',
-      model: 'anthropic/claude-sonnet-4',
-      agent: 'plan',
+    await act(async () => {
+      await result.current.mutateAsync({
+        assistantMessageID: 'assistant-1',
+        userMessageContent: 'edited text',
+        model: 'anthropic/claude-sonnet-4',
+        agent: 'plan',
+      })
     })
 
-    expect(mocks.switchSessionAgent).toHaveBeenCalledWith('test-session', 'plan', 'local')
-    expect(mocks.switchSessionModel).toHaveBeenCalledWith('test-session', {
-      providerID: 'anthropic',
-      id: 'claude-sonnet-4',
-    }, 'local')
-    expect(mocks.switchSessionAgent.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.switchSessionModel.mock.invocationCallOrder[0],
+    expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/agent')?.body).toEqual({
+      agent: 'plan',
+    })
+    expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/model')?.body).toEqual({
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+    })
+
+    const paths = requestPaths(fetchFake)
+    expect(paths.indexOf('POST /api/opencode/api/session/test-session/agent')).toBeLessThan(
+      paths.indexOf('POST /api/opencode/api/session/test-session/model'),
+    )
+    expect(paths.indexOf('POST /api/opencode/api/session/test-session/model')).toBeLessThan(
+      paths.indexOf('POST /api/opencode/api/session/test-session/prompt'),
     )
   })
 })

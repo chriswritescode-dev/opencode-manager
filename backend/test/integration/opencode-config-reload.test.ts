@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { createServer } from 'http'
 import type { IncomingMessage, Server, ServerResponse } from 'http'
-import type { AddressInfo } from 'net'
 import { mkdir, rm, writeFile } from 'fs/promises'
 import path from 'path'
+import { z } from 'zod'
 import { buildOpenCodeBasicAuth } from '@opencode-manager/shared/opencode'
+import { JsonObjectSchema, JsonValueSchema, type JsonObject } from '@opencode-manager/shared/utils'
 import { FetchOpenCodeClient } from '../../src/services/opencode/client'
 import { OPENCODE_DIRECTORY_HEADER } from '../../src/services/opencode/upstream'
 import {
@@ -21,7 +22,28 @@ const WATCHER_SETTLE_MS = 1500
 const MOCK_MODEL_CAPABILITIES = { tools: true, input: ['text'], output: ['text'] }
 const GLOBAL_AGENTS_MARKER = 'GLOBAL_AGENTS_MARKER_7781'
 
-type CompletionRequest = { headers: IncomingMessage['headers']; body: { model?: string; tools?: Array<{ function?: { name?: string } }> } }
+const CompletionBodySchema = z.object({
+  model: z.string().optional(),
+  tools: z.array(z.object({ function: z.object({ name: z.string().optional() }).optional() })).optional(),
+}).loose()
+
+type CompletionRequest = { headers: IncomingMessage['headers']; body: z.infer<typeof CompletionBodySchema> }
+
+const AddressInfoSchema = z.object({ port: z.number() })
+const AgentListSchema = z.object({ data: z.array(z.object({ id: z.string().optional(), name: z.string().optional() })) })
+const SessionCreatedSchema = z.object({ data: z.object({ id: z.string() }) })
+const PluginListSchema = z.object({
+  data: z.array(z.object({ id: z.string(), state: z.object({ status: z.string() }) })),
+})
+const DefaultModelSchema = z.object({ data: z.object({ id: z.string(), providerID: z.string() }) })
+const ActiveSessionsSchema = z.object({ data: JsonObjectSchema })
+const SessionMessagesSchema = z.object({
+  data: z.array(z.object({
+    type: z.string(),
+    outcome: z.string().optional(),
+    content: z.array(z.object({ text: z.string().optional() })).optional(),
+  })),
+})
 
 type MockLlm = {
   port: number
@@ -34,7 +56,7 @@ type MockLlm = {
 
 const CHUNK_BASE = { id: 'chatcmpl-reload', object: 'chat.completion.chunk', created: 1, model: 'mock-model' }
 
-function writeChunk(res: ServerResponse, delta: Record<string, unknown>, finishReason: string | null): void {
+function writeChunk(res: ServerResponse, delta: JsonObject, finishReason: string | null): void {
   res.write(`data: ${JSON.stringify({ ...CHUNK_BASE, choices: [{ index: 0, delta, finish_reason: finishReason }] })}\n\n`)
 }
 
@@ -59,7 +81,7 @@ async function startMockLlm(): Promise<MockLlm> {
       raw += chunk.toString()
     })
     req.on('end', () => {
-      const body = JSON.parse(raw) as CompletionRequest['body']
+      const body = CompletionBodySchema.parse(JSON.parse(raw))
       requests.push({ headers: req.headers, body })
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
       writeChunk(res, { role: 'assistant', content: 'partial ' }, null)
@@ -73,7 +95,7 @@ async function startMockLlm(): Promise<MockLlm> {
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
   return {
-    port: (server.address() as AddressInfo).port,
+    port: AddressInfoSchema.parse(server.address()).port,
     requests,
     hold: (enabled) => {
       holding = enabled
@@ -104,7 +126,7 @@ async function waitFor<T>(description: string, probe: () => Promise<T | undefine
   throw new Error(`Timed out waiting for ${description}`)
 }
 
-function mockProvider(port: number, pathSuffix: string, models: Record<string, unknown>, settings: Record<string, unknown> = {}) {
+function mockProvider(port: number, pathSuffix: string, models: JsonObject, settings: JsonObject = {}) {
   return {
     package: '@opencode/ai/providers/openai-compatible',
     name: `Mock ${pathSuffix}`,
@@ -113,17 +135,17 @@ function mockProvider(port: number, pathSuffix: string, models: Record<string, u
   }
 }
 
-function buildBaseConfig(port: number): Record<string, unknown> {
+function buildBaseConfig(port: number) {
   return {
     providers: {
       mock: mockProvider(port, 'v1', { 'mock-model': { name: 'Mock Model', capabilities: MOCK_MODEL_CAPABILITIES } }),
     },
     model: 'mock/mock-model',
     permissions: [{ action: '*', resource: '*', effect: 'allow' }],
-  }
+  } satisfies JsonObject
 }
 
-function buildReloadedConfig(port: number, pluginDirectory: string): Record<string, unknown> {
+function buildReloadedConfig(port: number, pluginDirectory: string) {
   return {
     providers: {
       mock: mockProvider(
@@ -144,7 +166,7 @@ function buildReloadedConfig(port: number, pluginDirectory: string): Record<stri
       { action: 'webfetch', resource: '*', effect: 'deny' },
     ],
     plugins: [pluginDirectory],
-  }
+  } satisfies JsonObject
 }
 
 const PROBE_PLUGIN_SOURCE = `export default {
@@ -193,7 +215,12 @@ describe.skipIf(OPENCODE_BIN === null)('OpenCode 2 location reload applies confi
   let configDirectory: string
   let pluginDirectory: string
 
-  async function requestJson<T>(directory: string, pathname: string, init: RequestInit = {}): Promise<T> {
+  async function requestJson<Schema extends z.ZodType>(
+    directory: string,
+    pathname: string,
+    schema: Schema,
+    init: RequestInit = {},
+  ): Promise<z.infer<Schema>> {
     const response = await fetch(`${serve.baseUrl}${pathname}`, {
       ...init,
       headers: {
@@ -204,11 +231,11 @@ describe.skipIf(OPENCODE_BIN === null)('OpenCode 2 location reload applies confi
     })
     const text = await response.text()
     if (!response.ok) throw new Error(`${init.method ?? 'GET'} ${pathname} failed with ${response.status}: ${text}`)
-    return (text ? JSON.parse(text) : undefined) as T
+    return schema.parse(JSON.parse(text))
   }
 
   async function listIds(directory: string, pathname: string): Promise<string[]> {
-    const body = await requestJson<{ data: Array<{ id?: string; name?: string }> }>(directory, pathname)
+    const body = await requestJson(directory, pathname, AgentListSchema)
     return body.data.map((entry) => entry.id ?? entry.name ?? '')
   }
 
@@ -224,12 +251,12 @@ describe.skipIf(OPENCODE_BIN === null)('OpenCode 2 location reload applies confi
   }
 
   async function promptAndCaptureToolRequest(directory: string): Promise<{ sessionID: string; request: CompletionRequest }> {
-    const session = await requestJson<{ data: { id: string } }>(directory, '/api/session', {
+    const session = await requestJson(directory, '/api/session', SessionCreatedSchema, {
       method: 'POST',
       body: JSON.stringify({ location: { directory } }),
     })
     const firstRequest = llm.requests.length
-    await requestJson(directory, `/api/session/${session.data.id}/prompt`, {
+    await requestJson(directory, `/api/session/${session.data.id}/prompt`, JsonValueSchema, {
       method: 'POST',
       body: JSON.stringify({ text: 'hello' }),
     })
@@ -293,17 +320,17 @@ describe.skipIf(OPENCODE_BIN === null)('OpenCode 2 location reload applies confi
       })
       expect(otherAgents).toEqual(expect.arrayContaining(['reviewer', 'mdagent']))
 
-      const plugins = await requestJson<{ data: Array<{ id: string; state: { status: string } }> }>(workspace, '/api/plugin')
+      const plugins = await requestJson(workspace, '/api/plugin', PluginListSchema)
       expect(plugins.data.find((plugin) => plugin.id === 'probe.plugin')?.state.status).toBe('active')
 
-      const models = JSON.stringify(await requestJson<unknown>(workspace, '/api/model'))
+      const models = JSON.stringify(await requestJson(workspace, '/api/model', JsonValueSchema))
       expect(models).toContain('"providerID":"custom"')
-      const defaultModel = await requestJson<{ data: { id: string; providerID: string } }>(workspace, '/api/model/default')
+      const defaultModel = await requestJson(workspace, '/api/model/default', DefaultModelSchema)
       expect(defaultModel.data).toMatchObject({ id: 'mock-alt', providerID: 'mock' })
 
-      expect(JSON.stringify(await requestJson<unknown>(workspace, '/api/command'))).toContain('mdcmd')
-      expect(JSON.stringify(await requestJson<unknown>(workspace, '/api/skill'))).toContain('globalskill')
-      expect(JSON.stringify(await requestJson<unknown>(otherLocation, '/api/skill'))).toContain('projectskill')
+      expect(JSON.stringify(await requestJson(workspace, '/api/command', JsonValueSchema))).toContain('mdcmd')
+      expect(JSON.stringify(await requestJson(workspace, '/api/skill', JsonValueSchema))).toContain('globalskill')
+      expect(JSON.stringify(await requestJson(otherLocation, '/api/skill', JsonValueSchema))).toContain('projectskill')
 
       const reloaded = await promptAndCaptureToolRequest(workspace)
       expect(toolNames(reloaded.request)).toContain('probe_tool')
@@ -325,7 +352,7 @@ describe.skipIf(OPENCODE_BIN === null)('OpenCode 2 location reload applies confi
       await reloadWorkspaceLocation()
       await delay(WATCHER_SETTLE_MS)
 
-      const active = await requestJson<{ data: Record<string, unknown> }>(workspace, '/api/session/active')
+      const active = await requestJson(workspace, '/api/session/active', ActiveSessionsSchema)
       expect(Object.keys(active.data)).toContain(sessionID)
       expect(llm.heldCount()).toBe(1)
 
@@ -333,9 +360,10 @@ describe.skipIf(OPENCODE_BIN === null)('OpenCode 2 location reload applies confi
       llm.releaseHeld()
 
       const messages = await waitFor('the session to finish its held turn', async () => {
-        const body = await requestJson<{ data: Array<{ type: string; outcome?: string; content?: Array<{ text?: string }> }> }>(
+        const body = await requestJson(
           workspace,
           `/api/session/${sessionID}/message`,
+          SessionMessagesSchema,
         )
         return body.data.some((message) => message.type === 'idle') ? body.data : undefined
       })

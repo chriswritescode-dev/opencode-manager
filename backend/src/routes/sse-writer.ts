@@ -1,8 +1,8 @@
 import { encodeSSEFrame } from '../utils/sse-frame'
 
 export interface QueuedSSEWriterInput {
-  write: (chunk: Uint8Array) => Promise<unknown> | void
-  onError: (error: unknown) => void
+  write: (chunk: Uint8Array) => Promise<void> | void
+  onError: (cause: unknown) => void
 }
 
 export interface QueuedSSEWriter {
@@ -23,7 +23,10 @@ export function createQueuedSSEWriter(input: QueuedSSEWriterInput): QueuedSSEWri
     draining = true
     try {
       while (queue.length > 0 && !closed) {
-        const frame = queue.shift() as Uint8Array
+        const frame = queue.shift()
+        if (frame === undefined) {
+          return
+        }
         await input.write(frame)
       }
     } catch (error) {

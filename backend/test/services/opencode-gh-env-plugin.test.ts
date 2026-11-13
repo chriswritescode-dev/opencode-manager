@@ -2,34 +2,28 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { promises as fs } from 'fs'
 import path from 'path'
 import os from 'os'
+import { z } from 'zod'
 import { installManagedPlugins, getOpenCodePluginDir } from '../../src/services/opencode/plugin-registry'
-import { SANDBOX_SHELL_STATE_KEY } from '../../src/services/opencode-plugin-state'
+import type { JsonValue } from '@opencode-manager/shared/utils'
 import {
   loadGeneratedPlugin,
+  readSandboxShellState,
+  readSecretMaskState,
+  resetPluginGlobalState,
   type GeneratedPlugin,
   type GeneratedTool,
   type GeneratedToolExecuteContext,
   type ShellCreateBeforeEvent,
   type ToolExecuteAfterEvent,
 } from '../helpers/opencode-plugin-context'
+import { createFetchStub } from '../helpers/fetch-stub'
 
 const INTERNAL_API_URL = 'http://localhost:5003/api/internal'
-const MASK_STATE_KEY = Symbol.for('ocm-secret-masks.v1')
 const PLAN_NAME = 'ocm-session-0123456789ab'
 
-type MaskState = { byCwd: Map<string, string[]>; version: number; unionVersion: number; union: string[] }
+const ToolExecuteInputSchema = z.object({ command: z.string() })
 
-type ShellSandboxState = { inFlightSandboxedCommands: Map<string, number> }
-
-function maskStateForTests(): MaskState | undefined {
-  return (globalThis as Record<symbol, unknown>)[MASK_STATE_KEY] as MaskState | undefined
-}
-
-function shellSandboxStateForTests(): ShellSandboxState | undefined {
-  return (globalThis as Record<symbol, unknown>)[Symbol.for(SANDBOX_SHELL_STATE_KEY)] as ShellSandboxState | undefined
-}
-
-function shellTool(plugin: GeneratedPlugin, execute: (input: unknown, context: GeneratedToolExecuteContext) => Promise<unknown>): GeneratedTool {
+function shellTool(plugin: GeneratedPlugin, execute: (input: JsonValue, context: GeneratedToolExecuteContext) => Promise<JsonValue>): GeneratedTool {
   const tool = plugin.applyToolTransforms([{ name: 'shell', execute }]).find((candidate) => candidate.name === 'shell')
   if (!tool) throw new Error('the shell tool was not found after transforms')
   return tool
@@ -55,10 +49,10 @@ describe('ocm-gh-env plugin', () => {
   }
 
   function stubShellEnvFetch(body: { env?: Record<string, string>; mask?: string[] }) {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => body,
-    })
+    const fetchMock = createFetchStub(async () => new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }))
     vi.stubGlobal('fetch', fetchMock)
     return fetchMock
   }
@@ -73,8 +67,7 @@ describe('ocm-gh-env plugin', () => {
   afterEach(async () => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
-    delete (globalThis as Record<symbol, unknown>)[MASK_STATE_KEY]
-    delete (globalThis as Record<symbol, unknown>)[Symbol.for(SANDBOX_SHELL_STATE_KEY)]
+    resetPluginGlobalState()
     delete process.env.OCM_SANDBOX_ENFORCED
     delete process.env.OCM_INTERNAL_API_URL
     delete process.env.OCM_INTERNAL_TOKEN
@@ -148,7 +141,7 @@ describe('ocm-gh-env plugin', () => {
   it('does not fetch when the internal env vars are missing', async () => {
     delete process.env.OCM_INTERNAL_API_URL
     delete process.env.OCM_INTERNAL_TOKEN
-    const fetchMock = vi.fn()
+    const fetchMock = createFetchStub(async () => new Response('{}', { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
     const plugin = await loadPlugin()
     const event = { command: 'git push', cwd: '/repo', env: {} }
@@ -160,7 +153,9 @@ describe('ocm-gh-env plugin', () => {
   })
 
   it('never throws when the fetch fails', async () => {
-    const fetchMock = vi.fn().mockRejectedValue(new Error('network down'))
+    const fetchMock = createFetchStub(async () => {
+      throw new Error('network down')
+    })
     vi.stubGlobal('fetch', fetchMock)
     const plugin = await loadPlugin()
     const event = { command: 'git push', cwd: '/repo', env: {} }
@@ -240,7 +235,7 @@ describe('ocm-gh-env plugin', () => {
     await plugin.triggerShellCreateBefore({ command: 'ls', cwd: '/repo', env: {} })
 
     class ToolResult {
-      [key: string]: unknown
+      [key: string]: JsonValue
       output = 'token s3cret-value'
     }
     const event: ToolExecuteAfterEvent = { tool: 'shell', status: 'completed', result: new ToolResult() }
@@ -282,7 +277,7 @@ describe('ocm-gh-env plugin', () => {
     const plugin = await loadPlugin()
     await plugin.triggerShellCreateBefore({ command: 'ls', cwd: '/repo', env: {} })
 
-    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ env: {}, mask: ['second-secret'] }) })
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ env: {}, mask: ['second-secret'] }), { status: 200 }))
     vi.spyOn(Date, 'now').mockReturnValue(realNow() + 6000)
     await plugin.triggerShellCreateBefore({ command: 'ls', cwd: '/repo', env: {} })
 
@@ -291,13 +286,13 @@ describe('ocm-gh-env plugin', () => {
     await plugin.triggerToolExecuteAfter(event)
 
     expect(event.result).toEqual({ output: 'first-secret and ***' })
-    expect(maskStateForTests()?.byCwd.get('/repo')).toEqual(['second-secret'])
+    expect(readSecretMaskState()?.byCwd.get('/repo')).toEqual(['second-secret'])
   })
 
   it('keeps masks per cwd and masks a result with the masks of the cwd its shell ran in', async () => {
-    const fetchMock = vi.fn().mockImplementation((url: URL) => {
-      const mask = String(url).includes('%2Frepo-a') ? ['a-secret'] : ['b-secret']
-      return Promise.resolve({ ok: true, json: async () => ({ env: {}, mask }) })
+    const fetchMock = createFetchStub(async (input) => {
+      const mask = String(input).includes('%2Frepo-a') ? ['a-secret'] : ['b-secret']
+      return new Response(JSON.stringify({ env: {}, mask }), { status: 200 })
     })
     vi.stubGlobal('fetch', fetchMock)
     const plugin = await loadPlugin()
@@ -316,9 +311,9 @@ describe('ocm-gh-env plugin', () => {
   })
 
   it('masks a result without a cwd with the union of the current per-cwd masks', async () => {
-    const fetchMock = vi.fn().mockImplementation((url: URL) => {
-      const mask = String(url).includes('%2Frepo-a') ? ['a-secret'] : ['b-secret']
-      return Promise.resolve({ ok: true, json: async () => ({ env: {}, mask }) })
+    const fetchMock = createFetchStub(async (input) => {
+      const mask = String(input).includes('%2Frepo-a') ? ['a-secret'] : ['b-secret']
+      return new Response(JSON.stringify({ env: {}, mask }), { status: 200 })
     })
     vi.stubGlobal('fetch', fetchMock)
     const plugin = await loadPlugin()
@@ -340,7 +335,7 @@ describe('ocm-gh-env plugin', () => {
     const plugin = await loadPlugin()
     await plugin.triggerShellCreateBefore({ command: 'ls', cwd: '/repo', env: {} })
 
-    expect(maskStateForTests()?.byCwd.get('/repo')).toEqual(['abcdef', 'abc'])
+    expect(readSecretMaskState()?.byCwd.get('/repo')).toEqual(['abcdef', 'abc'])
 
     const event: ToolExecuteAfterEvent = { tool: 'shell', status: 'completed', result: { output: 'abcdef' } }
     await plugin.triggerToolExecuteAfter(event)
@@ -352,25 +347,24 @@ describe('ocm-gh-env plugin', () => {
     it(`lets a sandboxed shell register the plan masks and skips the repository env (${order})`, async () => {
       process.env.OCM_SANDBOX_ENFORCED = 'true'
       const shellEnvCalls: string[] = []
-      vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
-        const target = String(url)
+      vi.stubGlobal('fetch', createFetchStub(async (input) => {
+        const target = String(input)
         if (target.includes('/sandbox/sessions/')) {
-          return Promise.resolve({ ok: true, status: 200, json: async () => ({ sandboxed: true, source: 'default', since: 1 }) })
+          return new Response(JSON.stringify({ sandboxed: true, source: 'default', since: 1 }), { status: 200 })
         }
         if (target.endsWith('/sandbox/shell')) {
-          return Promise.resolve({
-            ok: true,
-            status: 200,
-            json: async () => ({ mode: 'sandbox', workdir: '/repo', name: PLAN_NAME, mask: ['plan-secret'] }),
-          })
+          return new Response(
+            JSON.stringify({ mode: 'sandbox', workdir: '/repo', name: PLAN_NAME, mask: ['plan-secret'] }),
+            { status: 200 },
+          )
         }
         shellEnvCalls.push(target)
-        return Promise.resolve({ ok: true, json: async () => ({ env: { GH_TOKEN: 'ghp' }, mask: ['repo-secret'] }) })
+        return new Response(JSON.stringify({ env: { GH_TOKEN: 'ghp' }, mask: ['repo-secret'] }), { status: 200 })
       }))
       const ghEnv = await loadPlugin()
       const sandbox = await loadGeneratedPlugin(path.join(getOpenCodePluginDir(configHome), 'ocm-sandbox.js'))
-      const base = vi.fn().mockImplementation(async (input: { command: string }) => {
-        const event = shellCreateEvent(input.command, '/repo')
+      const base = vi.fn<(input: JsonValue, context: GeneratedToolExecuteContext) => Promise<JsonValue>>(async (input) => {
+        const event = shellCreateEvent(ToolExecuteInputSchema.parse(input).command, '/repo')
         if (order === 'gh-env first') {
           await ghEnv.triggerShellCreateBefore(event)
           await sandbox.triggerShellCreateBefore(event)
@@ -386,8 +380,8 @@ describe('ocm-gh-env plugin', () => {
 
       expect(shellEnvCalls).toHaveLength(1)
       expect(shellEnvCalls[0]).toContain('sandboxed=1')
-      expect(maskStateForTests()?.byCwd.get('/repo')).toEqual(['plan-secret'])
-      expect(shellSandboxStateForTests()?.inFlightSandboxedCommands.size).toBe(0)
+      expect(readSecretMaskState()?.byCwd.get('/repo')).toEqual(['plan-secret'])
+      expect(readSandboxShellState()?.inFlightSandboxedCommands.size).toBe(0)
 
       const event: ToolExecuteAfterEvent = { tool: 'shell', status: 'completed', result: { output: 'plan-secret and repo-secret' } }
       await ghEnv.triggerToolExecuteAfter(event)

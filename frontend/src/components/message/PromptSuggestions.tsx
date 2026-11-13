@@ -28,11 +28,11 @@ interface PromptSuggestionsProps<T> {
 const TAKEOVER_TOP_GAP_PX = 8
 const TAKEOVER_MIN_HEIGHT_PX = 160
 
-const KIND_ICONS: Partial<Record<SuggestionKind, LucideIcon>> = {
-  agent: Bot,
-  skill: Sparkles,
-  file: FileText,
-}
+const KIND_ICONS = new Map<SuggestionKind, LucideIcon>([
+  ['agent', Bot],
+  ['skill', Sparkles],
+  ['file', FileText],
+])
 
 export function PromptSuggestions<T>({
   isOpen,
@@ -58,7 +58,7 @@ export function PromptSuggestions<T>({
     if (!isOpen) return
 
     const handleClickOutside = (e: MouseEvent) => {
-      if (listRef.current && !listRef.current.contains(e.target as Node)) {
+      if (listRef.current && e.target instanceof Node && !listRef.current.contains(e.target)) {
         onClose()
       }
     }
@@ -84,7 +84,7 @@ export function PromptSuggestions<T>({
     const isSelected = index === selectedIndex
     const isExpanded = item.key === expandedKey
     const swipeOffset = touch.swipe?.item === item.value ? touch.swipe.offset : 0
-    const Icon = KIND_ICONS[item.kind]
+    const Icon = KIND_ICONS.get(item.kind)
 
     return (
       <div key={item.key} data-index={index} className={`relative overflow-hidden ${takeover ? 'rounded-xl' : ''}`}>
@@ -197,7 +197,7 @@ function useTakeoverHeight(listRef: RefObject<HTMLDivElement | null>, enabled: b
     }
 
     measure()
-    const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    const resizeObserver = 'ResizeObserver' in globalThis ? new ResizeObserver(measure) : null
     resizeObserver?.observe(anchor)
     if (boundary) resizeObserver?.observe(boundary)
     const viewport = window.visualViewport

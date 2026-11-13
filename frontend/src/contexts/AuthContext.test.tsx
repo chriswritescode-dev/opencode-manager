@@ -1,118 +1,147 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { useState } from 'react'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { useState, type ReactNode } from 'react'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider, dehydrate } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describeUserAgent } from '@opencode-manager/shared/utils'
 import { PAIRING_CODE_INVALID_MESSAGE } from '@opencode-manager/shared/schemas'
-import { FetchError } from '@/api/fetchWrapper'
-import { LocationCatcher } from '@/test/test-utils'
+import { authClient } from '@/lib/auth-client'
+import { createFetchFake, type FetchFake, type FetchRoute } from '@/test/fetchFake'
+import { installPasskeyAuthenticator } from '@/test/browserFakes'
+import { makeAuthConfig, makeAuthSession, type AuthSessionFixture } from '@/test/fixtures/api'
+import { LocationCatcher } from '@/test/test-components'
 import { AuthProvider } from './AuthContext'
 import { QueryCachePersistenceProvider } from './QueryCachePersistenceContext'
 import { useAuth } from '@/hooks/useAuth'
 import { QUERY_CACHE_STORAGE_KEY, queryCacheBuster } from '@/lib/queryPersistence'
 import { STORED_AUTH_USER_KEY } from '@/lib/authSession'
 
-const mocks = vi.hoisted(() => ({
-  useSession: vi.fn(),
-  refetch: vi.fn(),
-  signInEmail: vi.fn(),
-  signInSocial: vi.fn(),
-  signInPasskey: vi.fn(),
-  signUpEmail: vi.fn(),
-  signOut: vi.fn(),
-  redeemDevicePairingCode: vi.fn(),
-}))
-
-vi.mock('@/lib/auth-client', () => ({
-  useSession: mocks.useSession,
-  signIn: { email: mocks.signInEmail, social: mocks.signInSocial },
-  signUp: { email: mocks.signUpEmail },
-  signOut: mocks.signOut,
-  authClient: { signIn: { passkey: mocks.signInPasskey }, passkey: { addPasskey: vi.fn() } },
-}))
-
-vi.mock('@/api/devicePairing', () => ({
-  redeemDevicePairingCode: mocks.redeemDevicePairingCode,
-}))
-
 type AuthValue = ReturnType<typeof useAuth>
 
-const STORED_USER = { id: 'user-1', email: 'user@example.com', name: 'Ada' }
+type FixtureUser = AuthSessionFixture['user']
+
+const STORED_USER: FixtureUser = { id: 'user-1', email: 'user@example.com', name: 'Ada' }
 const pairingCode = 'a'.repeat(43)
 
-function renderAuth(initialEntry: string, options: { persistence?: boolean } = {}) {
-  const capturedPathname: { current: string } = { current: '' }
-  const capturedSearch: { current: string } = { current: '' }
-  const captured: { current: AuthValue | null } = { current: null }
+interface SessionState {
+  user: FixtureUser | null
+}
+
+interface AuthHarnessOptions {
+  sessionRoute?: FetchRoute['respond']
+  extraRoutes?: FetchRoute[]
+  persistence?: boolean
+}
+
+interface AuthHarness {
+  capturedPathname: { current: string }
+  capturedSearch: { current: string }
+  captured: { current: AuthValue | null }
+  queryClient: QueryClient
+  fetchFake: FetchFake
+  session: SessionState
+}
+
+interface ValueRef<T> {
+  current: T
+}
+
+function authRoutes(state: SessionState): FetchRoute[] {
+  const signIn = () => {
+    state.user = STORED_USER
+    return { json: makeAuthSession({ user: STORED_USER }) }
+  }
+  return [
+    {
+      method: 'GET',
+      path: '/api/auth/get-session',
+      respond: () => ({ json: state.user ? makeAuthSession({ user: state.user }) : null }),
+    },
+    {
+      method: 'GET',
+      path: '/api/auth-info/config',
+      respond: () => ({ json: makeAuthConfig({ enabledProviders: ['credentials', 'passkey'] }) }),
+    },
+    { method: 'POST', path: '/api/auth/sign-in/email', respond: signIn },
+    { method: 'POST', path: '/api/auth/sign-up/email', respond: signIn },
+    {
+      method: 'POST',
+      path: '/api/auth/sign-in/social',
+      respond: () => ({ json: { url: 'https://github.example.com', redirect: true } }),
+    },
+    {
+      method: 'GET',
+      path: '/api/auth/passkey/generate-authenticate-options',
+      respond: () => ({ json: { challenge: 'Y2hhbGxlbmdl', rpId: 'localhost', allowCredentials: [] } }),
+    },
+    { method: 'POST', path: '/api/auth/passkey/verify-authentication', respond: signIn },
+    {
+      method: 'POST',
+      path: '/api/auth/sign-out',
+      respond: () => {
+        state.user = null
+        return { json: {} }
+      },
+    },
+  ]
+}
+
+function AuthProbe({ captured }: { captured: { current: AuthValue | null } }) {
+  const auth = useAuth()
+  const [error, setError] = useState<string | null>(null)
+  captured.current = auth
+
+  const pair = async () => {
+    const result = await auth.signInWithPairingCode(pairingCode)
+    setError(result.error ?? null)
+  }
+
+  return (
+    <>
+      <button type="button" onClick={pair}>
+        Pair
+      </button>
+      {error ? <p>{error}</p> : null}
+    </>
+  )
+}
+
+function renderAuth(initialEntry: string, options: AuthHarnessOptions = {}): AuthHarness {
+  const capturedPathname = { current: '' }
+  const capturedSearch = { current: '' }
+  const captured: ValueRef<AuthValue | null> = { current: null }
   const queryClient = new QueryClient()
+  const session: SessionState = { user: null }
+
+  const routes: FetchRoute[] = []
+  if (options.sessionRoute) {
+    routes.push({ method: 'GET', path: '/api/auth/get-session', respond: options.sessionRoute })
+  }
+  routes.push(...(options.extraRoutes ?? []), ...authRoutes(session))
+  const fetchFake = createFetchFake(routes)
+  fetchFake.install()
+
+  const probe = <AuthProbe captured={captured} />
+  const content: ReactNode = options.persistence
+    ? <QueryCachePersistenceProvider persistThrottleMs={0}>{probe}</QueryCachePersistenceProvider>
+    : probe
 
   render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialEntry]}>
         <LocationCatcher capturedSearch={capturedSearch} capturedPathname={capturedPathname} />
         <Routes>
-          <Route
-            path="/login"
-            element={(
-              <AuthProvider>
-                {options.persistence ? (
-                  <QueryCachePersistenceProvider persistThrottleMs={0}>
-                    <AuthProbe captured={captured} />
-                  </QueryCachePersistenceProvider>
-                ) : (
-                  <AuthProbe captured={captured} />
-                )}
-              </AuthProvider>
-            )}
-          />
-          <Route path="/" element={null} />
-          <Route path="/repos/:id" element={null} />
+          <Route path="/login" element={<AuthProvider>{content}</AuthProvider>} />
+          <Route path="/repos/1" element={<div>repos marker</div>} />
+          <Route path="/repos/:id" element={<div>repo marker</div>} />
+          <Route path="/" element={<div>home marker</div>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   )
 
-  return { capturedPathname, capturedSearch, captured, queryClient }
-}
-
-function AuthProbe({ captured }: { captured: { current: AuthValue | null } }) {
-  captured.current = useAuth()
-  return null
-}
-
-function PairingSignIn() {
-  const { signInWithPairingCode } = useAuth()
-  const [error, setError] = useState<string | null>(null)
-
-  const submit = async () => {
-    const result = await signInWithPairingCode(pairingCode)
-    setError(result.error ?? null)
-  }
-
-  return (
-    <>
-      <button type="button" onClick={submit}>
-        Pair
-      </button>
-      {error && <p>{error}</p>}
-    </>
-  )
-}
-
-function renderPairing(initialEntry: string) {
-  return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<PairingSignIn />} />
-          <Route path="/repos/1" element={<div>repos marker</div>} />
-          <Route path="/" element={<div>home marker</div>} />
-        </Routes>
-      </AuthProvider>
-    </MemoryRouter>,
-  )
+  return { capturedPathname, capturedSearch, captured, queryClient, fetchFake, session }
 }
 
 async function pair() {
@@ -120,26 +149,11 @@ async function pair() {
   await user.click(screen.getByRole('button', { name: 'Pair' }))
 }
 
-afterEach(() => {
-  vi.unstubAllGlobals()
+beforeEach(() => {
+  authClient.$store.notify('$sessionSignal')
 })
 
 describe('AuthProvider post-login navigation', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    localStorage.clear()
-    mocks.useSession.mockReturnValue({ data: null, error: null, isPending: false, refetch: mocks.refetch })
-    mocks.refetch.mockResolvedValue(undefined)
-    mocks.signInEmail.mockResolvedValue({ data: { user: { id: 'user-1' } } })
-    mocks.signInPasskey.mockResolvedValue({ data: { user: { id: 'user-1' } } })
-    mocks.signInSocial.mockResolvedValue({ data: { url: 'https://github.example.com' } })
-    mocks.signUpEmail.mockResolvedValue({ data: { user: { id: 'user-1' } } })
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ enabledProviders: ['credentials'], registrationEnabled: true, isFirstUser: false, adminConfigured: true }),
-    }))
-  })
-
   it('returns to the requested page after signing in with a password', async () => {
     const { captured, capturedPathname, capturedSearch } = renderAuth('/login?redirect=%2Frepos%2F2%3Ftab%3Dworkspaces')
 
@@ -162,7 +176,8 @@ describe('AuthProvider post-login navigation', () => {
   })
 
   it('returns to the requested page after signing in with a passkey', async () => {
-    const { captured, capturedPathname, capturedSearch } = renderAuth('/login?redirect=%2Frepos%2F7')
+    installPasskeyAuthenticator()
+    const { captured, capturedPathname, capturedSearch, fetchFake } = renderAuth('/login?redirect=%2Frepos%2F7')
 
     await captured.current?.signInWithPasskey()
 
@@ -170,14 +185,15 @@ describe('AuthProvider post-login navigation', () => {
       expect(capturedPathname.current).toBe('/repos/7')
     })
     expect(capturedSearch.current).toBe('')
+    expect(fetchFake.findRequests('POST', '/api/auth/passkey/verify-authentication')).toHaveLength(1)
   })
 
   it('sends the redirect target as the OAuth callback URL', async () => {
-    const { captured } = renderAuth('/login?redirect=%2Frepos%2F3%3Ftab%3Dworkspaces')
+    const { captured, fetchFake } = renderAuth('/login?redirect=%2Frepos%2F3%3Ftab%3Dworkspaces')
 
     await captured.current?.signInWithProvider('github')
 
-    expect(mocks.signInSocial).toHaveBeenCalledWith({
+    expect(fetchFake.lastRequest('POST', '/api/auth/sign-in/social')?.body).toMatchObject({
       provider: 'github',
       callbackURL: '/repos/3?tab=workspaces',
     })
@@ -195,33 +211,33 @@ describe('AuthProvider post-login navigation', () => {
 })
 
 describe('AuthProvider signInWithPairingCode', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    localStorage.clear()
-    mocks.useSession.mockReturnValue({ data: null, error: null, isPending: false, refetch: mocks.refetch })
-    mocks.refetch.mockResolvedValue(undefined)
-    mocks.redeemDevicePairingCode.mockResolvedValue({ user: { id: 'u1', name: 'Ada', email: 'ada@example.com' } })
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ enabledProviders: ['credentials'], registrationEnabled: true, isFirstUser: false, adminConfigured: true }),
-    }))
+  const redeemRoute = (respond: FetchRoute['respond']): FetchRoute => ({
+    method: 'POST',
+    path: '/api/auth/device-pairing/redeem',
+    respond,
   })
 
   it('redeems the code with the described device and returns to the redirect target', async () => {
-    renderPairing('/login?redirect=%2Frepos%2F1')
+    const { fetchFake } = renderAuth('/login?redirect=%2Frepos%2F1', {
+      extraRoutes: [
+        redeemRoute(() => ({ json: { user: { id: 'u1', name: 'Ada', email: 'ada@example.com' } } })),
+      ],
+    })
 
     await pair()
 
     expect(await screen.findByText('repos marker')).toBeInTheDocument()
-    expect(mocks.redeemDevicePairingCode).toHaveBeenCalledWith({
+    expect(fetchFake.lastRequest('POST', '/api/auth/device-pairing/redeem')?.body).toEqual({
       code: pairingCode,
       deviceName: describeUserAgent(navigator.userAgent),
     })
-    expect(mocks.refetch).toHaveBeenCalledTimes(1)
+    expect(fetchFake.findRequests('GET', '/api/auth/get-session').length).toBeGreaterThan(1)
   })
 
   it('lands home without a redirect target', async () => {
-    renderPairing('/login')
+    renderAuth('/login', {
+      extraRoutes: [redeemRoute(() => ({ json: { user: { id: 'u1', name: 'Ada', email: 'ada@example.com' } } }))],
+    })
 
     await pair()
 
@@ -229,55 +245,34 @@ describe('AuthProvider signInWithPairingCode', () => {
   })
 
   it('shows the server message when the code expired or was already used', async () => {
-    mocks.redeemDevicePairingCode.mockRejectedValue(
-      new FetchError(PAIRING_CODE_INVALID_MESSAGE, 400, 'PAIRING_CODE_INVALID'),
-    )
-    renderPairing('/login?redirect=%2Frepos%2F1')
+    const { fetchFake } = renderAuth('/login?redirect=%2Frepos%2F1', {
+      extraRoutes: [redeemRoute(() => ({ status: 400, json: { error: PAIRING_CODE_INVALID_MESSAGE } }))],
+    })
 
     await pair()
 
     expect(await screen.findByText(PAIRING_CODE_INVALID_MESSAGE)).toBeInTheDocument()
     expect(screen.queryByText('repos marker')).not.toBeInTheDocument()
-    expect(mocks.refetch).not.toHaveBeenCalled()
+    expect(fetchFake.findRequests('GET', '/api/auth/get-session')).toHaveLength(1)
   })
 
   it('shows the rate-limit message for a 429', async () => {
-    mocks.redeemDevicePairingCode.mockRejectedValue(
-      new FetchError('Too many attempts', 429, 'RATE_LIMITED'),
-    )
-    renderPairing('/login')
+    const { fetchFake } = renderAuth('/login', {
+      extraRoutes: [redeemRoute(() => ({ status: 429, json: { error: 'Too many attempts' } }))],
+    })
 
     await pair()
 
-    expect(
-      await screen.findByText('Too many attempts. Wait a minute and try again.'),
-    ).toBeInTheDocument()
-    expect(mocks.refetch).not.toHaveBeenCalled()
+    expect(await screen.findByText('Too many attempts. Wait a minute and try again.')).toBeInTheDocument()
+    expect(fetchFake.findRequests('GET', '/api/auth/get-session')).toHaveLength(1)
   })
 })
 
 describe('AuthProvider session restore', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    localStorage.clear()
-    mocks.useSession.mockReturnValue({ data: null, error: null, isPending: false, refetch: mocks.refetch })
-    mocks.refetch.mockResolvedValue(undefined)
-    mocks.signOut.mockResolvedValue({ data: null })
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ enabledProviders: ['credentials'], registrationEnabled: true, isFirstUser: false, adminConfigured: true }),
-    }))
-  })
-
   it('stores the validated user for the next cold start', async () => {
-    mocks.useSession.mockReturnValue({
-      data: { user: STORED_USER },
-      error: null,
-      isPending: false,
-      refetch: mocks.refetch,
+    const { captured } = renderAuth('/login', {
+      sessionRoute: () => ({ json: makeAuthSession({ user: STORED_USER }) }),
     })
-
-    const { captured } = renderAuth('/login')
 
     await waitFor(() => expect(captured.current?.isAuthenticated).toBe(true))
     expect(JSON.parse(localStorage.getItem(STORED_AUTH_USER_KEY) ?? '')).toEqual(STORED_USER)
@@ -285,14 +280,11 @@ describe('AuthProvider session restore', () => {
 
   it('treats a transient session failure as signed in with the stored user', async () => {
     localStorage.setItem(STORED_AUTH_USER_KEY, JSON.stringify(STORED_USER))
-    mocks.useSession.mockReturnValue({
-      data: null,
-      error: new TypeError('Failed to fetch'),
-      isPending: false,
-      refetch: mocks.refetch,
+    const { captured } = renderAuth('/login', {
+      sessionRoute: () => {
+        throw new TypeError('Failed to fetch')
+      },
     })
-
-    const { captured } = renderAuth('/login')
 
     await waitFor(() => expect(captured.current?.isAuthenticated).toBe(true))
     expect(captured.current?.user).toEqual(STORED_USER)
@@ -301,27 +293,20 @@ describe('AuthProvider session restore', () => {
 
   it('keeps the stored user while the session is still loading', async () => {
     localStorage.setItem(STORED_AUTH_USER_KEY, JSON.stringify(STORED_USER))
-    mocks.useSession.mockReturnValue({ data: null, error: null, isPending: true, refetch: mocks.refetch })
-
-    const { captured } = renderAuth('/login')
+    const { captured } = renderAuth('/login', {
+      sessionRoute: () => new Promise<never>(() => undefined),
+    })
 
     await waitFor(() => expect(captured.current?.isAuthenticated).toBe(true))
     expect(captured.current?.isLoading).toBe(false)
   })
 
   it.each([
-    ['a 401 response', { status: 401, statusText: 'Unauthorized' }],
-    ['a successful response without a user', null],
-  ])('clears the stored user on %s', async (_label, error) => {
+    ['a 401 response', () => ({ status: 401, json: { error: 'Unauthorized' } })],
+    ['a successful response without a user', () => ({ json: null })],
+  ])('clears the stored user on %s', async (_label, sessionRoute) => {
     localStorage.setItem(STORED_AUTH_USER_KEY, JSON.stringify(STORED_USER))
-    mocks.useSession.mockReturnValue({
-      data: null,
-      error,
-      isPending: false,
-      refetch: mocks.refetch,
-    })
-
-    const { captured } = renderAuth('/login')
+    const { captured } = renderAuth('/login', { sessionRoute })
 
     await waitFor(() => expect(captured.current?.isAuthenticated).toBe(false))
     expect(localStorage.getItem(STORED_AUTH_USER_KEY)).toBeNull()
@@ -329,11 +314,7 @@ describe('AuthProvider session restore', () => {
 
   it('clears the stored user on logout and leaves the cache teardown to its owner', async () => {
     localStorage.setItem(STORED_AUTH_USER_KEY, JSON.stringify(STORED_USER))
-    const { captured } = renderAuth('/login')
-    mocks.signOut.mockImplementation(async (options: { fetchOptions?: { onSuccess?: () => void } }) => {
-      options.fetchOptions?.onSuccess?.()
-      return { data: null }
-    })
+    const { captured, fetchFake } = renderAuth('/login')
 
     await act(async () => {
       await captured.current?.logout()
@@ -341,17 +322,11 @@ describe('AuthProvider session restore', () => {
 
     expect(localStorage.getItem(STORED_AUTH_USER_KEY)).toBeNull()
     expect(captured.current?.isAuthenticated).toBe(false)
-    expect(mocks.signOut).toHaveBeenCalled()
+    expect(fetchFake.findRequests('POST', '/api/auth/sign-out')).toHaveLength(1)
   })
 
   it('signs out and clears the persisted cache when sign-out fails offline', async () => {
     localStorage.setItem(STORED_AUTH_USER_KEY, JSON.stringify(STORED_USER))
-    mocks.useSession.mockReturnValue({
-      data: { user: STORED_USER },
-      error: null,
-      isPending: false,
-      refetch: mocks.refetch,
-    })
     const seededClient = new QueryClient()
     seededClient.setQueryData(['repos'], [{ id: 1 }])
     localStorage.setItem(QUERY_CACHE_STORAGE_KEY, JSON.stringify({
@@ -359,9 +334,20 @@ describe('AuthProvider session restore', () => {
       timestamp: Date.now(),
       clientState: dehydrate(seededClient),
     }))
-    mocks.signOut.mockRejectedValue(new TypeError('Failed to fetch'))
 
-    const { captured } = renderAuth('/login', { persistence: true })
+    const { captured } = renderAuth('/login', {
+      persistence: true,
+      sessionRoute: () => ({ json: makeAuthSession({ user: STORED_USER }) }),
+      extraRoutes: [
+        {
+          method: 'POST',
+          path: '/api/auth/sign-out',
+          respond: () => {
+            throw new TypeError('Failed to fetch')
+          },
+        },
+      ],
+    })
     await waitFor(() => expect(localStorage.getItem(QUERY_CACHE_STORAGE_KEY)).not.toBeNull())
 
     await act(async () => {
@@ -381,14 +367,9 @@ describe('AuthProvider session restore', () => {
     )],
   ])('signs out when another tab %s', async (_label, changeStoredUser) => {
     localStorage.setItem(STORED_AUTH_USER_KEY, JSON.stringify(STORED_USER))
-    mocks.useSession.mockReturnValue({
-      data: { user: STORED_USER },
-      error: null,
-      isPending: false,
-      refetch: mocks.refetch,
+    const { captured, fetchFake } = renderAuth('/login', {
+      sessionRoute: () => ({ json: makeAuthSession({ user: STORED_USER }) }),
     })
-
-    const { captured } = renderAuth('/login')
     await waitFor(() => expect(captured.current?.isAuthenticated).toBe(true))
 
     act(() => {
@@ -397,6 +378,6 @@ describe('AuthProvider session restore', () => {
     })
 
     await waitFor(() => expect(captured.current?.isAuthenticated).toBe(false))
-    expect(mocks.signOut).toHaveBeenCalled()
+    expect(fetchFake.findRequests('POST', '/api/auth/sign-out')).toHaveLength(1)
   })
 })

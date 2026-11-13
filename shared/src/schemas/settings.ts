@@ -3,7 +3,8 @@ import { NotificationPreferencesSchema, DEFAULT_NOTIFICATION_PREFERENCES } from 
 import { OPENCODE_CONFIG_SOURCE_NAMES } from "../config/defaults";
 import { ColorThemeIdSchema, MANAGER_COLOR_THEME_ID } from "../themes";
 import { SessionPermissionModeSchema } from "./session-permissions";
-import { SessionSandboxResourcesSchema } from "./session-sandbox";
+import { SessionSandboxCpusSchema, SessionSandboxMemoryMibSchema } from "./session-sandbox";
+import { JsonObjectSchema, type JsonValue } from "../utils/json";
 
 export const CustomCommandSchema = z.object({
   name: z.string(),
@@ -73,7 +74,7 @@ export type ActivityWindowMinutes = z.infer<typeof ActivityWindowMinutesSchema>;
 
 export const DEFAULT_ACTIVITY_WINDOW_MINUTES: ActivityWindowMinutes = 30;
 
-export function isActivityWindowMinutes(value: unknown): value is ActivityWindowMinutes {
+export function isActivityWindowMinutes(value: JsonValue | undefined): value is ActivityWindowMinutes {
   return ActivityWindowMinutesSchema.safeParse(value).success;
 }
 
@@ -148,8 +149,6 @@ export const ServerEnvVarSchema = z.object({
   value: z.string(),
 });
 
-type ServerEnvVar = z.infer<typeof ServerEnvVarSchema>
-
 export const BLOCKED_SERVER_ENV_KEYS = [
   'OPENCODE_PASSWORD',
   'OPENCODE_SERVER_PASSWORD',
@@ -174,8 +173,8 @@ export const SandboxPreferencesSchema = z.object({
   enabled: z.boolean(),
   gitCredentials: z.boolean().optional(),
   defaultForNewSessions: z.boolean().optional(),
-  cpus: SessionSandboxResourcesSchema.shape.cpus.optional(),
-  memoryMib: SessionSandboxResourcesSchema.shape.memoryMib.optional(),
+  cpus: SessionSandboxCpusSchema.optional(),
+  memoryMib: SessionSandboxMemoryMibSchema.optional(),
   idleStopMinutes: z.number().int().min(1).max(1440).optional(),
   maxRunningVms: z.number().int().min(1).max(32).optional(),
 });
@@ -278,17 +277,17 @@ export const DEFAULT_USER_PREFERENCES = {
   groupToolCalls: true,
   showReasoning: false,
   simpleChatMode: false,
-  keyboardShortcuts: {} as Record<string, string>,
+  keyboardShortcuts: {},
   customCommands: [],
   customAgents: [],
-  gitCredentials: [] as GitCredential[],
-  defaultGitCredentialId: undefined as string | undefined,
+  gitCredentials: [],
+  defaultGitCredentialId: undefined,
   gitIdentity: DEFAULT_GIT_IDENTITY,
   tts: DEFAULT_TTS_CONFIG,
   stt: DEFAULT_STT_CONFIG,
   notifications: DEFAULT_NOTIFICATION_PREFERENCES,
   repoSortMode: 'recent' as const,
-  serverEnvVars: [] as ServerEnvVar[],
+  serverEnvVars: [],
   sandbox: DEFAULT_SANDBOX_PREFERENCES,
   sessionDefaults: DEFAULT_SESSION_DEFAULTS,
 };
@@ -313,7 +312,7 @@ export const OpenCodeConfigSourceFileSchema = z.object({
   name: OpenCodeConfigSourceNameSchema,
   path: z.string(),
   rawContent: z.string(),
-  content: z.record(z.string(), z.unknown()),
+  content: JsonObjectSchema,
   isValid: z.boolean(),
   validationIssues: z.array(OpenCodeConfigValidationIssueSchema).optional(),
   updatedAt: z.number(),
@@ -321,7 +320,7 @@ export const OpenCodeConfigSourceFileSchema = z.object({
 
 export const OpenCodeConfigFileSchema = z.object({
   path: z.string(),
-  content: z.record(z.string(), z.unknown()),
+  content: JsonObjectSchema,
   rawContent: z.string(),
   isValid: z.boolean(),
   validationIssues: z.array(OpenCodeConfigValidationIssueSchema).optional(),
@@ -331,13 +330,13 @@ export const OpenCodeConfigFileSchema = z.object({
 });
 
 export const UpdateOpenCodeConfigRequestSchema = z.object({
-  content: z.union([z.record(z.string(), z.unknown()), z.string()]),
+  content: z.union([JsonObjectSchema, z.string()]),
   source: OpenCodeConfigSourceNameSchema.optional(),
   expectedRevision: z.string().optional(),
 });
 
 export const UpdateOpenCodeConfigPatchRequestSchema = z.object({
-  patch: z.record(z.string(), z.unknown()),
+  patch: JsonObjectSchema,
   source: OpenCodeConfigSourceNameSchema.optional(),
   expectedRevision: z.string().optional(),
 });

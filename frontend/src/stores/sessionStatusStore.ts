@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import type { SessionInfo, SessionStatus } from '@opencode-manager/shared/opencode'
+import type { ActiveSessions } from '@/api/opencode'
 import { childLifecycle, type BackgroundTaskLifecycle, type ChildOutcome } from '@/lib/backgroundWork'
 
 export type SessionStatusType = SessionStatus | { type: 'compact' }
@@ -75,10 +76,6 @@ const clearOptimisticActiveTimer = (sessionID: string): void => {
   optimisticActiveTimers.delete(sessionID)
 }
 
-/**
- * Hash used to skip redundant status writes: the status type alone, except for retry states,
- * which include their attempt metadata so changed retry details still propagate.
- */
 const getStatusHash = (status: SessionStatusType): string => {
   if (status.type === 'retry') {
     return JSON.stringify(status)
@@ -199,7 +196,7 @@ const prunedRevisions = (currentRevisions: Map<string, number>): Map<string, num
   return nextRevisions
 }
 
-export function busyStatusesFromActiveSessions(active: Record<string, unknown>): Record<string, SessionStatusType> {
+export function busyStatusesFromActiveSessions(active: ActiveSessions): Record<string, SessionStatusType> {
   return Object.fromEntries(
     Object.keys(active).map((sessionID) => [sessionID, { type: 'busy' as const }]),
   )
@@ -249,12 +246,14 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
     statuses.set(sessionID, status)
     statusCache.set(sessionID, getStatusHash(status))
     const knownSessions = markSessionKnown(state.knownSessions, sessionID)
-    return {
-      statuses,
-      statusCache,
-      ...(knownSessions ? { knownSessions } : {}),
-      ...(recordRevisionPatch(state, sessionID) ?? {}),
+    const revisionPatch = recordRevisionPatch(state, sessionID)
+    const patch: Partial<SessionStatusStore> = { statuses, statusCache }
+    if (knownSessions) patch.knownSessions = knownSessions
+    if (revisionPatch) {
+      patch.statusRevisions = revisionPatch.statusRevisions
+      patch.revision = revisionPatch.revision
     }
+    return patch
   }
 
   const isLiveAfterCapture = (sessionID: string, captureRevision: number): boolean => {
@@ -322,13 +321,14 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
       sameSets(currentKnownSessions, nextKnownSessions)
     ) return null
 
-    return {
+    const patch: Partial<SessionStatusStore> = {
       statuses: newMap,
       statusCache: newCache,
       statusRevisions: nextRevisions,
       knownSessions: nextKnownSessions,
-      ...(sessionServers === null ? {} : { sessionServers }),
     }
+    if (sessionServers !== null) patch.sessionServers = sessionServers
+    return patch
   }
 
   const pruneRevisionsForRejectedSnapshot = (): void => {
@@ -364,10 +364,9 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
         const revisionPatch = recordRevisionPatch(get(), sessionID)
         const knownSessions = markSessionKnown(get().knownSessions, sessionID)
         if (revisionPatch || knownSessions) {
-          set({
-            ...(revisionPatch ?? {}),
-            ...(knownSessions ? { knownSessions } : {}),
-          })
+          const patch: Partial<SessionStatusStore> = { ...revisionPatch }
+          if (knownSessions) patch.knownSessions = knownSessions
+          set(patch)
         }
         return
       }
@@ -385,7 +384,8 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
         const outcomes = new Map(state.outcomes)
         outcomes.set(sessionID, outcome)
         const knownSessions = markSessionKnown(state.knownSessions, sessionID)
-        return { outcomes, ...(knownSessions ? { knownSessions } : {}) }
+        if (knownSessions) return { outcomes, knownSessions }
+        return { outcomes }
       })
     },
 
@@ -619,10 +619,10 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => {
       const revisionsChanged = !sameEntries(currentRevisions, nextRevisions)
       if (!shellsChanged && !revisionsChanged) return
 
-      set({
-        ...(shellsChanged ? { runningShells } : {}),
-        ...(revisionsChanged ? { shellRevisions: nextRevisions } : {}),
-      })
+      const patch: Partial<SessionStatusStore> = {}
+      if (shellsChanged) patch.runningShells = runningShells
+      if (revisionsChanged) patch.shellRevisions = nextRevisions
+      set(patch)
     },
 
     beginShellSnapshot: () => {

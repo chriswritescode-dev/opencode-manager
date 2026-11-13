@@ -1,16 +1,24 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
-import { stubMatchMedia } from '@/test/test-utils'
+import { describe, it, expect, vi } from 'vitest'
 import { useState } from 'react'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { SessionMessageInfo } from '@opencode-manager/shared/opencode'
+import { installMatchMedia } from '@/test/browserFakes'
+import { makeUserMessage } from '@/test/fixtures/api'
 import { SessionMessagePickerDialog } from './SessionMessagePickerDialog'
 
 function userMessage(id: string, text: string, created = 1000): SessionMessageInfo {
-  return { id, type: 'user', text, time: { created } } as SessionMessageInfo
+  return makeUserMessage({ id, text, time: { created } })
 }
 
 function assistantMessage(id: string, text: string): SessionMessageInfo {
-  return { id, type: 'assistant', text, time: { created: 1000 } } as unknown as SessionMessageInfo
+  return {
+    id,
+    type: 'assistant',
+    agent: 'build',
+    model: { providerID: 'anthropic', id: 'claude-sonnet-4-5' },
+    content: [{ type: 'text', text }],
+    time: { created: 1000 },
+  }
 }
 
 const renderPicker = (
@@ -49,12 +57,8 @@ function FocusHost() {
 }
 
 describe('SessionMessagePickerDialog', () => {
-  afterEach(() => {
-    Reflect.deleteProperty(window, 'matchMedia')
-  })
-
   it('focuses its search on open and returns focus to the previous element on Escape', async () => {
-    stubMatchMedia(true)
+    installMatchMedia(true)
     render(<FocusHost />)
     const prompt = screen.getByLabelText('prompt')
     prompt.focus()

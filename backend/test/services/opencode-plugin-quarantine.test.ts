@@ -3,6 +3,7 @@ import { promises as fs } from 'fs'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'fs'
 import path from 'path'
 import os from 'os'
+import { JsonObjectSchema, type JsonObject } from '@opencode-manager/shared/utils'
 import { restoreQuarantinedOpenCodePlugins } from '../../src/services/opencode-plugin-quarantine'
 
 describe('opencode plugin quarantine restore', () => {
@@ -32,8 +33,12 @@ describe('opencode plugin quarantine restore', () => {
     await fs.rm(root, { recursive: true, force: true })
   })
 
-  function writeConfig(content: Record<string, unknown>) {
+  function writeConfig(content: JsonObject) {
     writeFileSync(configPath, JSON.stringify(content, null, 2))
+  }
+
+  async function readConfig(filePath: string): Promise<JsonObject> {
+    return JsonObjectSchema.parse(JSON.parse(await fs.readFile(filePath, 'utf-8')))
   }
 
   function writeManifest(quarantineDir: string, entries: Record<string, { original: string; order: number | string }>) {
@@ -203,7 +208,7 @@ describe('opencode plugin quarantine restore', () => {
 
     await restoreQuarantinedOpenCodePlugins(configHome, configPath)
 
-    const restored = JSON.parse(await fs.readFile(configPath, 'utf-8')) as Record<string, unknown>
+    const restored = await readConfig(configPath)
     expect(restored.plugin).toEqual(['my-plugin'])
     expect(restored.shell).toEqual({ command: '/repo/.bin/evil-shell', args: [] })
     expect(restored.mcp).toEqual({ local: { type: 'local', command: ['node', 'server.js'] } })
@@ -227,7 +232,7 @@ describe('opencode plugin quarantine restore', () => {
 
     await restoreQuarantinedOpenCodePlugins(configHome, configPath)
 
-    const restored = JSON.parse(await fs.readFile(configPath, 'utf-8')) as Record<string, unknown>
+    const restored = await readConfig(configPath)
     expect(restored.plugin).toEqual(['legacy-plugin'])
     expect(restored.model).toBe('x')
     await expect(fs.access(`${configPath}.ocm-sandbox-backup`)).rejects.toThrow()
@@ -244,7 +249,7 @@ describe('opencode plugin quarantine restore', () => {
 
     await restoreQuarantinedOpenCodePlugins(configHome, configPath)
 
-    const restored = JSON.parse(await fs.readFile(configPath, 'utf-8')) as Record<string, unknown>
+    const restored = await readConfig(configPath)
     expect(restored.mcp).toEqual({ build: { type: 'remote', url: 'https://example.com/mcp' } })
     await expect(fs.access(`${configPath}.ocm-sandbox-backup`)).rejects.toThrow()
   })
@@ -263,8 +268,8 @@ describe('opencode plugin quarantine restore', () => {
 
     await restoreQuarantinedOpenCodePlugins(configHome, configPath)
 
-    expect(JSON.parse(await fs.readFile(jsoncPath, 'utf-8'))).toEqual({ plugin: ['evil-plugin'], model: 'x' })
-    expect(JSON.parse(await fs.readFile(homeJsonPath, 'utf-8'))).toEqual({
+    expect(await readConfig(jsoncPath)).toEqual({ plugin: ['evil-plugin'], model: 'x' })
+    expect(await readConfig(homeJsonPath)).toEqual({
       shell: { command: '/repo/.bin/evil-shell' },
       lsp: true,
     })
@@ -284,7 +289,7 @@ describe('opencode plugin quarantine restore', () => {
 
     await restoreQuarantinedOpenCodePlugins(configHome, configPath)
 
-    expect(JSON.parse(await fs.readFile(path.join(managedDir, 'opencode.json'), 'utf-8'))).toEqual({
+    expect(await readConfig(path.join(managedDir, 'opencode.json'))).toEqual({
       plugin: ['evil-plugin'],
       model: 'x',
     })
@@ -315,12 +320,12 @@ describe('opencode plugin quarantine restore', () => {
     await expect(restoreQuarantinedOpenCodePlugins(configHome, configPath)).rejects.toThrow('disk full')
     renameSpy.mockRestore()
 
-    const config = JSON.parse(await fs.readFile(configPath, 'utf-8')) as Record<string, unknown>
+    const config = await readConfig(configPath)
     expect(config.plugin).toBeUndefined()
     await expect(fs.access(`${configPath}.ocm-sandbox-backup`)).resolves.toBeUndefined()
 
     await restoreQuarantinedOpenCodePlugins(configHome, configPath)
-    const restored = JSON.parse(await fs.readFile(configPath, 'utf-8')) as Record<string, unknown>
+    const restored = await readConfig(configPath)
     expect(restored.plugin).toEqual(['my-plugin'])
     await expect(fs.access(`${configPath}.ocm-sandbox-backup`)).rejects.toThrow()
   })
@@ -375,7 +380,7 @@ describe('opencode plugin quarantine restore', () => {
 
     const readSpy = vi.spyOn(fs, 'readFile')
     let backupReads = 0
-    readSpy.mockImplementation(async (filePath: unknown) => {
+    readSpy.mockImplementation(async (filePath: Parameters<typeof fs.readFile>[0]) => {
       if (String(filePath).endsWith('.ocm-sandbox-backup')) {
         backupReads += 1
         return JSON.stringify({ removedSections: { plugin: ['my-plugin'] } })
@@ -453,7 +458,7 @@ describe('opencode plugin quarantine restore', () => {
       rmSpy.mockRestore()
     }
 
-    const restored = JSON.parse(await fs.readFile(configPath, 'utf-8')) as Record<string, unknown>
+    const restored = await readConfig(configPath)
     expect(restored.plugin).toEqual(['my-plugin'])
     await expect(fs.access(`${configPath}.ocm-sandbox-backup`)).resolves.toBeUndefined()
   })

@@ -1,451 +1,122 @@
-import path from 'path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Database } from 'bun:sqlite'
+import path from 'node:path'
+import { chmodSync, lstatSync, mkdirSync } from 'node:fs'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { Database } from 'bun:sqlite'
+import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
+import { isWorktreeSibling, type RepoSibling } from '@opencode-manager/shared/utils'
 import { getReposPath } from '@opencode-manager/shared/config/env'
-import type { GitAuthService } from '../../src/services/git-auth'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { Repo } from '../../src/types/repo'
-import { isWorktreeSibling, type RepoSibling } from '@opencode-manager/shared/utils'
-import { migrate } from '../../src/db/migration-runner'
-import { allMigrations } from '../../src/db/migrations'
+import { createScheduleRun, updateScheduleRunWorktree } from '../../src/db/schedules'
+import { getRepoByLocalPath } from '../../src/db/queries'
+import {
+  discoverLocalRepos,
+  getSiblingRepos,
+  initLocalRepo,
+  listRepoSiblings,
+  relinkReposFromSessionDirectories,
+  resolveRepoForDirectory,
+} from '../../src/services/repo'
+import { cloneOrigin, createCommittedRepo, createGitAuthService, createOrigin, git } from '../helpers/git-fixtures'
+import { createStubOpenCodeClient, type OpenCodeApiOverrides } from '../helpers/stub-opencode-client'
+import { createTestDatabase, seedRepo, seedScheduleJob } from '../helpers/test-database'
+import { createTempWorkspace, type TempWorkspace } from '../helpers/test-env'
 
-const executeCommand = vi.fn()
-const ensureDirectoryExists = vi.fn()
-
-const getRepoByLocalPath = vi.fn()
-const getRepoBySourcePath = vi.fn()
-const createRepo = vi.fn()
-const updateRepoStatus = vi.fn()
-const updateRepoBranch = vi.fn()
-const deleteRepo = vi.fn()
-const listRepos = vi.fn()
-
-const resolveProjectId = vi.fn()
-const isGitMainCheckout = vi.fn()
-const getSettings = vi.fn()
-
-const lstat = vi.fn()
-const stat = vi.fn()
-const readdir = vi.fn()
-const symlink = vi.fn()
-const readlink = vi.fn()
-const mkdirSafe = vi.fn()
-
-const missingDirectories = new Set<string>()
-
-vi.mock('node:fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:fs')>()
-  return {
-    ...actual,
-    existsSync: (target: string) => (
-      target.startsWith('/worktrees/') ? !missingDirectories.has(target) : actual.existsSync(target)
-    ),
-  }
-})
-
-vi.mock('fs/promises', () => ({
-  default: {
-    lstat,
-    stat,
-    readdir,
-    symlink,
-    readlink,
-  },
-}))
-
-vi.mock('../../src/utils/fs-safe', () => ({
-  mkdirSafe,
-  mkdirSyncSafe: vi.fn(),
-  canonicalPathSync: (target: string) => target,
-}))
-
-vi.mock('../../src/services/settings', () => ({
-  SettingsService: vi.fn().mockImplementation(() => ({ getSettings })),
-}))
-
-vi.mock('../../src/services/project-id-resolver', () => ({
-  resolveProjectId,
-  isGitMainCheckout,
-}))
-
-vi.mock('../../src/utils/process', () => ({
-  executeCommand,
-}))
-
-vi.mock('../../src/services/file-operations', () => ({
-  ensureDirectoryExists,
-}))
-
-vi.mock('../../src/db/queries', () => ({
-  getRepoByLocalPath,
-  getRepoBySourcePath,
-  createRepo,
-  updateRepoStatus,
-  updateRepoBranch,
-  deleteRepo,
-  listRepos,
-}))
-
-const mockGitAuthService = {
-  getGitEnvironment: vi.fn().mockReturnValue({}),
-} as unknown as GitAuthService
-
-function createDirectoryStat() {
-  return {
-    isDirectory: () => true,
-    isFile: () => false,
-    isSymbolicLink: () => false,
-  }
+interface WorktreeEntry {
+  directory: string
+  strategy?: string
 }
 
-function createFileStat() {
-  return {
-    isDirectory: () => false,
-    isFile: () => true,
-    isSymbolicLink: () => false,
-  }
-}
-
-function createDirent(name: string) {
-  return {
-    name,
-    isDirectory: () => true,
-    isSymbolicLink: () => false,
-  }
-}
-
-function createEnoentError(targetPath: string) {
-  return Object.assign(new Error(`ENOENT: ${targetPath}`), { code: 'ENOENT' })
-}
+const gitAuthService = createGitAuthService()
 
 describe('repo service', () => {
+  let workspace: TempWorkspace
+  let db: Database
+
   beforeEach(() => {
-    vi.clearAllMocks()
-    ensureDirectoryExists.mockResolvedValue(undefined)
-    mkdirSafe.mockResolvedValue(undefined)
-    symlink.mockResolvedValue(undefined)
-    readlink.mockResolvedValue('')
-    readdir.mockResolvedValue([])
-    stat.mockResolvedValue(createDirectoryStat())
-    executeCommand.mockImplementation(async (args: string[]) => {
-      if (args.includes('--git-dir')) {
-        return '.git'
-      }
+    workspace = createTempWorkspace('ocm-repo-service-')
+    db = createTestDatabase()
+  })
 
-      if (args.includes('HEAD') && !args.includes('--abbrev-ref')) {
-        return 'abc123'
-      }
-
-      if (args.includes('--abbrev-ref')) {
-        return 'main'
-      }
-
-      return ''
-    })
+  afterEach(() => {
+    db.close()
+    workspace.restore()
   })
 
   it('creates a new empty git repo for a relative path', async () => {
-    const { initLocalRepo } = await import('../../src/services/repo')
-    const database = {} as never
+    const result = await initLocalRepo(db, gitAuthService, 'my-new-repo')
 
-    getRepoByLocalPath.mockReturnValue(null)
-    createRepo.mockImplementation((_, input) => ({
-      id: 1,
-      localPath: input.localPath,
-      fullPath: path.join(getReposPath(), input.localPath),
-      defaultBranch: input.defaultBranch,
-      cloneStatus: input.cloneStatus,
-      clonedAt: input.clonedAt,
-      isLocal: true,
-    }))
-
-    const result = await initLocalRepo(database, mockGitAuthService, 'my-new-repo')
-
-    expect(ensureDirectoryExists).toHaveBeenCalledWith(expect.stringContaining('my-new-repo'))
-    expect(executeCommand).toHaveBeenCalledWith(['git', 'init'], expect.any(Object))
-    expect(updateRepoStatus).toHaveBeenCalledWith(database, 1, 'ready')
     expect(result.cloneStatus).toBe('ready')
-    expect(result.fullPath).toContain('my-new-repo')
+    expect(result.fullPath).toBe(path.join(getReposPath(), 'my-new-repo'))
+    expect(git(['rev-parse', '--git-dir'], result.fullPath)).toBe('.git')
+    expect(getRepoByLocalPath(db, 'my-new-repo')?.cloneStatus).toBe('ready')
   })
 
   it('links an absolute git repo in place and preserves its source path', async () => {
-    const { initLocalRepo } = await import('../../src/services/repo')
-    const database = {} as never
-    const absolutePath = '/Users/test/existing-repo'
-    const aliasPath = path.join(getReposPath(), 'existing-repo')
+    const sourcePath = path.join(workspace.path, 'outside', 'existing-repo')
+    createCommittedRepo(sourcePath)
 
-    getRepoBySourcePath.mockReturnValue(null)
-    getRepoByLocalPath.mockReturnValue(null)
-    createRepo.mockImplementation((_, input) => ({
-      id: 2,
-      localPath: input.localPath,
-      sourcePath: input.sourcePath,
-      fullPath: input.sourcePath ?? path.join(getReposPath(), input.localPath),
-      branch: input.branch,
-      defaultBranch: input.defaultBranch,
-      cloneStatus: input.cloneStatus,
-      clonedAt: input.clonedAt,
-      isLocal: true,
-      isWorktree: input.isWorktree,
-    }))
+    const result = await initLocalRepo(db, gitAuthService, sourcePath)
 
-    lstat.mockImplementation(async (targetPath: string) => {
-      if (targetPath === absolutePath) {
-        return createDirectoryStat()
-      }
-
-      if (targetPath === path.join(absolutePath, '.git')) {
-        return createDirectoryStat()
-      }
-
-      if (targetPath === aliasPath) {
-        throw createEnoentError(targetPath)
-      }
-
-      throw createEnoentError(targetPath)
-    })
-
-    const result = await initLocalRepo(database, mockGitAuthService, absolutePath)
-
-    expect(createRepo).toHaveBeenCalledWith(database, expect.objectContaining({
-      localPath: 'existing-repo',
-      sourcePath: absolutePath,
-      cloneStatus: 'ready',
-      isLocal: true,
-    }))
-    expect(symlink).toHaveBeenCalledWith(absolutePath, aliasPath, 'dir')
     expect(result.localPath).toBe('existing-repo')
-    expect(result.sourcePath).toBe(absolutePath)
-    expect(result.fullPath).toBe(absolutePath)
+    expect(result.sourcePath).toBe(sourcePath)
+    expect(result.fullPath).toBe(sourcePath)
+    expect(result.cloneStatus).toBe('ready')
+    expect(lstatSync(path.join(getReposPath(), 'existing-repo')).isSymbolicLink()).toBe(true)
+    expect(lstatSync(path.join(getReposPath(), 'existing-repo', '.git')).isDirectory()).toBe(true)
   })
 
   it('discovers nested repos and keeps existing registrations', async () => {
-    const { discoverLocalRepos } = await import('../../src/services/repo')
-    const database = {} as never
-    const rootPath = '/Users/test/projects'
-    const existingRepo = {
-      id: 9,
-      localPath: 'app-two',
-      sourcePath: '/Users/test/projects/nested/app-two',
-      fullPath: '/Users/test/projects/nested/app-two',
-      branch: 'main',
-      defaultBranch: 'main',
-      cloneStatus: 'ready' as const,
-      clonedAt: Date.now(),
-      isLocal: true,
-      isWorktree: true,
-    }
+    const rootPath = path.join(workspace.path, 'projects')
+    const appOne = path.join(rootPath, 'app-one')
+    const appTwo = path.join(rootPath, 'nested', 'app-two')
+    createCommittedRepo(appOne)
+    createCommittedRepo(appTwo)
+    const existing = seedRepo(db, { localPath: 'app-two', sourcePath: appTwo, isLocal: true, isWorktree: true })
 
-    getRepoByLocalPath.mockReturnValue(null)
-    getRepoBySourcePath.mockImplementation((_, sourcePath: string) => {
-      if (sourcePath === existingRepo.sourcePath) {
-        return existingRepo
-      }
-
-      return null
-    })
-    createRepo.mockImplementation((_, input) => ({
-      id: 3,
-      localPath: input.localPath,
-      sourcePath: input.sourcePath,
-      fullPath: input.sourcePath ?? path.join(getReposPath(), input.localPath),
-      branch: input.branch,
-      defaultBranch: input.defaultBranch,
-      cloneStatus: input.cloneStatus,
-      clonedAt: input.clonedAt,
-      isLocal: true,
-      isWorktree: input.isWorktree,
-    }))
-
-    lstat.mockImplementation(async (targetPath: string) => {
-      if (targetPath === path.join(rootPath, 'app-one')) {
-        return createDirectoryStat()
-      }
-
-      if (targetPath === path.join(rootPath, 'nested')) {
-        return createDirectoryStat()
-      }
-
-      if (targetPath === path.join(rootPath, 'nested', 'app-two')) {
-        return createDirectoryStat()
-      }
-
-      if (targetPath === path.join(rootPath, '.git')) {
-        throw createEnoentError(targetPath)
-      }
-
-      if (targetPath === path.join(rootPath, 'app-one', '.git')) {
-        return createDirectoryStat()
-      }
-
-      if (targetPath === path.join(rootPath, 'nested', '.git')) {
-        throw createEnoentError(targetPath)
-      }
-
-      if (targetPath === path.join(rootPath, 'nested', 'app-two', '.git')) {
-        return createFileStat()
-      }
-
-      if (targetPath === path.join(getReposPath(), 'app-one')) {
-        throw createEnoentError(targetPath)
-      }
-
-      throw createEnoentError(targetPath)
-    })
-
-    readdir.mockImplementation(async (targetPath: string) => {
-      if (targetPath === rootPath) {
-        return [createDirent('app-one'), createDirent('nested')]
-      }
-
-      if (targetPath === path.join(rootPath, 'nested')) {
-        return [createDirent('app-two')]
-      }
-
-      return []
-    })
-
-    const result = await discoverLocalRepos(database, mockGitAuthService, rootPath)
+    const result = await discoverLocalRepos(db, gitAuthService, rootPath)
 
     expect(result.discoveredCount).toBe(1)
     expect(result.existingCount).toBe(1)
     expect(result.errors).toEqual([])
-    expect(result.repos).toHaveLength(2)
-    expect(result.repos.map((repo) => repo.fullPath)).toContain('/Users/test/projects/app-one')
-    expect(result.repos.map((repo) => repo.fullPath)).toContain(existingRepo.fullPath)
-    expect(symlink).toHaveBeenCalledTimes(1)
+    expect(result.repos.map((repo) => repo.fullPath)).toEqual([appOne, existing.fullPath])
+    expect(lstatSync(path.join(getReposPath(), 'app-one')).isSymbolicLink()).toBe(true)
   })
 
   it('continues discovery when a nested directory cannot be read', async () => {
-    const { discoverLocalRepos } = await import('../../src/services/repo')
-    const database = {} as never
-    const rootPath = '/Users/test/projects'
+    const rootPath = path.join(workspace.path, 'projects')
+    const appOne = path.join(rootPath, 'app-one')
+    const restricted = path.join(rootPath, 'restricted')
+    createCommittedRepo(appOne)
+    mkdirSync(restricted, { recursive: true })
+    chmodSync(restricted, 0o111)
 
-    getRepoByLocalPath.mockReturnValue(null)
-    getRepoBySourcePath.mockReturnValue(null)
-    createRepo.mockImplementation((_, input) => ({
-      id: 4,
-      localPath: input.localPath,
-      sourcePath: input.sourcePath,
-      fullPath: input.sourcePath ?? path.join(getReposPath(), input.localPath),
-      branch: input.branch,
-      defaultBranch: input.defaultBranch,
-      cloneStatus: input.cloneStatus,
-      clonedAt: input.clonedAt,
-      isLocal: true,
-      isWorktree: input.isWorktree,
-    }))
+    try {
+      const result = await discoverLocalRepos(db, gitAuthService, rootPath)
 
-    lstat.mockImplementation(async (targetPath: string) => {
-      if (targetPath === rootPath || targetPath === path.join(rootPath, 'app-one') || targetPath === path.join(rootPath, 'restricted')) {
-        return createDirectoryStat()
-      }
-
-      if (targetPath === path.join(rootPath, '.git')) {
-        throw createEnoentError(targetPath)
-      }
-
-      if (targetPath === path.join(rootPath, 'app-one', '.git')) {
-        return createDirectoryStat()
-      }
-
-      if (targetPath === path.join(rootPath, 'restricted', '.git')) {
-        throw createEnoentError(targetPath)
-      }
-
-      if (targetPath === path.join(getReposPath(), 'app-one')) {
-        throw createEnoentError(targetPath)
-      }
-
-      throw createEnoentError(targetPath)
-    })
-
-    readdir.mockImplementation(async (targetPath: string) => {
-      if (targetPath === rootPath) {
-        return [createDirent('app-one'), createDirent('restricted')]
-      }
-
-      if (targetPath === path.join(rootPath, 'restricted')) {
-        throw new Error('EACCES: permission denied')
-      }
-
-      return []
-    })
-
-    const result = await discoverLocalRepos(database, mockGitAuthService, rootPath)
-
-    expect(result.discoveredCount).toBe(1)
-    expect(result.existingCount).toBe(0)
-    expect(result.repos).toHaveLength(1)
-    expect(result.repos[0]?.fullPath).toBe('/Users/test/projects/app-one')
-    expect(result.errors).toEqual([
-      {
-        path: '/Users/test/projects/restricted',
-        error: 'EACCES: permission denied',
-      },
-    ])
+      expect(result.discoveredCount).toBe(1)
+      expect(result.existingCount).toBe(0)
+      expect(result.repos.map((repo) => repo.fullPath)).toEqual([appOne])
+      expect(result.errors).toEqual([{ path: restricted, error: expect.stringContaining('EACCES') }])
+    } finally {
+      chmodSync(restricted, 0o755)
+    }
   })
 
   it('relinks imported session directories to nearest git repo roots', async () => {
-    const { relinkReposFromSessionDirectories } = await import('../../src/services/repo')
-    const database = {} as never
-    const repoRoot = '/Users/test/projects/app-one'
-    const aliasPath = path.join(getReposPath(), 'app-one')
+    const repoRoot = path.join(workspace.path, 'projects', 'app-one')
+    const webDirectory = path.join(repoRoot, 'apps', 'web')
+    const apiDirectory = path.join(repoRoot, 'packages', 'api')
+    const nonRepoDirectory = path.join(workspace.path, 'projects', 'not-a-repo')
+    createCommittedRepo(repoRoot)
+    mkdirSync(webDirectory, { recursive: true })
+    mkdirSync(apiDirectory, { recursive: true })
+    mkdirSync(nonRepoDirectory, { recursive: true })
 
-    getRepoByLocalPath.mockReturnValue(null)
-    getRepoBySourcePath.mockReturnValue(null)
-    createRepo.mockImplementation((_, input) => ({
-      id: 5,
-      localPath: input.localPath,
-      sourcePath: input.sourcePath,
-      fullPath: input.sourcePath ?? path.join(getReposPath(), input.localPath),
-      branch: input.branch,
-      defaultBranch: input.defaultBranch,
-      cloneStatus: input.cloneStatus,
-      clonedAt: input.clonedAt,
-      isLocal: true,
-      isWorktree: input.isWorktree,
-    }))
-
-    lstat.mockImplementation(async (targetPath: string) => {
-      if (targetPath === repoRoot || targetPath === path.join(repoRoot, '.git')) {
-        return createDirectoryStat()
-      }
-
-      if (targetPath === aliasPath) {
-        throw createEnoentError(targetPath)
-      }
-
-      throw createEnoentError(targetPath)
-    })
-
-    executeCommand.mockImplementation(async (args: string[]) => {
-      if (args.includes('--show-toplevel')) {
-        if (args[2] === '/Users/test/projects/not-a-repo') {
-          throw new Error('not a git repository')
-        }
-        return `${repoRoot}\n`
-      }
-
-      if (args.includes('--git-dir')) {
-        return '.git'
-      }
-
-      if (args.includes('HEAD') && !args.includes('--abbrev-ref')) {
-        return 'abc123'
-      }
-
-      if (args.includes('--abbrev-ref')) {
-        return 'main'
-      }
-
-      return ''
-    })
-
-    const result = await relinkReposFromSessionDirectories(database, mockGitAuthService, [
-      '/Users/test/projects/app-one/apps/web',
-      '/Users/test/projects/app-one/packages/api',
-      '/Users/test/projects/not-a-repo',
+    const result = await relinkReposFromSessionDirectories(db, gitAuthService, [
+      webDirectory,
+      apiDirectory,
+      nonRepoDirectory,
     ])
 
     expect(result.relinkedCount).toBe(1)
@@ -453,88 +124,73 @@ describe('repo service', () => {
     expect(result.nonRepoPathCount).toBe(1)
     expect(result.duplicatePathCount).toBe(1)
     expect(result.errors).toEqual([])
-    expect(result.repos).toHaveLength(1)
-    expect(result.repos[0]?.fullPath).toBe(repoRoot)
-    expect(createRepo).toHaveBeenCalledTimes(1)
+    expect(result.repos.map((repo) => repo.fullPath)).toEqual([repoRoot])
   })
 })
 
 describe('getSiblingRepos worktree API', () => {
-  type SiblingRepo = RepoSibling
-
+  let workspace: TempWorkspace
   let db: Database
+  let repo: Repo
+  let originPath: string
 
-  function createRepoRow(id: number, localPath: string, overrides: Partial<Repo> = {}): Repo {
-    return {
-      id,
-      repoUrl: 'https://github.com/test/repo',
-      localPath,
-      fullPath: path.join(getReposPath(), localPath),
-      sourcePath: path.join(getReposPath(), localPath),
-      branch: 'main',
-      defaultBranch: 'main',
-      cloneStatus: 'ready',
-      clonedAt: Date.now(),
-      ...overrides,
-    }
+  function worktreeDirectory(name: string): string {
+    const directory = path.join(workspace.path, 'worktrees', name)
+    mkdirSync(directory, { recursive: true })
+    return directory
   }
 
-  function createClient(worktrees: Array<{ directory: string; strategy?: string }>, overrides: {
-    locationGet?: () => Promise<{ directory: string; project: { id: string; directory: string; canonical: string } }>
-    worktreeList?: () => Promise<Array<{ directory: string; strategy?: string }>>
+  function createClient(overrides: {
+    worktrees?: WorktreeEntry[]
+    list?: () => Promise<WorktreeEntry[]>
+    locationGet?: OpenCodeApi['location']['get']
   } = {}): OpenCodeClient {
-    return {
-      api: {
-        location: {
-          get: overrides.locationGet ?? (async () => ({
-            directory: path.join(getReposPath(), 'repo-a'),
-            project: { id: 'commit-A', directory: path.join(getReposPath(), 'repo-a'), canonical: path.join(getReposPath(), 'repo-a') },
-          })),
-        },
-        worktree: {
-          list: overrides.worktreeList ?? (async () => worktrees),
-        },
-      },
-    } as unknown as OpenCodeClient
+    const list = overrides.list ?? (async () => overrides.worktrees ?? [])
+    const api: OpenCodeApiOverrides = { worktree: { list } }
+    if (overrides.locationGet) {
+      api.location = { get: overrides.locationGet }
+    }
+    return createStubOpenCodeClient({ api })
   }
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
-    getSettings.mockReturnValue({ preferences: { repoOrder: [] }, updatedAt: Date.now() })
-    resolveProjectId.mockResolvedValue('commit-A')
-    isGitMainCheckout.mockResolvedValue(false)
-    listRepos.mockReturnValue([createRepoRow(1, 'repo-a')])
+    workspace = createTempWorkspace('ocm-repo-siblings-')
+    db = createTestDatabase()
+    originPath = path.join(workspace.path, 'origin.git')
+    createOrigin(originPath, path.join(workspace.path, 'seed'))
+    repo = seedRepo(db, { localPath: 'repo-a' })
+    cloneOrigin(originPath, repo.fullPath)
   })
 
   afterEach(() => {
     db.close()
-    missingDirectories.clear()
+    workspace.restore()
   })
 
   it('skips worktrees OpenCode still records but that no longer exist on disk', async () => {
-    const { getSiblingRepos } = await import('../../src/services/repo')
-    missingDirectories.add('/worktrees/removed-run')
-    const client = createClient([
-      { directory: '/worktrees/removed-run', strategy: 'git' },
-      { directory: '/worktrees/feature-x', strategy: 'git' },
-    ])
+    const featureWorktree = worktreeDirectory('feature-x')
+    const client = createClient({
+      worktrees: [
+        { directory: path.join(workspace.path, 'worktrees', 'removed-run'), strategy: 'git' },
+        { directory: featureWorktree, strategy: 'git' },
+      ],
+    })
 
-    const siblings = await getSiblingRepos(db, 1, {}, client)
+    const siblings = await getSiblingRepos(db, repo.id, {}, client)
 
-    expect(siblings.filter((sibling) => sibling.id === -1).map((sibling) => sibling.fullPath)).toEqual(['/worktrees/feature-x'])
+    expect(siblings.filter((sibling) => sibling.id === -1).map((sibling) => sibling.fullPath)).toEqual([featureWorktree])
   })
 
   it('maps worktree entries to worktree siblings', async () => {
-    const { getSiblingRepos } = await import('../../src/services/repo')
-    const client = createClient([{ directory: '/worktrees/feature-x', strategy: 'git' }])
+    const featureWorktree = worktreeDirectory('feature-x')
+    const client = createClient({ worktrees: [{ directory: featureWorktree, strategy: 'git' }] })
 
-    const siblings = await getSiblingRepos(db, 1, {}, client) as SiblingRepo[]
+    const siblings = await getSiblingRepos(db, repo.id, {}, client)
 
     expect(siblings).toHaveLength(2)
     expect(siblings[1]).toMatchObject({
       id: -1,
-      fullPath: '/worktrees/feature-x',
+      fullPath: featureWorktree,
       localPath: 'feature-x',
       worktreeSource: 'opencode',
     })
@@ -543,166 +199,152 @@ describe('getSiblingRepos worktree API', () => {
   })
 
   it('excludes the target repo, repos root, known siblings, and main checkouts', async () => {
-    const { getSiblingRepos } = await import('../../src/services/repo')
-    const repoA = path.join(getReposPath(), 'repo-a')
     const repoB = path.join(getReposPath(), 'repo-b')
-    listRepos.mockReturnValue([createRepoRow(1, 'repo-a'), createRepoRow(2, 'repo-b')])
-    isGitMainCheckout.mockImplementation(async (directory: string) => directory === '/worktrees/main-checkout')
-    const client = createClient([
-      { directory: repoA, strategy: 'git' },
-      { directory: getReposPath(), strategy: 'git' },
-      { directory: repoB, strategy: 'git' },
-      { directory: '/worktrees/main-checkout', strategy: 'git' },
-      { directory: '/worktrees/feature-x', strategy: 'git' },
-    ])
+    cloneOrigin(originPath, repoB)
+    seedRepo(db, { localPath: 'repo-b' })
+    const mainCheckout = path.join(workspace.path, 'worktrees', 'main-checkout')
+    cloneOrigin(originPath, mainCheckout)
+    const featureWorktree = worktreeDirectory('feature-x')
+    mkdirSync(getReposPath(), { recursive: true })
+    const client = createClient({
+      worktrees: [
+        { directory: repo.fullPath, strategy: 'git' },
+        { directory: getReposPath(), strategy: 'git' },
+        { directory: repoB, strategy: 'git' },
+        { directory: mainCheckout, strategy: 'git' },
+        { directory: featureWorktree, strategy: 'git' },
+      ],
+    })
 
-    const siblings = await getSiblingRepos(db, 1, {}, client) as SiblingRepo[]
+    const siblings = await getSiblingRepos(db, repo.id, {}, client)
 
     expect(siblings).toHaveLength(3)
-    expect(siblings.filter((sibling) => sibling.id === -1).map((sibling) => sibling.fullPath)).toEqual(['/worktrees/feature-x'])
+    expect(siblings.filter((sibling) => sibling.id === -1).map((sibling) => sibling.fullPath)).toEqual([featureWorktree])
   })
 
   it('marks an active schedule run worktree as an in-use schedule worktree', async () => {
-    const { getSiblingRepos } = await import('../../src/services/repo')
-    const activePath = '/worktrees/active-run'
-    db.prepare('INSERT INTO schedule_jobs (repo_id, name, prompt, created_at, updated_at) VALUES (?, ?, ?, ?, ?)').run(1, 'nightly', 'check', Date.now(), Date.now())
-    db.prepare('INSERT INTO schedule_runs (job_id, repo_id, trigger_source, status, started_at, created_at, worktree_path) VALUES (?, ?, ?, ?, ?, ?, ?)').run(1, 1, 'manual', 'running', Date.now(), Date.now(), activePath)
-    const client = createClient([
-      { directory: activePath, strategy: 'git' },
-      { directory: '/worktrees/feature-x', strategy: 'git' },
-    ])
+    const activeWorktree = worktreeDirectory('active-run')
+    const featureWorktree = worktreeDirectory('feature-x')
+    const job = seedScheduleJob(db, repo.id, { name: 'nightly' })
+    const run = createScheduleRun(db, {
+      jobId: job.id,
+      repoId: repo.id,
+      triggerSource: 'manual',
+      status: 'running',
+      startedAt: Date.now(),
+      createdAt: Date.now(),
+    })
+    updateScheduleRunWorktree(db, repo.id, job.id, run.id, { worktreePath: activeWorktree })
+    const client = createClient({
+      worktrees: [
+        { directory: activeWorktree, strategy: 'git' },
+        { directory: featureWorktree, strategy: 'git' },
+      ],
+    })
 
-    const siblings = await getSiblingRepos(db, 1, {}, client) as SiblingRepo[]
+    const siblings = await getSiblingRepos(db, repo.id, {}, client)
 
     expect(siblings).toHaveLength(3)
-    expect(siblings[1]).toMatchObject({ fullPath: activePath, worktreeSource: 'schedule', schedule: { repoId: 1, jobId: 1, runId: 1, inUse: true, name: 'nightly' } })
-    expect(siblings[2]).toMatchObject({ fullPath: '/worktrees/feature-x', worktreeSource: 'opencode' })
+    expect(siblings[1]).toMatchObject({
+      fullPath: activeWorktree,
+      worktreeSource: 'schedule',
+      schedule: { repoId: repo.id, jobId: job.id, runId: run.id, inUse: true, name: 'nightly' },
+    })
+    expect(siblings[2]).toMatchObject({ fullPath: featureWorktree, worktreeSource: 'opencode' })
   })
 
   it('returns only repo siblings when the location lookup rejects', async () => {
-    const { getSiblingRepos } = await import('../../src/services/repo')
-    const client = createClient([], {
+    const client = createClient({
       locationGet: async () => {
         throw new Error('location unavailable')
       },
     })
 
-    const siblings = await getSiblingRepos(db, 1, {}, client) as SiblingRepo[]
+    const siblings = await getSiblingRepos(db, repo.id, {}, client)
 
     expect(siblings).toHaveLength(1)
-    expect(siblings[0]?.id).toBe(1)
+    expect(siblings[0]?.id).toBe(repo.id)
   })
 
   it('returns only repo siblings when the worktree list rejects', async () => {
-    const { getSiblingRepos } = await import('../../src/services/repo')
-    const client = createClient([], {
-      worktreeList: async () => {
+    const client = createClient({
+      list: async () => {
         throw new Error('worktree list unavailable')
       },
     })
 
-    const siblings = await getSiblingRepos(db, 1, {}, client) as SiblingRepo[]
+    const siblings = await getSiblingRepos(db, repo.id, {}, client)
 
     expect(siblings).toHaveLength(1)
-    expect(siblings[0]?.id).toBe(1)
+    expect(siblings[0]?.id).toBe(repo.id)
   })
 
   describe('listRepoSiblings', () => {
     it('returns every sibling without branch resolution when no filter is given', async () => {
-      const { listRepoSiblings } = await import('../../src/services/repo')
-      executeCommand.mockClear()
-      const client = createClient([{ directory: '/worktrees/feature-x', strategy: 'git' }])
+      const featureWorktree = worktreeDirectory('feature-x')
+      const client = createClient({ worktrees: [{ directory: featureWorktree, strategy: 'git' }] })
 
-      const siblings = await listRepoSiblings(db, 1, {}, client)
+      const siblings: RepoSibling[] = await listRepoSiblings(db, repo.id, {}, client)
 
-      expect(siblings.map((sibling) => sibling.fullPath)).toEqual([
-        path.join(getReposPath(), 'repo-a'),
-        '/worktrees/feature-x',
-      ])
+      expect(siblings.map((sibling) => sibling.fullPath)).toEqual([repo.fullPath, featureWorktree])
       expect(siblings.every((sibling) => sibling.currentBranch === undefined)).toBe(true)
-      expect(executeCommand.mock.calls.some(([args]) => (args as string[]).includes('--abbrev-ref'))).toBe(false)
     })
 
     it('applies the filter to the listed siblings', async () => {
-      const { listRepoSiblings } = await import('../../src/services/repo')
-      const client = createClient([
-        { directory: '/worktrees/feature-x', strategy: 'git' },
-        { directory: '/worktrees/feature-y', strategy: 'git' },
-      ])
+      const firstWorktree = worktreeDirectory('feature-x')
+      const secondWorktree = worktreeDirectory('feature-y')
+      const client = createClient({
+        worktrees: [
+          { directory: firstWorktree, strategy: 'git' },
+          { directory: secondWorktree, strategy: 'git' },
+        ],
+      })
 
-      const siblings = await listRepoSiblings(db, 1, {}, client, isWorktreeSibling)
+      const siblings = await listRepoSiblings(db, repo.id, {}, client, isWorktreeSibling)
 
-      expect(siblings.map((sibling) => sibling.fullPath)).toEqual(['/worktrees/feature-x', '/worktrees/feature-y'])
+      expect(siblings.map((sibling) => sibling.fullPath)).toEqual([firstWorktree, secondWorktree])
     })
   })
 })
 
 describe('resolveRepoForDirectory', () => {
-  function createReadyRepo(id: number, localPath: string): Repo {
-    return {
-      id,
-      repoUrl: 'https://github.com/test/repo',
-      localPath,
-      fullPath: path.join(getReposPath(), localPath),
-      sourcePath: path.join(getReposPath(), localPath),
-      branch: 'main',
-      defaultBranch: 'main',
-      cloneStatus: 'ready',
-      clonedAt: Date.now(),
-    }
-  }
+  let workspace: TempWorkspace
+  let db: Database
+  let repo: Repo
+  let originPath: string
 
   beforeEach(() => {
-    vi.clearAllMocks()
+    workspace = createTempWorkspace('ocm-resolve-repo-')
+    db = createTestDatabase()
+    originPath = path.join(workspace.path, 'origin.git')
+    createOrigin(originPath, path.join(workspace.path, 'seed'))
+    repo = seedRepo(db, { localPath: 'repo-a' })
+    cloneOrigin(originPath, repo.fullPath)
+  })
+
+  afterEach(() => {
+    db.close()
+    workspace.restore()
   })
 
   it('resolves a workspace directory that shares a repo OpenCode project id', async () => {
-    const { resolveRepoForDirectory } = await import('../../src/services/repo')
-    const repo = createReadyRepo(1, 'repo-a')
-    const workspaceDirectory = '/worktrees/feature-x'
-    getRepoBySourcePath.mockReturnValue(null)
-    getRepoByLocalPath.mockReturnValue(null)
-    listRepos.mockReturnValue([repo])
-    resolveProjectId.mockImplementation(async (directory: string) =>
-      directory === workspaceDirectory || directory === repo.fullPath ? 'commit-A' : null,
-    )
-    executeCommand.mockImplementation(async (args: string[]) =>
-      args.includes('--git-common-dir') ? path.join(repo.fullPath, '.git') : '',
-    )
+    const worktreePath = path.join(workspace.path, 'worktrees', 'feature-x')
+    mkdirSync(path.dirname(worktreePath), { recursive: true })
+    git(['worktree', 'add', '-b', 'feature/x', worktreePath], repo.fullPath)
 
-    const result = await resolveRepoForDirectory({} as never, workspaceDirectory)
-
-    expect(result).toBe(repo)
+    await expect(resolveRepoForDirectory(db, worktreePath)).resolves.toEqual(repo)
   })
 
   it('returns null for a matching project id that is not the registered checkout', async () => {
-    const { resolveRepoForDirectory } = await import('../../src/services/repo')
-    const repo = createReadyRepo(1, 'repo-a')
-    const cloneDirectory = '/clones/repo-a'
-    getRepoBySourcePath.mockReturnValue(null)
-    getRepoByLocalPath.mockReturnValue(null)
-    listRepos.mockReturnValue([repo])
-    resolveProjectId.mockImplementation(async (directory: string) =>
-      directory === cloneDirectory || directory === repo.fullPath ? 'commit-A' : null,
-    )
-    executeCommand.mockImplementation(async (args: string[]) =>
-      args.includes('--git-common-dir') ? path.join(cloneDirectory, '.git') : '',
-    )
+    const clonePath = path.join(workspace.path, 'clones', 'repo-a')
+    cloneOrigin(originPath, clonePath)
 
-    const result = await resolveRepoForDirectory({} as never, cloneDirectory)
-
-    expect(result).toBeNull()
+    await expect(resolveRepoForDirectory(db, clonePath)).resolves.toBeNull()
   })
 
   it('returns null for a directory that matches no repo', async () => {
-    const { resolveRepoForDirectory } = await import('../../src/services/repo')
-    getRepoBySourcePath.mockReturnValue(null)
-    getRepoByLocalPath.mockReturnValue(null)
-    listRepos.mockReturnValue([createReadyRepo(1, 'repo-a')])
-    resolveProjectId.mockResolvedValue(null)
+    mkdirSync(path.join(workspace.path, 'unknown', 'directory'), { recursive: true })
 
-    const result = await resolveRepoForDirectory({} as never, '/unknown/directory')
-
-    expect(result).toBeNull()
+    await expect(resolveRepoForDirectory(db, path.join(workspace.path, 'unknown', 'directory'))).resolves.toBeNull()
   })
 })

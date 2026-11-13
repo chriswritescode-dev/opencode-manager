@@ -2,7 +2,13 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchWrapper, fetchWrapperBlob } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
 import { saveFile } from '@/lib/download'
-import type { FileInfo, ChunkedFileInfo, PatchOperation } from '@/types/files'
+import { z } from 'zod'
+import { ChunkedFileInfoSchema, FileInfoSchema } from '@opencode-manager/shared/schemas'
+import type { FileInfo, ChunkedFileInfo, PatchOperation } from '@opencode-manager/shared/types'
+
+const ignoredPathsResponseSchema = z.object({ ignoredPaths: z.array(z.string()) })
+
+const filePatchResponseSchema = z.object({ success: z.boolean(), totalLines: z.number() })
 
 interface FileApiUrlOptions {
   route?: string
@@ -24,7 +30,7 @@ export function getFileApiUrl(path: string, options: FileApiUrlOptions = {}): st
 }
 
 async function fetchFile(path: string): Promise<FileInfo> {
-  return fetchWrapper(getFileApiUrl(path))
+  return fetchWrapper(getFileApiUrl(path), FileInfoSchema)
 }
 
 export function useFile(path: string | undefined) {
@@ -36,13 +42,13 @@ export function useFile(path: string | undefined) {
 }
 
 export async function fetchFileRange(path: string, startLine: number, endLine: number): Promise<ChunkedFileInfo> {
-  return fetchWrapper(getFileApiUrl(path), {
+  return fetchWrapper(getFileApiUrl(path), ChunkedFileInfoSchema, {
     params: { startLine, endLine },
   })
 }
 
 export async function getIgnoredPaths(path: string): Promise<{ ignoredPaths: string[] }> {
-  return fetchWrapper(getFileApiUrl(path, { route: 'ignored-paths' }))
+  return fetchWrapper(getFileApiUrl(path, { route: 'ignored-paths' }), ignoredPathsResponseSchema)
 }
 
 export interface DownloadOptions {
@@ -66,7 +72,7 @@ export async function downloadDirectoryAsZip(path: string, options?: DownloadOpt
 
 export async function applyFilePatches(path: string, patches: PatchOperation[]): Promise<{ success: boolean; totalLines: number }> {
   const url = getFileApiUrl(path)
-  return fetchWrapper(url, {
+  return fetchWrapper(url, filePatchResponseSchema, {
     method: 'PATCH',
     body: JSON.stringify({ patches }),
   })

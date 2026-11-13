@@ -1,21 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { Database } from 'bun:sqlite'
-import { migrate } from '../../src/db/migration-runner'
-import { allMigrations } from '../../src/db/migrations'
+import { z } from 'zod'
+import type { Database } from 'bun:sqlite'
+import { selectRow } from '../../src/db/rows'
 import { SecretsService, SecretsServiceError } from '../../src/services/secrets'
 import { decryptSecret } from '../../src/utils/crypto'
-import { logger } from '../../src/utils/logger'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
+import { createTestDatabase } from '../helpers/test-database'
+import { testLogEntries } from '../helpers/log-assertions'
+import { catchThrownError } from '../helpers/thrown-error'
 
-function createTestDb(): Database {
-  const db = new Database(':memory:')
-  migrate(db, allMigrations)
-  return db
-}
+const StoredSecretRowSchema = z.object({ value: z.string() })
 
 function readStoredValue(db: Database, name: string): string {
-  const row = db.prepare('SELECT value FROM secrets WHERE name = ?').get(name) as { value: string } | undefined
-  return row?.value ?? ''
+  return selectRow(db, StoredSecretRowSchema, 'SELECT value FROM secrets WHERE name = ?', name)?.value ?? ''
 }
 
 describe('SecretsService', () => {
@@ -23,7 +20,7 @@ describe('SecretsService', () => {
   let service: SecretsService
 
   beforeEach(() => {
-    db = createTestDb()
+    db = createTestDatabase()
     service = new SecretsService(db)
   })
 
@@ -77,13 +74,10 @@ describe('SecretsService', () => {
   })
 
   it('rejects an environment for a global entry', () => {
-    expect(() => service.set('secret', null, 'prod', 'TOKEN', 'value')).toThrow(SecretsServiceError)
+    const error = catchThrownError(() => service.set('secret', null, 'prod', 'TOKEN', 'value'))
 
-    try {
-      service.set('secret', null, 'prod', 'TOKEN', 'value')
-    } catch (error) {
-      expect((error as SecretsServiceError).statusCode).toBe(400)
-    }
+    expect(error).toBeInstanceOf(SecretsServiceError)
+    expect(error instanceof SecretsServiceError ? error.statusCode : null).toBe(400)
   })
 
   it('deletes an entry and reports whether it existed', () => {
@@ -147,7 +141,6 @@ describe('SecretsService', () => {
   })
 
   it('skips a secret that cannot be decrypted and logs only its name', () => {
-    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {})
     const now = Date.now()
     db.prepare(
       'INSERT INTO secrets (kind, repo_id, environment, name, value, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -155,8 +148,10 @@ describe('SecretsService', () => {
 
     const resolved = service.resolveValues(1, null)
     expect(resolved.secrets).not.toHaveProperty('BROKEN')
-    expect(warn).toHaveBeenCalledTimes(1)
-    expect(warn.mock.calls[0]?.[0]).toContain('BROKEN')
-    expect(warn.mock.calls[0]?.[0]).not.toContain('not-a-valid-encrypted-value')
+
+    const warnings = testLogEntries('warn')
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]?.message).toContain('BROKEN')
+    expect(warnings[0]?.message).not.toContain('not-a-valid-encrypted-value')
   })
 })

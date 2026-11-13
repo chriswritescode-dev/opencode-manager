@@ -28,7 +28,7 @@ import { ServiceError } from '../utils/service-error'
 import { buildFusionPrompt, buildFusionSourcePermissionRuleset, collectFusionSources } from './multi-run-fusion'
 import type { OpenCodeClient } from './opencode/client'
 import { RepoWorkspaceError } from './repo'
-import type { RepoWorkspaceService } from './repo-workspace'
+import type { RepoWorkspaceProvider } from './repo-workspace'
 import {
   resolveSessionTarget,
   SessionLauncher,
@@ -36,6 +36,7 @@ import {
   sessionTargetInput,
   sessionTargetOfRun,
   type LaunchedSession,
+  type OpenCodeModelLoader,
   type ResolvedSessionTarget,
 } from './session-launcher'
 import type { SessionPermissionModeService } from './session-permission-modes'
@@ -110,11 +111,12 @@ export class MultiRunService {
   constructor(
     private readonly db: Database,
     private readonly openCodeClient: OpenCodeClient,
-    private readonly repoWorkspaces: RepoWorkspaceService,
-    private readonly permissionModes: SessionPermissionModeService,
+    private readonly repoWorkspaces: RepoWorkspaceProvider,
+    private readonly permissionModes: Pick<SessionPermissionModeService, 'applyDefaultMode'>,
     private readonly getServerClient?: (serverId: string) => OpenCodeClient,
+    private readonly loadModel?: OpenCodeModelLoader,
   ) {
-    this.sessionLauncher = new SessionLauncher(db, openCodeClient, repoWorkspaces, getServerClient)
+    this.sessionLauncher = new SessionLauncher(db, openCodeClient, repoWorkspaces, getServerClient, loadModel)
   }
 
   async launch(request: LaunchMultiRunRequest): Promise<MultiRun> {
@@ -183,8 +185,8 @@ export class MultiRunService {
       updateMultiRunEntry(this.db, launch.entry.id, ['starting'], {
         status: 'failed',
         error: getErrorMessage(result.reason) || 'Failed to launch session',
-        ...(workspaceDirectory ? { directory: workspaceDirectory } : {}),
-        ...(launchError?.sessionId ? { sessionId: launchError.sessionId } : {}),
+        directory: workspaceDirectory,
+        sessionId: launchError?.sessionId,
       })
     })
 
@@ -275,11 +277,11 @@ export class MultiRunService {
         prompt: built.prompt,
         model: request.model,
         title: `${record.name} · fusion`,
-        ...(request.agent ? { agent: request.agent } : {}),
+        agent: request.agent,
         permissions: sourcePermissions,
         workspace: {
           name: `${record.name}-fusion-${fusion.id}`,
-          ...(request.baseRef ? { ref: request.baseRef } : {}),
+          ref: request.baseRef,
         },
       })
 
@@ -294,8 +296,8 @@ export class MultiRunService {
       updateMultiRunFusion(this.db, fusion.id, ['starting'], {
         status: 'failed',
         error: getErrorMessage(error) || 'Failed to launch session',
-        ...(workspaceDirectory ? { directory: workspaceDirectory } : {}),
-        ...(launchError?.sessionId ? { sessionId: launchError.sessionId } : {}),
+        directory: workspaceDirectory,
+        sessionId: launchError?.sessionId,
       })
     }
 
@@ -397,7 +399,8 @@ export class MultiRunService {
           db: this.db,
           openCodeClient: this.openCodeClient,
           repoWorkspaces: this.repoWorkspaces,
-          ...(this.getServerClient ? { getServerClient: this.getServerClient } : {}),
+          getServerClient: this.getServerClient,
+          loadModel: this.loadModel,
         },
         target,
       )
@@ -420,10 +423,10 @@ export class MultiRunService {
       prompt: request.prompt,
       model: entry.model,
       title: `${request.name} · ${entry.model}`,
-      ...(request.agent ? { agent: request.agent } : {}),
-      ...(request.isolate
-        ? { workspace: { name: `${request.name}-${index + 1}`, ...(request.baseRef ? { ref: request.baseRef } : {}) } }
-        : {}),
+      agent: request.agent,
+      workspace: request.isolate
+        ? { name: `${request.name}-${index + 1}`, ref: request.baseRef }
+        : undefined,
     })
   }
 

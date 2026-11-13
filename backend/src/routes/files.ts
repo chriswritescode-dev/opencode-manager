@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono'
-import type { ContentfulStatusCode } from 'hono/utils/http-status'
+import { Readable } from 'node:stream'
+import { z } from 'zod'
 import * as fileService from '../services/files'
 import * as archiveService from '../services/archive'
 import { logger } from '../utils/logger'
@@ -36,7 +37,32 @@ function matchesIfNoneMatch(ifNoneMatch: string | undefined, etag: string): bool
   return values.includes('*') || values.includes(etag)
 }
 
-export function createFileRoutes() {
+export type FileRoutesService = Pick<
+  typeof fileService,
+  | 'getFile'
+  | 'getRawFileContent'
+  | 'getRawFileMetadata'
+  | 'getFileRange'
+  | 'uploadFile'
+  | 'createFileOrFolder'
+  | 'deleteFileOrFolder'
+  | 'renameOrMoveFile'
+  | 'applyFilePatches'
+>
+
+export type FileArchiveRoutesService = Pick<
+  typeof archiveService,
+  | 'createDirectoryArchive'
+  | 'getArchiveSize'
+  | 'getArchiveStream'
+  | 'deleteArchive'
+  | 'getIgnoredPathsList'
+>
+
+export function createFileRoutes(
+  files: FileRoutesService = fileService,
+  archives: FileArchiveRoutesService = archiveService,
+) {
   const app = new Hono()
 
   app.get('*', async (c) => {
@@ -61,22 +87,22 @@ export function createFileRoutes() {
           includePaths
         }
 
-        const archivePath = await archiveService.createDirectoryArchive(userPath, undefined, options)
-        const archiveSize = await archiveService.getArchiveSize(archivePath)
-        const archiveStream = archiveService.getArchiveStream(archivePath)
+        const archivePath = await archives.createDirectoryArchive(userPath, undefined, options)
+        const archiveSize = await archives.getArchiveSize(archivePath)
+        const archiveStream = archives.getArchiveStream(archivePath)
         const dirName = userPath.split('/').pop() || 'download'
 
         logger.info(`ZIP archive created: ${archivePath} (${archiveSize} bytes)`)
 
         archiveStream.on('end', () => {
-          archiveService.deleteArchive(archivePath)
+          archives.deleteArchive(archivePath)
         })
 
         archiveStream.on('error', () => {
-          archiveService.deleteArchive(archivePath)
+          archives.deleteArchive(archivePath)
         })
 
-        return new Response(archiveStream as unknown as ReadableStream, {
+        return new Response(Readable.toWeb(archiveStream), {
           status: 200,
           headers: {
             'Content-Type': 'application/zip',
@@ -86,7 +112,7 @@ export function createFileRoutes() {
         })
       } catch (error: unknown) {
         logger.error('Failed to create directory archive:', error)
-        return c.json({ error: getErrorMessage(error) || 'Failed to create archive' }, getStatusCode(error) as ContentfulStatusCode)
+        return c.json({ error: getErrorMessage(error) || 'Failed to create archive' }, getStatusCode(error))
       }
     }
 
@@ -98,11 +124,11 @@ export function createFileRoutes() {
       }
 
       try {
-        const ignoredPaths = await archiveService.getIgnoredPathsList(userPath)
+        const ignoredPaths = await archives.getIgnoredPathsList(userPath)
         return c.json({ ignoredPaths })
       } catch (error: unknown) {
         logger.error('Failed to get ignored paths:', error)
-        return c.json({ error: getErrorMessage(error) || 'Failed to get ignored paths' }, getStatusCode(error) as ContentfulStatusCode)
+        return c.json({ error: getErrorMessage(error) || 'Failed to get ignored paths' }, getStatusCode(error))
       }
     }
 
@@ -121,15 +147,15 @@ export function createFileRoutes() {
           return c.json({ error: 'Invalid line range parameters' }, 400)
         }
         
-        const result = await fileService.getFileRange(userPath, startLine, endLine)
+        const result = await files.getFileRange(userPath, startLine, endLine)
         return c.json(result)
       }
       
       if (raw) {
-        const metadata = await fileService.getRawFileMetadata(userPath)
+        const metadata = await files.getRawFileMetadata(userPath)
 
         if (!metadata) {
-          const result = await fileService.getFile(userPath)
+          const result = await files.getFile(userPath)
           return c.json(result)
         }
 
@@ -149,7 +175,7 @@ export function createFileRoutes() {
           })
         }
 
-        const content = await fileService.getRawFileContent(userPath)
+        const content = await files.getRawFileContent(userPath)
         return new Response(content, {
           headers: {
             'Content-Type': metadata.mimeType,
@@ -163,7 +189,7 @@ export function createFileRoutes() {
         })
       }
 
-      const result = await fileService.getFile(userPath)
+      const result = await files.getFile(userPath)
 
       if (download && !result.isDirectory) {
         const content = result.content ? Buffer.from(result.content, 'base64') : Buffer.alloc(0)
@@ -179,7 +205,7 @@ export function createFileRoutes() {
       return c.json(result)
     } catch (error: unknown) {
       logger.error('Failed to get file:', error)
-      return c.json({ error: getErrorMessage(error) || 'Failed to get file' }, getStatusCode(error) as ContentfulStatusCode)
+      return c.json({ error: getErrorMessage(error) || 'Failed to get file' }, getStatusCode(error))
     }
   })
 
@@ -188,17 +214,17 @@ export function createFileRoutes() {
       const path = getFilePathFromRequest(c, c.req.path.replace(/^\/api\/files\//, '') || '')
       const body = await c.req.parseBody()
       
-      const file = body.file as File
-      if (!file) {
+      const file = body.file
+      if (!(file instanceof File)) {
         return c.json({ error: 'No file provided' }, 400)
       }
-      
-      const relativePath = body.relativePath as string | undefined
-      const result = await fileService.uploadFile(path, file, relativePath)
+
+      const relativePath = z.string().safeParse(body.relativePath)
+      const result = await files.uploadFile(path, file, relativePath.success ? relativePath.data : undefined)
       return c.json(result)
     } catch (error: unknown) {
       logger.error('Failed to upload file:', error)
-      return c.json({ error: getErrorMessage(error) }, getStatusCode(error) as ContentfulStatusCode)
+      return c.json({ error: getErrorMessage(error) }, getStatusCode(error))
     }
   })
 
@@ -207,11 +233,11 @@ export function createFileRoutes() {
       const path = getFilePathFromRequest(c, c.req.path.replace(/^\/api\/files\//, '') || '')
       const body = await c.req.json()
       
-      const result = await fileService.createFileOrFolder(path, body)
+      const result = await files.createFileOrFolder(path, body)
       return c.json(result)
     } catch (error: unknown) {
       logger.error('Failed to create file/folder:', error)
-      return c.json({ error: getErrorMessage(error) }, getStatusCode(error) as ContentfulStatusCode)
+      return c.json({ error: getErrorMessage(error) }, getStatusCode(error))
     }
   })
 
@@ -219,11 +245,11 @@ export function createFileRoutes() {
     try {
       const path = getFilePathFromRequest(c, c.req.path.replace(/^\/api\/files\//, '') || '')
       
-      await fileService.deleteFileOrFolder(path)
+      await files.deleteFileOrFolder(path)
       return c.json({ success: true })
     } catch (error: unknown) {
       logger.error('Failed to delete file/folder:', error)
-      return c.json({ error: getErrorMessage(error) }, getStatusCode(error) as ContentfulStatusCode)
+      return c.json({ error: getErrorMessage(error) }, getStatusCode(error))
     }
   })
 
@@ -233,15 +259,15 @@ export function createFileRoutes() {
       const body = await c.req.json()
       
       if (body.patches && Array.isArray(body.patches)) {
-        const result = await fileService.applyFilePatches(path, body.patches)
+        const result = await files.applyFilePatches(path, body.patches)
         return c.json(result)
       }
       
-      const result = await fileService.renameOrMoveFile(path, body)
+      const result = await files.renameOrMoveFile(path, body)
       return c.json(result)
     } catch (error: unknown) {
       logger.error('Failed to patch file:', error)
-      return c.json({ error: getErrorMessage(error) }, getStatusCode(error) as ContentfulStatusCode)
+      return c.json({ error: getErrorMessage(error) }, getStatusCode(error))
     }
   })
 

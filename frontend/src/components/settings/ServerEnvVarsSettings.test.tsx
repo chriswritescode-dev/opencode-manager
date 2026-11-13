@@ -1,53 +1,57 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ServerEnvVarsSettings } from './ServerEnvVarsSettings'
-import { useSettings } from '@/hooks/useSettings'
-import type { UserPreferences } from '@/api/types/settings'
-import { createUseSettingsMock } from '@/test/test-utils'
+import { renderWithProviders } from '@/test/render'
+import { createSettingsServer } from '@/test/fixtures/settingsServer'
 
-const mocks = vi.hoisted(() => ({
-  updateSettingsAsync: vi.fn(),
-  showToast: { success: vi.fn(), error: vi.fn() },
-}))
-
-vi.mock('@/hooks/useSettings')
-vi.mock('@/lib/toast', () => ({ showToast: mocks.showToast }))
-
-function mockSettings(serverEnvVars: Array<{ key: string; value: string }> = []): void {
-  vi.mocked(useSettings).mockReturnValue(
-    createUseSettingsMock({
-      preferences: { serverEnvVars } as UserPreferences,
-      updateSettingsAsync: mocks.updateSettingsAsync,
-    }),
-  )
+function renderEnvVars(serverEnvVars: Array<{ key: string, value: string }> = []) {
+  const settings = createSettingsServer({ serverEnvVars })
+  const result = renderWithProviders(<ServerEnvVarsSettings />, {
+    auth: false,
+    theme: false,
+    tts: false,
+    fetchRoutes: settings.routes,
+  })
+  return { ...result, settings }
 }
 
 describe('ServerEnvVarsSettings', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.updateSettingsAsync.mockResolvedValue(undefined)
-  })
-
-  it('saves only serverEnvVars without the removed default-variable mechanism', async () => {
+  it('saves only the server environment variables', async () => {
     const user = userEvent.setup()
-    mockSettings([{ key: 'FOO', value: 'bar' }])
-
-    render(<ServerEnvVarsSettings />)
+    const { fetchFake } = renderEnvVars([{ key: 'FOO', value: 'bar' }])
 
     await user.click(screen.getByRole('button', { name: /Server Environment Variables/i }))
     await user.click(screen.getByRole('button', { name: /^Save$/i }))
 
-    expect(mocks.updateSettingsAsync).toHaveBeenCalledWith({
-      serverEnvVars: [{ key: 'FOO', value: 'bar' }],
+    expect(fetchFake.lastRequest('PATCH', '/api/settings')?.body).toEqual({
+      preferences: { serverEnvVars: [{ key: 'FOO', value: 'bar' }] },
     })
+    expect(await screen.findByText('Environment variables saved')).toBeInTheDocument()
+    expect(
+      screen.getByText('Restart the OpenCode server to apply environment variable changes.'),
+    ).toBeInTheDocument()
+  })
+
+  it('reports a failed save', async () => {
+    const user = userEvent.setup()
+    const settings = createSettingsServer({}, { patch: () => ({ status: 500, json: { error: 'write failed' } }) })
+    renderWithProviders(<ServerEnvVarsSettings />, {
+      auth: false,
+      theme: false,
+      tts: false,
+      fetchRoutes: settings.routes,
+    })
+
+    await user.click(screen.getByRole('button', { name: /Server Environment Variables/i }))
+    await user.click(screen.getByRole('button', { name: /^Save$/i }))
+
+    expect(await screen.findByText('Failed to save environment variables')).toBeInTheDocument()
   })
 
   it('does not render a default variables section', async () => {
     const user = userEvent.setup()
-    mockSettings()
-
-    render(<ServerEnvVarsSettings />)
+    renderEnvVars()
 
     await user.click(screen.getByRole('button', { name: /Server Environment Variables/i }))
 

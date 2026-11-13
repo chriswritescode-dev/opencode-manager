@@ -1,27 +1,23 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { Hono } from 'hono'
-import { Database } from 'bun:sqlite'
-import { migrate } from '../../src/db/migration-runner'
-import { allMigrations } from '../../src/db/migrations'
-import { createRepo } from '../../src/db/queries'
+import { z } from 'zod'
+import type { Database } from 'bun:sqlite'
+import { SecretListResponseSchema, type SecretEntry } from '@opencode-manager/shared/schemas'
 import { SecretsService } from '../../src/services/secrets'
 import { ProjectConfigService } from '../../src/services/project-config'
 import { createGitService } from '../../src/services/git/GitService'
 import { createGlobalSecretRoutes, createRepoSecretRoutes } from '../../src/routes/secrets'
-import type { GitAuthService } from '../../src/services/git-auth'
-import type { SecretEntry } from '@opencode-manager/shared/schemas'
+import { selectRow } from '../../src/db/rows'
+import { createGitAuthService } from '../helpers/git-fixtures'
+import { readJson } from '../helpers/read-json'
+import { createTestDatabase, seedRepo } from '../helpers/test-database'
 
-const gitAuthService = { getGitEnvironment: () => ({}) } as unknown as GitAuthService
 const jsonHeaders = { 'Content-Type': 'application/json' }
-
-function createTestDb(): Database {
-  const db = new Database(':memory:')
-  migrate(db, allMigrations)
-  return db
-}
+const StoredSecretSchema = z.object({ value: z.string() })
 
 function createApp(db: Database): Hono {
   const secretsService = new SecretsService(db)
+  const gitAuthService = createGitAuthService()
   const projectConfigService = new ProjectConfigService(db, createGitService(gitAuthService), gitAuthService)
   const app = new Hono()
   app.route('/secrets', createGlobalSecretRoutes(secretsService, 'secret'))
@@ -31,19 +27,8 @@ function createApp(db: Database): Hono {
   return app
 }
 
-function seedRepo(db: Database): number {
-  return createRepo(db, {
-    localPath: 'repo-a',
-    defaultBranch: 'main',
-    cloneStatus: 'ready',
-    clonedAt: Date.now(),
-    isLocal: true,
-  }).id
-}
-
 async function readItems(res: Response): Promise<SecretEntry[]> {
-  const body = await res.json() as { items: SecretEntry[] }
-  return body.items
+  return (await readJson(res, SecretListResponseSchema)).items
 }
 
 describe('secret routes', () => {
@@ -51,7 +36,7 @@ describe('secret routes', () => {
   let app: Hono
 
   beforeEach(() => {
-    db = createTestDb()
+    db = createTestDatabase()
     app = createApp(db)
   })
 
@@ -68,7 +53,7 @@ describe('secret routes', () => {
     expect(await readItems(variables)).toEqual([])
   })
 
-  it('stores a secret without ever returning its value', async () => {
+  it('stores a secret under its upper-cased name without ever returning its value', async () => {
     const put = await app.request('/secrets/token', {
       method: 'PUT',
       headers: jsonHeaders,
@@ -76,14 +61,13 @@ describe('secret routes', () => {
     })
     expect(put.status).toBe(204)
 
-    const list = await app.request('/secrets')
-    const items = await readItems(list)
+    const items = await readItems(await app.request('/secrets'))
     expect(items).toHaveLength(1)
     expect(items[0]).toMatchObject({ name: 'TOKEN', environment: null })
     expect(items[0]).not.toHaveProperty('value')
 
-    const stored = db.prepare('SELECT value FROM secrets WHERE name = ?').get('TOKEN') as { value: string }
-    expect(stored.value).not.toBe('super-secret')
+    const stored = selectRow(db, StoredSecretSchema, 'SELECT value FROM secrets WHERE name = ?', 'TOKEN')
+    expect(stored?.value).not.toBe('super-secret')
   })
 
   it('stores a variable and returns its value', async () => {
@@ -96,17 +80,6 @@ describe('secret routes', () => {
 
     const items = await readItems(await app.request('/variables'))
     expect(items).toEqual([expect.objectContaining({ name: 'LOG_LEVEL', environment: null, value: 'debug' })])
-  })
-
-  it('normalizes names to upper case', async () => {
-    await app.request('/secrets/my_token', {
-      method: 'PUT',
-      headers: jsonHeaders,
-      body: JSON.stringify({ value: 'v' }),
-    })
-
-    const items = await readItems(await app.request('/secrets'))
-    expect(items[0]?.name).toBe('MY_TOKEN')
   })
 
   it('rejects invalid, GITHUB_, and reserved names with 400', async () => {
@@ -154,7 +127,7 @@ describe('secret routes', () => {
     expect(global.status).toBe(400)
     expect(await global.json()).toEqual({ error: 'Invalid JSON' })
 
-    const repoId = seedRepo(db)
+    const repoId = seedRepo(db).id
     const repo = await app.request(`/repos/${repoId}/secrets/token`, {
       method: 'PUT',
       headers: jsonHeaders,
@@ -186,7 +159,7 @@ describe('secret routes', () => {
   })
 
   it('stores repository secrets against the repo and never returns values', async () => {
-    const repoId = seedRepo(db)
+    const repoId = seedRepo(db).id
 
     const put = await app.request(`/repos/${repoId}/secrets/token`, {
       method: 'PUT',
@@ -201,7 +174,7 @@ describe('secret routes', () => {
   })
 
   it('supports repository environments and scoped deletes', async () => {
-    const repoId = seedRepo(db)
+    const repoId = seedRepo(db).id
 
     await app.request(`/repos/${repoId}/variables/deploy_url`, {
       method: 'PUT',

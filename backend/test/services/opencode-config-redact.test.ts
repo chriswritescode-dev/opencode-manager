@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { redactOpenCodeConfigFile } from '../../src/services/opencode-config-redact'
 import type { OpenCodeConfigFile } from '../../src/types/settings'
+import type { JsonObject } from '@opencode-manager/shared/utils'
 
-function buildConfig(content: Record<string, unknown>): OpenCodeConfigFile {
+function buildConfig(content: JsonObject): OpenCodeConfigFile {
   return {
     path: '/config/opencode.jsonc',
     content,

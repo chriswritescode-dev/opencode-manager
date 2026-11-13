@@ -18,10 +18,6 @@ function isInvisiblePart(part: AssistantContentPart, showReasoning: boolean): bo
   return false
 }
 
-/**
- * Collapses consecutive read, search, and fetch tool calls into exploration groups, matching the
- * OpenCode TUI. Parts that render nothing are dropped so they do not split a run.
- */
 export function groupExplorationParts(
   content: SessionMessageAssistant['content'],
   showReasoning: boolean,
@@ -36,17 +32,14 @@ export function groupExplorationParts(
   }, [])
 }
 
-/** Whether every tool in an exploration group has finished, successfully or not. */
 export function isExplorationComplete(parts: SessionMessageAssistantTool[]): boolean {
   return parts.every((part) => part.state.status === 'completed' || part.state.status === 'error')
 }
 
-/** Number of exploration tools that ended in an error. */
 export function explorationFailureCount(parts: SessionMessageAssistantTool[]): number {
   return parts.filter((part) => part.state.status === 'error').length
 }
 
-/** TUI-style summary such as `Explored: 5 reads, 2 searches`, with a failure count when any tool errored. */
 export function explorationLabel(parts: SessionMessageAssistantTool[]): string {
   const counts = new Map<string, number>()
   parts.forEach((part) => {

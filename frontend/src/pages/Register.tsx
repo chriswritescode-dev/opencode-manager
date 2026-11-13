@@ -26,7 +26,7 @@ type RegisterFormData = z.infer<typeof registerSchema>
 
 export function Register() {
   const { signUpWithEmail } = useAuth()
-  const { config } = useLoaderData() as { config: AuthConfig }
+  const { config } = useLoaderData<{ config: AuthConfig }>()
   const theme = useTheme()
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)

@@ -7,12 +7,18 @@ import type {
   SessionMessageInfo,
   V2Event,
 } from '@opencode-manager/shared/opencode'
+import type { JsonValue } from '@opencode-manager/shared/utils'
 import { useSessionTranscript } from './useSessionTranscript'
 import { useContextUsage } from './useContextUsage'
 import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
 import { applySessionEvent, emptySessionTranscript } from '@/lib/session-projection'
 import type { TranscriptCache } from '@/lib/session-projection'
 import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
+import { openCodeEventStream } from '@/lib/opencode-event-stream'
+import { TestEventStreamTransport } from '@/lib/opencode-event-stream/testTransport'
+import { createTestQueryClient } from '@/test/render'
+import { createFetchFake, type FetchFake, type FetchRoute } from '@/test/fetchFake'
+import { makeCatalogModel, makeCatalogProvider } from '@/test/fixtures/api'
 import {
   ASSISTANT_MESSAGE_ID,
   SESSION_ID,
@@ -26,35 +32,19 @@ import {
   textStreamSequence,
 } from '@/test/fixtures/session-projection'
 
-const mocks = vi.hoisted(() => ({
-  listSessionMessages: vi.fn(),
-  readSessionSnapshot: vi.fn(),
-  transport: null as unknown,
-}))
-
-const serverStatusMocks = vi.hoisted(() => ({
-  useOpenCodeServerStatuses: vi.fn(),
-}))
-
-vi.mock('@/hooks/useOpenCodeServers', () => ({
-  useOpenCodeServerStatuses: serverStatusMocks.useOpenCodeServerStatuses,
-}))
-
-vi.mock('@/api/opencode', () => ({
-  listSessionMessages: mocks.listSessionMessages,
-  readSessionSnapshot: mocks.readSessionSnapshot,
-}))
-
-vi.mock('@/lib/opencode-event-stream', async () => {
-  const { OpenCodeEventStream } = await import('@/lib/opencode-event-stream/openCodeEventStream')
-  const { TestEventStreamTransport } = await import('@/lib/opencode-event-stream/testTransport')
-  const transport = new TestEventStreamTransport()
-  mocks.transport = transport
-  return { openCodeEventStream: new OpenCodeEventStream({ transport }) }
-})
-
 const DIRECTORY = '/repo'
 const SECOND_SESSION_ID = 'ses_2'
+const MESSAGE_ROUTE = '/api/opencode/api/session/:sessionID/message'
+const STATUS_ROUTE = '/api/opencode-servers/status'
+const CATALOG_ROUTES: FetchRoute[] = [
+  { method: 'GET', path: '/api/opencode/api/provider', respond: () => ({ json: { data: [makeCatalogProvider()] } }) },
+  {
+    method: 'GET',
+    path: '/api/opencode/api/model',
+    respond: () => ({ json: { data: [makeCatalogModel({ providerID: 'anthropic', id: 'claude-sonnet-4-5', modelID: 'claude-sonnet-4-5' })] } }),
+  },
+  { method: 'GET', path: '/api/opencode/api/config', respond: () => ({ json: [] }) },
+]
 
 interface SnapshotValue {
   messages: SessionMessageInfo[]
@@ -63,31 +53,156 @@ interface SnapshotValue {
   nextCursor?: string
 }
 
-interface TestTransport {
-  connected(): void
-  fail(): void
-  message(data: unknown): void
-  resync(payload?: unknown): void
+interface PageMessagesRef {
+  current: SessionMessageInfo[]
 }
 
-function testTransport(): TestTransport {
-  const transport = mocks.transport as TestTransport
-  return {
-    connected: () => transport.connected(),
-    fail: () => transport.fail(),
-    message: (event) => transport.message({ payload: event }),
-    resync: (payload) => transport.resync(payload),
-  }
+interface OlderPage {
+  messages: SessionMessageInfo[]
+  nextCursor?: string
 }
 
-function deferred<Value>() {
-  let resolve!: (value: Value) => void
-  let reject!: (error: unknown) => void
-  const promise = new Promise<Value>((res, rej) => {
+interface SnapshotServer {
+  fetchFake: FetchFake
+  setSnapshot: (snapshot: SnapshotValue) => void
+  setOlderPage: (cursor: string, page: OlderPage) => void
+  setServerConnected: (connected: boolean) => void
+  deferNextRead: () => () => void
+  deferCursorRead: (cursor: string) => () => void
+  reads: () => number
+  cursorReads: () => string[]
+}
+
+interface DeferredRead {
+  promise: Promise<void>
+  resolve: () => void
+}
+
+function deferred(): DeferredRead {
+  let resolve = () => {}
+  const promise = new Promise<void>((res) => {
     resolve = res
-    reject = rej
   })
-  return { promise, resolve, reject }
+  return { promise, resolve }
+}
+
+function snapshotServer(initial: SnapshotValue): SnapshotServer {
+  let snapshot = initial
+  let serverConnected = false
+  const olderPages = new Map<string, OlderPage>()
+  let readGate: DeferredRead | null = null
+  const deferredCursorReads = new Map<string, DeferredRead>()
+  const cursorReads: string[] = []
+  let reads = 0
+
+  async function passReadGate(): Promise<void> {
+    const gate = readGate
+    if (gate) await gate.promise
+  }
+
+  function messageRoute(prefix: string): FetchRoute {
+    return {
+      method: 'GET',
+      path: `${prefix}/api/session/:sessionID/message`,
+      respond: async (request) => {
+        const cursor = request.searchParams.get('cursor')
+        if (cursor === null) {
+          reads += 1
+          await passReadGate()
+          return {
+            json: {
+              data: [...snapshot.messages].reverse(),
+              cursor: snapshot.nextCursor === undefined ? {} : { next: snapshot.nextCursor },
+            },
+          }
+        }
+        cursorReads.push(cursor)
+        const deferredCursorRead = deferredCursorReads.get(cursor)
+        if (deferredCursorRead) {
+          deferredCursorReads.delete(cursor)
+          await deferredCursorRead.promise
+        }
+        const page = olderPages.get(cursor) ?? { messages: [] }
+        return {
+          json: {
+            data: [...page.messages].reverse(),
+            cursor: page.nextCursor === undefined ? {} : { next: page.nextCursor },
+          },
+        }
+      },
+    }
+  }
+
+  function inboxRoute(prefix: string): FetchRoute {
+    return {
+      method: 'GET',
+      path: `${prefix}/api/session/:sessionID/inbox`,
+      respond: async () => {
+        await passReadGate()
+        return { json: { data: snapshot.pending } }
+      },
+    }
+  }
+
+  function activeRoute(prefix: string): FetchRoute {
+    return {
+      method: 'GET',
+      path: `${prefix}/api/session/active`,
+      respond: async () => {
+        await passReadGate()
+        return {
+          json: { data: snapshot.status === 'busy' ? { [SESSION_ID]: { type: 'running' } } : {} },
+        }
+      },
+    }
+  }
+
+  const routes: FetchRoute[] = [
+    messageRoute('/api/opencode'),
+    inboxRoute('/api/opencode'),
+    activeRoute('/api/opencode'),
+    messageRoute('/api/opencode/servers/srv_remote'),
+    inboxRoute('/api/opencode/servers/srv_remote'),
+    activeRoute('/api/opencode/servers/srv_remote'),
+    {
+      method: 'GET',
+      path: STATUS_ROUTE,
+      respond: () => ({
+        json: {
+          statuses: [{ serverId: 'srv_remote', connected: serverConnected, version: null, error: null }],
+        },
+      }),
+    },
+    ...CATALOG_ROUTES,
+  ]
+
+  return {
+    fetchFake: createFetchFake(routes),
+    setSnapshot: (next) => {
+      snapshot = next
+    },
+    setOlderPage: (cursor, page) => {
+      olderPages.set(cursor, page)
+    },
+    setServerConnected: (connected) => {
+      serverConnected = connected
+    },
+    deferNextRead: () => {
+      const next = deferred()
+      readGate = next
+      return () => {
+        readGate = null
+        next.resolve()
+      }
+    },
+    deferCursorRead: (cursor) => {
+      const next = deferred()
+      deferredCursorReads.set(cursor, next)
+      return next.resolve
+    },
+    reads: () => reads,
+    cursorReads: () => cursorReads,
+  }
 }
 
 const seededMessages: SessionMessageInfo[] = [
@@ -119,14 +234,14 @@ const deliveredPromptEvent: V2Event = {
   data: { sessionID: SESSION_ID, inboxID: queuedPrompt.id },
 }
 
+function createQueryClient(): QueryClient {
+  return createTestQueryClient()
+}
+
 function createWrapper(queryClient: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
     return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   }
-}
-
-function createQueryClient() {
-  return new QueryClient({ defaultOptions: { queries: { retry: false } } })
 }
 
 function createRemoteWrapper(queryClient: QueryClient) {
@@ -140,27 +255,33 @@ function createRemoteWrapper(queryClient: QueryClient) {
 }
 
 describe('useSessionTranscript', () => {
+  let server: SnapshotServer
+  let transport: TestEventStreamTransport
+
+  function sendEvent(event: V2Event): void {
+    transport.message({ payload: event })
+  }
+
+  function resync(payload?: JsonValue): void {
+    transport.resync(payload)
+  }
+
   beforeEach(() => {
-    vi.clearAllMocks()
-    serverStatusMocks.useOpenCodeServerStatuses.mockReturnValue({ statusById: {} })
-    mocks.readSessionSnapshot.mockReset()
-    mocks.readSessionSnapshot.mockResolvedValue({
-      messages: seededMessages,
-      pending: [],
-      status: 'idle',
-    })
+    transport = new TestEventStreamTransport()
+    openCodeEventStream.setTransport(transport)
+    server = snapshotServer({ messages: seededMessages, pending: [], status: 'idle' })
+    server.fetchFake.install()
   })
 
   it('applies streamed session events to the seeded transcript', async () => {
-    const queryClient = createQueryClient()
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createWrapper(createQueryClient()),
     })
 
     await waitFor(() => expect(result.current.messages).toHaveLength(2))
 
     act(() => {
-      textStreamSequence.slice(1, 3).forEach((event) => testTransport().message(event))
+      textStreamSequence.slice(1, 3).forEach(sendEvent)
     })
 
     await waitFor(() => {
@@ -171,15 +292,14 @@ describe('useSessionTranscript', () => {
   })
 
   it('ignores events for other sessions', async () => {
-    const queryClient = createQueryClient()
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createWrapper(createQueryClient()),
     })
 
     await waitFor(() => expect(result.current.messages).toHaveLength(2))
 
     act(() => {
-      otherSessionSequence.forEach((event: V2Event) => testTransport().message(event))
+      otherSessionSequence.forEach(sendEvent)
     })
 
     expect(result.current.messages).toHaveLength(2)
@@ -188,9 +308,8 @@ describe('useSessionTranscript', () => {
   })
 
   it('refetches the newest page after the event stream reconnects', async () => {
-    const queryClient = createQueryClient()
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createWrapper(createQueryClient()),
     })
 
     await waitFor(() => expect(result.current.messages).toHaveLength(2))
@@ -198,27 +317,22 @@ describe('useSessionTranscript', () => {
     const reconnected: SessionMessageInfo[] = [
       { id: messageID(300), type: 'synthetic', text: 'Reconnected', time: { created: 30000 } },
     ]
-    mocks.readSessionSnapshot.mockResolvedValue({
-      messages: reconnected,
-      pending: [],
-      status: 'idle',
-    })
+    server.setSnapshot({ messages: reconnected, pending: [], status: 'idle' })
 
     act(() => {
-      testTransport().fail()
-      testTransport().connected()
+      transport.fail()
+      transport.connected()
     })
 
     await waitFor(() => {
-      expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2)
+      expect(server.reads()).toBe(2)
       expect(result.current.messages).toEqual(reconnected)
     })
   })
 
   it('refetches the newest page on an upstream resync while the browser stream stays connected', async () => {
-    const queryClient = createQueryClient()
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createWrapper(createQueryClient()),
     })
 
     await waitFor(() => expect(result.current.messages).toHaveLength(2))
@@ -226,69 +340,57 @@ describe('useSessionTranscript', () => {
     const recovered: SessionMessageInfo[] = [
       { id: messageID(400), type: 'synthetic', text: 'Recovered', time: { created: 40000 } },
     ]
-    mocks.readSessionSnapshot.mockResolvedValue({
-      messages: recovered,
-      pending: [],
-      status: 'idle',
-    })
+    server.setSnapshot({ messages: recovered, pending: [], status: 'idle' })
 
     act(() => {
-      testTransport().resync()
+      resync()
     })
 
     await waitFor(() => {
-      expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2)
+      expect(server.reads()).toBe(2)
       expect(result.current.messages).toEqual(recovered)
     })
   })
 
   it('ignores a resync scoped to another server', async () => {
-    const queryClient = createQueryClient()
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createWrapper(createQueryClient()),
     })
 
     await waitFor(() => expect(result.current.messages).toHaveLength(2))
-    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1)
+    expect(server.reads()).toBe(1)
 
     await act(async () => {
-      testTransport().resync({ timestamp: Date.now(), serverId: 'srv_remote' })
+      resync({ timestamp: Date.now(), serverId: 'srv_remote' })
     })
 
-    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1)
+    expect(server.reads()).toBe(1)
   })
 
   it('refetches the newest page on a resync scoped to its own remote server', async () => {
-    const queryClient = createQueryClient()
-    const wrapper = function Wrapper({ children }: { children: ReactNode }) {
-      return (
-        <QueryClientProvider client={queryClient}>
-          <OpenCodeServerProvider serverId="srv_remote">{children}</OpenCodeServerProvider>
-        </QueryClientProvider>
-      )
-    }
-    const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), { wrapper })
-
-    await waitFor(() => expect(result.current.messages).toHaveLength(2))
-    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1)
-
-    await act(async () => {
-      testTransport().resync({ timestamp: Date.now(), serverId: 'srv_remote' })
+    const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
+      wrapper: createRemoteWrapper(createQueryClient()),
     })
 
-    await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(result.current.messages).toHaveLength(2))
+    expect(server.reads()).toBe(1)
+
+    await act(async () => {
+      resync({ timestamp: Date.now(), serverId: 'srv_remote' })
+    })
+
+    await waitFor(() => expect(server.reads()).toBe(2))
   })
 
   it('reads the newest page once on a fresh mount with no cached transcript', async () => {
-    const queryClient = createQueryClient()
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createWrapper(createQueryClient()),
     })
 
     await waitFor(() => expect(result.current.messages).toHaveLength(2))
 
     await act(async () => {})
-    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1)
+    expect(server.reads()).toBe(1)
   })
 
   it('refreshes a cached transcript when switching to another session', async () => {
@@ -302,7 +404,7 @@ describe('useSessionTranscript', () => {
     )
 
     await waitFor(() => expect(result.current.messages).toHaveLength(2))
-    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1)
+    expect(server.reads()).toBe(1)
 
     const staleBusy: TranscriptCache = {
       transcript: { messages: seededMessages, pending: [], status: 'busy' },
@@ -312,17 +414,13 @@ describe('useSessionTranscript', () => {
     rerender({ sessionID: SECOND_SESSION_ID })
 
     await waitFor(() => expect(result.current.status).toBe('idle'))
-    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2)
-    expect(mocks.readSessionSnapshot).toHaveBeenLastCalledWith(SECOND_SESSION_ID, 'local')
+    expect(server.reads()).toBe(2)
+    expect(server.fetchFake.lastRequest('GET', MESSAGE_ROUTE)?.path).toBe(`/api/opencode/api/session/${SECOND_SESSION_ID}/message`)
   })
 
   it('refreshes a stale cached transcript when the hook remounts', async () => {
     const queryClient = createQueryClient()
-    mocks.readSessionSnapshot.mockResolvedValue({
-      messages: seededMessages,
-      pending: [],
-      status: 'busy',
-    })
+    server.setSnapshot({ messages: seededMessages, pending: [], status: 'busy' })
     const first = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
       wrapper: createWrapper(queryClient),
     })
@@ -330,17 +428,13 @@ describe('useSessionTranscript', () => {
     await waitFor(() => expect(first.result.current.status).toBe('busy'))
     first.unmount()
 
-    mocks.readSessionSnapshot.mockResolvedValue({
-      messages: seededMessages,
-      pending: [],
-      status: 'idle',
-    })
+    server.setSnapshot({ messages: seededMessages, pending: [], status: 'idle' })
     const second = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
       wrapper: createWrapper(queryClient),
     })
 
     await waitFor(() => expect(second.result.current.status).toBe('idle'))
-    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2)
+    expect(server.reads()).toBe(2)
   })
 
   it('applies events buffered during the refresh read triggered by an existing cache', async () => {
@@ -361,40 +455,35 @@ describe('useSessionTranscript', () => {
       },
     })
 
-    const refreshRead = deferred<SnapshotValue>()
-    mocks.readSessionSnapshot.mockReturnValueOnce(refreshRead.promise)
+    const releaseRefresh = server.deferNextRead()
 
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
       wrapper: createWrapper(queryClient),
     })
 
-    await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(server.reads()).toBe(1))
 
     act(() => {
-      testTransport().message(executionSequence[1])
+      sendEvent(executionSequence[1])
     })
 
+    server.setSnapshot({
+      messages: [seededMessages[0], settledAssistant],
+      pending: [],
+      status: 'busy',
+    })
     await act(async () => {
-      refreshRead.resolve({
-        messages: [seededMessages[0], settledAssistant],
-        pending: [],
-        status: 'busy',
-      })
+      releaseRefresh()
     })
 
     await waitFor(() => expect(result.current.status).toBe('idle'))
-    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1)
+    expect(server.reads()).toBe(1)
   })
 
   it('seeds a queued prompt and a busy session from the snapshot on mount', async () => {
-    mocks.readSessionSnapshot.mockResolvedValue({
-      messages: seededMessages,
-      pending: [queuedPrompt],
-      status: 'busy',
-    })
-    const queryClient = createQueryClient()
+    server.setSnapshot({ messages: seededMessages, pending: [queuedPrompt], status: 'busy' })
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createWrapper(createQueryClient()),
     })
 
     await waitFor(() => expect(result.current.pending).toEqual([queuedPrompt]))
@@ -424,14 +513,13 @@ describe('useSessionTranscript', () => {
       payload: { text: 'After that' },
       delivery: 'queue',
     }
-    mocks.readSessionSnapshot.mockResolvedValue({
+    server.setSnapshot({
       messages: seededMessages,
       pending: [queuedPrompt, cancelledPrompt, waitingPrompt],
       status: 'busy',
     })
-    const queryClient = createQueryClient()
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createWrapper(createQueryClient()),
     })
 
     await waitFor(() => expect(result.current.pending).toHaveLength(3))
@@ -442,18 +530,18 @@ describe('useSessionTranscript', () => {
       text: 'Wait for me',
       time: { created: 20100 },
     }
-    mocks.readSessionSnapshot.mockResolvedValue({
+    server.setSnapshot({
       messages: [...seededMessages, delivered],
       pending: [waitingPrompt],
       status: 'idle',
     })
 
     act(() => {
-      testTransport().fail()
-      testTransport().connected()
+      transport.fail()
+      transport.connected()
     })
 
-    await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(server.reads()).toBe(2))
 
     await waitFor(() => expect(result.current.pending).toEqual([waitingPrompt]))
     expect(result.current.status).toBe('idle')
@@ -465,21 +553,20 @@ describe('useSessionTranscript', () => {
   })
 
   it('applies events buffered during the initial load onto the snapshot with a single read', async () => {
-    const initialRead = deferred<SnapshotValue>()
-    mocks.readSessionSnapshot.mockReturnValueOnce(initialRead.promise)
-    const queryClient = createQueryClient()
+    const releaseInitial = server.deferNextRead()
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createWrapper(createQueryClient()),
     })
 
-    await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(server.reads()).toBe(1))
 
     act(() => {
-      textStreamSequence.slice(1, 3).forEach((event) => testTransport().message(event))
+      textStreamSequence.slice(1, 3).forEach(sendEvent)
     })
 
+    server.setSnapshot({ messages: seededMessages, pending: [], status: 'idle' })
     await act(async () => {
-      initialRead.resolve({ messages: seededMessages, pending: [], status: 'idle' })
+      releaseInitial()
     })
 
     await waitFor(() => {
@@ -488,21 +575,19 @@ describe('useSessionTranscript', () => {
       expect(assistant.content).toEqual([{ type: 'text', text: 'Hello ' }])
     })
     expect(result.current.messages).toHaveLength(2)
-    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1)
+    expect(server.reads()).toBe(1)
   })
 
   it('does not re-append a buffered delta for a part the snapshot already contains', async () => {
-    const initialRead = deferred<SnapshotValue>()
-    mocks.readSessionSnapshot.mockReturnValueOnce(initialRead.promise)
-    const queryClient = createQueryClient()
+    const releaseInitial = server.deferNextRead()
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createWrapper(createQueryClient()),
     })
 
-    await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(server.reads()).toBe(1))
 
     act(() => {
-      testTransport().message(textStreamSequence[2])
+      sendEvent(textStreamSequence[2])
     })
 
     const assistantWithText: SessionMessageInfo = {
@@ -513,8 +598,9 @@ describe('useSessionTranscript', () => {
       content: [{ type: 'text', text: 'Hello ' }],
       time: { created: 1020 },
     }
+    server.setSnapshot({ messages: [seededMessages[0], assistantWithText], pending: [], status: 'idle' })
     await act(async () => {
-      initialRead.resolve({ messages: [seededMessages[0], assistantWithText], pending: [], status: 'idle' })
+      releaseInitial()
     })
 
     await waitFor(() => {
@@ -522,22 +608,20 @@ describe('useSessionTranscript', () => {
       if (assistant?.type !== 'assistant') throw new Error('expected an assistant message')
       expect(assistant.content).toEqual([{ type: 'text', text: 'Hello ' }])
     })
-    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1)
+    expect(server.reads()).toBe(1)
   })
 
   it('does not duplicate a buffered text part the snapshot already contains', async () => {
-    const initialRead = deferred<SnapshotValue>()
-    mocks.readSessionSnapshot.mockReturnValueOnce(initialRead.promise)
-    const queryClient = createQueryClient()
+    const releaseInitial = server.deferNextRead()
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createWrapper(createQueryClient()),
     })
 
-    await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(server.reads()).toBe(1))
 
     act(() => {
-      testTransport().message(textStreamSequence[1])
-      testTransport().message(textStreamSequence[2])
+      sendEvent(textStreamSequence[1])
+      sendEvent(textStreamSequence[2])
     })
 
     const assistantWithText: SessionMessageInfo = {
@@ -548,8 +632,9 @@ describe('useSessionTranscript', () => {
       content: [{ type: 'text', text: 'Hello ' }],
       time: { created: 1020 },
     }
+    server.setSnapshot({ messages: [seededMessages[0], assistantWithText], pending: [], status: 'idle' })
     await act(async () => {
-      initialRead.resolve({ messages: [seededMessages[0], assistantWithText], pending: [], status: 'idle' })
+      releaseInitial()
     })
 
     await waitFor(() => {
@@ -557,21 +642,20 @@ describe('useSessionTranscript', () => {
       if (assistant?.type !== 'assistant') throw new Error('expected an assistant message')
       expect(assistant.content).toEqual([{ type: 'text', text: 'Hello ' }])
     })
-    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1)
+    expect(server.reads()).toBe(1)
   })
 
   it('does not refetch the transcript on window focus', async () => {
-    const queryClient = createQueryClient()
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createWrapper(createQueryClient()),
     })
 
     await waitFor(() => expect(result.current.messages).toHaveLength(2))
 
     act(() => {
-      testTransport().connected()
+      transport.connected()
     })
-    await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(server.reads()).toBe(2))
 
     act(() => {
       focusManager.setFocused(false)
@@ -579,41 +663,40 @@ describe('useSessionTranscript', () => {
     })
 
     await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2)
+    expect(server.reads()).toBe(2)
     focusManager.setFocused(undefined)
   })
 
   it('polls the newest page every 5s while the event stream is disconnected and stops once connected', async () => {
     vi.useFakeTimers()
     try {
-      const queryClient = createQueryClient()
       const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-        wrapper: createWrapper(queryClient),
+        wrapper: createWrapper(createQueryClient()),
       })
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)
       })
-      expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(1)
+      expect(server.reads()).toBe(1)
       expect(result.current.messages).toHaveLength(2)
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(5000)
       })
-      expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2)
+      expect(server.reads()).toBe(2)
 
       act(() => {
-        testTransport().connected()
+        transport.connected()
       })
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)
       })
-      const readsAfterConnect = mocks.readSessionSnapshot.mock.calls.length
+      const readsAfterConnect = server.reads()
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(15000)
       })
-      expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(readsAfterConnect)
+      expect(server.reads()).toBe(readsAfterConnect)
     } finally {
       vi.useRealTimers()
     }
@@ -622,14 +705,9 @@ describe('useSessionTranscript', () => {
   it('polls a remote transcript while the remote server is disconnected even when the browser stream is connected', async () => {
     vi.useFakeTimers()
     try {
-      serverStatusMocks.useOpenCodeServerStatuses.mockReturnValue({
-        statusById: {
-          srv_remote: { serverId: 'srv_remote', connected: false, version: null, error: null },
-        },
-      })
-      const queryClient = createQueryClient()
+      server.setServerConnected(false)
       const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-        wrapper: createRemoteWrapper(queryClient),
+        wrapper: createRemoteWrapper(createQueryClient()),
       })
 
       await act(async () => {
@@ -638,17 +716,17 @@ describe('useSessionTranscript', () => {
       expect(result.current.messages).toHaveLength(2)
 
       act(() => {
-        testTransport().connected()
+        transport.connected()
       })
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)
       })
-      const readsAfterConnect = mocks.readSessionSnapshot.mock.calls.length
+      const readsAfterConnect = server.reads()
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(15000)
       })
-      expect(mocks.readSessionSnapshot.mock.calls.length).toBeGreaterThan(readsAfterConnect)
+      expect(server.reads()).toBeGreaterThan(readsAfterConnect)
     } finally {
       vi.useRealTimers()
     }
@@ -657,14 +735,9 @@ describe('useSessionTranscript', () => {
   it('stops polling a remote transcript once both the browser stream and the remote server are connected', async () => {
     vi.useFakeTimers()
     try {
-      serverStatusMocks.useOpenCodeServerStatuses.mockReturnValue({
-        statusById: {
-          srv_remote: { serverId: 'srv_remote', connected: true, version: null, error: null },
-        },
-      })
-      const queryClient = createQueryClient()
+      server.setServerConnected(true)
       const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-        wrapper: createRemoteWrapper(queryClient),
+        wrapper: createRemoteWrapper(createQueryClient()),
       })
 
       await act(async () => {
@@ -673,17 +746,17 @@ describe('useSessionTranscript', () => {
       expect(result.current.messages).toHaveLength(2)
 
       act(() => {
-        testTransport().connected()
+        transport.connected()
       })
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)
       })
-      const readsAfterConnect = mocks.readSessionSnapshot.mock.calls.length
+      const readsAfterConnect = server.reads()
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(15000)
       })
-      expect(mocks.readSessionSnapshot.mock.calls.length).toBe(readsAfterConnect)
+      expect(server.reads()).toBe(readsAfterConnect)
     } finally {
       vi.useRealTimers()
     }
@@ -692,14 +765,9 @@ describe('useSessionTranscript', () => {
   it('keeps the local transcript polling behavior independent of server statuses', async () => {
     vi.useFakeTimers()
     try {
-      serverStatusMocks.useOpenCodeServerStatuses.mockReturnValue({
-        statusById: {
-          local: { serverId: 'local', connected: false, version: null, error: null },
-        },
-      })
-      const queryClient = createQueryClient()
+      server.setServerConnected(false)
       const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-        wrapper: createWrapper(queryClient),
+        wrapper: createWrapper(createQueryClient()),
       })
 
       await act(async () => {
@@ -708,17 +776,17 @@ describe('useSessionTranscript', () => {
       expect(result.current.messages).toHaveLength(2)
 
       act(() => {
-        testTransport().connected()
+        transport.connected()
       })
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)
       })
-      const readsAfterConnect = mocks.readSessionSnapshot.mock.calls.length
+      const readsAfterConnect = server.reads()
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(15000)
       })
-      expect(mocks.readSessionSnapshot.mock.calls.length).toBe(readsAfterConnect)
+      expect(server.reads()).toBe(readsAfterConnect)
     } finally {
       vi.useRealTimers()
     }
@@ -726,46 +794,32 @@ describe('useSessionTranscript', () => {
 
   it('reads the newest page once when execution ends while a tool is still running', async () => {
     const running = promptSequence.slice(0, 15).reduce(applySessionEvent, emptySessionTranscript)
-    mocks.readSessionSnapshot.mockResolvedValue({
-      messages: running.messages,
-      pending: [],
-      status: 'busy',
-    })
-    const queryClient = createQueryClient()
+    server.setSnapshot({ messages: running.messages, pending: [], status: 'busy' })
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createWrapper(createQueryClient()),
     })
 
     await waitFor(() => expect(result.current.status).toBe('busy'))
 
     act(() => {
-      testTransport().message(executionSequence[1])
+      sendEvent(executionSequence[1])
     })
 
-    await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(server.reads()).toBe(2))
     await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2)
+    expect(server.reads()).toBe(2)
   })
 
   it('does not roll back a settled execution when a delayed reconnect read resolves', async () => {
-    mocks.readSessionSnapshot.mockResolvedValue({
-      messages: seededMessages,
-      pending: [],
-      status: 'busy',
-    })
-    const queryClient = createQueryClient()
+    server.setSnapshot({ messages: seededMessages, pending: [], status: 'busy' })
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createWrapper(createQueryClient()),
     })
 
     await waitFor(() => expect(result.current.status).toBe('busy'))
 
-    const reconnectRead = deferred<{
-      messages: SessionMessageInfo[]
-      pending: SessionInboxInfo[]
-      status: 'busy'
-    }>()
-    mocks.readSessionSnapshot.mockReturnValueOnce(reconnectRead.promise).mockResolvedValue({
+    const releaseReconnect = server.deferNextRead()
+    server.setSnapshot({
       messages: [
         ...seededMessages,
         { id: messageID(91), type: 'idle', outcome: 'succeeded', time: { created: 9010 } },
@@ -775,18 +829,18 @@ describe('useSessionTranscript', () => {
     })
 
     act(() => {
-      testTransport().fail()
-      testTransport().connected()
+      transport.fail()
+      transport.connected()
     })
 
-    await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(server.reads()).toBe(2))
 
     act(() => {
-      testTransport().message(executionSequence[1])
+      sendEvent(executionSequence[1])
     })
 
     await act(async () => {
-      reconnectRead.resolve({ messages: seededMessages, pending: [], status: 'busy' })
+      releaseReconnect()
     })
 
     await waitFor(() => expect(result.current.status).toBe('idle'))
@@ -798,52 +852,37 @@ describe('useSessionTranscript', () => {
   })
 
   it('reconciles a pending delivery that arrives while the reconnect read is pending', async () => {
-    mocks.readSessionSnapshot.mockResolvedValue({
-      messages: seededMessages,
-      pending: [queuedPrompt],
-      status: 'idle',
-    })
-    const queryClient = createQueryClient()
+    server.setSnapshot({ messages: seededMessages, pending: [queuedPrompt], status: 'idle' })
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createWrapper(createQueryClient()),
     })
 
     await waitFor(() => expect(result.current.pending).toEqual([queuedPrompt]))
 
-    const reconnectRead = deferred<{
-      messages: SessionMessageInfo[]
-      pending: SessionInboxInfo[]
-      status: 'idle'
-    }>()
+    const releaseReconnect = server.deferNextRead()
     const delivered: SessionMessageInfo = {
       id: queuedPrompt.id,
       type: 'user',
       text: 'Wait for me',
       time: { created: 20100 },
     }
-    mocks.readSessionSnapshot.mockReturnValueOnce(reconnectRead.promise).mockResolvedValue({
-      messages: [...seededMessages, delivered],
-      pending: [],
-      status: 'idle',
-    })
+    server.setSnapshot({ messages: [...seededMessages, delivered], pending: [], status: 'idle' })
 
     act(() => {
-      testTransport().fail()
-      testTransport().connected()
+      transport.fail()
+      transport.connected()
     })
 
-    await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(server.reads()).toBe(2))
 
     act(() => {
-      testTransport().message(deliveredPromptEvent)
+      sendEvent(deliveredPromptEvent)
     })
 
+    const staleSnapshot = { messages: seededMessages, pending: [queuedPrompt], status: 'idle' as const }
+    server.setSnapshot(staleSnapshot)
     await act(async () => {
-      reconnectRead.resolve({
-        messages: seededMessages,
-        pending: [queuedPrompt],
-        status: 'idle',
-      })
+      releaseReconnect()
     })
 
     await waitFor(() => expect(result.current.pending).toEqual([]))
@@ -853,39 +892,30 @@ describe('useSessionTranscript', () => {
   })
 
   it('applies a status event buffered during the reconnect read without re-reading', async () => {
-    const queryClient = createQueryClient()
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createWrapper(createQueryClient()),
     })
 
     await waitFor(() => expect(result.current.messages).toHaveLength(2))
 
-    const reconnectRead = deferred<{
-      messages: SessionMessageInfo[]
-      pending: SessionInboxInfo[]
-      status: 'idle'
-    }>()
+    const releaseReconnect = server.deferNextRead()
     const reconnected: SessionMessageInfo = {
       id: messageID(300),
       type: 'synthetic',
       text: 'Reconnected',
       time: { created: 30000 },
     }
-    mocks.readSessionSnapshot.mockReturnValueOnce(reconnectRead.promise).mockResolvedValue({
-      messages: [...seededMessages, reconnected],
-      pending: [],
-      status: 'idle',
-    })
+    server.setSnapshot({ messages: [...seededMessages, reconnected], pending: [], status: 'idle' })
 
     act(() => {
-      testTransport().fail()
-      testTransport().connected()
+      transport.fail()
+      transport.connected()
     })
 
-    await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(server.reads()).toBe(2))
 
     act(() => {
-      testTransport().message({
+      sendEvent({
         id: eventID(180),
         created: 18000,
         type: 'session.status',
@@ -894,7 +924,7 @@ describe('useSessionTranscript', () => {
     })
 
     await act(async () => {
-      reconnectRead.resolve({ messages: [...seededMessages, reconnected], pending: [], status: 'idle' })
+      releaseReconnect()
     })
 
     await waitFor(() => expect(result.current.messages).toHaveLength(3))
@@ -904,16 +934,11 @@ describe('useSessionTranscript', () => {
       reconnected.id,
     ])
     expect(result.current.status).toBe('busy')
-    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2)
+    expect(server.reads()).toBe(2)
   })
 
   it('keeps older loaded pages and the older cursor after an overlapping newest-page read', async () => {
-    mocks.readSessionSnapshot.mockResolvedValue({
-      messages: seededMessages,
-      pending: [],
-      status: 'idle',
-      nextCursor: 'cursor_1',
-    })
+    server.setSnapshot({ messages: seededMessages, pending: [], status: 'idle', nextCursor: 'cursor_1' })
     const queryClient = createQueryClient()
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
       wrapper: createWrapper(queryClient),
@@ -927,7 +952,7 @@ describe('useSessionTranscript', () => {
       text: 'Earlier',
       time: { created: 900 },
     }
-    mocks.listSessionMessages.mockResolvedValueOnce({ messages: [olderMessage], nextCursor: 'cursor_0' })
+    server.setOlderPage('cursor_1', { messages: [olderMessage], nextCursor: 'cursor_0' })
     await act(async () => {
       await result.current.fetchOlder()
     })
@@ -938,15 +963,10 @@ describe('useSessionTranscript', () => {
       text: 'Later',
       time: { created: 30000 },
     }
-    mocks.readSessionSnapshot.mockResolvedValue({
-      messages: [...seededMessages, newer],
-      pending: [],
-      status: 'idle',
-      nextCursor: 'cursor_new',
-    })
+    server.setSnapshot({ messages: [...seededMessages, newer], pending: [], status: 'idle', nextCursor: 'cursor_new' })
 
     act(() => {
-      testTransport().resync()
+      resync()
     })
 
     await waitFor(() => expect(result.current.messages).toHaveLength(4))
@@ -959,30 +979,23 @@ describe('useSessionTranscript', () => {
     expect(queryClient.getQueryData<{ nextCursor?: string }>(sessionTranscriptQueryKey(SESSION_ID))?.nextCursor).toBe(
       'cursor_0',
     )
-    expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2)
+    expect(server.reads()).toBe(2)
   })
 
   it('discards an older-page response superseded by a newest-page read that leaves a gap', async () => {
-    mocks.readSessionSnapshot.mockResolvedValue({
-      messages: seededMessages,
-      pending: [],
-      status: 'idle',
-      nextCursor: 'cursor_1',
-    })
-    const queryClient = createQueryClient()
+    server.setSnapshot({ messages: seededMessages, pending: [], status: 'idle', nextCursor: 'cursor_1' })
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createWrapper(createQueryClient()),
     })
 
     await waitFor(() => expect(result.current.hasOlder).toBe(true))
 
-    const olderPage = deferred<{ messages: SessionMessageInfo[]; nextCursor: string }>()
-    mocks.listSessionMessages.mockReturnValue(olderPage.promise)
+    const releaseOlder = server.deferCursorRead('cursor_1')
     let older: Promise<void> | undefined
     act(() => {
       older = result.current.fetchOlder()
     })
-    expect(mocks.listSessionMessages).toHaveBeenCalledWith(SESSION_ID, { cursor: 'cursor_1' }, 'local')
+    expect(server.cursorReads()).toEqual(['cursor_1'])
 
     const gapPage: SessionMessageInfo = {
       id: messageID(300),
@@ -990,23 +1003,18 @@ describe('useSessionTranscript', () => {
       text: 'Much later',
       time: { created: 30000 },
     }
-    const reconnectRead = deferred<SnapshotValue>()
-    mocks.readSessionSnapshot.mockReturnValue(reconnectRead.promise)
+    const releaseReconnect = server.deferNextRead()
+    server.setSnapshot({ messages: [gapPage], pending: [], status: 'idle', nextCursor: 'cursor_2' })
 
     act(() => {
-      testTransport().fail()
-      testTransport().connected()
+      transport.fail()
+      transport.connected()
     })
 
-    await waitFor(() => expect(mocks.readSessionSnapshot).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(server.reads()).toBe(2))
 
     await act(async () => {
-      reconnectRead.resolve({
-        messages: [gapPage],
-        pending: [],
-        status: 'idle',
-        nextCursor: 'cursor_2',
-      })
+      releaseReconnect()
     })
 
     const olderMessage: SessionMessageInfo = {
@@ -1015,8 +1023,9 @@ describe('useSessionTranscript', () => {
       text: 'Earlier',
       time: { created: 900 },
     }
+    server.setOlderPage('cursor_1', { messages: [olderMessage], nextCursor: 'cursor_3' })
     await act(async () => {
-      olderPage.resolve({ messages: [olderMessage], nextCursor: 'cursor_3' })
+      releaseOlder()
       await older
     })
 
@@ -1024,24 +1033,17 @@ describe('useSessionTranscript', () => {
       expect(result.current.messages.map((message) => message.id)).toEqual([gapPage.id]),
     )
 
-    mocks.listSessionMessages.mockResolvedValue({ messages: [] })
     await act(async () => {
       await result.current.fetchOlder()
     })
 
-    expect(mocks.listSessionMessages).toHaveBeenLastCalledWith(SESSION_ID, { cursor: 'cursor_2' }, 'local')
+    expect(server.cursorReads()).toEqual(['cursor_1', 'cursor_2'])
   })
 
   it('loads older pages with fetchOlder until the cursor is exhausted', async () => {
-    mocks.readSessionSnapshot.mockResolvedValue({
-      messages: seededMessages,
-      pending: [],
-      status: 'idle',
-      nextCursor: 'cursor_1',
-    })
-    const queryClient = createQueryClient()
+    server.setSnapshot({ messages: seededMessages, pending: [], status: 'idle', nextCursor: 'cursor_1' })
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createWrapper(createQueryClient()),
     })
 
     await waitFor(() => expect(result.current.hasOlder).toBe(true))
@@ -1052,13 +1054,13 @@ describe('useSessionTranscript', () => {
       text: 'Earlier',
       time: { created: 900 },
     }
-    mocks.listSessionMessages.mockResolvedValueOnce({ messages: [olderMessage] })
+    server.setOlderPage('cursor_1', { messages: [olderMessage] })
 
     await act(async () => {
       await result.current.fetchOlder()
     })
 
-    expect(mocks.listSessionMessages).toHaveBeenLastCalledWith(SESSION_ID, { cursor: 'cursor_1' }, 'local')
+    expect(server.cursorReads()).toEqual(['cursor_1'])
     await waitFor(() => {
       expect(result.current.messages.map((message) => message.id)).toEqual([
         olderMessage.id,
@@ -1070,9 +1072,8 @@ describe('useSessionTranscript', () => {
   })
 
   it('batches events for one session into a single animation frame', async () => {
-    const queryClient = createQueryClient()
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createWrapper(createQueryClient()),
     })
 
     await waitFor(() => expect(result.current.messages).toHaveLength(2))
@@ -1086,8 +1087,8 @@ describe('useSessionTranscript', () => {
       })
 
     act(() => {
-      promptSequence.slice(0, 2).forEach((event) => testTransport().message(event))
-      textStreamSequence.slice(0, 2).forEach((event) => testTransport().message(event))
+      promptSequence.slice(0, 2).forEach(sendEvent)
+      textStreamSequence.slice(0, 2).forEach(sendEvent)
     })
 
     expect(frames).toHaveLength(1)
@@ -1106,15 +1107,14 @@ describe('useSessionTranscript', () => {
   })
 
   it('reports the session status from status events', async () => {
-    const queryClient = createQueryClient()
     const { result } = renderHook(() => useSessionTranscript(SESSION_ID, DIRECTORY), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createWrapper(createQueryClient()),
     })
 
     await waitFor(() => expect(result.current.messages).toHaveLength(2))
 
     act(() => {
-      testTransport().message({
+      sendEvent({
         id: eventID(170),
         created: 17000,
         type: 'session.status',
@@ -1130,7 +1130,7 @@ describe('useSessionTranscript', () => {
 
   it('applies streamed deltas exactly once across the transcript and context-usage consumers', async () => {
     const queryClient = createQueryClient()
-    const pageMessages: { current: SessionMessageInfo[] } = { current: [] }
+    const pageMessages: PageMessagesRef = { current: [] }
 
     function PageConsumers() {
       const { messages } = useSessionTranscript(SESSION_ID, DIRECTORY)
@@ -1144,12 +1144,12 @@ describe('useSessionTranscript', () => {
     await waitFor(() => expect(pageMessages.current).toHaveLength(2))
 
     act(() => {
-      testTransport().message(textStreamSequence[1])
-      testTransport().message(textStreamSequence[2])
-      testTransport().message(promptSequence[7])
-      testTransport().message(promptSequence[8])
-      testTransport().message(promptSequence[11])
-      testTransport().message(promptSequence[12])
+      sendEvent(textStreamSequence[1])
+      sendEvent(textStreamSequence[2])
+      sendEvent(promptSequence[7])
+      sendEvent(promptSequence[8])
+      sendEvent(promptSequence[11])
+      sendEvent(promptSequence[12])
     })
 
     await waitFor(() => {

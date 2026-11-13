@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { repoQueryOptions } from '@/lib/repoQuery'
 import { buildToolItems, toolKeyOf } from '@/components/navigation/moreDrawerItems'
-import { useShortcutActions } from '@/contexts/KeyboardShortcutsContext'
+import { useShortcutActions } from '@/contexts/keyboard-shortcuts-context'
 import { dialogSearch } from '@/hooks/useDialogParam'
 import { sessionQueryOptions, useCreateSession } from '@/hooks/useOpenCode'
 import { useMobile } from '@/hooks/useMobile'
@@ -16,7 +16,7 @@ import {
   useToolPanelToggle,
   type PanelTool,
 } from '@/hooks/useToolPanel'
-import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/opencode-server-context'
 import {
   getAssistantPath,
   getRepoPath,
@@ -27,10 +27,6 @@ import {
   parseServerSessionRoute,
 } from '@/lib/navigation'
 
-/**
- * Registers the app-wide shortcut actions: the settings dialog, the route tool panels, and session creation on the
- * route's OpenCode server. Page layers can override any of these by registering the same action name.
- */
 export function useGlobalShortcutActions(): void {
   const { pathname } = useLocation()
   const navigate = useNavigate()
@@ -43,7 +39,7 @@ export function useGlobalShortcutActions(): void {
   const repoId = isAssistantPath(pathname) ? ASSISTANT_REPO_ID : parseRepoRoute(pathname).repoId
 
   const { data: repo } = useQuery({
-    ...repoQueryOptions(repoId as number),
+    ...repoQueryOptions(repoId ?? 0),
     enabled: repoId !== null,
   })
 

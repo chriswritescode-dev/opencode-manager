@@ -1,51 +1,63 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { getOpenCodeGlobalConfigPath } from '@opencode-manager/shared/config/env'
-import type { ModelInfo, ModelRef } from '@opencode-manager/shared/opencode'
+import type { ModelInfo } from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from '../../../src/services/opencode/client'
 import { GenerateTextTimeoutError, generateTextWithTimeout } from '../../../src/services/opencode/generate-text'
 import { MODEL_LOAD_POLL_MS } from '../../../src/services/opencode-models'
+import { createStubOpenCodeClient, modelInfo } from '../../helpers/stub-opencode-client'
+
+type GenerateTextInput = Parameters<OpenCodeClient['api']['generate']['text']>[0]
+type GenerateTextOptions = Parameters<OpenCodeClient['api']['generate']['text']>[1]
+type GenerateTextOutput = Awaited<ReturnType<OpenCodeClient['api']['generate']['text']>>
 
 interface GenerateCall {
-  input: { prompt: string; model?: ModelRef }
+  input: GenerateTextInput
   signal: AbortSignal | undefined
 }
 
-const CATALOG_MODEL = { providerID: 'openai', id: 'gpt-5-mini', enabled: true } as ModelInfo
-
-function makeClient(
-  impl: (call: GenerateCall) => Promise<{ text: string }>,
-  catalogs: ModelInfo[][] = [[CATALOG_MODEL]],
-): {
+interface StubGenerateClient {
   client: OpenCodeClient
   calls: GenerateCall[]
-  modelList: ReturnType<typeof vi.fn>
-} {
+  modelDirectories: Array<string | null>
+}
+
+const CATALOG_MODEL = modelInfo({ providerID: 'openai', id: 'gpt-5-mini', enabled: true })
+
+function makeClient(
+  impl: (call: GenerateCall) => Promise<GenerateTextOutput>,
+  catalogs: ModelInfo[][] = [[CATALOG_MODEL]],
+): StubGenerateClient {
   const calls: GenerateCall[] = []
+  const modelDirectories: Array<string | null> = []
   let listCall = 0
-  const catalogAt = () => catalogs[Math.min(listCall, catalogs.length - 1)] ?? []
-  const modelList = vi.fn(async () => {
-    const data = catalogAt()
-    listCall += 1
-    return { data }
-  })
-  const client = {
+  let currentCatalog: ModelInfo[] = []
+
+  const client = createStubOpenCodeClient({
     api: {
       config: { get: vi.fn(async () => []) },
       model: {
-        list: modelList,
-        default: vi.fn(async () => ({ data: catalogs[Math.min(listCall - 1, catalogs.length - 1)]?.[0] ?? null })),
+        list: vi.fn(async (input?: { location?: { directory?: string } }) => {
+          modelDirectories.push(input?.location?.directory ?? null)
+          currentCatalog = catalogs[Math.min(listCall, catalogs.length - 1)] ?? []
+          listCall += 1
+          return { location: { directory: input?.location?.directory ?? '' }, data: currentCatalog }
+        }),
+        default: vi.fn(async () => ({
+          location: { directory: getOpenCodeGlobalConfigPath() },
+          data: currentCatalog[0] ?? null,
+        })),
       },
       generate: {
-        text: async (input: GenerateCall['input'], options?: { signal?: AbortSignal }) => {
+        text: async (input: GenerateTextInput, options?: GenerateTextOptions) => {
           const call: GenerateCall = { input, signal: options?.signal }
           calls.push(call)
-          return impl(call)
+          return await impl(call)
         },
       },
     },
-  } as unknown as OpenCodeClient
+  })
 
-  return { client, calls, modelList }
+  return { client, calls, modelDirectories }
 }
 
 describe('generateTextWithTimeout', () => {
@@ -54,11 +66,11 @@ describe('generateTextWithTimeout', () => {
   })
 
   it('resolves a model from the global config catalog when none is provided', async () => {
-    const { client, calls, modelList } = makeClient(async () => ({ text: 'hello' }))
+    const { client, calls, modelDirectories } = makeClient(async () => ({ text: 'hello' }))
 
     await expect(generateTextWithTimeout(client, { prompt: 'write' }, 1000)).resolves.toBe('hello')
 
-    expect(modelList).toHaveBeenCalledWith({ location: { directory: getOpenCodeGlobalConfigPath() } }, expect.anything())
+    expect(modelDirectories).toEqual([getOpenCodeGlobalConfigPath()])
     expect(calls).toHaveLength(1)
     expect(calls[0]?.input).toEqual({ prompt: 'write', model: { providerID: 'openai', id: 'gpt-5-mini' } })
     expect(calls[0]?.signal).toBeInstanceOf(AbortSignal)

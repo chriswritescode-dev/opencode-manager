@@ -2,32 +2,32 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RepoListControls } from './RepoListControls'
+import { installPointerCapture, installWindowSize } from '@/test/browserFakes'
+import type { RepoFilterMode, RepoSortMode } from './repo-list-state'
 
-const mocks = vi.hoisted(() => ({ mobile: { current: false } }))
-
-vi.mock('@/hooks/useMobile', () => ({
-  isMobileViewport: () => mocks.mobile.current,
-  useMobile: () => mocks.mobile.current,
-}))
-
-function baseProps() {
+function baseProps(overrides: {
+  filterMode?: RepoFilterMode
+  sortMode?: RepoSortMode
+  selectionMode?: boolean
+  selectedCount?: number
+} = {}) {
   return {
     searchQuery: '',
     onSearchChange: vi.fn(),
-    filterMode: 'recent' as const,
+    filterMode: overrides.filterMode ?? 'recent',
     onFilterModeChange: vi.fn(),
-    sortMode: 'recent' as const,
+    sortMode: overrides.sortMode ?? 'recent',
     onSortModeChange: vi.fn(),
     filteredCount: 3,
     attentionCount: 0,
-    selectedCount: 0,
+    selectedCount: overrides.selectedCount ?? 0,
     allVisibleSelected: false,
     onSelectAll: vi.fn(),
     onClearSelection: vi.fn(),
     onDelete: vi.fn(),
     hasLocalRepos: false,
     hasClonedRepos: false,
-    selectionMode: false,
+    selectionMode: overrides.selectionMode ?? false,
     onSelectionModeChange: vi.fn(),
     onAddRepo: vi.fn(),
   }
@@ -35,24 +35,22 @@ function baseProps() {
 
 describe('RepoListControls', () => {
   beforeEach(() => {
-    mocks.mobile.current = false
+    installPointerCapture()
   })
 
   it('renders the add repository button after the search input on mobile', () => {
-    mocks.mobile.current = true
+    installWindowSize(480)
 
     render(<RepoListControls {...baseProps()} />)
 
     const search = screen.getByRole('textbox')
     const addButton = screen.getByRole('button', { name: 'Add repository' })
 
-    expect(
-      search.compareDocumentPosition(addButton) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy()
+    expect(search.compareDocumentPosition(addButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('calls onAddRepo once when the mobile button is clicked', async () => {
-    mocks.mobile.current = true
+    installWindowSize(480)
     const props = baseProps()
     const user = userEvent.setup()
 
@@ -69,7 +67,7 @@ describe('RepoListControls', () => {
   })
 
   it('offers the sort options in the mobile filter menu', async () => {
-    mocks.mobile.current = true
+    installWindowSize(480)
     const props = baseProps()
     const user = userEvent.setup()
 
@@ -83,8 +81,8 @@ describe('RepoListControls', () => {
   })
 
   it('shows the active non-default filter on mobile and clears it back to the default', async () => {
-    mocks.mobile.current = true
-    const props = { ...baseProps(), filterMode: 'attention' as const }
+    installWindowSize(480)
+    const props = baseProps({ filterMode: 'attention' })
     const user = userEvent.setup()
 
     render(<RepoListControls {...props} />)
@@ -98,7 +96,7 @@ describe('RepoListControls', () => {
   })
 
   it('hides the active filter chip for the default filter', () => {
-    mocks.mobile.current = true
+    installWindowSize(480)
 
     render(<RepoListControls {...baseProps()} />)
 
@@ -106,9 +104,9 @@ describe('RepoListControls', () => {
   })
 
   it('shows the selection toolbar as soon as select mode is on', () => {
-    mocks.mobile.current = true
+    installWindowSize(480)
 
-    render(<RepoListControls {...baseProps()} selectionMode selectedCount={0} />)
+    render(<RepoListControls {...baseProps({ selectionMode: true })} />)
 
     expect(screen.getByText('0 selected')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Select All' })).toBeInTheDocument()
@@ -117,8 +115,8 @@ describe('RepoListControls', () => {
   })
 
   it('exits select mode from the Done button', async () => {
-    mocks.mobile.current = true
-    const props = { ...baseProps(), selectionMode: true, selectedCount: 2 }
+    installWindowSize(480)
+    const props = baseProps({ selectionMode: true, selectedCount: 2 })
     const user = userEvent.setup()
 
     render(<RepoListControls {...props} />)

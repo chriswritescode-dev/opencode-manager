@@ -1,209 +1,136 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import type { Database } from 'bun:sqlite'
 import { createAuth } from '../../src/auth'
+import type { AuthEnv, AuthInstance } from '../../src/auth'
 import { syncAdminFromEnv } from '../../src/routes/auth'
-import { createAuthDatabase } from '../helpers/auth-database'
+import { createTestDatabase } from '../helpers/test-database'
+import { createAuthEnv } from '../helpers/auth-env'
 
-const { ENV } = vi.hoisted(() => ({
-  ENV: {
-    SERVER: { PORT: 5003, HOST: '0.0.0.0', NODE_ENV: 'test' },
-    AUTH: {
-      SECRET: 'test-secret-for-encryption-key-32c',
-      TRUSTED_ORIGINS: 'http://localhost:5173,http://localhost:5003',
-      SECURE_COOKIES: false,
-      ADMIN_EMAIL: undefined as string | undefined,
-      ADMIN_PASSWORD: undefined as string | undefined,
-      ADMIN_PASSWORD_RESET: false,
-      GITHUB_CLIENT_ID: undefined as string | undefined,
-      GITHUB_CLIENT_SECRET: undefined as string | undefined,
-      GOOGLE_CLIENT_ID: undefined as string | undefined,
-      GOOGLE_CLIENT_SECRET: undefined as string | undefined,
-      DISCORD_CLIENT_ID: undefined as string | undefined,
-      DISCORD_CLIENT_SECRET: undefined as string | undefined,
-      PASSKEY_RP_ID: 'localhost',
-      PASSKEY_RP_NAME: 'OpenCode Manager',
-      PASSKEY_ORIGIN: 'http://localhost:5003',
-    },
-    LOGGING: { DEBUG: false, LOG_LEVEL: 'info' },
-  },
-}))
+const ORIGIN = 'http://localhost:5173'
 
-vi.mock('@opencode-manager/shared/config/env', () => ({
-  ENV,
-  getTrustedOrigins: () => ENV.AUTH.TRUSTED_ORIGINS
-    .split(',')
-    .map((origin: string) => origin.trim())
-    .filter((origin: string) => origin.length > 0),
-}))
-
-vi.mock('../../src/utils/logger', () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-}))
-
-function resetEnv(): void {
-  ENV.SERVER.PORT = 5003
-  ENV.AUTH.TRUSTED_ORIGINS = 'http://localhost:5173,http://localhost:5003'
-  ENV.AUTH.SECURE_COOKIES = false
-  ENV.AUTH.ADMIN_EMAIL = undefined
-  ENV.AUTH.ADMIN_PASSWORD = undefined
-  ENV.AUTH.GITHUB_CLIENT_ID = undefined
-  ENV.AUTH.GITHUB_CLIENT_SECRET = undefined
-  ENV.AUTH.GOOGLE_CLIENT_ID = undefined
-  ENV.AUTH.GOOGLE_CLIENT_SECRET = undefined
-  ENV.AUTH.DISCORD_CLIENT_ID = undefined
-  ENV.AUTH.DISCORD_CLIENT_SECRET = undefined
+function signUpRequest(email: string, password: string): Request {
+  return new Request(`${ORIGIN}/api/auth/sign-up/email`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: ORIGIN },
+    body: JSON.stringify({ email, password, name: 'Test' }),
+  })
 }
 
 describe('createAuth', () => {
+  let db: Database
+  let auth: AuthInstance
+
   beforeEach(() => {
-    resetEnv()
+    db = createTestDatabase()
+  })
+
+  afterEach(() => {
+    db.close()
   })
 
   it('rejects HTTP signup in admin mode while allowing internal admin provisioning and sign-in', async () => {
-    ENV.AUTH.ADMIN_EMAIL = 'admin@example.com'
-    ENV.AUTH.ADMIN_PASSWORD = 'admin-password'
-    const db = createAuthDatabase()
-    const auth = createAuth(db)
+    const env = createAuthEnv({ ADMIN_EMAIL: 'admin@example.com', ADMIN_PASSWORD: 'admin-password' })
+    auth = createAuth(db, env)
 
-    try {
-      for (const email of ['other@example.com', ENV.AUTH.ADMIN_EMAIL]) {
-        const response = await auth.handler(new Request('http://localhost:5173/api/auth/sign-up/email', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', origin: 'http://localhost:5173' },
-          body: JSON.stringify({ email, password: 'test-password', name: 'Test' }),
-        }))
-        expect(response.status).toBe(403)
-      }
-      expect(db.prepare('SELECT COUNT(*) AS count FROM "user"').get()).toEqual({ count: 0 })
-      await expect(auth.api.signUpEmail({
-        body: { email: 'other@example.com', password: 'test-password', name: 'Other' },
-      })).rejects.toThrow('Registration is disabled')
-
-      await syncAdminFromEnv(auth, db)
-      const response = await auth.handler(new Request('http://localhost:5173/api/auth/sign-in/email', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', origin: 'http://localhost:5173' },
-        body: JSON.stringify({ email: ENV.AUTH.ADMIN_EMAIL, password: ENV.AUTH.ADMIN_PASSWORD }),
-      }))
-      expect(response.status).toBe(200)
-      expect(db.prepare('SELECT COUNT(*) AS count FROM "user"').get()).toEqual({ count: 1 })
-    } finally {
-      db.close()
+    for (const email of ['other@example.com', env.ADMIN_EMAIL ?? '']) {
+      const response = await auth.handler(signUpRequest(email, 'test-password'))
+      expect(response.status).toBe(403)
     }
+    expect(db.prepare('SELECT COUNT(*) AS count FROM "user"').get()).toEqual({ count: 0 })
+    await expect(auth.api.signUpEmail({
+      body: { email: 'other@example.com', password: 'test-password', name: 'Other' },
+    })).rejects.toThrow('Registration is disabled')
+
+    await syncAdminFromEnv(auth, db, env)
+    const response = await auth.handler(new Request(`${ORIGIN}/api/auth/sign-in/email`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: ORIGIN },
+      body: JSON.stringify({ email: env.ADMIN_EMAIL, password: env.ADMIN_PASSWORD }),
+    }))
+    expect(response.status).toBe(200)
+    expect(db.prepare('SELECT COUNT(*) AS count FROM "user"').get()).toEqual({ count: 1 })
   }, 30000)
 
   it('allows signup without a complete preconfigured admin', async () => {
-    ENV.AUTH.ADMIN_EMAIL = 'admin@example.com'
-    const db = createAuthDatabase()
-    const auth = createAuth(db)
-    try {
-      const response = await auth.handler(new Request('http://localhost:5173/api/auth/sign-up/email', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', origin: 'http://localhost:5173' },
-        body: JSON.stringify({ email: 'other@example.com', password: 'test-password', name: 'Other' }),
-      }))
-      expect(response.status).toBe(200)
-    } finally {
-      db.close()
-    }
+    auth = createAuth(db, createAuthEnv({ ADMIN_EMAIL: 'admin@example.com' }))
+
+    const response = await auth.handler(signUpRequest('other@example.com', 'test-password'))
+
+    expect(response.status).toBe(200)
   })
 
   it('rejects a session cookie immediately after its session row is deleted', async () => {
-    const db = createAuthDatabase()
-    const auth = createAuth(db)
+    auth = createAuth(db, createAuthEnv())
 
-    try {
-      const signUpResponse = await auth.handler(new Request('http://localhost:5173/api/auth/sign-up/email', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', origin: 'http://localhost:5173' },
-        body: JSON.stringify({ email: 'revoked@example.com', password: 'test-password', name: 'Revoked' }),
-      }))
-      expect(signUpResponse.status).toBe(200)
+    const signUpResponse = await auth.handler(signUpRequest('revoked@example.com', 'test-password'))
+    expect(signUpResponse.status).toBe(200)
 
-      const setCookies = signUpResponse.headers.getSetCookie()
-      expect(setCookies.length).toBeGreaterThan(0)
-      const headers = new Headers({ cookie: setCookies.map((cookie) => cookie.split(';')[0]).join('; ') })
+    const setCookies = signUpResponse.headers.getSetCookie()
+    expect(setCookies.length).toBeGreaterThan(0)
+    const headers = new Headers({ cookie: setCookies.map((cookie) => cookie.split(';')[0]).join('; ') })
 
-      const session = await auth.api.getSession({ headers })
-      expect(session?.user.email).toBe('revoked@example.com')
+    const session = await auth.api.getSession({ headers })
+    expect(session?.user.email).toBe('revoked@example.com')
 
-      db.prepare('DELETE FROM "session" WHERE "userId" = ?').run(session!.user.id)
-      expect(db.prepare('SELECT COUNT(*) AS count FROM "session"').get()).toEqual({ count: 0 })
+    db.prepare('DELETE FROM "session" WHERE "userId" = ?').run(session?.user.id ?? '')
+    expect(db.prepare('SELECT COUNT(*) AS count FROM "session"').get()).toEqual({ count: 0 })
 
-      expect(await auth.api.getSession({ headers })).toBeNull()
-    } finally {
-      db.close()
-    }
+    expect(await auth.api.getSession({ headers })).toBeNull()
   }, 30000)
 
-  it('creates an auth instance without social providers and responds to requests', async () => {
-    const db = createAuthDatabase()
-    const auth = createAuth(db)
+  const providerCases: Array<{ label: string; overrides: Partial<AuthEnv>; expected: string[] }> = [
+    { label: 'no social credentials', overrides: {}, expected: [] },
+    {
+      label: 'complete credentials for every provider',
+      overrides: {
+        GITHUB_CLIENT_ID: 'github-id',
+        GITHUB_CLIENT_SECRET: 'github-secret',
+        GOOGLE_CLIENT_ID: 'google-id',
+        GOOGLE_CLIENT_SECRET: 'google-secret',
+        DISCORD_CLIENT_ID: 'discord-id',
+        DISCORD_CLIENT_SECRET: 'discord-secret',
+      },
+      expected: ['discord', 'github', 'google'],
+    },
+    {
+      label: 'only one half of each credential pair',
+      overrides: {
+        GITHUB_CLIENT_ID: 'github-id',
+        GOOGLE_CLIENT_SECRET: 'google-secret',
+        DISCORD_CLIENT_ID: 'discord-id',
+      },
+      expected: [],
+    },
+  ]
 
-    expect(typeof auth.api.getSession).toBe('function')
-    expect(auth.handler).toBeTypeOf('function')
+  it.each(providerCases)('configures social providers with $label', ({ overrides, expected }) => {
+    auth = createAuth(db, createAuthEnv(overrides))
 
-    const res = await auth.handler(new Request('http://localhost/api/auth/ok'))
-    expect(res).toBeInstanceOf(Response)
-
-    db.close()
+    expect(Object.keys(auth.options.socialProviders ?? {}).sort()).toEqual(expected)
   })
 
-  it('creates an auth instance when all social providers are configured', async () => {
-    ENV.AUTH.GITHUB_CLIENT_ID = 'github-id'
-    ENV.AUTH.GITHUB_CLIENT_SECRET = 'github-secret'
-    ENV.AUTH.GOOGLE_CLIENT_ID = 'google-id'
-    ENV.AUTH.GOOGLE_CLIENT_SECRET = 'google-secret'
-    ENV.AUTH.DISCORD_CLIENT_ID = 'discord-id'
-    ENV.AUTH.DISCORD_CLIENT_SECRET = 'discord-secret'
+  it('uses the first trusted origin as the base URL', () => {
+    auth = createAuth(db, createAuthEnv(), {
+      trustedOrigins: ['http://example.test', 'http://localhost:5003'],
+      port: 5003,
+    })
 
-    const db = createAuthDatabase()
-    const auth = createAuth(db)
-
-    expect(typeof auth.api.getSession).toBe('function')
-
-    const res = await auth.handler(new Request('http://localhost/api/auth/ok'))
-    expect(res).toBeInstanceOf(Response)
-
-    db.close()
+    expect(auth.options.baseURL).toBe('http://example.test')
+    expect(auth.options.trustedOrigins).toEqual(['http://example.test', 'http://localhost:5003'])
   })
 
-  it('ignores social providers with only one credential half configured', async () => {
-    ENV.AUTH.GITHUB_CLIENT_ID = 'github-id'
-    ENV.AUTH.GOOGLE_CLIENT_SECRET = 'google-secret'
-    ENV.AUTH.DISCORD_CLIENT_ID = 'discord-id'
+  it('falls back to the server port when no trusted origin is configured', () => {
+    auth = createAuth(db, createAuthEnv(), { trustedOrigins: [], port: 4321 })
 
-    const db = createAuthDatabase()
-    const auth = createAuth(db)
-
-    const res = await auth.handler(new Request('http://localhost/api/auth/ok'))
-    expect(res).toBeInstanceOf(Response)
-
-    db.close()
+    expect(auth.options.baseURL).toBe('http://localhost:4321')
   })
 
-  it('falls back to the localhost port when trusted origins are empty', async () => {
-    ENV.AUTH.TRUSTED_ORIGINS = ''
-    ENV.SERVER.PORT = 4321
-    ENV.AUTH.SECURE_COOKIES = true
+  it('serves auth requests through its handler', async () => {
+    auth = createAuth(db, createAuthEnv())
 
-    const db = createAuthDatabase()
-    const auth = createAuth(db)
+    const res = await auth.handler(new Request(`${ORIGIN}/api/auth/ok`))
 
-    const res = await auth.handler(new Request('http://localhost/api/auth/ok'))
     expect(res).toBeInstanceOf(Response)
-
-    db.close()
-  })
-
-  it('uses the first trusted origin as the base URL', async () => {
-    ENV.AUTH.TRUSTED_ORIGINS = ' http://example.test ,http://localhost:5003'
-
-    const db = createAuthDatabase()
-    const auth = createAuth(db)
-
-    const res = await auth.handler(new Request('http://example.test/api/auth/ok'))
-    expect(res).toBeInstanceOf(Response)
-
-    db.close()
+    expect(res.status).toBeLessThan(500)
   })
 })

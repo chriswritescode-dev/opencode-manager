@@ -1,9 +1,9 @@
-import { isRecord } from '@opencode-manager/shared/utils'
+import { parseJsonObject, type JsonObject } from '@opencode-manager/shared/utils'
 
-export type EnforcementRemovedSections = Record<string, unknown>
+export type EnforcementRemovedSections = JsonObject
 
-function mergeRecordSections(target: Record<string, unknown>, key: string, value: Record<string, unknown>): void {
-  const current = isRecord(target[key]) ? { ...(target[key] as Record<string, unknown>) } : {}
+function mergeRecordSections(target: JsonObject, key: string, value: JsonObject): void {
+  const current = { ...(parseJsonObject(target[key]) ?? {}) }
   for (const [name, entry] of Object.entries(value)) {
     if (current[name] === undefined) {
       current[name] = entry
@@ -12,11 +12,8 @@ function mergeRecordSections(target: Record<string, unknown>, key: string, value
   target[key] = current
 }
 
-export function restoreEnforcementSections(
-  config: Record<string, unknown>,
-  removed: EnforcementRemovedSections,
-): Record<string, unknown> {
-  const restored: Record<string, unknown> = { ...config }
+export function restoreEnforcementSections(config: JsonObject, removed: JsonObject): JsonObject {
+  const restored: JsonObject = { ...config }
 
   for (const [key, value] of Object.entries(removed)) {
     if (key === 'plugin') {
@@ -25,18 +22,17 @@ export function restoreEnforcementSections(
       }
       continue
     }
-    if (key === 'mcp' && isRecord(value)) {
-      mergeRecordSections(restored, 'mcp', value)
+    const valueSection = parseJsonObject(value)
+    if (key === 'mcp' && valueSection !== null) {
+      mergeRecordSections(restored, 'mcp', valueSection)
       continue
     }
-    if (key === 'provider' && isRecord(value)) {
-      mergeRecordSections(restored, 'provider', value)
+    if (key === 'provider' && valueSection !== null) {
+      mergeRecordSections(restored, 'provider', valueSection)
       continue
     }
     if (key === 'experimentalHook') {
-      const experimental = isRecord(restored.experimental)
-        ? { ...(restored.experimental as Record<string, unknown>) }
-        : {}
+      const experimental = { ...(parseJsonObject(restored.experimental) ?? {}) }
       if (experimental.hook === undefined) {
         experimental.hook = value
         restored.experimental = experimental

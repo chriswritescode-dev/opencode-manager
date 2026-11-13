@@ -1,11 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import {
+  SetSessionPermissionModeRequestSchema,
+  type SessionPermissionModeState,
+} from '@opencode-manager/shared/schemas'
+import type { FetchRoute, FetchRouteResult } from '@/test/fetchFake'
+import { renderWithProviders } from '@/test/render'
 import { PermissionModeToggle } from './PermissionModeToggle'
-import { useSessionPermissionMode, useSetSessionPermissionMode } from '@/hooks/useSessionPermissionMode'
-import type { SessionPermissionModeState } from '@opencode-manager/shared/schemas'
-
-vi.mock('@/hooks/useSessionPermissionMode')
 
 const baseState: SessionPermissionModeState = {
   sessionId: 'ses_1',
@@ -14,108 +16,87 @@ const baseState: SessionPermissionModeState = {
   lockedReason: null,
 }
 
-function mockHooks(overrides: {
-  data?: SessionPermissionModeState | undefined
-  state?: Partial<SessionPermissionModeState>
-  mutate?: ReturnType<typeof vi.fn>
-  isPending?: boolean
-  isError?: boolean
-} = {}) {
-  const data = 'data' in overrides ? overrides.data : { ...baseState, ...overrides.state }
-  vi.mocked(useSessionPermissionMode).mockReturnValue({
-    data,
-    isError: overrides.isError ?? false,
-  } as ReturnType<typeof useSessionPermissionMode>)
-  vi.mocked(useSetSessionPermissionMode).mockReturnValue({
-    mutate: overrides.mutate ?? vi.fn(),
-    isPending: overrides.isPending ?? false,
-  } as unknown as ReturnType<typeof useSetSessionPermissionMode>)
+function renderToggle(initial: SessionPermissionModeState, getRespond?: FetchRoute['respond']) {
+  let state = initial
+  const modeUrl = `/api/session-permission-modes/${initial.sessionId}`
+
+  const routes: FetchRoute[] = [
+    {
+      method: 'GET',
+      path: modeUrl,
+      respond: getRespond ?? (() => ({ json: state })),
+    },
+    {
+      method: 'PUT',
+      path: modeUrl,
+      respond: (request) => {
+        const parsed = SetSessionPermissionModeRequestSchema.safeParse(request.body)
+        if (parsed.success) state = { ...state, mode: parsed.data.mode }
+        return { json: state }
+      },
+    },
+  ]
+
+  return renderWithProviders(<PermissionModeToggle sessionID={initial.sessionId} directory="/repo" />, {
+    auth: false,
+    theme: false,
+    tts: false,
+    toaster: false,
+    serverId: 'srv_remote',
+    fetchRoutes: routes,
+  })
 }
 
 describe('PermissionModeToggle', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  it('renders the ask state', () => {
-    mockHooks()
-    render(<PermissionModeToggle sessionID="ses_1" directory="/repo" />)
-
-    expect(screen.getByRole('button', { name: 'Permissions: follow configured rules' })).toBeEnabled()
-  })
-
-  it('switches to accept-everything with the directory when clicked', async () => {
+  it.each([
+    ['ask', 'Permissions: follow configured rules', 'auto'],
+    ['auto', 'Permissions: auto-accept all', 'ask'],
+  ] as const)('switches a loaded %s mode to %s through the current server', async (mode, label, nextMode) => {
     const user = userEvent.setup()
-    const mutate = vi.fn()
-    mockHooks({ mutate })
-    render(<PermissionModeToggle sessionID="ses_1" directory="/repo" />)
+    const { fetchFake } = renderToggle({ ...baseState, mode })
 
-    await user.click(screen.getByRole('button', { name: 'Permissions: follow configured rules' }))
+    await user.click(await screen.findByRole('button', { name: label }))
 
-    expect(mutate).toHaveBeenCalledWith({ directory: '/repo', mode: 'auto' })
+    await waitFor(() =>
+      expect(fetchFake.lastRequest('PUT', '/api/session-permission-modes/ses_1')?.body).toEqual({
+        directory: '/repo',
+        mode: nextMode,
+        serverId: 'srv_remote',
+      }),
+    )
   })
 
-  it('switches back to ask when already accepting everything', async () => {
+  it.each([
+    ['child', 'Inherited from parent session'],
+    ['schedule', "Scheduled runs use the schedule's permission configuration"],
+  ] as const)('is disabled and labelled for %s-locked sessions', async (lockedReason, label) => {
+    renderToggle({ ...baseState, mode: 'auto', lockedReason })
+
+    expect(await screen.findByRole('button', { name: label })).toBeDisabled()
+  })
+
+  it('stays disabled and skips the write while the mode read is pending', async () => {
     const user = userEvent.setup()
-    const mutate = vi.fn()
-    mockHooks({ state: { mode: 'auto' }, mutate })
-    render(<PermissionModeToggle sessionID="ses_1" directory="/repo" />)
-
-    await user.click(screen.getByRole('button', { name: 'Permissions: auto-accept all' }))
-
-    expect(mutate).toHaveBeenCalledWith({ directory: '/repo', mode: 'ask' })
-  })
-
-  it('is disabled and labelled as locked for child sessions', () => {
-    mockHooks({ state: { lockedReason: 'child', mode: 'auto' } })
-    render(<PermissionModeToggle sessionID="ses_child" directory="/repo" />)
-
-    const button = screen.getByRole('button', { name: 'Inherited from parent session' })
-    expect(button).toBeDisabled()
-  })
-
-  it('is disabled and labelled for schedule-run sessions', () => {
-    mockHooks({ state: { lockedReason: 'schedule', mode: 'ask' } })
-    render(<PermissionModeToggle sessionID="ses_sched" directory="/repo" />)
-
-    const button = screen.getByRole('button', { name: "Scheduled runs use the schedule's permission configuration" })
-    expect(button).toBeDisabled()
-  })
-
-  it('cannot mutate while the mode read is still loading', async () => {
-    const user = userEvent.setup()
-    const mutate = vi.fn()
-    mockHooks({ data: undefined, mutate })
-    render(<PermissionModeToggle sessionID="ses_1" directory="/repo" />)
+    const { fetchFake } = renderToggle(
+      baseState,
+      () => new Promise<FetchRouteResult>(() => undefined),
+    )
 
     const button = screen.getByRole('button', { name: 'Permissions: loading' })
     expect(button).toBeDisabled()
 
     await user.click(button)
-    expect(mutate).not.toHaveBeenCalled()
+    expect(fetchFake.findRequests('PUT', '/api/session-permission-modes/ses_1')).toHaveLength(0)
   })
 
-  it('cannot mutate and reports unavailable when the mode read failed', async () => {
+  it('stays disabled and reports unavailable when the mode read fails', async () => {
     const user = userEvent.setup()
-    const mutate = vi.fn()
-    mockHooks({ data: undefined, isError: true, mutate })
-    render(<PermissionModeToggle sessionID="ses_1" directory="/repo" />)
+    const { fetchFake } = renderToggle(baseState, () => ({ status: 500, json: { error: 'boom' } }))
 
-    const button = screen.getByRole('button', { name: 'Permissions: unavailable' })
+    const button = await screen.findByRole('button', { name: 'Permissions: unavailable' })
     expect(button).toBeDisabled()
 
     await user.click(button)
-    expect(mutate).not.toHaveBeenCalled()
-  })
-
-  it('switches a loaded auto mode back to ask when clicked', async () => {
-    const user = userEvent.setup()
-    const mutate = vi.fn()
-    mockHooks({ data: { ...baseState, mode: 'auto' }, mutate })
-    render(<PermissionModeToggle sessionID="ses_1" directory="/repo" />)
-
-    await user.click(screen.getByRole('button', { name: 'Permissions: auto-accept all' }))
-
-    expect(mutate).toHaveBeenCalledWith({ directory: '/repo', mode: 'ask' })
+    expect(fetchFake.findRequests('PUT', '/api/session-permission-modes/ses_1')).toHaveLength(0)
   })
 })

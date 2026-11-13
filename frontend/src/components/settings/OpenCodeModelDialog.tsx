@@ -13,9 +13,9 @@ import { Combobox } from '@/components/ui/combobox'
 import { Label } from '@/components/ui/label'
 import { RefreshCw, Loader2 } from 'lucide-react'
 import { settingsApi } from '@/api/settings'
-import { isRecord } from '@opencode-manager/shared/utils'
 import type { OpenCodeProviderConfig, OpenCodeProviderModelConfig } from '@opencode-manager/shared/opencode'
 import type { OpenCodeProviderModelPatch } from '@/api/types/settings'
+import { JsonObjectSchema, parseJsonText, type JsonObject, type JsonValue } from '@opencode-manager/shared/utils'
 
 const handledModelKeys = new Set([
   'modelID',
@@ -31,89 +31,70 @@ const handledModelKeys = new Set([
   'limit',
 ])
 
-type JsonObject = Record<string, unknown>
+const stringRecordSchema = z.record(z.string(), z.string())
 
-/**
- * Parses JSON text, returning `null` instead of throwing when the input is
- * malformed.
- */
-function parseJson(value: string): unknown {
-  try {
-    return JSON.parse(value) as unknown
-  } catch {
-    return null
-  }
+const costEntrySchema = z.object({
+  tier: z.object({ type: z.literal('context'), size: z.number() }).optional(),
+  input: z.number(),
+  output: z.number(),
+  cache: z.object({ read: z.number().optional(), write: z.number().optional() }).optional(),
+})
+
+const costSchema = z.union([costEntrySchema, z.array(costEntrySchema)])
+
+const variantSchema = z.object({
+  id: z.string(),
+  settings: JsonObjectSchema.optional(),
+  headers: stringRecordSchema.optional(),
+  body: JsonObjectSchema.optional(),
+})
+
+const variantsSchema = z.array(variantSchema)
+
+type ModelCost = z.infer<typeof costSchema>
+
+type ModelVariant = z.infer<typeof variantsSchema>[number]
+
+function parseJson(value: string): JsonValue | undefined {
+  return parseJsonText(value) ?? undefined
 }
 
-/**
- * Parses JSON text and returns it only when it is a plain object, so arrays,
- * primitives, and malformed input all yield `null`.
- */
-function parseJsonObject(value: string): JsonObject | null {
-  const parsed = parseJson(value)
-  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-    return parsed as JsonObject
-  }
-  return null
+function parseJsonObject(value: string): JsonObject | undefined {
+  const parsed = JsonObjectSchema.safeParse(parseJson(value))
+  return parsed.success ? parsed.data : undefined
 }
 
-/**
- * Parses JSON text into an object or array, returning `null` for primitives and
- * malformed input; callers that need one container kind narrow the result.
- */
-function parseJsonContainer(value: string): JsonObject | unknown[] | null {
-  const parsed = parseJson(value)
-  if (Array.isArray(parsed)) return parsed
-  if (parsed && typeof parsed === 'object') return parsed as JsonObject
-  return null
-}
-
-/**
- * Parses JSON text and returns it only when it is an array, so object-shaped or
- * malformed input yields `null`.
- */
-function parseJsonArray(value: string): unknown[] | null {
-  const parsed = parseJson(value)
-  return Array.isArray(parsed) ? parsed : null
-}
-
-/**
- * Serializes a value as indented JSON for an editable text field, returning an
- * empty string for nullish input and for objects with no keys.
- */
-function stringifyJson(value: unknown): string {
-  if (!value || (typeof value === 'object' && !Array.isArray(value) && Object.keys(value as JsonObject).length === 0)) {
+function stringifyJson(value: JsonValue | undefined): string {
+  const object = JsonObjectSchema.safeParse(value)
+  if (!value || (object.success && Object.keys(object.data).length === 0)) {
     return ''
   }
 
   return JSON.stringify(value, null, 2)
 }
 
-/**
- * Parses an optional JSON object field, treating blank input as absent and
- * mapping invalid or non-object values to `undefined` so the patch omits them.
- */
 function parseOptionalJsonField(value: string): JsonObject | undefined {
   if (!value.trim()) return undefined
-  return parseJsonObject(value) ?? undefined
+  return parseJsonObject(value)
 }
 
-/**
- * Parses an optional field holding either a JSON object or array, returning
- * `undefined` for blank, primitive, or malformed input.
- */
-function parseOptionalJsonContainerField(value: string): JsonObject | unknown[] | undefined {
+
+function parseOptionalCostField(value: string): ModelCost | undefined {
   if (!value.trim()) return undefined
-  return parseJsonContainer(value) ?? undefined
+  const parsed = costSchema.safeParse(parseJson(value))
+  return parsed.success ? parsed.data : undefined
 }
 
-/**
- * Parses an optional JSON array field, returning `undefined` when the field is
- * blank or does not hold an array.
- */
-function parseOptionalJsonArrayField(value: string): unknown[] | undefined {
+function parseOptionalVariantsField(value: string): ModelVariant[] | undefined {
   if (!value.trim()) return undefined
-  return parseJsonArray(value) ?? undefined
+  const parsed = variantsSchema.safeParse(parseJson(value))
+  return parsed.success ? parsed.data : undefined
+}
+
+function parseOptionalHeadersField(value: string): Record<string, string> | undefined {
+  if (!value.trim()) return undefined
+  const parsed = stringRecordSchema.safeParse(parseJson(value))
+  return parsed.success ? parsed.data : undefined
 }
 
 function parseOptionalNumber(value: string): number | undefined {
@@ -122,20 +103,19 @@ function parseOptionalNumber(value: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined
 }
 
-/**
- * Recursively diffs the previously stored model config against the next one and
- * replaces each dropped key with a merge-patch `null` so the server removes it.
- * Values are returned untouched unless both sides are objects.
- */
-function withRemovedKeysAsNull(previous: unknown, next: unknown): unknown {
-  if (!isRecord(previous) || !isRecord(next)) return next
+function withRemovedKeysAsNull(previous: JsonValue, next: JsonObject): JsonObject {
+  const previousObject = JsonObjectSchema.safeParse(previous)
+  if (!previousObject.success) return next
 
-  const patch: Record<string, unknown> = {}
-  for (const key of Object.keys(previous)) {
+  const patch: JsonObject = { ...next }
+  for (const key of Object.keys(previousObject.data)) {
     if (!(key in next)) patch[key] = null
   }
   for (const [key, value] of Object.entries(next)) {
-    patch[key] = withRemovedKeysAsNull(previous[key], value)
+    const nestedNext = JsonObjectSchema.safeParse(value)
+    if (nestedNext.success) {
+      patch[key] = withRemovedKeysAsNull(previousObject.data[key], nestedNext.data)
+    }
   }
   return patch
 }
@@ -152,53 +132,32 @@ function prettifyModelName(modelId: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-/**
- * Builds a schema field for optional JSON object text: blank input passes, and
- * any other value must parse as a plain object or an issue named after `label`
- * is reported.
- */
+function jsonField<T>(label: string, description: string, parse: (value: string) => T | undefined) {
+  return z.string().superRefine((value, ctx) => {
+    if (!value.trim()) return
+    if (parse(value) === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `${label} must be ${description}`,
+      })
+    }
+  })
+}
+
 function jsonObjectField(label: string) {
-  return z.string().superRefine((value, ctx) => {
-    if (!value.trim()) return
-    if (!parseJsonObject(value)) {
-      ctx.addIssue({
-        code: 'custom',
-        message: `${label} must be a valid JSON object`,
-      })
-    }
-  })
+  return jsonField(label, 'a valid JSON object', parseJsonObject)
 }
 
-/**
- * Builds a form schema field that accepts blank input but rejects any non-blank
- * value that is not a JSON object or array.
- */
-function jsonContainerField(label: string) {
-  return z.string().superRefine((value, ctx) => {
-    if (!value.trim()) return
-    if (!parseJsonContainer(value)) {
-      ctx.addIssue({
-        code: 'custom',
-        message: `${label} must be a valid JSON object or array`,
-      })
-    }
-  })
+function stringRecordField(label: string) {
+  return jsonField(label, 'a valid JSON object of strings', parseOptionalHeadersField)
 }
 
-/**
- * Builds a form schema field that accepts blank input but rejects any non-blank
- * value that is not a valid JSON array.
- */
-function jsonArrayField(label: string) {
-  return z.string().superRefine((value, ctx) => {
-    if (!value.trim()) return
-    if (!parseJsonArray(value)) {
-      ctx.addIssue({
-        code: 'custom',
-        message: `${label} must be a valid JSON array`,
-      })
-    }
-  })
+function costField(label: string) {
+  return jsonField(label, 'a valid cost object or array', parseOptionalCostField)
+}
+
+function variantsField(label: string) {
+  return jsonField(label, 'a valid variants array', parseOptionalVariantsField)
 }
 
 const modelFormSchema = z.object({
@@ -213,10 +172,10 @@ const modelFormSchema = z.object({
   inputLimit: z.string(),
   outputLimit: z.string(),
   settingsJson: jsonObjectField('Settings'),
-  headersJson: jsonObjectField('Headers'),
+  headersJson: stringRecordField('Headers'),
   capabilitiesJson: jsonObjectField('Capabilities'),
-  costJson: jsonContainerField('Cost'),
-  variantsJson: jsonArrayField('Variants'),
+  costJson: costField('Cost'),
+  variantsJson: variantsField('Variants'),
   extraJson: jsonObjectField('Advanced fields'),
   createNewProvider: z.boolean(),
   newProviderType: z.enum(['api', 'npm']),
@@ -279,12 +238,6 @@ interface OpenCodeModelDialogProps {
   }
 }
 
-/**
- * Renders the create/edit model dialog for a provider, including provider
- * selection or new-provider fields, debounced model discovery from the provider
- * base URL, limits, and free-form JSON fields for the remaining model settings.
- * Values reset whenever the dialog opens for a different target.
- */
 export function OpenCodeModelDialog({
   open,
   onOpenChange,
@@ -378,7 +331,8 @@ export function OpenCodeModelDialog({
       return watchedNewProviderBaseUrl?.trim() || ''
     }
     const baseURL = existingProviders?.[watchedProviderId]?.settings?.baseURL
-    return typeof baseURL === 'string' ? baseURL.trim() : ''
+    const trimmedBaseURL = z.string().safeParse(baseURL)
+    return trimmedBaseURL.success ? trimmedBaseURL.data.trim() : ''
   }, [createNewProvider, watchedNewProviderBaseUrl, watchedProviderId, existingProviders])
 
   const discoverModels = useCallback(async (forceRefresh = false) => {
@@ -447,18 +401,11 @@ export function OpenCodeModelDialog({
     }
   }, [open, resetKey, form, getDefaultValues])
 
-  /**
-   * Converts the validated form values into a model patch, parsing optional JSON
-   * and numeric fields and nulling keys cleared while editing, then passes the
-   * patch and any new provider config to `onSubmit` before resetting and closing.
-   */
   const handleSubmit = (values: ModelFormValues) => {
     const extra = parseOptionalJsonField(values.extraJson)
-    const settings = parseOptionalJsonField(values.settingsJson)
-    const headers = parseOptionalJsonField(values.headersJson)
-    const capabilities = parseOptionalJsonField(values.capabilitiesJson)
-    const cost = parseOptionalJsonContainerField(values.costJson)
-    const variants = parseOptionalJsonArrayField(values.variantsJson)
+    const headers = parseOptionalHeadersField(values.headersJson)
+    const cost = parseOptionalCostField(values.costJson)
+    const variants = parseOptionalVariantsField(values.variantsJson)
 
     const builtModel: OpenCodeProviderModelPatch = {
       ...(extra ?? {}),
@@ -472,22 +419,24 @@ export function OpenCodeModelDialog({
     const contextLimit = parseOptionalNumber(values.contextLimit)
     const inputLimit = parseOptionalNumber(values.inputLimit)
     const outputLimit = parseOptionalNumber(values.outputLimit)
-    builtModel.limit = contextLimit !== undefined || inputLimit !== undefined || outputLimit !== undefined
-      ? {
-          ...(contextLimit !== undefined ? { context: contextLimit } : {}),
-          ...(inputLimit !== undefined ? { input: inputLimit } : {}),
-          ...(outputLimit !== undefined ? { output: outputLimit } : {}),
-        }
-      : null
+    if (contextLimit !== undefined || inputLimit !== undefined || outputLimit !== undefined) {
+      const limit: NonNullable<OpenCodeProviderModelConfig['limit']> = {}
+      if (contextLimit !== undefined) limit.context = contextLimit
+      if (inputLimit !== undefined) limit.input = inputLimit
+      if (outputLimit !== undefined) limit.output = outputLimit
+      builtModel.limit = limit
+    } else {
+      builtModel.limit = null
+    }
 
-    builtModel.settings = (settings as OpenCodeProviderModelConfig['settings'] | undefined) ?? null
-    builtModel.headers = (headers as Record<string, string> | undefined) ?? null
-    builtModel.capabilities = (capabilities as OpenCodeProviderModelConfig['capabilities'] | undefined) ?? null
-    builtModel.cost = (cost as OpenCodeProviderModelConfig['cost'] | undefined) ?? null
-    builtModel.variants = (variants as OpenCodeProviderModelConfig['variants'] | undefined) ?? null
+    builtModel.settings = parseOptionalJsonField(values.settingsJson) ?? null
+    builtModel.headers = headers ?? null
+    builtModel.capabilities = parseOptionalJsonField(values.capabilitiesJson) ?? null
+    builtModel.cost = cost ?? null
+    builtModel.variants = variants ?? null
 
-    const model = editingModel
-      ? withRemovedKeysAsNull(editingModel.model, builtModel) as OpenCodeProviderModelPatch
+    const model: OpenCodeProviderModelPatch = editingModel
+      ? { ...builtModel, ...withRemovedKeysAsNull(editingModel.model, builtModel) }
       : builtModel
 
     let newProvider: NewProviderConfig | undefined

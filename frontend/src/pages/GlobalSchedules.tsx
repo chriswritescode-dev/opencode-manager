@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import { z } from 'zod'
 import { useNavigate } from 'react-router-dom'
 import {
   useAllSchedules,
@@ -24,16 +25,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CalendarClock, Loader2, Plus, ArrowLeft, SlidersHorizontal } from 'lucide-react'
 
 import { useScheduleUrlState } from '@/hooks/useScheduleUrlState'
-import type { ScheduleTab } from '@/hooks/useScheduleUrlState'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 
 import type { ScheduleJobWithRepo, ScheduleRunWithContext } from '@/api/schedules'
 import { Combobox } from '@/components/ui/combobox'
 import { getRepoPath, getServerProjectPath } from '@/lib/navigation'
 
-type StatusFilter = 'all' | 'enabled' | 'disabled'
-type ScheduleModeFilter = 'all' | 'cron' | 'interval'
-type SortOption = 'nextRun' | 'name' | 'repo'
+const statusFilterSchema = z.enum(['all', 'enabled', 'disabled'])
+const scheduleModeFilterSchema = z.enum(['all', 'cron', 'interval'])
+const sortOptionSchema = z.enum(['nextRun', 'name', 'repo'])
+const runSortOptionSchema = z.enum(['startedAt', 'jobName', 'duration'])
+const scheduleTabSchema = z.enum(['jobs', 'detail', 'runs', 'prompts'])
+
+type StatusFilter = z.infer<typeof statusFilterSchema>
+type ScheduleModeFilter = z.infer<typeof scheduleModeFilterSchema>
+type SortOption = z.infer<typeof sortOptionSchema>
 
 function jobBucket(job: ScheduleJobWithRepo): string {
   return job.repoId === null ? `server:${job.serverId ?? ''}:${job.repoPath}` : job.repoPath
@@ -243,19 +249,19 @@ export function GlobalSchedules() {
     { value: 'all', label: 'All Status' },
     { value: 'enabled', label: 'Enabled' },
     { value: 'disabled', label: 'Disabled' },
-  ], [])
+  ] as const, [])
 
   const modeOptions = useMemo(() => [
     { value: 'all', label: 'All Modes' },
     { value: 'cron', label: 'Cron' },
     { value: 'interval', label: 'Interval' },
-  ], [])
+  ] as const, [])
 
   const sortOptions = useMemo(() => [
     { value: 'nextRun', label: 'Next Run' },
     { value: 'name', label: 'Name' },
     { value: 'repo', label: 'Repository' },
-  ], [])
+  ] as const, [])
 
   const runStatusOptions = useMemo(() => [
     { value: 'all', label: 'All Status' },
@@ -460,7 +466,10 @@ export function GlobalSchedules() {
         </div>
       </Header>
 
-      <Tabs value={scheduleTab} onValueChange={(v) => setScheduleTab(v as ScheduleTab)} className="flex-1 min-h-0 flex flex-col overflow-hidden">
+      <Tabs value={scheduleTab} onValueChange={(v) => {
+        const parsedTab = scheduleTabSchema.safeParse(v)
+        if (parsedTab.success) setScheduleTab(parsedTab.data)
+      }} className="flex-1 min-h-0 flex flex-col overflow-hidden">
         <div className="border-b border-border px-4">
           <TabsList className="h-auto gap-0 rounded-none border-0 bg-transparent p-0">
             <TabsTrigger value="jobs" className="rounded-none border-b-2 border-transparent px-4 py-2.5 text-sm data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
@@ -522,7 +531,7 @@ export function GlobalSchedules() {
                       checked={statusFilter === opt.value}
                       onCheckedChange={(checked) => {
                         if (checked) {
-                          setStatusFilter(opt.value as StatusFilter)
+                          setStatusFilter(opt.value)
                         } else {
                           setStatusFilter('all')
                         }
@@ -547,7 +556,7 @@ export function GlobalSchedules() {
                       checked={scheduleModeFilter === opt.value}
                       onCheckedChange={(checked) => {
                         if (checked) {
-                          setScheduleModeFilter(opt.value as ScheduleModeFilter)
+                          setScheduleModeFilter(opt.value)
                         } else {
                           setScheduleModeFilter('all')
                         }
@@ -559,7 +568,10 @@ export function GlobalSchedules() {
                   ))}
                   <DropdownMenuSeparator />
                   <DropdownMenuLabel>Sort</DropdownMenuLabel>
-                  <DropdownMenuRadioGroup value={sortOption} onValueChange={(v) => setSortOption(v as SortOption)}>
+                  <DropdownMenuRadioGroup value={sortOption} onValueChange={(v) => {
+                    const parsedSort = sortOptionSchema.safeParse(v)
+                    if (parsedSort.success) setSortOption(parsedSort.data)
+                  }}>
                     {sortOptions.map((opt) => (
                       <DropdownMenuRadioItem
                         key={opt.value}
@@ -728,7 +740,10 @@ export function GlobalSchedules() {
                   ))}
                   <DropdownMenuSeparator />
                   <DropdownMenuLabel>Sort</DropdownMenuLabel>
-                  <DropdownMenuRadioGroup value={runSortOption} onValueChange={(v) => setRunSortOption(v as 'startedAt' | 'jobName' | 'duration')}>
+                  <DropdownMenuRadioGroup value={runSortOption} onValueChange={(v) => {
+                    const parsedRunSort = runSortOptionSchema.safeParse(v)
+                    if (parsedRunSort.success) setRunSortOption(parsedRunSort.data)
+                  }}>
                     {runSortOptions.map((opt) => (
                       <DropdownMenuRadioItem
                         key={opt.value}

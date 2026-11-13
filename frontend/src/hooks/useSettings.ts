@@ -17,13 +17,10 @@ export function useSettings(userId = 'default', options: { enabled?: boolean } =
     mutationFn: (updates: Partial<UserPreferences>) =>
       settingsApi.updateSettings({ preferences: updates }, userId),
     onMutate: async (updates) => {
-      // Cancel outgoing refetches
       await queryClient.cancelQueries({ queryKey: ['settings', userId] })
       
-      // Snapshot current value
       const previousData = queryClient.getQueryData(['settings', userId])
       
-      // Optimistically update cache immediately
       queryClient.setQueryData(['settings', userId], (old: typeof data) => {
         if (!old) return old
         return {
@@ -39,7 +36,6 @@ export function useSettings(userId = 'default', options: { enabled?: boolean } =
       return { previousData }
     },
     onError: (_err, _updates, context) => {
-      // Rollback on error
       if (context?.previousData) {
         queryClient.setQueryData(['settings', userId], context.previousData)
       }

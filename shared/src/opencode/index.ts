@@ -1,4 +1,5 @@
 import { OpenCode } from '@opencode/client'
+import { z } from 'zod'
 import { OPENCODE_SERVER_USERNAME } from '../schemas/opencode-servers'
 
 export { OPENCODE_SERVER_USERNAME }
@@ -56,9 +57,19 @@ export type {
   OpenCodeAgentConfig,
   OpenCodeCommandConfig,
   OpenCodeConfigInfo,
+  OpenCodeManagedConfigSections,
   OpenCodePermissionRule,
   OpenCodeProviderConfig,
   OpenCodeProviderModelConfig,
+} from './config'
+
+export {
+  OpenCodeAgentConfigSchema,
+  OpenCodeCommandConfigSchema,
+  OpenCodeManagedConfigSectionsSchema,
+  OpenCodePermissionRuleSchema,
+  OpenCodeProviderConfigSchema,
+  OpenCodeProviderModelConfigSchema,
 } from './config'
 
 export {
@@ -72,7 +83,7 @@ export {
   readSessionGoal,
 } from './goal'
 
-export type { GoalState, GoalStatus, SessionGoalRead } from './goal'
+export type { GoalState, GoalStatus, SessionGoalRead, SessionGoalRpc } from './goal'
 
 export { configModelRef, formatOpenCodeModelRef, parseOpenCodeModelRef, selectConfiguredModelRef } from './modelRef'
 
@@ -211,10 +222,9 @@ export function createOpenCodeApi(options: OpenCodeApiOptions): OpenCodeApi {
   return OpenCode.make({
     baseUrl: options.baseUrl,
     fetch: options.fetch,
-    headers: {
-      ...options.headers,
-      ...(options.password ? { Authorization: buildOpenCodeBasicAuth(options.password) } : {}),
-    },
+    headers: options.password
+      ? { ...options.headers, Authorization: buildOpenCodeBasicAuth(options.password) }
+      : options.headers,
   })
 }
 
@@ -226,7 +236,11 @@ export function openCodeLocation(directory: string | undefined): OpenCodeLocatio
   return directory ? { location: { directory } } : undefined
 }
 
-const OPENCODE_ERROR_STATUS_BY_TAG: Record<string, number> = {
+interface OpenCodeErrorStatusByTag {
+  [tag: string]: number
+}
+
+const OPENCODE_ERROR_STATUS_BY_TAG: OpenCodeErrorStatusByTag = {
   InvalidRequestError: 400,
   RpcError: 400,
   InvalidCursorError: 400,
@@ -259,16 +273,19 @@ const OPENCODE_ERROR_STATUS_BY_TAG: Record<string, number> = {
   ServiceUnavailableError: 503,
 }
 
-export function openCodeErrorStatus(error: unknown): number | undefined {
-  if (error === null || typeof error !== 'object') return undefined
+const OpenCodeErrorIdentitySchema = z.object({
+  _tag: z.string().optional(),
+  name: z.string().optional(),
+})
 
-  const tag = (error as { _tag?: unknown })._tag
-  if (typeof tag === 'string' && OPENCODE_ERROR_STATUS_BY_TAG[tag] !== undefined) {
-    return OPENCODE_ERROR_STATUS_BY_TAG[tag]
+export function openCodeErrorStatus(cause: unknown): number | undefined {
+  const identity = OpenCodeErrorIdentitySchema.safeParse(cause)
+  if (!identity.success) return undefined
+
+  const { _tag, name } = identity.data
+  if (_tag !== undefined && OPENCODE_ERROR_STATUS_BY_TAG[_tag] !== undefined) {
+    return OPENCODE_ERROR_STATUS_BY_TAG[_tag]
   }
-
-  const name = (error as { name?: unknown }).name
-  if (typeof name === 'string') return OPENCODE_ERROR_STATUS_BY_TAG[name]
-
+  if (name !== undefined) return OPENCODE_ERROR_STATUS_BY_TAG[name]
   return undefined
 }

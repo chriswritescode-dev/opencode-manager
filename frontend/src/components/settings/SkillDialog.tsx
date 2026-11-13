@@ -9,7 +9,7 @@ import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, For
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { getRepoDisplayName } from '@/lib/utils'
-import type { SkillFileInfo, CreateSkillRequest, UpdateSkillRequest, SkillScope } from '@opencode-manager/shared'
+import type { SkillFileInfo, CreateSkillRequest } from '@opencode-manager/shared'
 import type { Repo } from '@/api/types'
 import { listRepos } from '@/api/repos'
 import { useQuery } from '@tanstack/react-query'
@@ -29,7 +29,7 @@ type SkillFormValues = z.infer<typeof skillFormSchema>
 interface SkillDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSubmit: (data: CreateSkillRequest | (UpdateSkillRequest & { name: string; scope: SkillScope; repoId?: number })) => void
+  onSubmit: (data: CreateSkillRequest) => void
   editingSkill?: SkillFileInfo | null
 }
 

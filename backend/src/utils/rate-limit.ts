@@ -8,6 +8,11 @@ interface BucketState {
   lastRefill: number
 }
 
+export interface RateLimitDecision {
+  allowed: boolean
+  retryAfterMs: number
+}
+
 export class TokenBucketRateLimiter {
   private buckets: Map<string, BucketState>
 
@@ -18,7 +23,7 @@ export class TokenBucketRateLimiter {
     this.buckets = new Map()
   }
 
-  tryConsume(key: string, cost = 1): { allowed: boolean; retryAfterMs: number } {
+  tryConsume(key: string, cost = 1): RateLimitDecision {
     const bucket = this.buckets.get(key) ?? this.createBucket(key)
 
     const elapsed = this.now() - bucket.lastRefill

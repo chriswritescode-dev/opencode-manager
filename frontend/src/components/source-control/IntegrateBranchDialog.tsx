@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { z } from 'zod'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -13,9 +14,15 @@ import { useRepoBranches } from '@/hooks/useRepoBranches'
 import { BranchCombobox } from '@/components/repo/BranchCombobox'
 import { setRepoGitStatusCaches } from '@/lib/queryInvalidation'
 import { GitOperationBanner } from './GitOperationBanner'
+import { GitOperationStateSchema } from '@opencode-manager/shared/schemas'
 import type { GitOperationState } from '@opencode-manager/shared'
 
 type IntegrateStrategy = 'merge' | 'cherry-pick'
+
+const mergeConflictDetailsSchema = z.object({
+  targetRepoId: z.number().optional(),
+  operation: GitOperationStateSchema.optional(),
+})
 
 const INTEGRATE_STRATEGY_OPTIONS: Array<RadioOption<IntegrateStrategy>> = [
   { value: 'merge', label: 'Merge commit', description: 'Integrate all commits with a merge commit.' },
@@ -95,10 +102,10 @@ export function IntegrateBranchDialog({ repoId, sourceBranch, open, onOpenChange
         onSuccess: () => onOpenChange(false),
         onError: (error) => {
           if (error instanceof FetchError && error.code === 'MERGE_CONFLICT') {
-            const details = error.details as { targetRepoId?: number; operation?: GitOperationState } | undefined
-            if (details?.targetRepoId !== undefined && details.operation) {
-              setConflictTargetRepoId(details.targetRepoId)
-              setConflictSnapshot(details.operation)
+            const details = mergeConflictDetailsSchema.safeParse(error.details)
+            if (details.success && details.data.targetRepoId !== undefined && details.data.operation) {
+              setConflictTargetRepoId(details.data.targetRepoId)
+              setConflictSnapshot(details.data.operation)
               setConflictStartedAt(Date.now())
               return
             }

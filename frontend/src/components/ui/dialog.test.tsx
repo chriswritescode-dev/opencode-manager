@@ -1,15 +1,10 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { useState } from "react";
-import { render, screen, act, fireEvent, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { stubMatchMedia } from "@/test/test-utils";
-import { Combobox } from "./combobox";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "./dialog";
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { useState } from 'react'
+import { render, screen, act, fireEvent, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { installMatchMedia } from '@/test/browserFakes'
+import { Combobox } from './combobox'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from './dialog'
 
 function withMobileViewport(fn: () => void) {
   const originalWidth = window.innerWidth
@@ -26,7 +21,33 @@ function withMobileViewport(fn: () => void) {
   })
 }
 
-describe("DialogContent", () => {
+interface TouchPoint {
+  clientX: number
+  clientY: number
+}
+
+function swipeHorizontally(element: Element, fromX: number, toX: number, clientY = 100) {
+  const start: TouchPoint = { clientX: fromX, clientY }
+  const end: TouchPoint = { clientX: toX, clientY }
+  fireEvent.touchStart(element, { touches: [start], changedTouches: [start] })
+  fireEvent.touchMove(element, { touches: [end], changedTouches: [end] })
+  fireEvent.touchEnd(element, { touches: [], changedTouches: [end] })
+}
+
+function dragHorizontally(element: Element, fromX: number, toX: number, clientY = 100) {
+  const start: TouchPoint = { clientX: fromX, clientY }
+  const end: TouchPoint = { clientX: toX, clientY }
+  fireEvent.touchStart(element, { touches: [start], changedTouches: [start] })
+  fireEvent.touchMove(element, { touches: [end], changedTouches: [end] })
+}
+
+function swipeCloseTrigger(): HTMLButtonElement {
+  const trigger = document.querySelector('[data-swipe-close-trigger]')
+  if (!(trigger instanceof HTMLButtonElement)) throw new Error('Missing swipe close trigger')
+  return trigger
+}
+
+describe('DialogContent', () => {
   beforeEach(() => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
@@ -35,175 +56,96 @@ describe("DialogContent", () => {
     })
   })
 
-  it("closes an open combobox on Escape before closing the dialog", async () => {
-    const user = userEvent.setup();
-    const onOpenChange = vi.fn();
+  it('closes an open combobox on Escape before closing the dialog', async () => {
+    const user = userEvent.setup()
+    const onOpenChange = vi.fn()
     render(
       <Dialog open onOpenChange={onOpenChange}>
         <DialogContent>
           <DialogTitle>Test Dialog</DialogTitle>
-          <Combobox value="" onChange={vi.fn()} options={[{ value: "a", label: "Alpha" }]} ariaLabel="Choice" />
+          <Combobox value="" onChange={vi.fn()} options={[{ value: 'a', label: 'Alpha' }]} ariaLabel="Choice" />
         </DialogContent>
-      </Dialog>
-    );
-    const combobox = screen.getByRole("combobox", { name: "Choice" });
+      </Dialog>,
+    )
+    const combobox = screen.getByRole('combobox', { name: 'Choice' })
 
-    await user.click(combobox);
-    expect(combobox).toHaveAttribute("aria-expanded", "true");
-    await user.keyboard("{Escape}");
-    expect(combobox).toHaveAttribute("aria-expanded", "false");
-    expect(onOpenChange).not.toHaveBeenCalled();
+    await user.click(combobox)
+    expect(combobox).toHaveAttribute('aria-expanded', 'true')
+    await user.keyboard('{Escape}')
+    expect(combobox).toHaveAttribute('aria-expanded', 'false')
+    expect(onOpenChange).not.toHaveBeenCalled()
 
-    await user.keyboard("{Escape}");
-    expect(onOpenChange).toHaveBeenCalledWith(false);
-  });
+    await user.keyboard('{Escape}')
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
 
-  it("applies safe-area padding when fullscreen prop is true", () => {
-    render(
-      <Dialog open>
-        <DialogContent fullscreen data-testid="dialog-content">
-          <DialogHeader>
-            <DialogTitle>Test Dialog</DialogTitle>
-          </DialogHeader>
-        </DialogContent>
-      </Dialog>
-    );
-    const content = screen.getByTestId("dialog-content");
-    expect(content).toHaveStyle({ paddingTop: "env(safe-area-inset-top, 0px)" });
-  });
+  it.each([
+    { label: 'fullscreen', props: { fullscreen: true } },
+    { label: 'mobileFullscreen', props: { mobileFullscreen: true } },
+  ])(
+    'applies safe-area padding and inset-0 when $label is set',
+    ({ props }) => {
+      render(
+        <Dialog open>
+          <DialogContent {...props} data-testid="dialog-content">
+            <DialogHeader>
+              <DialogTitle>Test Dialog</DialogTitle>
+            </DialogHeader>
+          </DialogContent>
+        </Dialog>,
+      )
+      const content = screen.getByTestId('dialog-content')
+      expect(content).toHaveStyle({ paddingTop: 'env(safe-area-inset-top, 0px)' })
+      expect(content).toHaveClass('inset-0')
+    },
+  )
 
-  it("applies safe-area padding when mobileFullscreen prop is true", () => {
-    render(
-      <Dialog open>
-        <DialogContent mobileFullscreen data-testid="dialog-content">
-          <DialogHeader>
-            <DialogTitle>Test Dialog</DialogTitle>
-          </DialogHeader>
-        </DialogContent>
-      </Dialog>
-    );
-    const content = screen.getByTestId("dialog-content");
-    expect(content).toHaveStyle({ paddingTop: "env(safe-area-inset-top, 0px)" });
-  });
-
-  it("applies inset-0 for fullscreen dialogs", () => {
-    render(
-      <Dialog open>
-        <DialogContent fullscreen data-testid="dialog-content">
-          Content
-        </DialogContent>
-      </Dialog>
-    );
-    const content = screen.getByTestId("dialog-content");
-    expect(content).toHaveClass("inset-0");
-  });
-
-  it("applies inset-0 for mobileFullscreen dialogs", () => {
-    render(
-      <Dialog open>
-        <DialogContent mobileFullscreen data-testid="dialog-content">
-          Content
-        </DialogContent>
-      </Dialog>
-    );
-    const content = screen.getByTestId("dialog-content");
-    expect(content).toHaveClass("inset-0");
-  });
-
-  it("does not apply safe-area padding when neither fullscreen nor mobileFullscreen", () => {
+  it('does not apply safe-area padding or inset-0 when neither fullscreen prop is set', () => {
     render(
       <Dialog open>
         <DialogContent data-testid="dialog-content">
-          Content
+          <DialogTitle>Test Dialog</DialogTitle>
         </DialogContent>
-      </Dialog>
-    );
-    const content = screen.getByTestId("dialog-content");
-    const style = content.getAttribute("style") || "";
-    expect(style).not.toContain("safe-area");
-    expect(content).not.toHaveClass("inset-0");
-  });
+      </Dialog>,
+    )
+    const content = screen.getByTestId('dialog-content')
+    const style = content.getAttribute('style') || ''
+    expect(style).not.toContain('safe-area')
+    expect(content).not.toHaveClass('inset-0')
+  })
 
-  it("hides close button when fullscreen is true", () => {
+  it('hides close button when fullscreen is true', () => {
     render(
       <Dialog open>
         <DialogContent fullscreen data-testid="dialog-content">
-          Content
+          <DialogTitle>Test Dialog</DialogTitle>
         </DialogContent>
-      </Dialog>
-    );
-    expect(screen.queryByRole("button", { name: /close/i })).not.toBeInTheDocument();
-  });
+      </Dialog>,
+    )
+    expect(screen.queryByRole('button', { name: /close/i })).not.toBeInTheDocument()
+  })
 
-  it("shows close button when mobileFullscreen is true", () => {
+  it('shows close button when mobileFullscreen is true', () => {
     render(
       <Dialog open>
         <DialogContent mobileFullscreen data-testid="dialog-content">
-          Content
+          <DialogTitle>Test Dialog</DialogTitle>
         </DialogContent>
-      </Dialog>
-    );
-    expect(screen.getByRole("button", { name: /close/i })).toBeInTheDocument();
-  });
+      </Dialog>,
+    )
+    expect(screen.getByRole('button', { name: /close/i })).toBeInTheDocument()
+  })
 
-  it("hides close button when hideCloseButton is true", () => {
+  it('hides close button when hideCloseButton is true', () => {
     render(
       <Dialog open>
         <DialogContent hideCloseButton data-testid="dialog-content">
-          Content
+          <DialogTitle>Test Dialog</DialogTitle>
         </DialogContent>
-      </Dialog>
-    );
-    expect(screen.queryByRole("button", { name: /close/i })).not.toBeInTheDocument();
-  });
-
-  it("accepts mobileSwipeToClose prop without breaking rendering", () => {
-    const onOpenChange = vi.fn();
-    render(
-      <Dialog open onOpenChange={onOpenChange}>
-        <DialogContent mobileFullscreen mobileSwipeToClose data-testid="dialog-content">
-          <DialogHeader>
-            <DialogTitle>Swipe Dialog</DialogTitle>
-          </DialogHeader>
-        </DialogContent>
-      </Dialog>
-    );
-    const content = screen.getByTestId("dialog-content");
-    expect(content).toBeInTheDocument();
-    expect(content).toHaveClass("inset-0");
-  });
-
-  it("applies safe-area padding when mobileSwipeToClose is used with mobileFullscreen", () => {
-    render(
-      <Dialog open>
-        <DialogContent mobileFullscreen mobileSwipeToClose data-testid="dialog-content">
-          <DialogHeader>
-            <DialogTitle>Test Dialog</DialogTitle>
-          </DialogHeader>
-        </DialogContent>
-      </Dialog>
-    );
-    const content = screen.getByTestId("dialog-content");
-    expect(content).toHaveStyle({ paddingTop: "env(safe-area-inset-top, 0px)" });
-  });
-
-  it('renders hidden close trigger by default on mobile', () => {
-    withMobileViewport(() => {
-      const onOpenChange = vi.fn();
-      render(
-        <Dialog open onOpenChange={onOpenChange}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Swipe Dialog</DialogTitle>
-            </DialogHeader>
-          </DialogContent>
-        </Dialog>
-      );
-      const closeTrigger = document.querySelector('[data-swipe-close-trigger]');
-      expect(closeTrigger).toBeInTheDocument();
-      expect(closeTrigger).toHaveAccessibleName('Dismiss dialog');
-    });
-  });
+      </Dialog>,
+    )
+    expect(screen.queryByRole('button', { name: /close/i })).not.toBeInTheDocument()
+  })
 
   it('extends the close button hit area without enlarging the icon', () => {
     render(
@@ -213,17 +155,38 @@ describe("DialogContent", () => {
             <DialogTitle>Close Target Dialog</DialogTitle>
           </DialogHeader>
         </DialogContent>
-      </Dialog>
-    );
+      </Dialog>,
+    )
 
-    const closeButton = screen.getByRole('button', { name: 'Close' });
-    const icon = closeButton.querySelector('svg');
+    const closeButton = screen.getByRole('button', { name: 'Close' })
+    const icon = closeButton.querySelector('svg')
 
-    expect(closeButton).toHaveClass('after:-inset-2', 'pointer-coarse:after:-inset-3.5');
-    expect(icon).toHaveClass('h-4', 'w-4');
-  });
+    expect(closeButton).toHaveClass('after:-inset-2', 'pointer-coarse:after:-inset-3.5')
+    expect(icon).toHaveClass('h-4', 'w-4')
+  })
 
-  it('does not render hidden close trigger when mobileSwipeToClose is false', () => {
+  it('renders a labelled hidden close trigger on mobile by default and closes the dialog through it', () => {
+    withMobileViewport(() => {
+      const onOpenChange = vi.fn()
+      render(
+        <Dialog open onOpenChange={onOpenChange}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Swipe Dialog</DialogTitle>
+            </DialogHeader>
+          </DialogContent>
+        </Dialog>,
+      )
+
+      const closeTrigger = swipeCloseTrigger()
+      expect(closeTrigger).toHaveAccessibleName('Dismiss dialog')
+
+      closeTrigger.click()
+      expect(onOpenChange).toHaveBeenCalledWith(false)
+    })
+  })
+
+  it('does not render the hidden close trigger when mobileSwipeToClose is false', () => {
     withMobileViewport(() => {
       render(
         <Dialog open>
@@ -232,40 +195,16 @@ describe("DialogContent", () => {
               <DialogTitle>Swipe Dialog</DialogTitle>
             </DialogHeader>
           </DialogContent>
-        </Dialog>
-      );
-      const closeTrigger = document.querySelector('[data-swipe-close-trigger]');
-      expect(closeTrigger).not.toBeInTheDocument();
-    });
-  });
+        </Dialog>,
+      )
+      expect(document.querySelector('[data-swipe-close-trigger]')).not.toBeInTheDocument()
+    })
+  })
 
-  it('closes dialog when hidden close trigger is activated', () => {
+  it('calls onSwipeBack when canSwipeBack is true and the swipe completes', () => {
     withMobileViewport(() => {
-      const onOpenChange = vi.fn();
-      render(
-        <Dialog open onOpenChange={onOpenChange}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Swipe Dialog</DialogTitle>
-            </DialogHeader>
-          </DialogContent>
-        </Dialog>
-      );
-      
-      const closeTrigger = document.querySelector('[data-swipe-close-trigger]') as HTMLButtonElement | null;
-      expect(closeTrigger).toBeInTheDocument();
-      
-      if (closeTrigger) {
-        closeTrigger.click();
-        expect(onOpenChange).toHaveBeenCalledWith(false);
-      }
-    });
-  });
-
-  it('calls onSwipeBack when canSwipeBack is true and swipe completes', () => {
-    withMobileViewport(() => {
-      const mockOnSwipeBack = vi.fn();
-      const onOpenChange = vi.fn();
+      const mockOnSwipeBack = vi.fn()
+      const onOpenChange = vi.fn()
       render(
         <Dialog open onOpenChange={onOpenChange}>
           <DialogContent
@@ -273,32 +212,22 @@ describe("DialogContent", () => {
             onSwipeBack={mockOnSwipeBack}
             data-testid="swipe-dialog"
           >
-            Content
+            <DialogTitle>Swipe Dialog</DialogTitle>
           </DialogContent>
-        </Dialog>
-      );
-      
-      const content = screen.getByTestId('swipe-dialog');
+        </Dialog>,
+      )
 
-      content.dispatchEvent(new TouchEvent('touchstart', {
-        touches: [{ clientX: 10, clientY: 100 }] as any,
-      }));
-      content.dispatchEvent(new TouchEvent('touchmove', {
-        touches: [{ clientX: 100, clientY: 100 }] as any,
-      }));
-      content.dispatchEvent(new TouchEvent('touchend', {
-        changedTouches: [{ clientX: 100, clientY: 100 }] as any,
-      }));
-      
-      expect(mockOnSwipeBack).toHaveBeenCalled();
-      expect(onOpenChange).not.toHaveBeenCalled();
-    });
-  });
+      swipeHorizontally(screen.getByTestId('swipe-dialog'), 10, 100)
 
-  it('attempts close when canSwipeBack is false and swipe completes', () => {
+      expect(mockOnSwipeBack).toHaveBeenCalled()
+      expect(onOpenChange).not.toHaveBeenCalled()
+    })
+  })
+
+  it('attempts close when canSwipeBack is false and the swipe completes', () => {
     withMobileViewport(() => {
-      const mockOnSwipeBack = vi.fn();
-      const onOpenChange = vi.fn();
+      const mockOnSwipeBack = vi.fn()
+      const onOpenChange = vi.fn()
       render(
         <Dialog open onOpenChange={onOpenChange}>
           <DialogContent
@@ -306,131 +235,53 @@ describe("DialogContent", () => {
             onSwipeBack={mockOnSwipeBack}
             data-testid="swipe-dialog"
           >
-            Content
+            <DialogTitle>Swipe Dialog</DialogTitle>
           </DialogContent>
-        </Dialog>
-      );
-      
-      const content = screen.getByTestId('swipe-dialog');
-      content.dispatchEvent(new TouchEvent('touchstart', {
-        touches: [{ clientX: 10, clientY: 100 }] as any,
-      }));
-      content.dispatchEvent(new TouchEvent('touchmove', {
-        touches: [{ clientX: 100, clientY: 100 }] as any,
-      }));
-      content.dispatchEvent(new TouchEvent('touchend', {
-        changedTouches: [{ clientX: 100, clientY: 100 }] as any,
-      }));
-      
-      expect(mockOnSwipeBack).not.toHaveBeenCalled();
-      expect(onOpenChange).toHaveBeenCalledWith(false);
-    });
-  });
+        </Dialog>,
+      )
 
-  it('applies safe-area style and hidden trigger for mobileFullscreen', () => {
-    withMobileViewport(() => {
-      render(
-        <Dialog open>
-          <DialogContent mobileFullscreen data-testid="dialog-content">
-            Content
-          </DialogContent>
-        </Dialog>
-      );
-      const content = screen.getByTestId("dialog-content");
-      expect(content).toHaveStyle({ paddingTop: "env(safe-area-inset-top, 0px)" });
-      expect(document.querySelector('[data-swipe-close-trigger]')).toBeInTheDocument();
-    });
-  });
+      swipeHorizontally(screen.getByTestId('swipe-dialog'), 10, 100)
 
-  it('does not apply transform styles to non-fullscreen dialogs', () => {
-    withMobileViewport(() => {
-      render(
-        <Dialog open>
-          <DialogContent data-testid="dialog-content">
-            Content
-          </DialogContent>
-        </Dialog>
-      );
-      const content = screen.getByTestId("dialog-content");
-      const style = content.getAttribute("style") || "";
-      expect(style).not.toMatch(/transform/);
-    });
-  });
+      expect(mockOnSwipeBack).not.toHaveBeenCalled()
+      expect(onOpenChange).toHaveBeenCalledWith(false)
+    })
+  })
 
-  it('applies swipe transform to fullscreen dialogs during touchmove', () => {
+  it('applies the swipe transform to fullscreen dialogs during touchmove', () => {
     withMobileViewport(() => {
       render(
         <Dialog open>
           <DialogContent fullscreen data-testid="dialog-content">
-            Content
+            <DialogTitle>Test Dialog</DialogTitle>
           </DialogContent>
-        </Dialog>
-      );
-      const content = screen.getByTestId("dialog-content");
-      content.dispatchEvent(new TouchEvent('touchstart', {
-        touches: [{ clientX: 10, clientY: 100 }] as any,
-      }));
-      content.dispatchEvent(new TouchEvent('touchmove', {
-        touches: [{ clientX: 50, clientY: 100 }] as any,
-      }));
-      
-      const style = content.getAttribute("style") || "";
-      expect(style).toMatch(/transform/);
-    });
-  });
+        </Dialog>,
+      )
+      const content = screen.getByTestId('dialog-content')
+      dragHorizontally(content, 10, 50)
 
-  it('does not apply swipe transform to non-fullscreen dialogs during touchmove', () => {
+      expect(content.getAttribute('style') || '').toMatch(/transform/)
+    })
+  })
+
+  it('does not apply a swipe transform to non-fullscreen dialogs during touchmove', () => {
     withMobileViewport(() => {
       render(
         <Dialog open>
           <DialogContent data-testid="dialog-content">
-            Content
+            <DialogTitle>Test Dialog</DialogTitle>
           </DialogContent>
-        </Dialog>
-      );
-      const content = screen.getByTestId("dialog-content");
-      content.dispatchEvent(new TouchEvent('touchstart', {
-        touches: [{ clientX: 10, clientY: 100 }] as any,
-      }));
-      content.dispatchEvent(new TouchEvent('touchmove', {
-        touches: [{ clientX: 50, clientY: 100 }] as any,
-      }));
-      
-      const style = content.getAttribute("style") || "";
-      expect(style).not.toMatch(/transform/);
-    });
-  });
+        </Dialog>,
+      )
+      const content = screen.getByTestId('dialog-content')
+      dragHorizontally(content, 10, 50)
 
-  it('binds swipe handler when mobileSwipeToClose and mobileFullscreen are enabled', () => {
-    withMobileViewport(() => {
-      const onOpenChange = vi.fn();
-      render(
-        <Dialog open onOpenChange={onOpenChange}>
-          <DialogContent mobileFullscreen mobileSwipeToClose data-testid="swipe-dialog">
-            <DialogHeader>
-              <DialogTitle>Swipe Dialog</DialogTitle>
-            </DialogHeader>
-          </DialogContent>
-        </Dialog>
-      );
-      
-      const content = screen.getByTestId('swipe-dialog');
-      const closeTrigger = document.querySelector('[data-swipe-close-trigger]') as HTMLButtonElement | null;
-      
-      expect(content).toBeInTheDocument();
-      expect(closeTrigger).toBeInTheDocument();
-      
-      const clickSpy = vi.spyOn(closeTrigger as HTMLButtonElement, 'click');
-      closeTrigger?.click();
-      
-      expect(clickSpy).toHaveBeenCalled();
-      expect(onOpenChange).toHaveBeenCalledWith(false);
-    });
-  });
-});
+      expect(content.getAttribute('style') || '').not.toMatch(/transform/)
+    })
+  })
+})
 
-describe("DialogHeader", () => {
-  it("can shrink so a long title truncates instead of widening the dialog", () => {
+describe('DialogHeader', () => {
+  it('can shrink so a long title truncates instead of widening the dialog', () => {
     render(
       <Dialog open>
         <DialogContent>
@@ -438,11 +289,11 @@ describe("DialogHeader", () => {
             <DialogTitle className="truncate">a very long command that would otherwise widen the dialog</DialogTitle>
           </DialogHeader>
         </DialogContent>
-      </Dialog>
-    );
-    expect(screen.getByTestId("dialog-header")).toHaveClass("min-w-0");
-  });
-});
+      </Dialog>,
+    )
+    expect(screen.getByTestId('dialog-header')).toHaveClass('min-w-0')
+  })
+})
 
 function ReturnFocusHost({ onCloseAutoFocus }: { onCloseAutoFocus?: (event: Event) => void }) {
   const [open, setOpen] = useState(false)
@@ -492,7 +343,7 @@ describe('Dialog return focus', () => {
   })
 
   it('returns focus to the element focused before opening when there is no trigger', async () => {
-    stubMatchMedia(true)
+    installMatchMedia(true)
     render(<ReturnFocusHost />)
     const prompt = screen.getByLabelText('prompt')
 
@@ -502,7 +353,7 @@ describe('Dialog return focus', () => {
   })
 
   it('does not refocus a text field on touch devices, so the keyboard stays closed', async () => {
-    stubMatchMedia(false)
+    installMatchMedia(false)
     render(<ReturnFocusHost />)
     const prompt = screen.getByLabelText('prompt')
 
@@ -512,7 +363,7 @@ describe('Dialog return focus', () => {
   })
 
   it('refocuses a non-text element on touch devices', async () => {
-    stubMatchMedia(false)
+    installMatchMedia(false)
     render(<ReturnFocusHost />)
     const opener = screen.getByText('open')
 
@@ -522,7 +373,7 @@ describe('Dialog return focus', () => {
   })
 
   it('lets a caller onCloseAutoFocus that prevents default take over', async () => {
-    stubMatchMedia(true)
+    installMatchMedia(true)
     render(<ReturnFocusHost onCloseAutoFocus={(event) => event.preventDefault()} />)
     const prompt = screen.getByLabelText('prompt')
 
@@ -532,7 +383,7 @@ describe('Dialog return focus', () => {
   })
 
   it('moves focus to the chat prompt when the dialog closes on desktop', async () => {
-    stubMatchMedia(true)
+    installMatchMedia(true)
     render(<PromptReturnFocusHost />)
     const opener = screen.getByText('open prompt dialog')
     opener.focus()
@@ -571,8 +422,7 @@ describe('keyboardAware', () => {
     if (originalVisualViewport) {
       Object.defineProperty(window, 'visualViewport', originalVisualViewport)
     } else {
-      // @ts-expect-error allow delete
-      delete window.visualViewport
+      Reflect.deleteProperty(window, 'visualViewport')
     }
     Object.defineProperty(window, 'innerHeight', {
       writable: true,
@@ -587,10 +437,11 @@ describe('keyboardAware', () => {
     render(
       <Dialog open>
         <DialogContent keyboardAware mobileFullscreen data-testid="dialog-content">
+          <DialogTitle>Keyboard Dialog</DialogTitle>
           <textarea autoFocus data-testid="dialog-input" />
         </DialogContent>
-      </Dialog>
-    );
+      </Dialog>,
+    )
     screen.getByTestId('dialog-input').focus()
     act(() => {
       listeners.forEach((fn) => fn())
@@ -605,10 +456,11 @@ describe('keyboardAware', () => {
     render(
       <Dialog open>
         <DialogContent keyboardAware mobileFullscreen data-testid="dialog-content">
+          <DialogTitle>Keyboard Dialog</DialogTitle>
           <textarea autoFocus data-testid="dialog-input" />
         </DialogContent>
-      </Dialog>
-    );
+      </Dialog>,
+    )
     screen.getByTestId('dialog-input').focus()
     listeners.forEach((fn) => fn())
     const content = screen.getByTestId('dialog-content')
@@ -621,13 +473,14 @@ describe('keyboardAware', () => {
     render(
       <Dialog open>
         <DialogContent mobileFullscreen data-testid="dialog-content">
+          <DialogTitle>Keyboard Dialog</DialogTitle>
           <textarea autoFocus data-testid="dialog-input" />
         </DialogContent>
-      </Dialog>
-    );
+      </Dialog>,
+    )
     screen.getByTestId('dialog-input').focus()
     listeners.forEach((fn) => fn())
     const content = screen.getByTestId('dialog-content')
     expect(content.style.paddingBottom).toBe('')
   })
-});
+})

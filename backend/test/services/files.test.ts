@@ -244,11 +244,11 @@ describe('files service', () => {
     })
 
     it('rejects files larger than the upload limit', async () => {
-      const file = {
-        name: 'oversized.txt',
-        type: 'text/plain',
-        size: FILE_LIMITS.MAX_UPLOAD_SIZE_BYTES + 1,
-      } as unknown as File
+      const file = new File(
+        [new Uint8Array(FILE_LIMITS.MAX_UPLOAD_SIZE_BYTES + 1)],
+        'oversized.txt',
+        { type: 'text/plain' },
+      )
 
       await expect(uploadFile(relativeRoot, file)).rejects.toThrow('File too large')
     })

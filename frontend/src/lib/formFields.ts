@@ -5,6 +5,7 @@ import type {
   FormWhen,
   IntegrationMethod,
 } from '@opencode-manager/shared/opencode'
+import { z } from 'zod'
 
 export function methodIdentifier(method: IntegrationMethod): string {
   return 'id' in method ? method.id : method.type
@@ -21,13 +22,15 @@ function valuesEqual(
   left: string | number | boolean,
   right: string | number | boolean,
 ): boolean {
-  if (typeof left === 'boolean' || typeof right === 'boolean') return left === right
-  const normalizedLeft = normalizeSpecialNumber(left)
-  const normalizedRight = normalizeSpecialNumber(right)
-  if (typeof normalizedLeft === 'number' && typeof normalizedRight === 'number') {
-    return Object.is(normalizedLeft, normalizedRight)
+  if (left === true || left === false || right === true || right === false) {
+    return left === right
   }
-  return normalizedLeft === normalizedRight
+  const normalizedLeft = z.number().safeParse(normalizeSpecialNumber(left))
+  const normalizedRight = z.number().safeParse(normalizeSpecialNumber(right))
+  if (normalizedLeft.success && normalizedRight.success) {
+    return Object.is(normalizedLeft.data, normalizedRight.data)
+  }
+  return normalizeSpecialNumber(left) === normalizeSpecialNumber(right)
 }
 
 function matchesCondition(condition: FormWhen, answers: FormAnswer): boolean {
@@ -69,7 +72,8 @@ function isFieldAnswered(field: FormField, answers: FormAnswer): boolean {
   if (field.type === 'external') return true
   const value = answers[field.key]
   if (value === undefined) return false
-  if (typeof value === 'string') return value.trim().length > 0
+  const text = z.string().safeParse(value)
+  if (text.success) return text.data.trim().length > 0
   if (Array.isArray(value)) return value.length > 0
   return true
 }
@@ -89,7 +93,8 @@ export function buildAnswer(fields: readonly FormField[], answers: FormAnswer): 
     if (field.type === 'external') continue
     const value = answers[field.key]
     if (value === undefined) continue
-    if (typeof value === 'string' && value.trim() === '') continue
+    const text = z.string().safeParse(value)
+    if (text.success && text.data.trim() === '') continue
     if (Array.isArray(value) && value.length === 0) continue
     result[field.key] = value
   }
@@ -112,7 +117,7 @@ export function setAnswerValue(
   methodID: string,
   key: string,
   value: FormValue | undefined,
-): Record<string, FormAnswer> {
+) {
   const next = { ...(answers[methodID] ?? {}) }
   if (value === undefined) {
     delete next[key]

@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { Database } from 'bun:sqlite'
-import { migrate } from '../../src/db/migration-runner'
-import { allMigrations } from '../../src/db/migrations'
+import type { Database } from 'bun:sqlite'
+import type { V2Event } from '@opencode-manager/shared/opencode'
 import { createRepo } from '../../src/db/queries'
 import { createScheduleRun, getScheduleRunBySessionId, updateScheduleRunMetadata } from '../../src/db/schedules'
 import { getSessionPermissionMode, setSessionPermissionMode } from '../../src/db/session-permission-modes'
@@ -9,29 +8,22 @@ import { SettingsService } from '../../src/services/settings'
 import { SessionPermissionModeService } from '../../src/services/session-permission-modes'
 import { SessionAncestry } from '../../src/services/session-ancestry'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
-import type { SSEEvent } from '../../src/services/sse-aggregator'
 import {
   createFakeSessionPermissionClient,
   type FakePendingPermissionRequest,
 } from '../helpers/fake-session-permission-client'
+import { createTestDatabase } from '../helpers/test-database'
 
 const DIRECTORY = '/abs/repo'
 
-function createDeferred<T>(): {
-  promise: Promise<T>
-  resolve: (value: T) => void
-} {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((res) => {
-    resolve = res
+function createDeferred<T>() {
+  let settle = (value: T) => {
+    void value
+  }
+  const promise = new Promise<T>((resolve) => {
+    settle = resolve
   })
-  return { promise, resolve }
-}
-
-function createTestDb(): Database {
-  const db = new Database(':memory:')
-  migrate(db, allMigrations)
-  return db
+  return { promise, resolve: settle }
 }
 
 function createPermissionModeService(
@@ -44,11 +36,11 @@ function createPermissionModeService(
 
 function createMultiServerService(
   db: Database,
-  clients: { local: OpenCodeClient } & Record<string, OpenCodeClient>,
+  local: OpenCodeClient,
+  remote: OpenCodeClient,
   settingsService: SettingsService,
 ): SessionPermissionModeService {
-  const local = clients.local
-  const resolve = (serverId: string) => (serverId === 'local' ? local : clients[serverId] ?? local)
+  const resolve = (serverId: string) => (serverId === 'local' ? local : remote)
   return new SessionPermissionModeService(
     db,
     { getClient: resolve },
@@ -57,61 +49,75 @@ function createMultiServerService(
   )
 }
 
-function permissionAskedEvent(sessionID: string, id: string): SSEEvent {
+function permissionAskedEvent(sessionID: string, id: string): V2Event {
   return {
     id: `evt_${id}`,
-    created: Date.now(),
+    created: 0,
     type: 'permission.asked',
     location: { directory: DIRECTORY },
     data: { id, sessionID, action: 'shell', resources: ['ls'] },
-  } as unknown as SSEEvent
+  }
 }
 
-function sessionCreatedEvent(sessionID: string, parentID?: string): SSEEvent {
+function permissionAskedEventWithoutLocation(sessionID: string, id: string): V2Event {
+  return {
+    id: `evt_${id}`,
+    created: 0,
+    type: 'permission.asked',
+    data: { id, sessionID, action: 'shell', resources: ['ls'] },
+  }
+}
+
+interface SessionCreatedOptions {
+  parentID?: string
+  permissions?: Array<{ action: string; resource: string; effect: 'allow' | 'deny' }>
+}
+
+function sessionCreatedEvent(sessionID: string, options: SessionCreatedOptions = {}): V2Event {
   return {
     id: `evt_created_${sessionID}`,
-    created: Date.now(),
+    created: 0,
     type: 'session.created',
+    durable: { aggregateID: sessionID, seq: 1, version: 1 },
     location: { directory: DIRECTORY },
-    data: { sessionID, parentID },
-  } as unknown as SSEEvent
+    data: {
+      sessionID,
+      projectID: 'proj_1',
+      location: { directory: DIRECTORY },
+      slug: sessionID,
+      version: '2.0.15',
+      ...options,
+    },
+  }
 }
 
-function sessionDeletedEvent(sessionID: string): SSEEvent {
+function sessionDeletedEvent(sessionID: string): V2Event {
   return {
     id: `evt_deleted_${sessionID}`,
-    created: Date.now(),
+    created: 0,
     type: 'session.deleted',
+    durable: { aggregateID: sessionID, seq: 2, version: 2 },
     location: { directory: DIRECTORY },
     data: { sessionID },
-  } as unknown as SSEEvent
+  }
 }
 
-function sessionForkedEvent(sessionID: string, parentID: string): SSEEvent {
+function sessionForkedEvent(sessionID: string, parentID: string): V2Event {
   return {
     id: `evt_forked_${sessionID}`,
-    created: Date.now(),
+    created: 0,
     type: 'session.forked',
+    durable: { aggregateID: sessionID, seq: 2, version: 2 },
     location: { directory: DIRECTORY },
-    data: { sessionID, parentID, boundary: { messageID: 'msg_1', partID: null } },
-  } as unknown as SSEEvent
-}
-
-function sessionCreatedWithPermissionsEvent(sessionID: string, permissions: unknown[]): SSEEvent {
-  return {
-    id: `evt_created_${sessionID}`,
-    created: Date.now(),
-    type: 'session.created',
-    location: { directory: DIRECTORY },
-    data: { sessionID, permissions },
-  } as unknown as SSEEvent
+    data: { sessionID, parentID, boundary: { type: 'before', messageID: 'msg_1' } },
+  }
 }
 
 describe('SessionPermissionModeService', () => {
   let db: Database
 
   beforeEach(() => {
-    db = createTestDb()
+    db = createTestDatabase()
   })
 
   afterEach(() => {
@@ -295,7 +301,7 @@ describe('SessionPermissionModeService', () => {
     const service = createPermissionModeService(db, createFakeSessionPermissionClient(), settingsService)
 
     await service.handleEvent(DIRECTORY, sessionCreatedEvent('ses_root'))
-    await service.handleEvent(DIRECTORY, sessionCreatedEvent('ses_child', 'ses_root'))
+    await service.handleEvent(DIRECTORY, sessionCreatedEvent('ses_child', { parentID: 'ses_root' }))
 
     expect(getSessionPermissionMode(db, 'ses_root')).toBe('auto')
     expect(getSessionPermissionMode(db, 'ses_child')).toBeNull()
@@ -316,7 +322,7 @@ describe('SessionPermissionModeService', () => {
 
     await service.handleEvent(
       DIRECTORY,
-      sessionCreatedWithPermissionsEvent('ses_root', [{ permission: 'bash', pattern: '*', action: 'allow' }]),
+      sessionCreatedEvent('ses_root', { permissions: [{ action: 'allow', resource: 'bash', effect: 'allow' }] }),
     )
 
     expect(getSessionPermissionMode(db, 'ses_root')).toBeNull()
@@ -479,12 +485,7 @@ describe('SessionPermissionModeService', () => {
     })
     const service = createPermissionModeService(db, client, new SettingsService(db))
 
-    const event = {
-      id: 'evt_perm_null',
-      created: Date.now(),
-      type: 'permission.asked',
-      data: { id: 'perm-1', sessionID: 'ses_root', action: 'shell', resources: ['ls'] },
-    } as unknown as SSEEvent
+    const event = permissionAskedEventWithoutLocation('ses_root', 'perm-1')
 
     await expect(service.handleEvent(null, event)).resolves.toBeUndefined()
 
@@ -576,7 +577,7 @@ describe('SessionPermissionModeService', () => {
       setSessionPermissionMode(db, 'ses_remote', 'auto', 'srv_remote')
       const local = createFakeSessionPermissionClient({ parents: { ses_remote: null } })
       const remote = createFakeSessionPermissionClient({ parents: { ses_remote: null } })
-      const service = createMultiServerService(db, { local, srv_remote: remote }, new SettingsService(db))
+      const service = createMultiServerService(db, local, remote, new SettingsService(db))
 
       await expect(service.getEffectiveMode('ses_remote')).resolves.toMatchObject({ mode: 'ask' })
       await expect(service.getEffectiveMode('ses_remote', 'srv_remote')).resolves.toMatchObject({ mode: 'auto' })
@@ -592,7 +593,7 @@ describe('SessionPermissionModeService', () => {
       setSessionPermissionMode(db, 'ses_root', 'auto', 'srv_remote')
       const local = createFakeSessionPermissionClient({ parents: { ses_root: null } })
       const remote = createFakeSessionPermissionClient({ parents: { ses_root: null } })
-      const service = createMultiServerService(db, { local, srv_remote: remote }, new SettingsService(db))
+      const service = createMultiServerService(db, local, remote, new SettingsService(db))
 
       await service.handleEvent(DIRECTORY, permissionAskedEvent('ses_root', 'perm-remote'), 'srv_remote')
 
@@ -609,7 +610,7 @@ describe('SessionPermissionModeService', () => {
       setSessionPermissionMode(db, 'ses_root', 'auto', 'srv_remote')
       const local = createFakeSessionPermissionClient()
       const remote = createFakeSessionPermissionClient({ parents: { ses_child: 'ses_root', ses_root: null } })
-      const service = createMultiServerService(db, { local, srv_remote: remote }, new SettingsService(db))
+      const service = createMultiServerService(db, local, remote, new SettingsService(db))
 
       await service.handleEvent(DIRECTORY, permissionAskedEvent('ses_child', 'perm-child'), 'srv_remote')
 
@@ -629,7 +630,7 @@ describe('SessionPermissionModeService', () => {
         activeSessions: ['ses_remote'],
         pendingRequests: { [DIRECTORY]: [{ id: 'perm-remote', sessionID: 'ses_remote' }] },
       })
-      const service = createMultiServerService(db, { local, srv_remote: remote }, new SettingsService(db))
+      const service = createMultiServerService(db, local, remote, new SettingsService(db))
 
       await service.acceptPendingRequestsForActiveSessions('srv_remote')
 
@@ -662,7 +663,7 @@ describe('SessionPermissionModeService', () => {
 
       const local = createFakeSessionPermissionClient({ parents: { ses_scheduled: null } })
       const remote = createFakeSessionPermissionClient({ parents: { ses_scheduled: null } })
-      const service = createMultiServerService(db, { local, srv_remote: remote }, new SettingsService(db))
+      const service = createMultiServerService(db, local, remote, new SettingsService(db))
 
       await expect(service.getEffectiveMode('ses_scheduled')).resolves.toMatchObject({ lockedReason: 'schedule' })
       await expect(service.getEffectiveMode('ses_scheduled', 'srv_remote')).resolves.toMatchObject({
@@ -685,7 +686,7 @@ describe('SessionPermissionModeService', () => {
 
       const local = createFakeSessionPermissionClient({ parents: { ses_scheduled: null } })
       const remote = createFakeSessionPermissionClient({ parents: { ses_scheduled: null } })
-      const service = createMultiServerService(db, { local, srv_remote: remote }, new SettingsService(db))
+      const service = createMultiServerService(db, local, remote, new SettingsService(db))
 
       await expect(service.getEffectiveMode('ses_scheduled', 'srv_remote')).resolves.toEqual({
         sessionId: 'ses_scheduled',
@@ -711,7 +712,8 @@ describe('SessionPermissionModeService', () => {
       expect(getScheduleRunBySessionId(db, 'ses_scheduled')).toBeNull()
 
       const local = createFakeSessionPermissionClient({ parents: { ses_scheduled: null } })
-      const service = createMultiServerService(db, { local, srv_remote: createFakeSessionPermissionClient() }, new SettingsService(db))
+      const remote = createFakeSessionPermissionClient()
+      const service = createMultiServerService(db, local, remote, new SettingsService(db))
 
       await expect(service.getEffectiveMode('ses_scheduled')).resolves.toEqual({
         sessionId: 'ses_scheduled',
@@ -725,7 +727,7 @@ describe('SessionPermissionModeService', () => {
       setSessionPermissionMode(db, 'ses_root', 'auto', 'srv_remote')
       const local = createFakeSessionPermissionClient()
       const remote = createFakeSessionPermissionClient({ parents: { ses_root: null } })
-      const service = createMultiServerService(db, { local, srv_remote: remote }, new SettingsService(db))
+      const service = createMultiServerService(db, local, remote, new SettingsService(db))
       const event = permissionAskedEvent('ses_root', 'perm-remote')
 
       await expect(service.suppressesPermissionNotification(event, 'ses_root', 'srv_remote')).resolves.toBe(true)

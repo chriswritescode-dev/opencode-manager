@@ -1,24 +1,13 @@
 import '@testing-library/jest-dom/vitest'
+import './testStorage'
+import { afterEach, vi } from 'vitest'
+import { cleanup } from '@testing-library/react'
+import { keepMount } from 'nanostores'
+import { restoreBrowserFakes } from './browserFakes'
+import { installFetchProxy, setActiveFetch } from './fetchProxy'
+import { resetTestStores } from './resetStores'
 
-const testStorage = (() => {
-  const store = new Map<string, string>()
-  return {
-    getItem: (key: string) => store.get(key) ?? null,
-    setItem: (key: string, value: string) => store.set(key, value),
-    removeItem: (key: string) => store.delete(key),
-    clear: () => store.clear(),
-  }
-})()
-
-Object.defineProperty(window, 'localStorage', {
-  value: testStorage,
-  writable: true,
-})
-
-Object.defineProperty(globalThis, 'localStorage', {
-  value: window.localStorage,
-  writable: true,
-})
+installFetchProxy()
 
 global.ResizeObserver = class ResizeObserver {
   observe() {}
@@ -29,3 +18,19 @@ global.ResizeObserver = class ResizeObserver {
 if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {}
 }
+
+async function keepAuthSessionMounted(): Promise<void> {
+  const { authClient } = await import('@/lib/auth-client')
+  const session = authClient.$store.atoms.session
+  if ('active' in session && session.active) keepMount(session)
+}
+
+afterEach(async () => {
+  cleanup()
+  restoreBrowserFakes()
+  vi.unstubAllGlobals()
+  setActiveFetch(null)
+  resetTestStores()
+  window.localStorage.clear()
+  await keepAuthSessionMounted()
+})

@@ -148,7 +148,7 @@ describe('buildEventNotificationPayload', () => {
     expect(p.tag).toBe('permission.asked-ses_1')
     expect(p.data?.eventType).toBe('permission.asked')
     expect(p.renotify).toBe(true)
-    expect(typeof p.timestamp).toBe('number')
+    expect(p.timestamp).toEqual(expect.any(Number))
   })
 
   it('formats an edit permission with the file path', () => {

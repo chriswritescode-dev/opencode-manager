@@ -1,7 +1,8 @@
 import { Database } from 'bun:sqlite'
 import { randomBytes } from 'node:crypto'
 import { logger } from '../utils/logger'
-import { parseJsonc } from '@opencode-manager/shared/utils'
+import { z } from 'zod'
+import { JsonValueSchema, parseJsonObject, parseJsonc } from '@opencode-manager/shared/utils'
 import { encryptSecret } from '../utils/crypto'
 import { deleteSecret, readEncryptedSecret, writeEncryptedSecret } from '../db/secrets'
 import { ENV } from '@opencode-manager/shared/config/env'
@@ -16,6 +17,14 @@ import {
   isActivityWindowMinutes,
 } from '../types/settings'
 import { isColorThemeId, MANAGER_COLOR_THEME_ID } from '@opencode-manager/shared/themes'
+
+const preferencesRowSchema = z.object({ preferences: z.string(), updated_at: z.number() })
+
+const openCodePasswordStateRowSchema = z.object({
+  value: z.string(),
+  created_at: z.number(),
+  updated_at: z.number(),
+})
 
 const CUSTOM_OPENCODE_SERVER_PASSWORD_KEY = 'opencode_server_password'
 const MANAGED_OPENCODE_SERVER_PASSWORD_KEY = 'opencode_server_managed_password'
@@ -54,11 +63,13 @@ export class SettingsService {
   }
 
   getSettings(userId: string = 'default'): SettingsResponse {
-    const row = this.db
-      .query('SELECT preferences, updated_at FROM user_preferences WHERE user_id = ?')
-      .get(userId) as { preferences: string; updated_at: number } | undefined
+    const parsedRow = preferencesRowSchema.safeParse(
+      this.db
+        .query('SELECT preferences, updated_at FROM user_preferences WHERE user_id = ?')
+        .get(userId)
+    )
 
-    if (!row) {
+    if (!parsedRow.success) {
       return {
         preferences: DEFAULT_USER_PREFERENCES,
         updatedAt: Date.now(),
@@ -66,7 +77,7 @@ export class SettingsService {
     }
 
     try {
-      const parsed = parseJsonc(row.preferences) as Record<string, unknown>
+      const parsed = parseJsonObject(JsonValueSchema.parse(parseJsonc(parsedRow.data.preferences))) ?? {}
 
       if (!isColorThemeId(parsed.colorTheme)) {
         parsed.colorTheme = MANAGER_COLOR_THEME_ID
@@ -83,13 +94,13 @@ export class SettingsService {
 
       return {
         preferences: validated,
-        updatedAt: row.updated_at,
+        updatedAt: parsedRow.data.updated_at,
       }
     } catch (error) {
       logger.error('Failed to parse user preferences, returning defaults', error)
       return {
         preferences: DEFAULT_USER_PREFERENCES,
-        updatedAt: row.updated_at,
+        updatedAt: parsedRow.data.updated_at,
       }
     }
   }
@@ -185,15 +196,17 @@ export class SettingsService {
   }
 
   getStoredOpenCodeServerPasswordState(): OpenCodeServerPasswordState | null {
-    const row = this.db.prepare('SELECT value, created_at, updated_at FROM app_secrets WHERE key = ?').get(CUSTOM_OPENCODE_SERVER_PASSWORD_KEY) as { value: string; created_at: number; updated_at: number } | undefined
-    if (!row) {
+    const row = openCodePasswordStateRowSchema.safeParse(
+      this.db.prepare('SELECT value, created_at, updated_at FROM app_secrets WHERE key = ?').get(CUSTOM_OPENCODE_SERVER_PASSWORD_KEY)
+    )
+    if (!row.success) {
       return null
     }
 
     return {
-      value: row.value,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
+      value: row.data.value,
+      createdAt: row.data.created_at,
+      updatedAt: row.data.updated_at,
     }
   }
 

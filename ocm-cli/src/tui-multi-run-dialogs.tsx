@@ -1,4 +1,3 @@
-/** @jsxImportSource @opentui/solid */
 import { TextAttributes } from '@opentui/core'
 import { useKeyboard } from '@opentui/solid'
 import { createEffect, createMemo, createSignal, For, on, onMount, Show } from 'solid-js'

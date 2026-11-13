@@ -1,4 +1,5 @@
 import { useId, useState } from 'react'
+import { z } from 'zod'
 import { ArrowRight, ArrowUpRight, Combine, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -35,8 +36,9 @@ interface FusionComposerProps {
 
 const UPWARD_LIST_CLASS = 'bottom-full mt-0 mb-1'
 
-function errorCode(error: unknown): string | undefined {
-  return (error as { code?: string } | null)?.code
+function errorCode(cause: unknown): string | undefined {
+  const parsed = z.object({ code: z.string() }).safeParse(cause)
+  return parsed.success ? parsed.data.code : undefined
 }
 
 export function FusionComposer({
@@ -182,8 +184,8 @@ function ComposerError({ error, run, onOpenSession }: ComposerErrorProps) {
   }
 
   if (code === 'FUSION_ATTEMPT_RECOVERED') {
-    const parsed = FusionRecoveredDetailsSchema.safeParse((error as { details?: unknown }).details)
-    const recovered = parsed.success ? parsed.data.fusions : []
+    const parsed = z.object({ details: FusionRecoveredDetailsSchema }).safeParse(error)
+    const recovered = parsed.success ? parsed.data.details.fusions : []
     return (
       <div className="flex flex-wrap items-center gap-2">
         <p className="min-w-0 flex-1 text-sm text-destructive">An earlier attempt is already running.</p>

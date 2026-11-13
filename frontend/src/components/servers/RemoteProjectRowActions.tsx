@@ -48,10 +48,6 @@ function ProjectActionButton({ label, onClick, disabled, children }: ProjectActi
   )
 }
 
-/**
- * The project actions for one remote project: new session, schedules, and multi-run. Desktop shows
- * inline icon buttons and mobile shows a menu, matching local repository rows.
- */
 export function RemoteProjectRowActions({ serverId, directory }: RemoteProjectRowActionsProps) {
   const navigate = useNavigate()
   const isMobile = useMobile()

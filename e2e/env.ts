@@ -30,7 +30,7 @@ function resolveOpenCodeBin(): string {
   return candidates.find((candidate) => existsSync(candidate)) ?? 'opencode'
 }
 
-export function createServerEnv(): Record<string, string> {
+export function createServerEnv() {
   return {
     NODE_ENV: 'production',
     PORT: String(SERVER_PORT),
@@ -43,6 +43,7 @@ export function createServerEnv(): Record<string, string> {
     WORKSPACE_PATH: path.join(E2E_TMP, 'workspace'),
     REPO_BROWSE_ROOT: path.join(E2E_TMP, 'workspace'),
     AUTH_SECRET,
+    AUTH_RATE_LIMIT_MAX: '500',
     AUTH_TRUSTED_ORIGINS: `${BASE_URL},http://localhost:${SERVER_PORT}`,
     AUTH_SECURE_COOKIES: 'false',
     PASSKEY_ORIGIN: BASE_URL,

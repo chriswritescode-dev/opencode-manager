@@ -1,193 +1,195 @@
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
-import { BrowserRouter } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { act } from 'react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { RepoCard } from './RepoCard'
+import { useSessionStatus } from '@/stores/sessionStatusStore'
+import { renderWithProviders, connectTestEventStream } from '@/test/render'
+import { LocationCatcher } from '@/test/test-components'
+import { makeRepo } from '@/test/fixtures/api'
+import { permissionAsked } from '@/test/fixtures/events'
+import type { FetchRoute } from '@/test/fetchFake'
+import type { Repo } from '@/api/types'
+import type { GitStatusResponse } from '@/types/git'
 
-const mockNavigate = vi.fn()
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom')
-  return {
-    ...actual,
-    useNavigate: () => mockNavigate,
-  }
-})
+const REPO_PATH = '/Users/test/repos/test-repo'
 
-const activityMocks = vi.hoisted(() => ({
-  useRepoActivityState: vi.fn(),
-}))
-
-vi.mock('@/hooks/useActiveWork', () => ({
-  useRepoActivityState: activityMocks.useRepoActivityState,
-}))
-
-const defaultProps = {
-  repo: {
+function makeCardRepo(overrides: Partial<Repo> = {}): Repo {
+  return makeRepo({
     id: 1,
+    name: 'test-repo',
     repoUrl: 'https://github.com/test/test-repo',
     localPath: 'repos/test-repo',
-    fullPath: '/Users/test/repos/test-repo',
+    fullPath: REPO_PATH,
     defaultBranch: 'main',
     clonedAt: 0,
     branch: 'main',
     currentBranch: 'main',
-    cloneStatus: 'ready' as const,
+    cloneStatus: 'ready',
     isWorktree: false,
     isLocal: false,
-  },
-  onDelete: vi.fn(),
-  isDeleting: false,
-  isSelected: false,
-  onSelect: vi.fn(),
+    ...overrides,
+  })
 }
 
-const renderWithRouter = (ui: React.ReactElement) => {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>{ui}</BrowserRouter>
-    </QueryClientProvider>
+function makeGitStatus(overrides: Partial<GitStatusResponse> = {}): GitStatusResponse {
+  return {
+    branch: 'main',
+    ahead: 0,
+    behind: 0,
+    files: [],
+    hasChanges: false,
+    operation: null,
+    ...overrides,
+  }
+}
+
+const eventProviderRoutes: FetchRoute[] = [
+  { method: 'GET', path: '/api/repos', respond: () => ({ json: [makeCardRepo()] }) },
+  { method: 'GET', path: '/api/opencode-servers', respond: () => ({ json: { servers: [] } }) },
+]
+
+function renderCard(options: {
+  repo?: Repo
+  gitStatus?: GitStatusResponse
+  activityLabel?: string
+  manageMode?: boolean
+  selectionMode?: boolean
+  onSelect?: (id: number, selected: boolean) => void
+  extraRoutes?: FetchRoute[]
+} = {}) {
+  const capturedPathname = { current: '' }
+  const onDelete = vi.fn()
+  const view = renderWithProviders(
+    <>
+      <LocationCatcher capturedPathname={capturedPathname} capturedSearch={{ current: '' }} />
+      <RepoCard
+        repo={options.repo ?? makeCardRepo()}
+        onDelete={onDelete}
+        isDeleting={false}
+        isSelected={false}
+        onSelect={options.onSelect}
+        gitStatus={options.gitStatus}
+        manageMode={options.manageMode}
+        selectionMode={options.selectionMode}
+        activityLabel={options.activityLabel}
+      />
+    </>,
+    { events: true, fetchRoutes: [...(options.extraRoutes ?? []), ...eventProviderRoutes] },
   )
+  return { ...view, capturedPathname, onDelete }
 }
 
 describe('RepoCard', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    activityMocks.useRepoActivityState.mockReturnValue(null)
+    useSessionStatus.setState({ statuses: new Map(), directories: new Map() })
   })
 
-  it('should not navigate when cloneStatus is not ready', () => {
-    const props = {
-      ...defaultProps,
-      repo: { ...defaultProps.repo, cloneStatus: 'cloning' as const },
-    }
-    renderWithRouter(<RepoCard {...props} />)
+  it('does not navigate when cloneStatus is not ready', async () => {
+    const user = userEvent.setup()
+    const { capturedPathname } = renderCard({ repo: makeCardRepo({ cloneStatus: 'cloning' }) })
 
-    fireEvent.click(screen.getByText('test-repo'))
-    expect(mockNavigate).not.toHaveBeenCalled()
+    await user.click(screen.getByText('test-repo'))
+
+    expect(capturedPathname.current).toBe('/')
+  })
+
+  it('navigates to the repository when the card is ready', async () => {
+    const user = userEvent.setup()
+    const { capturedPathname } = renderCard()
+
+    await user.click(screen.getByText('test-repo'))
+
+    expect(capturedPathname.current).toBe('/repos/1')
   })
 
   it('should not show checkbox when onSelect is not provided', () => {
-    const { onSelect, ...propsWithoutSelect } = defaultProps
-    void onSelect
-    renderWithRouter(<RepoCard {...propsWithoutSelect} />)
+    renderCard()
+
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
   })
 
-  it('should not show checkbox in any mode', () => {
-    const props = {
-      ...defaultProps,
-      onSelect: vi.fn(),
-    }
-    renderWithRouter(<RepoCard {...props} manageMode={true} selectionMode={true} />)
+  it('should call onSelect when card is clicked in selection mode', async () => {
+    const user = userEvent.setup()
+    const onSelect = vi.fn()
+    const { capturedPathname } = renderCard({ onSelect, selectionMode: true })
+
+    await user.click(screen.getByText('test-repo'))
+
+    expect(onSelect).toHaveBeenCalledWith(1, true)
+    expect(capturedPathname.current).toBe('/')
+  })
+
+  it('should not show checkbox in manage mode or selection mode', () => {
+    renderCard({ manageMode: true, selectionMode: true, onSelect: vi.fn() })
+
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
   })
 
-  it('should call onSelect when card is clicked in selection mode', () => {
-    const onSelect = vi.fn()
-    const props = {
-      ...defaultProps,
-      onSelect,
-      selectionMode: true,
-    }
-    renderWithRouter(<RepoCard {...props} />)
-
-    fireEvent.click(screen.getByText('test-repo'))
-    expect(onSelect).toHaveBeenCalledWith(1, true)
-  })
-
-  it('should not navigate when card is clicked in selection mode', () => {
-    const onSelect = vi.fn()
-    const props = {
-      ...defaultProps,
-      onSelect,
-      selectionMode: true,
-    }
-    renderWithRouter(<RepoCard {...props} />)
-
-    fireEvent.click(screen.getByText('test-repo'))
-    expect(mockNavigate).not.toHaveBeenCalled()
-    expect(onSelect).toHaveBeenCalledWith(1, true)
-  })
-
-  it('should show dirty state indicator when gitStatus has changes', () => {
-    const props = {
-      ...defaultProps,
-      gitStatus: {
-        branch: 'main',
-        ahead: 0,
-        behind: 0,
-        files: [{ path: 'file.txt', status: 'modified' as const, staged: false }],
+  it('should show a dirty state indicator when gitStatus has changes', () => {
+    const { container } = renderCard({
+      gitStatus: makeGitStatus({
+        files: [{ path: 'file.txt', status: 'modified', staged: false }],
         hasChanges: true,
-        operation: null,
-      },
-    }
-    const { container } = renderWithRouter(<RepoCard {...props} />)
+      }),
+    })
 
-    const indicator = container.querySelector('.bg-highlight')
-    expect(indicator).toBeTruthy()
+    expect(container.querySelector('.bg-highlight')).not.toBeNull()
+    expect(screen.getByText('1')).toBeInTheDocument()
   })
 
   it('should show ahead/behind indicators when gitStatus has ahead or behind', () => {
-    const props = {
-      ...defaultProps,
-      gitStatus: {
-        branch: 'main',
-        ahead: 2,
-        behind: 1,
-        files: [],
-        hasChanges: false,
-        operation: null,
-      },
-    }
-    renderWithRouter(<RepoCard {...props} />)
+    renderCard({ gitStatus: makeGitStatus({ ahead: 2, behind: 1 }) })
 
     expect(screen.getByText(/↑2/)).toBeInTheDocument()
     expect(screen.getByText(/↓1/)).toBeInTheDocument()
   })
 
-  it('should display activity label when provided', () => {
-    const props = {
-      ...defaultProps,
-      activityLabel: '2h ago',
-    }
-    renderWithRouter(<RepoCard {...props} />)
+  it('should display the activity label when provided', () => {
+    renderCard({ activityLabel: '2h ago' })
 
     expect(screen.getByText('2h ago')).toBeInTheDocument()
   })
 
-  it('should show cloning state correctly', () => {
-    const props = {
-      ...defaultProps,
-      repo: { ...defaultProps.repo, cloneStatus: 'cloning' as const },
-    }
-    renderWithRouter(<RepoCard {...props} />)
+  it('should show the cloning state', () => {
+    renderCard({ repo: makeCardRepo({ cloneStatus: 'cloning' }) })
 
     expect(screen.getByText('Cloning...')).toBeInTheDocument()
   })
 
   it('should show the running indicator when a session in the repo is running', () => {
-    activityMocks.useRepoActivityState.mockReturnValue('running')
+    useSessionStatus.getState().setStatus('ses_1', { type: 'busy' })
+    useSessionStatus.getState().setSessionDirectory('ses_1', REPO_PATH)
 
-    renderWithRouter(<RepoCard {...defaultProps} />)
+    renderCard()
 
     expect(screen.getByLabelText('Sessions running')).toBeInTheDocument()
   })
 
-  it('should show the needs-input indicator when a session in the repo needs input', () => {
-    activityMocks.useRepoActivityState.mockReturnValue('needs-input')
+  it('should show the needs-input indicator when a session in the repo needs input', async () => {
+    const { eventStream } = renderCard()
+    await connectTestEventStream(eventStream)
 
-    renderWithRouter(<RepoCard {...defaultProps} />)
+    act(() => {
+      eventStream?.message(
+        permissionAsked(
+          {
+            id: 'permission-1',
+            sessionID: 'ses_1',
+            action: 'bash',
+            resources: ['echo hello'],
+            metadata: {},
+          },
+          { directory: REPO_PATH },
+        ),
+      )
+    })
 
-    expect(screen.getByLabelText('Session needs input')).toBeInTheDocument()
+    expect(await screen.findByLabelText('Session needs input')).toBeInTheDocument()
   })
 
   it('should not show an activity indicator when the repo is idle', () => {
-    activityMocks.useRepoActivityState.mockReturnValue(null)
-
-    renderWithRouter(<RepoCard {...defaultProps} />)
+    renderCard()
 
     expect(screen.queryByLabelText('Sessions running')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Session needs input')).not.toBeInTheDocument()

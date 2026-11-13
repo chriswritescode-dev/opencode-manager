@@ -1,5 +1,5 @@
 
-import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createBrowserRouter, RouterProvider, Outlet, useNavigate, useLocation, useParams, Navigate } from 'react-router-dom'
 import { useEffect, useRef, useCallback, type ReactNode } from 'react'
 import { DEVICE_PAIRING_PATH, LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
@@ -27,15 +27,17 @@ import { DesktopSidebar } from '@/components/navigation/DesktopSidebar'
 import { useRightEdgeSwipe, useSwipeBack } from './hooks/useMobile'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 import { TTSProvider } from './contexts/TTSContext'
-import { ThemeProvider, useThemeMode } from './contexts/ThemeContext'
+import { ThemeProvider } from './contexts/ThemeContext'
+import { useThemeMode } from './contexts/theme-context'
 import { AuthProvider } from './contexts/AuthContext'
 import { QueryCachePersistenceProvider } from './contexts/QueryCachePersistenceContext'
 import { KeyboardShortcutsProvider } from './contexts/KeyboardShortcutsContext'
-import { EventProvider, usePermissions, useEventContext } from '@/contexts/EventContext'
-import { OpenCodeServerProvider, isLocalOpenCodeServer } from '@/contexts/OpenCodeServerContext'
+import { EventProvider } from '@/contexts/EventContext'
+import { useEventContext } from '@/contexts/event-context'
+import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
 import { RepoWorktreesProvider } from '@/contexts/RepoWorktreesContext'
-import { SwipeNavigationProvider, useSwipeNavigation } from '@/contexts/SwipeNavigationContext'
-import { PermissionRequestDialog } from './components/session/PermissionRequestDialog'
+import { SwipeNavigationProvider } from '@/contexts/SwipeNavigationContext'
+import { useSwipeNavigation } from '@/contexts/swipe-navigation-context'
 import { SSHHostKeyDialog } from './components/ssh/SSHHostKeyDialog'
 import { loginLoader, setupLoader, registerLoader, protectedLoader } from './lib/auth-loaders'
 import { getSwipeBackTarget, isSessionDetailRoute } from '@/lib/navigation'
@@ -47,8 +49,8 @@ import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 import { useGlobalShortcutActions } from '@/hooks/useGlobalShortcutActions'
 import { useSidebarServerRouteSync } from '@/hooks/useSidebarServerSelection'
 import { usePushSubscriptionSessionSync } from '@/hooks/usePushSubscriptionSessionSync'
-import { sessionQueryOptions } from '@/hooks/useOpenCode'
 import { RestartServerDialog } from '@/components/settings/RestartServerDialog'
+import { PermissionDialogWrapper } from '@/components/session/PermissionDialogWrapper'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -106,47 +108,6 @@ function HealthMonitor() {
       isRestarting={restartServerMutation.isPending}
       onCancel={() => setConfirmOpen(false)}
       onConfirm={confirmRestart}
-    />
-  )
-}
-
-export function PermissionDialogWrapper() {
-  const {
-    current: currentPermission,
-    pendingCount,
-    respond: replyToPermission,
-    showDialog,
-    setShowDialog,
-    navigateToCurrent,
-    viewedSessionId,
-    currentDirectory,
-    currentIsFromDifferentSession,
-  } = usePermissions()
-  const { getRepoIdForSession } = useEventContext()
-  const isRemotePermission = currentPermission !== null && !isLocalOpenCodeServer(currentPermission.serverId)
-  const { data: session } = useQuery(
-    sessionQueryOptions(
-      currentPermission?.sessionID,
-      currentDirectory ?? undefined,
-      currentPermission?.serverId ?? LOCAL_OPENCODE_SERVER_ID,
-    ),
-  )
-
-  const canOpenCurrentSession = currentPermission !== null
-    && (isRemotePermission || getRepoIdForSession(currentPermission.sessionID) !== null)
-    && (currentIsFromDifferentSession || viewedSessionId === null)
-
-  return (
-    <PermissionRequestDialog
-      permission={currentPermission}
-      pendingCount={pendingCount}
-      isFromDifferentSession={currentIsFromDifferentSession}
-      sessionTitle={session?.title ?? undefined}
-      repoDirectory={currentDirectory}
-      onOpenSession={canOpenCurrentSession ? navigateToCurrent : undefined}
-      onRespond={replyToPermission}
-      open={showDialog}
-      onOpenChange={setShowDialog}
     />
   )
 }

@@ -1,15 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { FileDiffInfo, SessionMessageInfo } from '@opencode-manager/shared/opencode'
-import type { OpenCodeClient } from '../../src/services/opencode/client'
+import type { FileDiffInfo, SessionMessageUser } from '@opencode-manager/shared/opencode'
 import { readSessionChanges } from '../../src/services/session-changes'
+import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
 
-function userMessage(id: string): SessionMessageInfo {
-  return { id, type: 'user', time: { created: 0 }, text: id } as SessionMessageInfo
+function userMessage(id: string): SessionMessageUser {
+  return { id, type: 'user', time: { created: 0 }, text: id }
 }
 
 interface FakeClientOptions {
-  asc?: SessionMessageInfo[]
-  desc?: SessionMessageInfo[]
+  asc?: SessionMessageUser[]
+  desc?: SessionMessageUser[]
   diff?: FileDiffInfo[] | Error
 }
 
@@ -25,10 +25,7 @@ function createFakeClient(options: FakeClientOptions = {}) {
     return options.diff ?? []
   })
 
-  const client = {
-    api: { message: { list }, session: { diff } },
-    forwardRaw: vi.fn(),
-  } as unknown as OpenCodeClient
+  const client = createStubOpenCodeClient({ api: { message: { list }, session: { diff } } })
 
   return { client, list, diff }
 }

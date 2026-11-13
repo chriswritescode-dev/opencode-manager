@@ -1,15 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-
-vi.mock('../../src/utils/logger', () => ({
-  logger: {
-    info: vi.fn(),
-    error: vi.fn(),
-    warn: vi.fn(),
-  },
-}))
-
-import { ClientError, type OpenCodeApi, type V2Event } from '@opencode-manager/shared/opencode'
-import { subscribeOpenCodeEvents } from '../../src/services/opencode-event-subscription'
+import { ClientError, type V2Event } from '@opencode-manager/shared/opencode'
+import {
+  subscribeOpenCodeEvents,
+  type OpenCodeEventStreamApi,
+} from '../../src/services/opencode-event-subscription'
+import { expectLoggedMessage } from '../helpers/log-assertions'
 
 const serverConnected = {
   id: 'evt_connected',
@@ -29,7 +24,7 @@ interface ControlledEventStream {
   signal: AbortSignal
   push: (event: V2Event) => void
   end: () => void
-  fail: (error: unknown) => void
+  fail: (error: Error) => void
 }
 
 interface FakeSubscription {
@@ -40,7 +35,7 @@ interface FakeSubscription {
 function createControlledEventStream(): ControlledEventStream {
   const queue: V2Event[] = []
   let finished = false
-  let failure: { value: unknown } | null = null
+  let failure: { value: Error } | null = null
   let signal: AbortSignal
   let notify: (() => void) | null = null
 
@@ -77,7 +72,7 @@ function createControlledEventStream(): ControlledEventStream {
     set signal(next: AbortSignal) {
       signal = next
       next.addEventListener('abort', () => {
-        failure = { value: next.reason ?? new Error('aborted') }
+        failure = { value: next.reason instanceof Error ? next.reason : new Error('aborted') }
         wake()
       }, { once: true })
     },
@@ -93,21 +88,26 @@ function createControlledEventStream(): ControlledEventStream {
       failure = { value: error }
       wake()
     },
-  } as ControlledEventStream
+  }
 }
 
-function createFakeApi(): { api: OpenCodeApi; subscriptions: FakeSubscription[] } {
+interface FakeApi {
+  api: OpenCodeEventStreamApi
+  subscriptions: FakeSubscription[]
+}
+
+function createFakeApi(): FakeApi {
   const subscriptions: FakeSubscription[] = []
-  const api = {
+  const api: OpenCodeEventStreamApi = {
     event: {
-      subscribe: (options: { signal?: AbortSignal; onActivity?: () => void }) => {
+      subscribe: (options) => {
         const stream = createControlledEventStream()
-        stream.signal = options.signal!
-        subscriptions.push({ stream, onActivity: options.onActivity })
+        if (options?.signal) stream.signal = options.signal
+        subscriptions.push({ stream, onActivity: options?.onActivity })
         return stream.iterable
       },
     },
-  } as unknown as OpenCodeApi
+  }
   return { api, subscriptions }
 }
 
@@ -176,6 +176,7 @@ describe('subscribeOpenCodeEvents', () => {
 
     expect(received).toEqual(['server.connected', 'session.status'])
     expect(onDisconnect).not.toHaveBeenCalled()
+    expectLoggedMessage('test: failed to handle server.connected event', 'error')
 
     subscription.close()
   })
@@ -240,6 +241,7 @@ describe('subscribeOpenCodeEvents', () => {
     subscriptions[0]!.stream.end()
     await flush()
     expect(onDisconnect).toHaveBeenCalledTimes(1)
+    expectLoggedMessage('test: disconnect handler failed', 'error')
 
     await vi.advanceTimersByTimeAsync(100)
     expect(subscriptions).toHaveLength(2)

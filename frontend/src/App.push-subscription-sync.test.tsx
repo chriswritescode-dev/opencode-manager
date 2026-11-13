@@ -1,117 +1,64 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router-dom'
-import type { ReactNode } from 'react'
+import { describe, expect, it } from 'vitest'
+import { waitFor } from '@testing-library/react'
+import {
+  installMatchMedia,
+  installNavigationRequest,
+  installNotification,
+  installServiceWorkerPushSubscription,
+} from '@/test/browserFakes'
+import { makeAuthConfig, makeAuthSession, makeSettingsResponse } from '@/test/fixtures/api'
+import type { FetchRoute } from '@/test/fetchFake'
+import { TooltipProvider } from '@/components/ui/tooltip'
+import { renderWithProviders } from '@/test/render'
 
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>()
-  return { ...actual, createBrowserRouter: vi.fn(() => ({ routes: [] })) }
-})
-
-import { AppShell } from './App'
-
-const mocks = vi.hoisted(() => ({
-  usePushSubscriptionSessionSync: vi.fn(),
-}))
-
-vi.mock('@/hooks/usePushSubscriptionSessionSync', () => ({
-  usePushSubscriptionSessionSync: mocks.usePushSubscriptionSessionSync,
-}))
-
-vi.mock('@/hooks/useMobile', () => ({
-  useSwipeBack: () => ({ bind: () => () => {} }),
-  useRightEdgeSwipe: () => ({ bind: () => () => {} }),
-}))
-
-vi.mock('@/hooks/useMobileTabBar', () => ({
-  useMobileTabBar: () => ({ openSheet: null, open: vi.fn() }),
-}))
-
-vi.mock('@/contexts/SwipeNavigationContext', () => ({
-  useSwipeNavigation: () => null,
-}))
-
-vi.mock('@/contexts/EventContext', () => ({
-  EventProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
-  usePermissions: () => ({
-    current: null,
-    pendingCount: 0,
-    respond: vi.fn(),
-    showDialog: false,
-    setShowDialog: vi.fn(),
-    navigateToCurrent: vi.fn(),
-    viewedSessionId: null,
-    currentDirectory: null,
-    currentIsFromDifferentSession: false,
-  }),
-  useEventContext: () => ({
-    getRepoIdForSession: () => null,
-    sshHostKey: { request: null, respond: vi.fn() },
-  }),
-}))
-
-vi.mock('@/contexts/RepoWorktreesContext', () => ({
-  RepoWorktreesProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
-}))
-
-vi.mock('@/contexts/KeyboardShortcutsContext', () => ({
-  KeyboardShortcutsProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
-}))
-
-vi.mock('@/contexts/OpenCodeServerContext', () => ({
-  OpenCodeServerProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
-  isLocalOpenCodeServer: () => true,
-}))
-
-vi.mock('@/lib/serviceWorker', () => ({
-  onNotificationClick: () => () => {},
-}))
-
-vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ isAuthenticated: true }) }))
-vi.mock('@/hooks/useGlobalShortcutActions', () => ({ useGlobalShortcutActions: vi.fn() }))
-vi.mock('@/hooks/useSidebarServerSelection', () => ({ useSidebarServerRouteSync: vi.fn() }))
-vi.mock('@/hooks/useOpenCodeFailureToast', () => ({ useOpenCodeFailureToast: vi.fn() }))
-vi.mock('@/hooks/useOpenCode', () => ({
-  sessionQueryOptions: () => ({ queryKey: ['session'], queryFn: async () => null, enabled: false }),
-}))
-vi.mock('@/hooks/useOpenCodeServerActions', () => ({
-  useOpenCodeServerActions: () => ({
-    restartServerMutation: { isPending: false },
-    confirmOpen: false,
-    setConfirmOpen: vi.fn(),
-    activeSessionCount: 0,
-    requestRestart: vi.fn(),
-    confirmRestart: vi.fn(),
-  }),
-}))
-
-vi.mock('@/components/navigation/DesktopSidebar', () => ({ DesktopSidebar: () => null }))
-vi.mock('@/components/navigation/MobileTabBar', () => ({ MobileTabBar: () => null }))
-vi.mock('@/components/navigation/MobileSheetHost', () => ({ MobileSheetHost: () => null }))
-vi.mock('@/components/settings/SettingsDialog', () => ({ SettingsDialog: () => null }))
-vi.mock('@/components/settings/RestartServerDialog', () => ({ RestartServerDialog: () => null }))
-vi.mock('@/components/session/PermissionRequestDialog', () => ({ PermissionRequestDialog: () => null }))
-vi.mock('@/components/ssh/SSHHostKeyDialog', () => ({ SSHHostKeyDialog: () => null }))
-vi.mock('@/components/VersionNotifier', () => ({ VersionNotifier: () => null }))
-vi.mock('@/components/PwaUpdatePrompt', () => ({ PwaUpdatePrompt: () => null }))
+const routes: FetchRoute[] = [
+  { method: 'GET', path: '/api/auth/get-session', respond: () => ({ json: makeAuthSession() }) },
+  { method: 'GET', path: '/api/auth-info/config', respond: () => ({ json: makeAuthConfig() }) },
+  { method: 'GET', path: '/api/settings', respond: () => ({ json: makeSettingsResponse() }) },
+  {
+    method: 'POST',
+    path: '/api/notifications/subscribe',
+    respond: (request) => ({
+      json: {
+        subscription: {
+          id: 1,
+          userId: 'test-user',
+          endpoint: request.body?.endpoint,
+          p256dh: 'p256dh-key',
+          auth: 'auth-secret',
+          deviceName: null,
+          createdAt: 1,
+          lastUsedAt: null,
+        },
+      },
+    }),
+  },
+  { method: 'GET', path: '/api/repos', respond: () => ({ json: [] }) },
+  { method: 'GET', path: '/api/opencode-servers', respond: () => ({ json: { servers: [] } }) },
+  { method: 'GET', path: '/api/opencode/api/session/active', respond: () => ({ json: { data: {} } }) },
+  { method: 'GET', path: '/api/opencode/api/permission/request', respond: () => ({ json: { data: [] } }) },
+  { method: 'GET', path: '/api/opencode/api/form', respond: () => ({ json: { data: [] } }) },
+  { method: 'GET', path: '/api/opencode/api/shell', respond: () => ({ json: { data: [] } }) },
+  { method: 'GET', path: /^\/api\//, respond: () => ({ json: {} }) },
+]
 
 describe('AppShell', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
+  it('syncs the registered push subscription once in the authenticated shell', async () => {
+    installNavigationRequest()
+    installMatchMedia(false)
+    installNotification('granted')
+    const subscription = installServiceWorkerPushSubscription()
+    const { AppShell } = await import('./App')
 
-  it('mounts the push subscription session sync in the authenticated shell', () => {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <AppShell />
-        </MemoryRouter>
-      </QueryClientProvider>,
+    const { fetchFake } = renderWithProviders(
+      <TooltipProvider>
+        <AppShell />
+      </TooltipProvider>,
+      { events: true, fetchRoutes: routes },
     )
 
-    expect(mocks.usePushSubscriptionSessionSync).toHaveBeenCalledTimes(1)
-  })
+    await waitFor(() => expect(fetchFake.findRequests('POST', '/api/notifications/subscribe')).toHaveLength(1))
+    const syncRequest = fetchFake.lastRequest('POST', '/api/notifications/subscribe')
+    expect(syncRequest?.body).toMatchObject({ endpoint: subscription.endpoint, keys: subscription.keys })
+  }, 20000)
 })

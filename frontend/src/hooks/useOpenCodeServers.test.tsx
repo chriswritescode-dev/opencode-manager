@@ -1,52 +1,34 @@
-import { QueryClient, QueryClientProvider, onlineManager } from '@tanstack/react-query'
-import { act, renderHook, waitFor } from '@testing-library/react'
-import type { ReactNode } from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, waitFor } from '@testing-library/react'
+import { onlineManager } from '@tanstack/react-query'
+import { afterEach, describe, expect, it } from 'vitest'
 import { useOpenCodeServers } from './useOpenCodeServers'
+import { renderHookWithProviders } from '@/test/render'
+import { makeOpenCodeServer } from '@/test/fixtures/api'
 
-const mocks = vi.hoisted(() => ({ listOpenCodeServers: vi.fn() }))
+const hookProviders = {
+  auth: false,
+  theme: false,
+  tts: false,
+} as const
 
-vi.mock('@/api/opencodeServers', () => ({
-  listOpenCodeServers: mocks.listOpenCodeServers,
-  listOpenCodeServerStatuses: vi.fn(),
-  createOpenCodeServer: vi.fn(),
-  deleteOpenCodeServer: vi.fn(),
-  testOpenCodeServer: vi.fn(),
-  testOpenCodeServerById: vi.fn(),
-  updateOpenCodeServer: vi.fn(),
-}))
+const kitchen = makeOpenCodeServer({ id: 'srv_kitchen', name: 'Kitchen' })
 
-const kitchen = {
-  id: 'srv_kitchen',
-  name: 'Kitchen',
-  baseUrl: 'https://kitchen.example.com',
-  username: 'opencode',
-  enabled: true,
-  hasPassword: true,
-  createdAt: 1,
-  updatedAt: 2,
-}
-
-function createWrapper() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  )
-}
+const serversRoute = (respond: () => { json: object } | Promise<{ json: object }>) => ({
+  method: 'GET' as const,
+  path: '/api/opencode-servers',
+  respond,
+})
 
 describe('useOpenCodeServers', () => {
-  beforeEach(() => {
-    mocks.listOpenCodeServers.mockReset()
-  })
-
   afterEach(() => {
     onlineManager.setOnline(true)
   })
 
   it('reports an in-flight first load as initial loading', () => {
-    mocks.listOpenCodeServers.mockReturnValue(new Promise(() => {}))
-
-    const { result } = renderHook(() => useOpenCodeServers(), { wrapper: createWrapper() })
+    const { result } = renderHookWithProviders(() => useOpenCodeServers(), {
+      ...hookProviders,
+      fetchRoutes: [serversRoute(() => new Promise(() => {}))],
+    })
 
     expect(result.current.isPaused).toBe(false)
     expect(result.current.showsInitialLoading).toBe(true)
@@ -54,21 +36,31 @@ describe('useOpenCodeServers', () => {
 
   it('reports a paused offline fetch as paused instead of initial loading', () => {
     onlineManager.setOnline(false)
-    mocks.listOpenCodeServers.mockReturnValue(new Promise(() => {}))
 
-    const { result } = renderHook(() => useOpenCodeServers(), { wrapper: createWrapper() })
+    const { result, fetchFake } = renderHookWithProviders(() => useOpenCodeServers(), {
+      ...hookProviders,
+      fetchRoutes: [serversRoute(() => new Promise(() => {}))],
+    })
 
     expect(result.current.isPaused).toBe(true)
     expect(result.current.isLoading).toBe(false)
     expect(result.current.servers).toEqual([])
     expect(result.current.showsInitialLoading).toBe(false)
-    expect(mocks.listOpenCodeServers).not.toHaveBeenCalled()
+    expect(fetchFake.findRequests('GET', '/api/opencode-servers')).toHaveLength(0)
   })
 
   it('keeps the cached server list and leaves it unloaded while a refetch is paused', async () => {
-    mocks.listOpenCodeServers.mockResolvedValueOnce([kitchen]).mockReturnValueOnce(new Promise(() => {}))
-    const wrapper = createWrapper()
-    const { result } = renderHook(() => useOpenCodeServers(), { wrapper })
+    let requests = 0
+    const { result } = renderHookWithProviders(() => useOpenCodeServers(), {
+      ...hookProviders,
+      fetchRoutes: [
+        serversRoute(() => {
+          requests += 1
+          if (requests === 1) return { json: { servers: [kitchen] } }
+          return new Promise(() => {})
+        }),
+      ],
+    })
 
     await waitFor(() => expect(result.current.servers).toEqual([kitchen]))
 

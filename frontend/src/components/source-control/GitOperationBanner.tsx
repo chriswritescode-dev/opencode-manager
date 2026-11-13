@@ -8,12 +8,12 @@ import { ConfirmDestructiveDialog } from '@/components/ui/confirm-destructive-di
 import { AlertTriangle, Loader2 } from 'lucide-react'
 import type { GitOperationKind, GitOperationState } from '@opencode-manager/shared'
 
-const OPERATION_LABELS: Record<GitOperationKind, string> = {
+const OPERATION_LABELS = {
   merge: 'Merge',
   rebase: 'Rebase',
   'cherry-pick': 'Cherry-pick',
   revert: 'Revert',
-}
+} satisfies Record<GitOperationKind, string>
 
 interface GitOperationBannerProps {
   repoId: number

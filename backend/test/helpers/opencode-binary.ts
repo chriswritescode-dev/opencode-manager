@@ -1,11 +1,11 @@
-import { spawn, spawnSync } from 'child_process'
+import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'child_process'
 import { once } from 'events'
 import { mkdir, mkdtemp, rm } from 'fs/promises'
 import { createServer } from 'net'
-import type { AddressInfo } from 'net'
 import { randomBytes } from 'crypto'
 import os from 'os'
 import path from 'path'
+import { z } from 'zod'
 import { buildOpenCodeBasicAuth, isSupportedOpenCodeVersion } from '@opencode-manager/shared/opencode'
 import { OPENCODE_SERVICE_SERVE_ARGS, getOpenCodeServiceRegistrationPath, writeOpenCodeServiceSettings } from '../../src/services/opencode-service-mode'
 
@@ -17,6 +17,10 @@ const STOP_TIMEOUT_MS = 5000
 const KILL_CONFIRM_MS = 2000
 
 const OPENCODE_BINARY_CANDIDATES = ['opencode', '/usr/local/bin/opencode', '/opt/opencode/bin/opencode']
+
+const BoundPortSchema = z.object({ port: z.number() })
+
+export type VersionProbe = (binary: string) => string | null
 
 export type OpenCodeRunResult = {
   status: number | null
@@ -47,12 +51,20 @@ function readOpenCodeVersion(binary: string): string | null {
   return match ? match[1]! : null
 }
 
-export function resolveOpenCode2Binary(): string | null {
-  const candidates = [process.env.OPENCODE_BIN, ...OPENCODE_BINARY_CANDIDATES].filter(
-    (candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0,
-  )
+export function openCodeBinaryCandidates(): string[] {
+  const configured = process.env.OPENCODE_BIN
+  const candidates = configured !== undefined && configured.length > 0
+    ? [configured, ...OPENCODE_BINARY_CANDIDATES]
+    : [...OPENCODE_BINARY_CANDIDATES]
+  return candidates
+}
+
+export function resolveOpenCode2Binary(
+  candidates: string[] = openCodeBinaryCandidates(),
+  probeVersion: VersionProbe = readOpenCodeVersion,
+): string | null {
   for (const candidate of candidates) {
-    const version = readOpenCodeVersion(candidate)
+    const version = probeVersion(candidate)
     if (version && isSupportedOpenCodeVersion(version)) return candidate
   }
   return null
@@ -96,7 +108,7 @@ async function getFreePort(): Promise<number> {
     server.unref()
     server.on('error', reject)
     server.listen(0, '127.0.0.1', () => {
-      const port = (server.address() as AddressInfo).port
+      const port = BoundPortSchema.parse(server.address()).port
       server.close(() => resolve(port))
     })
   })
@@ -112,7 +124,6 @@ async function waitForServerInfo(baseUrl: string, password: string, child: Retur
       const response = await fetch(`${baseUrl}/api/info`, { headers: { Authorization: buildOpenCodeBasicAuth(password) } })
       if (response.ok) return
     } catch {
-      // the server is not listening yet
     }
     await delay(SERVE_POLL_INTERVAL_MS)
   }
@@ -128,12 +139,16 @@ export type OpenCodeServeDirectories = {
   cacheHome: string
 }
 
+export type ServeSpawn = (binary: string, args: string[], options: SpawnOptions) => ChildProcess
+
 export type OpenCodeServeOptions = {
+  binary?: string
   env?: NodeJS.ProcessEnv
   service?: boolean
   directories?: OpenCodeServeDirectories
   password?: string
   port?: number
+  spawnProcess?: ServeSpawn
 }
 
 export async function createOpenCodeServeDirectories(env: NodeJS.ProcessEnv = {}): Promise<OpenCodeServeDirectories> {
@@ -153,7 +168,7 @@ export async function createOpenCodeServeDirectories(env: NodeJS.ProcessEnv = {}
 }
 
 export async function startOpenCodeServe(options: OpenCodeServeOptions = {}): Promise<OpenCodeServe> {
-  const binary = resolveOpenCode2Binary()
+  const binary = options.binary ?? resolveOpenCode2Binary()
   if (!binary) throw new Error('no OpenCode 2 binary is available for the binary-backed test')
   const ownsDirectories = options.directories === undefined
   const directories = options.directories ?? await createOpenCodeServeDirectories(options.env)
@@ -178,7 +193,8 @@ export async function startOpenCodeServe(options: OpenCodeServeOptions = {}): Pr
   const args = options.service
     ? [...OPENCODE_SERVICE_SERVE_ARGS, '--port', String(port), '--hostname', '127.0.0.1']
     : ['serve', '--port', String(port), '--hostname', '127.0.0.1']
-  const child = spawn(binary, args, {
+  const spawnProcess = options.spawnProcess ?? spawn
+  const child = spawnProcess(binary, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
     env,
   })

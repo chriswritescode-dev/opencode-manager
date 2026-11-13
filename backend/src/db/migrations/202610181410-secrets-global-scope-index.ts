@@ -11,14 +11,6 @@ function rebuildScopeIndex(db: Database, globalScopeId: number): void {
   )
 }
 
-/**
- * Deletes the rows the legacy scope key cannot hold.
- *
- * The legacy index merged global rows (`repo_id IS NULL`) with the Assistant repository's scope
- * (`repo_id = 0`), and the old upsert let the last write win, so the newest row of each merged
- * group is the state legacy code would hold. Ordering by `updated_at`, then `id`, keeps that row
- * and deletes the rest, which lets the legacy unique index be recreated.
- */
 function collapseLegacyScopeDuplicates(db: Database): void {
   db.run(`
     DELETE FROM secrets

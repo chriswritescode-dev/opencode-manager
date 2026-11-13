@@ -1,6 +1,6 @@
 export * from './env-expressions'
+export * from './json'
 export * from './jsonc'
-export * from './record'
 export * from './repo'
 export * from './sandbox-command'
 export * from './semver'

@@ -1,61 +1,63 @@
-import { describe, it, expect, vi } from 'vitest'
-
-vi.mock('@opencode-manager/shared/config/env', () => ({
-  getWorkspacePath: vi.fn(() => '/test/workspace'),
-  getOpenCodeConfigFilePath: vi.fn(() => '/test/workspace/.config/opencode.json'),
-  getReposPath: vi.fn(() => '/test/workspace/repos'),
-  getAgentsMdPath: vi.fn(() => '/test/workspace/AGENTS.md'),
-  getDatabasePath: vi.fn(() => ':memory:'),
-  getConfigPath: vi.fn(() => '/test/workspace/config'),
-  ENV: {
-    SERVER: { PORT: 5003, HOST: '0.0.0.0', NODE_ENV: 'test' },
-    AUTH: { TRUSTED_ORIGINS: 'http://localhost:5173', SECRET: 'test-secret-for-encryption-key-32c' },
-    WORKSPACE: { BASE_PATH: '/test/workspace', REPOS_DIR: 'repos', CONFIG_DIR: 'config' },
-    OPENCODE: { PORT: 5551, HOST: '127.0.0.1', SERVER_PASSWORD: '' },
-    DATABASE: { PATH: ':memory:' },
-    FILE_LIMITS: {
-      MAX_SIZE_BYTES: 1024 * 1024,
-      MAX_UPLOAD_SIZE_BYTES: 10 * 1024 * 1024,
-    },
-  },
-  FILE_LIMITS: {
-    MAX_SIZE_BYTES: 1024 * 1024,
-    MAX_UPLOAD_SIZE_BYTES: 10 * 1024 * 1024,
-  },
-}))
-
-vi.mock('../../../src/utils/logger', () => ({
-  logger: {
-    info: vi.fn(),
-    error: vi.fn(),
-    warn: vi.fn(),
-  },
-}))
-
-import { createOpenCodeClient, FetchOpenCodeClient } from '../../../src/services/opencode/client'
-import { ENV } from '@opencode-manager/shared/config/env'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { z } from 'zod'
+import { ENV, getWorkspacePath } from '@opencode-manager/shared/config/env'
 import { openCodeLocation } from '@opencode-manager/shared/opencode'
+import { createOpenCodeClient, FetchOpenCodeClient } from '../../../src/services/opencode/client'
+import { createFetchStub } from '../../helpers/fetch-stub'
+import { readJson } from '../../helpers/read-json'
+import { createTempWorkspace, type TempWorkspace } from '../../helpers/test-env'
+
+const ErrorResponseSchema = z.object({ error: z.string() })
 
 async function readBodyText(body: RequestInit['body']): Promise<string | null> {
   if (!(body instanceof ReadableStream)) return null
   return await new Response(body).text()
 }
 
+function captureUrl(input: Parameters<typeof fetch>[0]): URL {
+  return new URL(input instanceof Request ? input.url : String(input))
+}
+
+function stubEnvHost(host: string): () => void {
+  const previous = ENV.OPENCODE.HOST
+  Object.defineProperty(ENV.OPENCODE, 'HOST', { value: host, configurable: true, writable: true })
+  return () => {
+    Object.defineProperty(ENV.OPENCODE, 'HOST', { value: previous, configurable: true, writable: true })
+  }
+}
+
 describe('OpenCodeClient', () => {
   const baseUrl = 'http://127.0.0.1:5551'
   const basicAuth = 'Basic dXNlcjpwYXNz'
+  let workspace: TempWorkspace
+  let previousLogLevel: string | undefined
+
+  beforeAll(() => {
+    workspace = createTempWorkspace('ocm-opencode-client-')
+    previousLogLevel = process.env.LOG_LEVEL
+    process.env.LOG_LEVEL = 'error'
+  })
+
+  afterAll(() => {
+    workspace.restore()
+    if (previousLogLevel === undefined) delete process.env.LOG_LEVEL
+    else process.env.LOG_LEVEL = previousLogLevel
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
 
   describe('forwardRaw', () => {
-    it('should strip /api/opencode prefix from path, preserve search string, and strip host/connection/authorization/cookie headers', async () => {
-      const mockResponse = new Response(JSON.stringify({}), { status: 200 })
+    it('strips the /api/opencode prefix, keeps the search string, and drops host/connection/authorization/cookie headers', async () => {
       let capturedUrl: URL | undefined
       let capturedInit: RequestInit | undefined
-      const fetchFn = async (input: URL | Request | string, init?: RequestInit) => {
-        capturedUrl = input instanceof URL ? input : new URL(input.toString())
+      const fetchFn = createFetchStub(async (input, init) => {
+        capturedUrl = captureUrl(input)
         capturedInit = init
-        return mockResponse
-      }
-      const client = new FetchOpenCodeClient({ baseUrl, basicAuth: '', fetchFn: fetchFn as unknown as typeof fetch })
+        return new Response(JSON.stringify({}), { status: 200 })
+      })
+      const client = new FetchOpenCodeClient({ baseUrl, basicAuth: '', fetchFn })
 
       const request = new Request('http://localhost:5003/api/opencode/config?query=1', {
         method: 'GET',
@@ -73,39 +75,37 @@ describe('OpenCodeClient', () => {
       expect(capturedUrl?.pathname).toBe('/config')
       expect(capturedUrl?.searchParams.get('query')).toBe('1')
 
-      expect(capturedInit?.headers).toEqual(expect.objectContaining({
-        'x-custom-header': 'value',
-      }))
-      expect((capturedInit?.headers as Record<string, string>)['host']).toBeUndefined()
-      expect((capturedInit?.headers as Record<string, string>)['connection']).toBeUndefined()
-      expect((capturedInit?.headers as Record<string, string>)['authorization']).toBeUndefined()
-      expect((capturedInit?.headers as Record<string, string>)['cookie']).toBeUndefined()
-      expect((capturedInit?.headers as Record<string, string>)['x-opencode-directory']).toBe(encodeURIComponent('/test/workspace'))
+      const forwardedHeaders = new Headers(capturedInit?.headers)
+      expect(forwardedHeaders.get('x-custom-header')).toBe('value')
+      expect(forwardedHeaders.get('host')).toBeNull()
+      expect(forwardedHeaders.get('connection')).toBeNull()
+      expect(forwardedHeaders.get('authorization')).toBeNull()
+      expect(forwardedHeaders.get('cookie')).toBeNull()
+      expect(forwardedHeaders.get('x-opencode-directory')).toBe(encodeURIComponent(workspace.path))
     })
 
     it('keeps a caller-supplied x-opencode-directory header', async () => {
       let capturedInit: RequestInit | undefined
-      const fetchFn = async (_: URL | Request | string, init?: RequestInit) => {
+      const fetchFn = createFetchStub(async (_input, init) => {
         capturedInit = init
         return new Response(JSON.stringify({}), { status: 200 })
-      }
-      const client = new FetchOpenCodeClient({ baseUrl, basicAuth: '', fetchFn: fetchFn as unknown as typeof fetch })
+      })
+      const client = new FetchOpenCodeClient({ baseUrl, basicAuth: '', fetchFn })
 
       await client.forwardRaw(new Request('http://localhost:5003/api/opencode/api/config', {
         headers: { 'X-OpenCode-Directory': '%2Frepo%2Fb' },
       }))
 
-      expect((capturedInit?.headers as Record<string, string>)['x-opencode-directory']).toBe('%2Frepo%2Fb')
+      expect(new Headers(capturedInit?.headers).get('x-opencode-directory')).toBe('%2Frepo%2Fb')
     })
 
-    it('should stream the body for POST but not for GET/HEAD', async () => {
-      const mockResponse = new Response(JSON.stringify({}), { status: 200 })
+    it('streams the body for POST but not for GET/HEAD', async () => {
       const capturedBodies: Array<RequestInit['body']> = []
-      const fetchFn = async (_: URL | Request | string, init?: RequestInit) => {
+      const fetchFn = createFetchStub(async (_input, init) => {
         capturedBodies.push(init?.body)
-        return mockResponse
-      }
-      const client = new FetchOpenCodeClient({ baseUrl, basicAuth: '', fetchFn: fetchFn as unknown as typeof fetch })
+        return new Response(JSON.stringify({}), { status: 200 })
+      })
+      const client = new FetchOpenCodeClient({ baseUrl, basicAuth: '', fetchFn })
 
       const postRequest = new Request('http://localhost:5003/api/opencode/test', {
         method: 'POST',
@@ -132,18 +132,18 @@ describe('OpenCodeClient', () => {
       expect(capturedBodies[2]).toBeUndefined()
     })
 
-    it('should resolve basic auth dynamically for each request', async () => {
-      const capturedAuthHeaders: Array<string | undefined> = []
+    it('resolves basic auth dynamically for each request', async () => {
+      const capturedAuthHeaders: Array<string | null> = []
       const passwords = ['first-password', 'second-password']
-      const fetchFn = async (_: URL | Request | string, init?: RequestInit) => {
-        capturedAuthHeaders.push((init?.headers as Record<string, string>).Authorization)
+      const fetchFn = createFetchStub(async (_input, init) => {
+        capturedAuthHeaders.push(new Headers(init?.headers).get('authorization'))
         return new Response(JSON.stringify({}), { status: 200 })
-      }
+      })
       const client = new FetchOpenCodeClient({
         baseUrl,
         basicAuth: null,
         passwordResolver: () => passwords.shift() ?? '',
-        fetchFn: fetchFn as unknown as typeof fetch,
+        fetchFn,
       })
 
       await client.forwardRaw(new Request('http://localhost:5003/api/opencode/config'))
@@ -155,8 +155,8 @@ describe('OpenCodeClient', () => {
       ])
     })
 
-    it('should inject auth when present and strip hop-by-hop response headers', async () => {
-      const mockResponse = new Response(JSON.stringify({ data: 'test' }), {
+    it('injects auth when present and strips hop-by-hop response headers', async () => {
+      const response = new Response(JSON.stringify({ data: 'test' }), {
         status: 200,
         headers: {
           'Content-Type': 'application/json',
@@ -169,13 +169,13 @@ describe('OpenCodeClient', () => {
 
       let capturedUrl: URL | undefined
       let capturedInit: RequestInit | undefined
-      const fetchFn = async (input: URL | Request | string, init?: RequestInit) => {
-        capturedUrl = input instanceof URL ? input : new URL(input.toString())
+      const fetchFn = createFetchStub(async (input, init) => {
+        capturedUrl = captureUrl(input)
         capturedInit = init
-        return mockResponse
-      }
+        return response
+      })
 
-      const client = new FetchOpenCodeClient({ baseUrl, basicAuth, fetchFn: fetchFn as unknown as typeof fetch })
+      const client = new FetchOpenCodeClient({ baseUrl, basicAuth, fetchFn })
 
       const result = await client.forwardRaw(new Request('http://localhost:5003/api/opencode/config?foo=bar', {
         method: 'POST',
@@ -188,34 +188,29 @@ describe('OpenCodeClient', () => {
       expect(capturedInit?.body).toBeInstanceOf(ReadableStream)
       expect(await readBodyText(capturedInit?.body)).toBe('request-body-content')
       expect(capturedInit?.duplex).toBe('half')
-      expect(capturedInit?.headers).toEqual(expect.objectContaining({
-        Authorization: basicAuth,
-        'x-caller': 'caller-value',
-      }))
 
-      const resultHeaders: Record<string, string> = {}
-      result.headers.forEach((value, key) => {
-        resultHeaders[key] = value
-      })
+      const forwardedHeaders = new Headers(capturedInit?.headers)
+      expect(forwardedHeaders.get('authorization')).toBe(basicAuth)
+      expect(forwardedHeaders.get('x-caller')).toBe('caller-value')
 
-      expect(resultHeaders['content-length']).toBeUndefined()
-      expect(resultHeaders['content-encoding']).toBeUndefined()
-      expect(resultHeaders['transfer-encoding']).toBeUndefined()
-      expect(resultHeaders['connection']).toBeUndefined()
-      expect(resultHeaders['content-type']).toBe('application/json')
+      const resultHeaders = new Headers(result.headers)
+      expect(resultHeaders.get('content-length')).toBeNull()
+      expect(resultHeaders.get('content-encoding')).toBeNull()
+      expect(resultHeaders.get('transfer-encoding')).toBeNull()
+      expect(resultHeaders.get('connection')).toBeNull()
+      expect(resultHeaders.get('content-type')).toBe('application/json')
     })
 
-    it('should return a 502 JSON Response when fetchFn throws', async () => {
-      const fetchFn = async () => {
+    it('returns a 502 JSON Response when the transport throws', async () => {
+      const fetchFn = createFetchStub(async () => {
         throw new Error('Network error')
-      }
-      const client = new FetchOpenCodeClient({ baseUrl, basicAuth: '', fetchFn: fetchFn as unknown as typeof fetch })
+      })
+      const client = new FetchOpenCodeClient({ baseUrl, basicAuth: '', fetchFn })
 
       const result = await client.forwardRaw(new Request('http://localhost:5003/api/opencode/config'))
 
       expect(result.status).toBe(502)
-      const body = await result.json()
-      expect(body).toEqual({ error: 'Proxy request failed' })
+      expect(await readJson(result, ErrorResponseSchema)).toEqual({ error: 'Proxy request failed' })
     })
   })
 
@@ -224,18 +219,18 @@ describe('OpenCodeClient', () => {
 
     it('probes GET /api/info with the resolver password on every call', async () => {
       const capturedUrls: string[] = []
-      const capturedAuthHeaders: Array<string | undefined> = []
+      const capturedAuthHeaders: Array<string | null> = []
       const passwords = ['first-password', 'second-password']
-      const fetchFn = async (input: URL | Request | string, init?: RequestInit) => {
-        capturedUrls.push(input instanceof URL ? input.toString() : input.toString())
-        capturedAuthHeaders.push(new Headers(init?.headers).get('authorization') ?? undefined)
+      const fetchFn = createFetchStub(async (input, init) => {
+        capturedUrls.push(captureUrl(input).toString())
+        capturedAuthHeaders.push(new Headers(init?.headers).get('authorization'))
         return new Response(JSON.stringify(serverInfo), { status: 200, headers: { 'Content-Type': 'application/json' } })
-      }
+      })
       const client = new FetchOpenCodeClient({
         baseUrl,
         basicAuth: null,
         passwordResolver: () => passwords.shift() ?? '',
-        fetchFn: fetchFn as unknown as typeof fetch,
+        fetchFn,
       })
 
       await client.api.server.info()
@@ -250,120 +245,93 @@ describe('OpenCodeClient', () => {
 
     it('scopes location-less requests to the workspace and leaves explicit locations to the query', async () => {
       const captured: Array<{ url: string; directory: string | null }> = []
-      const fetchFn = async (input: URL | Request | string, init?: RequestInit) => {
-        captured.push({ url: input.toString(), directory: new Headers(init?.headers).get('x-opencode-directory') })
+      const fetchFn = createFetchStub(async (input, init) => {
+        captured.push({ url: captureUrl(input).toString(), directory: new Headers(init?.headers).get('x-opencode-directory') })
         return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
-      }
-      const client = new FetchOpenCodeClient({ baseUrl, basicAuth: '', fetchFn: fetchFn as unknown as typeof fetch })
+      })
+      const client = new FetchOpenCodeClient({ baseUrl, basicAuth: '', fetchFn })
 
       await client.api.integration.list().catch(() => undefined)
       await client.api.skill.list(openCodeLocation('/repo/a')).catch(() => undefined)
 
-      expect(captured[0]).toEqual({ url: `${baseUrl}/api/integration`, directory: encodeURIComponent('/test/workspace') })
+      expect(captured[0]).toEqual({ url: `${baseUrl}/api/integration`, directory: encodeURIComponent(getWorkspacePath()) })
       expect(captured[1]?.url).toBe(`${baseUrl}/api/skill?location%5Bdirectory%5D=%2Frepo%2Fa`)
     })
 
     it('fails the info probe when the upstream answers 401', async () => {
-      const fetchFn = async () => new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 })
-      const client = new FetchOpenCodeClient({ baseUrl, basicAuth: '', fetchFn: fetchFn as unknown as typeof fetch })
+      const fetchFn = createFetchStub(async () => new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 }))
+      const client = new FetchOpenCodeClient({ baseUrl, basicAuth: '', fetchFn })
 
       await expect(client.api.server.info()).rejects.toThrow()
     })
 
     it('fails the info probe when the upstream answers HTML', async () => {
-      const fetchFn = async () => new Response('<!doctype html><html></html>', {
+      const fetchFn = createFetchStub(async () => new Response('<!doctype html><html></html>', {
         status: 200,
         headers: { 'Content-Type': 'text/html' },
-      })
-      const client = new FetchOpenCodeClient({ baseUrl, basicAuth: '', fetchFn: fetchFn as unknown as typeof fetch })
+      }))
+      const client = new FetchOpenCodeClient({ baseUrl, basicAuth: '', fetchFn })
 
       await expect(client.api.server.info()).rejects.toThrow()
     })
   })
 
   describe('createOpenCodeClient', () => {
-    it('uses loopback connect host when OPENCODE_HOST binds externally', async () => {
-      const originalFetch = globalThis.fetch
-      Object.defineProperty(ENV.OPENCODE, 'HOST', { value: '0.0.0.0', configurable: true, writable: true })
+    function captureForwardOrigin() {
       let capturedUrl: URL | undefined
-      const fetchFn = async (input: URL | Request | string) => {
-        capturedUrl = input instanceof URL ? input : new URL(input.toString())
+      vi.stubGlobal('fetch', createFetchStub(async (input) => {
+        capturedUrl = captureUrl(input)
         return new Response(JSON.stringify({}), { status: 200 })
-      }
-      Object.defineProperty(globalThis, 'fetch', { value: fetchFn, configurable: true, writable: true })
+      }))
+      return { origin: () => capturedUrl?.origin }
+    }
 
-      try {
-        const client = createOpenCodeClient('testpassword')
-        await client.forwardRaw(new Request('http://localhost:5003/api/opencode/doc'))
+    it('uses the loopback connect host when OPENCODE_HOST binds externally', async () => {
+      const captured = captureForwardOrigin()
 
-        expect(capturedUrl?.origin).toBe('http://127.0.0.1:5551')
-      } finally {
-        Object.defineProperty(ENV.OPENCODE, 'HOST', { value: '127.0.0.1', configurable: true, writable: true })
-        Object.defineProperty(globalThis, 'fetch', { value: originalFetch, configurable: true, writable: true })
-      }
+      const client = createOpenCodeClient('testpassword', '0.0.0.0')
+      await client.forwardRaw(new Request('http://localhost:5003/api/opencode/doc'))
+
+      expect(captured.origin()).toBe('http://127.0.0.1:5551')
     })
 
     it('honours an explicit host override instead of OPENCODE_HOST', async () => {
-      const originalFetch = globalThis.fetch
-      const originalHost = ENV.OPENCODE.HOST
-      Object.defineProperty(ENV.OPENCODE, 'HOST', { value: '192.168.1.10', configurable: true, writable: true })
-      let capturedUrl: URL | undefined
-      const fetchFn = async (input: URL | Request | string) => {
-        capturedUrl = input instanceof URL ? input : new URL(input.toString())
-        return new Response(JSON.stringify({}), { status: 200 })
-      }
-      Object.defineProperty(globalThis, 'fetch', { value: fetchFn, configurable: true, writable: true })
+      const restoreHost = stubEnvHost('192.168.1.10')
+      const captured = captureForwardOrigin()
 
       try {
         const client = createOpenCodeClient('testpassword', '127.0.0.1')
         await client.forwardRaw(new Request('http://localhost:5003/api/opencode/doc'))
 
-        expect(capturedUrl?.origin).toBe('http://127.0.0.1:5551')
+        expect(captured.origin()).toBe('http://127.0.0.1:5551')
       } finally {
-        Object.defineProperty(ENV.OPENCODE, 'HOST', { value: originalHost, configurable: true, writable: true })
-        Object.defineProperty(globalThis, 'fetch', { value: originalFetch, configurable: true, writable: true })
+        restoreHost()
       }
     })
 
     it('brackets an IPv6 loopback host in the request URL', async () => {
-      const originalFetch = globalThis.fetch
-      let capturedUrl: URL | undefined
-      const fetchFn = async (input: URL | Request | string) => {
-        capturedUrl = input instanceof URL ? input : new URL(input.toString())
-        return new Response(JSON.stringify({}), { status: 200 })
-      }
-      Object.defineProperty(globalThis, 'fetch', { value: fetchFn, configurable: true, writable: true })
+      const captured = captureForwardOrigin()
 
-      try {
-        const client = createOpenCodeClient('testpassword', '::1')
-        await client.forwardRaw(new Request('http://localhost:5003/api/opencode/doc'))
+      const client = createOpenCodeClient('testpassword', '::1')
+      await client.forwardRaw(new Request('http://localhost:5003/api/opencode/doc'))
 
-        expect(capturedUrl?.origin).toBe('http://[::1]:5551')
-      } finally {
-        Object.defineProperty(globalThis, 'fetch', { value: originalFetch, configurable: true, writable: true })
-      }
+      expect(captured.origin()).toBe('http://[::1]:5551')
     })
 
     it('resolves a lazy host override on every request', async () => {
-      const originalFetch = globalThis.fetch
       const hosts: string[] = []
       let currentHost = '192.168.1.10'
-      const fetchFn = async (input: URL | Request | string) => {
-        hosts.push(input instanceof URL ? input.hostname : new URL(input.toString()).hostname)
+      vi.stubGlobal('fetch', createFetchStub(async (input) => {
+        hosts.push(captureUrl(input).hostname)
         return new Response(JSON.stringify({}), { status: 200 })
-      }
-      Object.defineProperty(globalThis, 'fetch', { value: fetchFn, configurable: true, writable: true })
+      }))
 
-      try {
-        const client = createOpenCodeClient('testpassword', () => currentHost)
-        await client.forwardRaw(new Request('http://localhost:5003/api/opencode/doc'))
-        currentHost = '127.0.0.1'
-        await client.forwardRaw(new Request('http://localhost:5003/api/opencode/doc'))
+      const client = createOpenCodeClient('testpassword', () => currentHost)
+      await client.forwardRaw(new Request('http://localhost:5003/api/opencode/doc'))
+      currentHost = '127.0.0.1'
+      await client.forwardRaw(new Request('http://localhost:5003/api/opencode/doc'))
 
-        expect(hosts).toEqual(['192.168.1.10', '127.0.0.1'])
-      } finally {
-        Object.defineProperty(globalThis, 'fetch', { value: originalFetch, configurable: true, writable: true })
-      }
+      expect(hosts).toEqual(['192.168.1.10', '127.0.0.1'])
     })
   })
 })

@@ -10,22 +10,28 @@ import {
   type WalkthroughSource,
   type WalkthroughStatus,
 } from '@opencode-manager/shared/schemas'
+import { z } from 'zod'
+import { selectRow, selectRows } from './rows'
 
-interface ChangeWalkthroughRow {
-  session_id: string
-  source_key: string
-  diff_hash: string
-  generation_id: string
-  walkthrough_session_id: string | null
-  status: string
-  artifact_path: string | null
-  published_at: number | null
-  error: string | null
-  model: string | null
-  created_at: number
-  updated_at: number
-  execution_started_at: number | null
-}
+const ChangeWalkthroughRowSchema = z.object({
+  session_id: z.string(),
+  source_key: z.string(),
+  diff_hash: z.string(),
+  generation_id: z.string(),
+  walkthrough_session_id: z.string().nullable(),
+  status: z.string(),
+  artifact_path: z.string().nullable(),
+  published_at: z.number().nullable(),
+  error: z.string().nullable(),
+  model: z.string().nullable(),
+  created_at: z.number(),
+  updated_at: z.number(),
+  execution_started_at: z.number().nullable(),
+})
+
+type ChangeWalkthroughRow = z.infer<typeof ChangeWalkthroughRowSchema>
+
+const WalkthroughSessionIdRowSchema = z.object({ walkthrough_session_id: z.string() })
 
 const ROW_COLUMNS = 'session_id, source_key, diff_hash, generation_id, walkthrough_session_id, status, artifact_path, published_at, error, model, created_at, updated_at, execution_started_at'
 
@@ -103,9 +109,13 @@ export function getChangeWalkthrough(
   sessionId: string,
   sourceKey: string,
 ): ChangeWalkthrough | null {
-  const row = db
-    .prepare(`SELECT ${ROW_COLUMNS} FROM change_walkthroughs WHERE session_id = ? AND source_key = ?`)
-    .get(sessionId, sourceKey) as ChangeWalkthroughRow | undefined
+  const row = selectRow(
+    db,
+    ChangeWalkthroughRowSchema,
+    `SELECT ${ROW_COLUMNS} FROM change_walkthroughs WHERE session_id = ? AND source_key = ?`,
+    sessionId,
+    sourceKey,
+  )
   return row ? mapRow(row) : null
 }
 
@@ -113,9 +123,12 @@ export function getChangeWalkthroughByWalkthroughSession(
   db: Database,
   walkthroughSessionId: string,
 ): { walkthrough: ChangeWalkthrough; generationId: string } | null {
-  const row = db
-    .prepare(`SELECT ${ROW_COLUMNS} FROM change_walkthroughs WHERE walkthrough_session_id = ?`)
-    .get(walkthroughSessionId) as ChangeWalkthroughRow | undefined
+  const row = selectRow(
+    db,
+    ChangeWalkthroughRowSchema,
+    `SELECT ${ROW_COLUMNS} FROM change_walkthroughs WHERE walkthrough_session_id = ?`,
+    walkthroughSessionId,
+  )
   if (!row) {
     return null
   }
@@ -223,16 +236,21 @@ export function updateChangeWalkthrough(
 }
 
 export function listChangeWalkthroughSessionIds(db: Database): string[] {
-  const rows = db
-    .prepare('SELECT DISTINCT walkthrough_session_id FROM change_walkthroughs WHERE walkthrough_session_id IS NOT NULL')
-    .all() as Array<{ walkthrough_session_id: string }>
+  const rows = selectRows(
+    db,
+    WalkthroughSessionIdRowSchema,
+    'SELECT DISTINCT walkthrough_session_id FROM change_walkthroughs WHERE walkthrough_session_id IS NOT NULL',
+  )
   return rows.map((row) => row.walkthrough_session_id)
 }
 
 export function listChangeWalkthroughs(db: Database, sessionId: string): ChangeWalkthrough[] {
-  const rows = db
-    .prepare(`SELECT ${ROW_COLUMNS} FROM change_walkthroughs WHERE session_id = ?`)
-    .all(sessionId) as ChangeWalkthroughRow[]
+  const rows = selectRows(
+    db,
+    ChangeWalkthroughRowSchema,
+    `SELECT ${ROW_COLUMNS} FROM change_walkthroughs WHERE session_id = ?`,
+    sessionId,
+  )
   return rows.flatMap((row) => {
     const mapped = mapRow(row)
     return mapped ? [mapped] : []

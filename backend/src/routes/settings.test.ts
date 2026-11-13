@@ -1,216 +1,112 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { Hono } from 'hono'
-import { Database } from 'bun:sqlite'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
-import { tmpdir } from 'os'
-import { join } from 'path'
-import { migrate } from '../db/migration-runner'
-import { allMigrations } from '../db/migrations'
-import { createSettingsRoutes } from './settings'
-import { opencodeServerManager } from '../services/opencode-single-server'
-import type { GitAuthService } from '../services/git-auth'
-import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
+import type { Database } from 'bun:sqlite'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { z } from 'zod'
+import { SettingsResponseSchema } from '@opencode-manager/shared/schemas'
+import type { OpenCodeLifecycleStatus } from '@opencode-manager/shared/opencode'
+import { createSettingsRoutes, type SettingsRouteDependencies } from './settings'
+import { GitAuthService } from '../services/git-auth'
 import { createStubOpenCodeClient } from '../../test/helpers/stub-opencode-client'
-import type { ActiveUserSession } from '../services/opencode-restart'
+import { createTestDatabase } from '../../test/helpers/test-database'
+import { createTempWorkspace, type TempWorkspace } from '../../test/helpers/test-env'
+import { createFetchStub, type FetchStub } from '../../test/helpers/fetch-stub'
+import { readJson } from '../../test/helpers/read-json'
 import { sseAggregator } from '../services/sse-aggregator'
+import type { OpenCodeRestartTarget } from '../services/opencode-restart'
 
-interface TestUserPreferenceRow {
-  preferences: string
-  updated_at: number
-}
+const DirectoryFileListSchema = z.array(
+  z.object({ kind: z.string(), name: z.string(), relativePath: z.string() }),
+)
 
-interface StatementResult {
-  get?: (..._params: unknown[]) => TestUserPreferenceRow | { count: number } | { name: string } | { user_id: string; preferences: string } | undefined
-  run?: (..._params: unknown[]) => { changes: number }
-  all?: () => Array<unknown>
-}
+const DirectoryFileInstallSchema = z.object({
+  kind: z.string(),
+  filesInstalled: z.array(z.string()),
+  restartRequired: z.boolean(),
+})
 
-class InMemoryDatabase {
-  private userPreferences = new Map<string, TestUserPreferenceRow>()
+const DiscoveredModelsSchema = z.object({ models: z.array(z.string()), cached: z.boolean() })
 
-  private normalizeSql(sql: string): string {
-    return sql.trim().toLowerCase().replace(/\s+/g, ' ')
-  }
+const ActiveSessionsSchema = z.object({
+  count: z.number(),
+  sessions: z.array(z.object({ sessionID: z.string(), directory: z.string() })),
+})
 
-  private setUserPreference(userId: string, preferences: string, updatedAt: number): void {
-    this.userPreferences.set(userId, { preferences, updated_at: updatedAt })
-  }
+const RestartResponseSchema = z.object({
+  success: z.boolean(),
+  message: z.string().optional(),
+  interruptedSessions: z.array(z.string()).optional(),
+})
 
-  private createStatement(sql: string): StatementResult {
-    const normalizedSql = this.normalizeSql(sql)
-
-    if (normalizedSql === 'select preferences, updated_at from user_preferences where user_id = ?') {
-      return {
-        get: (...params: unknown[]) => {
-          const userId = params[0]
-          if (typeof userId !== 'string') {
-            return undefined
-          }
-          return this.userPreferences.get(userId)
-        },
-      }
-    }
-
-    if (normalizedSql.startsWith('insert into user_preferences')) {
-      return {
-        run: (...params: unknown[]) => {
-          const [userId, preferences, updatedAt] = params as [string, string, number]
-          this.setUserPreference(userId, preferences, updatedAt)
-          return { changes: 1 }
-        },
-      }
-    }
-
-    if (normalizedSql.startsWith('delete from user_preferences where user_id = ?')) {
-      return {
-        run: (...params: unknown[]) => {
-          const userId = params[0]
-          if (typeof userId !== 'string') {
-            return { changes: 0 }
-          }
-          const hadRow = this.userPreferences.delete(userId)
-          return { changes: hadRow ? 1 : 0 }
-        },
-      }
-    }
-
-    if (normalizedSql.startsWith('select user_id, preferences from user_preferences')) {
-      return {
-        all: () => [...this.userPreferences.entries()].map(([user_id, row]) => ({
-          user_id,
-          preferences: row.preferences,
-        })),
-      }
-    }
-
-    if (normalizedSql.startsWith('pragma table_info(') || normalizedSql.includes('select name from sqlite_master')) {
-      return {
-        all: () => [],
-        get: () => undefined,
-      }
-    }
-
-    if (normalizedSql.startsWith('select count(*) as count')) {
-      return {
-        get: () => ({ count: 0 }),
-      }
-    }
-
-    if (
-      normalizedSql.startsWith('create table') ||
-      normalizedSql.startsWith('create index') ||
-      normalizedSql.startsWith('drop table') ||
-      normalizedSql.startsWith('drop index')
-    ) {
-      return {
-        run: () => ({ changes: 0 }),
-      }
-    }
-
-    if (
-      normalizedSql.startsWith('begin transaction') ||
-      normalizedSql.startsWith('commit') ||
-      normalizedSql.startsWith('rollback')
-    ) {
-      return {
-        run: () => ({ changes: 0 }),
-      }
-    }
-
-    return {
-      get: () => undefined,
-      run: () => ({ changes: 0 }),
-      all: () => [],
-    }
-  }
-
-  query(sql: string): StatementResult {
-    return this.createStatement(sql)
-  }
-
-  prepare(sql: string): StatementResult {
-    return this.createStatement(sql)
-  }
-
-  run(sql: string, ...params: unknown[]): { changes: number } {
-    const statement = this.createStatement(sql)
-    return statement.run ? statement.run(...params) : { changes: 0 }
-  }
-
-  close() {
-    this.userPreferences.clear()
+function lifecycleStatus(): OpenCodeLifecycleStatus {
+  return {
+    state: 'healthy',
+    healthy: true,
+    port: 5551,
+    version: '2.0.15',
+    minVersion: '2.0.0',
+    versionSupported: true,
+    lastError: null,
+    activeRecoveryAction: null,
+    attemptedRecoveryActions: [],
+    nextRecoveryAction: null,
+    failureCount: 0,
+    watching: false,
+    updatedAt: new Date(0).toISOString(),
   }
 }
 
-vi.mock('bun:sqlite', () => ({
-  Database: class {
-    private db = new InMemoryDatabase()
-
-    query(sql: string) {
-      return this.db.query(sql)
-    }
-
-    prepare(sql: string) {
-      return this.db.prepare(sql)
-    }
-
-    run(sql: string, ...params: unknown[]) {
-      return this.db.run(sql, ...params)
-    }
-
-    close() {
-      return this.db.close()
-    }
-
-    exec(sql: string) {
-      return this.db.run(sql)
-    }
-  },
-}))
-
-const mockGitAuthService = {
-  getGitEnvironment: () => ({}),
-} as unknown as GitAuthService
-
-function createTestDb(): Database {
-  const db = new Database(':memory:')
-  migrate(db, allMigrations)
-  return db
+function createSettingsDeps(): SettingsRouteDependencies {
+  return {
+    openCodeManager: {
+      getVersion: () => '2.0.15',
+      fetchVersion: async () => '2.0.15',
+      clearStartupError: () => undefined,
+      getLastStartupError: () => null,
+      markRestartPending: vi.fn(),
+      isRestartPending: () => false,
+      restart: async () => undefined,
+      checkHealth: async () => true,
+    },
+    installOpenCodeVersion: async (version) => version,
+    detectSandboxCapability: () => ({ available: false, reason: 'sandbox unavailable in tests' }),
+    sandboxResourceLimitError: () => null,
+    syncManagerGitIdentityConfig: async () => ({ identity: null, error: null }),
+  }
 }
 
-function createTestApp(db: Database, openCodeSupervisor?: OpenCodeSupervisor): Hono {
+function createTestApp(
+  db: Database,
+  deps: SettingsRouteDependencies,
+  openCodeSupervisor?: OpenCodeRestartTarget,
+): Hono {
   const app = new Hono()
-  app.route('/settings', createSettingsRoutes(db, mockGitAuthService, createStubOpenCodeClient(), openCodeSupervisor))
+  app.route('/settings', createSettingsRoutes(db, new GitAuthService(), createStubOpenCodeClient(), openCodeSupervisor, deps))
   return app
 }
 
 describe('settings routes — serverEnvVars', () => {
   let db: Database
   let app: Hono
-  let originalWorkspacePath: string | undefined
+  let workspace: TempWorkspace
 
   beforeEach(() => {
-    db = createTestDb()
-    app = createTestApp(db)
-    originalWorkspacePath = process.env.WORKSPACE_PATH
-    process.env.WORKSPACE_PATH = '/tmp/test-workspace-settings-routes'
+    workspace = createTempWorkspace('settings-routes-')
+    db = createTestDatabase()
+    app = createTestApp(db, createSettingsDeps())
   })
 
   afterEach(() => {
-    if (originalWorkspacePath) {
-      process.env.WORKSPACE_PATH = originalWorkspacePath
-    } else {
-      delete process.env.WORKSPACE_PATH
-    }
     db.close()
+    workspace.restore()
   })
 
   it('GET / returns empty serverEnvVars by default', async () => {
     const res = await app.request('/settings')
 
     expect(res.status).toBe(200)
-    const data = (await res.json()) as { preferences: { serverEnvVars?: Array<{ key: string; value: string }> } }
-    expect(data.preferences.serverEnvVars).toEqual([])
+    expect((await readJson(res, SettingsResponseSchema)).preferences.serverEnvVars).toEqual([])
   })
 
   it('PATCH / saves and returns serverEnvVars', async () => {
@@ -230,8 +126,7 @@ describe('settings routes — serverEnvVars', () => {
     })
 
     expect(patchRes.status).toBe(200)
-    const data = (await patchRes.json()) as { preferences: { serverEnvVars: Array<{ key: string; value: string }> } }
-    expect(data.preferences.serverEnvVars).toEqual([
+    expect((await readJson(patchRes, SettingsResponseSchema)).preferences.serverEnvVars).toEqual([
       {
         key: 'OPENCODE_EXPERIMENTAL_FEATURE',
         value: 'true',
@@ -254,9 +149,8 @@ describe('settings routes — serverEnvVars', () => {
     })
 
     const res = await app.request('/settings')
-    const data = (await res.json()) as { preferences: { serverEnvVars: Array<{ key: string; value: string }> } }
 
-    expect(data.preferences.serverEnvVars).toEqual([
+    expect((await readJson(res, SettingsResponseSchema)).preferences.serverEnvVars).toEqual([
       {
         key: 'MY_FLAG',
         value: '1',
@@ -268,30 +162,21 @@ describe('settings routes — serverEnvVars', () => {
 describe('settings routes — OpenCode directory file upload', () => {
   let db: Database
   let app: Hono
-  let originalWorkspacePath: string | undefined
-  let workspacePath: string
-  const restart = vi.fn(async () => undefined)
-  let markRestartPendingSpy: ReturnType<typeof vi.spyOn>
+  let workspace: TempWorkspace
+  let deps: SettingsRouteDependencies
+  let restart: ReturnType<typeof vi.fn<OpenCodeRestartTarget['restart']>>
 
-  beforeEach(async () => {
-    db = createTestDb()
-    restart.mockClear()
-    markRestartPendingSpy = vi.spyOn(opencodeServerManager, 'markRestartPending').mockImplementation(() => undefined)
-    originalWorkspacePath = process.env.WORKSPACE_PATH
-    workspacePath = await mkdtemp(join(tmpdir(), 'ocm-command-upload-'))
-    process.env.WORKSPACE_PATH = workspacePath
-    app = createTestApp(db, { restart } as unknown as OpenCodeSupervisor)
+  beforeEach(() => {
+    workspace = createTempWorkspace('ocm-command-upload-')
+    db = createTestDatabase()
+    deps = createSettingsDeps()
+    restart = vi.fn<OpenCodeRestartTarget['restart']>(async () => lifecycleStatus())
+    app = createTestApp(db, deps, { restart })
   })
 
-  afterEach(async () => {
-    if (originalWorkspacePath) {
-      process.env.WORKSPACE_PATH = originalWorkspacePath
-    } else {
-      delete process.env.WORKSPACE_PATH
-    }
-    await rm(workspacePath, { recursive: true, force: true })
+  afterEach(() => {
     db.close()
-    markRestartPendingSpy.mockRestore()
+    workspace.restore()
   })
 
   it('installs uploaded command markdown files into the OpenCode commands directory', async () => {
@@ -309,32 +194,32 @@ describe('settings routes — OpenCode directory file upload', () => {
     })
 
     expect(res.status).toBe(200)
-    await expect(res.json()).resolves.toEqual({
+    expect(await readJson(res, DirectoryFileInstallSchema)).toEqual({
       kind: 'commands',
       filesInstalled: ['git/commit.md'],
       restartRequired: true,
     })
-    await expect(readFile(join(workspacePath, '.config/opencode/commands/git/commit.md'), 'utf8')).resolves.toBe('commit body')
+    await expect(readFile(join(workspace.path, '.config/opencode/commands/git/commit.md'), 'utf8')).resolves.toBe('commit body')
     expect(restart).not.toHaveBeenCalled()
-    expect(markRestartPendingSpy).toHaveBeenCalledTimes(1)
+    expect(deps.openCodeManager.markRestartPending).toHaveBeenCalledTimes(1)
   })
 
   it('lists uploaded command and agent directory files', async () => {
-    await mkdir(join(workspacePath, '.config/opencode/commands/git'), { recursive: true })
-    await mkdir(join(workspacePath, '.config/opencode/agents/team'), { recursive: true })
-    await writeFile(join(workspacePath, '.config/opencode/commands/git/commit.md'), 'commit body')
-    await writeFile(join(workspacePath, '.config/opencode/commands/git/.DS_Store'), 'metadata')
-    await writeFile(join(workspacePath, '.config/opencode/agents/team/planner.md'), 'planner body')
+    await mkdir(join(workspace.path, '.config/opencode/commands/git'), { recursive: true })
+    await mkdir(join(workspace.path, '.config/opencode/agents/team'), { recursive: true })
+    await writeFile(join(workspace.path, '.config/opencode/commands/git/commit.md'), 'commit body')
+    await writeFile(join(workspace.path, '.config/opencode/commands/git/.DS_Store'), 'metadata')
+    await writeFile(join(workspace.path, '.config/opencode/agents/team/planner.md'), 'planner body')
 
     const commandsRes = await app.request('/settings/opencode-directory-files?kind=commands')
     const agentsRes = await app.request('/settings/opencode-directory-files?kind=agents')
 
     expect(commandsRes.status).toBe(200)
     expect(agentsRes.status).toBe(200)
-    await expect(commandsRes.json()).resolves.toEqual([
+    expect(await readJson(commandsRes, DirectoryFileListSchema)).toEqual([
       { kind: 'commands', name: 'commit', relativePath: 'git/commit.md' },
     ])
-    await expect(agentsRes.json()).resolves.toEqual([
+    expect(await readJson(agentsRes, DirectoryFileListSchema)).toEqual([
       { kind: 'agents', name: 'planner', relativePath: 'team/planner.md' },
     ])
   })
@@ -343,39 +228,40 @@ describe('settings routes — OpenCode directory file upload', () => {
 describe('settings routes — opencode model discovery', () => {
   let db: Database
   let app: Hono
+  let workspace: TempWorkspace
   let originalFetch: typeof globalThis.fetch
-  let fetchMock: ReturnType<typeof vi.fn>
+  let fetchStub: FetchStub
 
   beforeEach(() => {
-    db = createTestDb()
-    app = createTestApp(db)
+    workspace = createTempWorkspace('settings-model-discovery-')
+    db = createTestDatabase()
+    app = createTestApp(db, createSettingsDeps())
     originalFetch = globalThis.fetch
-    fetchMock = vi.fn()
-    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch
+    fetchStub = createFetchStub(async () => new Response(JSON.stringify({ data: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    globalThis.fetch = fetchStub
   })
 
   afterEach(() => {
     globalThis.fetch = originalFetch
     db.close()
+    workspace.restore()
   })
 
-  it('returns 400 when baseUrl is missing', async () => {
-    const res = await app.request('/settings/opencode-discover-models')
-    expect(res.status).toBe(400)
-  })
+  it.each([
+    { label: 'missing', query: '' },
+    { label: 'invalid', query: '?baseUrl=not-a-url' },
+    { label: 'not http/https', query: '?baseUrl=ftp://example.com' },
+  ])('returns 400 when baseUrl is $label', async ({ query }) => {
+    const res = await app.request(`/settings/opencode-discover-models${query}`)
 
-  it('returns 400 when baseUrl is invalid', async () => {
-    const res = await app.request('/settings/opencode-discover-models?baseUrl=not-a-url')
-    expect(res.status).toBe(400)
-  })
-
-  it('returns 400 when baseUrl is not http/https', async () => {
-    const res = await app.request('/settings/opencode-discover-models?baseUrl=ftp://example.com')
     expect(res.status).toBe(400)
   })
 
   it('discovers models from the endpoint', async () => {
-    fetchMock.mockResolvedValueOnce(
+    fetchStub.mockResolvedValueOnce(
       new Response(JSON.stringify({ data: [{ id: 'gpt-4o' }, { id: 'gpt-3.5-turbo' }] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -383,14 +269,15 @@ describe('settings routes — opencode model discovery', () => {
     )
 
     const res = await app.request('/settings/opencode-discover-models?baseUrl=http://localhost:1234&refresh=true')
+
     expect(res.status).toBe(200)
-    const data = (await res.json()) as { models: string[]; cached: boolean }
+    const data = await readJson(res, DiscoveredModelsSchema)
     expect(data.models).toEqual(['gpt-4o', 'gpt-3.5-turbo'])
     expect(data.cached).toBe(false)
   })
 
   it('returns cached models on subsequent requests without re-fetching', async () => {
-    fetchMock.mockResolvedValueOnce(
+    fetchStub.mockResolvedValueOnce(
       new Response(JSON.stringify({ data: [{ id: 'llama-3' }] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -398,75 +285,81 @@ describe('settings routes — opencode model discovery', () => {
     )
 
     const firstRes = await app.request('/settings/opencode-discover-models?baseUrl=http://localhost:5678&refresh=true')
-    const firstData = (await firstRes.json()) as { models: string[]; cached: boolean }
+    const firstData = await readJson(firstRes, DiscoveredModelsSchema)
     expect(firstData.models).toEqual(['llama-3'])
     expect(firstData.cached).toBe(false)
 
     const secondRes = await app.request('/settings/opencode-discover-models?baseUrl=http://localhost:5678')
-    const secondData = (await secondRes.json()) as { models: string[]; cached: boolean }
+    const secondData = await readJson(secondRes, DiscoveredModelsSchema)
     expect(secondData.models).toEqual(['llama-3'])
     expect(secondData.cached).toBe(true)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchStub).toHaveBeenCalledTimes(1)
   })
 
   it('returns empty models when endpoint is unreachable', async () => {
-    fetchMock.mockRejectedValue(new Error('connection refused'))
+    fetchStub.mockRejectedValue(new Error('connection refused'))
 
     const res = await app.request('/settings/opencode-discover-models?baseUrl=http://localhost:9999&refresh=true')
+
     expect(res.status).toBe(200)
-    const data = (await res.json()) as { models: string[] }
-    expect(data.models).toEqual([])
+    expect((await readJson(res, DiscoveredModelsSchema)).models).toEqual([])
   })
 })
 
 describe('settings routes — active session reporting', () => {
   let db: Database
-  let app: Hono
+  let workspace: TempWorkspace
 
   beforeEach(() => {
-    db = createTestDb()
+    workspace = createTempWorkspace('settings-active-sessions-')
+    db = createTestDatabase()
   })
 
   afterEach(() => {
     db.close()
+    workspace.restore()
     vi.restoreAllMocks()
   })
 
   function stubActiveSessions(active: Record<string, string[]>, subagents: string[] = [], scheduled: string[] = []): void {
     vi.spyOn(sseAggregator, 'getActiveSessions').mockReturnValue(active)
-    vi.spyOn(sseAggregator, 'isSubagentSession').mockImplementation((id: string) => subagents.includes(id))
+    vi.spyOn(sseAggregator, 'isSubagentSession').mockImplementation((id) => subagents.includes(id))
     vi.spyOn(sseAggregator, 'getScheduledSessionIds').mockReturnValue(new Set(scheduled))
   }
 
   it('GET /opencode-active-sessions returns active user sessions excluding subagent and scheduled sessions', async () => {
     stubActiveSessions({ '/a': ['s1', 'sub1', 'sched1'] }, ['sub1'], ['sched1'])
+    const app = createTestApp(db, createSettingsDeps())
 
-    app = createTestApp(db)
     const res = await app.request('/settings/opencode-active-sessions')
+
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { count: number; sessions: ActiveUserSession[] }
+    const body = await readJson(res, ActiveSessionsSchema)
     expect(body.count).toBe(1)
     expect(body.sessions).toEqual([{ sessionID: 's1', directory: '/a' }])
   })
 
   it('GET /opencode-active-sessions returns empty when nothing is active', async () => {
     stubActiveSessions({})
-    app = createTestApp(db)
+    const app = createTestApp(db, createSettingsDeps())
+
     const res = await app.request('/settings/opencode-active-sessions')
+
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { count: number; sessions: ActiveUserSession[] }
+    const body = await readJson(res, ActiveSessionsSchema)
     expect(body.count).toBe(0)
     expect(body.sessions).toEqual([])
   })
 
   it('POST /opencode-restart restarts the server without reporting interrupted sessions', async () => {
     stubActiveSessions({ '/a': ['s1'] })
-    const restart = vi.fn().mockResolvedValue({ healthy: true })
+    const restart = vi.fn<OpenCodeRestartTarget['restart']>(async () => lifecycleStatus())
+    const app = createTestApp(db, createSettingsDeps(), { restart })
 
-    app = createTestApp(db, { restart } as unknown as OpenCodeSupervisor)
     const res = await app.request('/settings/opencode-restart', { method: 'POST' })
+
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { success: boolean; interruptedSessions?: string[] }
+    const body = await readJson(res, RestartResponseSchema)
     expect(body.success).toBe(true)
     expect(body.interruptedSessions).toBeUndefined()
     expect(restart).toHaveBeenCalledWith('settings_restart')

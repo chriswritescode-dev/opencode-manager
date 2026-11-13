@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect, type ReactNode } from 'react'
+import { z } from 'zod'
 import { useSettings } from '@/hooks/useSettings'
 import { useAuth } from '@/hooks/useAuth'
 import { API_BASE_URL } from '@/config'
@@ -31,14 +32,15 @@ interface SpeechRequest {
   onEnd?: (reason: TTSEndReason, error?: string) => void
 }
 
-function isNotAllowedError(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) return false
-  return (error as { name?: unknown }).name === 'NotAllowedError'
+const notAllowedErrorSchema = z.object({ name: z.literal('NotAllowedError') })
+
+function isNotAllowedError(cause: unknown): boolean {
+  return notAllowedErrorSchema.safeParse(cause).success
 }
 
-function playbackErrorMessage(error: unknown, fallback: string): string {
-  if (isNotAllowedError(error)) return PLAYBACK_BLOCKED_MESSAGE
-  return error instanceof Error && error.message ? error.message : fallback
+function playbackErrorMessage(cause: unknown, fallback: string): string {
+  if (isNotAllowedError(cause)) return PLAYBACK_BLOCKED_MESSAGE
+  return cause instanceof Error && cause.message ? cause.message : fallback
 }
 
 function splitIntoChunks(text: string): string[] {
@@ -85,7 +87,6 @@ export function TTSProvider({ children }: TTSProviderProps) {
   const activeProviderRef = useRef<TTSConfig['provider'] | null>(null)
   const pausedRef = useRef(false)
   
-  // Web Speech API reference
   const webSpeechSynthRef = useRef<ReturnType<typeof getWebSpeechSynthesizer> | null>(null)
 
   const ttsConfig = preferences?.tts
@@ -95,11 +96,9 @@ export function TTSProvider({ children }: TTSProviderProps) {
     if (isBuiltin) {
       return isWebSpeechSupported()
     }
-    // External requires apiKey
     return !!ttsConfig?.apiKey
   })()
 
-  // Initialize Web Speech synthesizer on demand
   const getSynthesizer = useCallback(() => {
     if (!webSpeechSynthRef.current) {
       webSpeechSynthRef.current = getWebSpeechSynthesizer();
@@ -237,7 +236,6 @@ export function TTSProvider({ children }: TTSProviderProps) {
     }
   }, [cleanup, clearAdvanceTimer, settleSpeechRequest])
 
-  // External API synthesis
   const synthesizeExternal = useCallback(async (text: string, signal: AbortSignal | undefined, playbackId: number): Promise<Blob | null> => {
     if (playbackIdRef.current !== playbackId) return null
 
@@ -360,7 +358,6 @@ export function TTSProvider({ children }: TTSProviderProps) {
     }
   }, [getPlayer, getChunkAudio, prefetchChunk, advanceQueue, failPlayback, settleSpeechRequest])
 
-  // Builtin Web Speech synthesis - takes explicit config and optional messageId
   const speakBuiltinWithConfig = useCallback(async (text: string, config: TTSConfig, messageId: string | null = null): Promise<boolean> => {
     if (!isWebSpeechSupported()) {
       failPlayback('Web Speech API not supported in this browser')
@@ -430,7 +427,6 @@ export function TTSProvider({ children }: TTSProviderProps) {
     }
   }, [resetPlayback, advanceQueue, failPlayback, getSynthesizer, settleSpeechRequest])
 
-  // Internal helper to start external TTS playback
   const startExternalPlayback = useCallback((sanitizedText: string, original: string, messageId: string | null): boolean => {
     resetPlayback()
     busyRef.current = true
@@ -579,8 +575,8 @@ export function TTSProvider({ children }: TTSProviderProps) {
     const audio = audioRef.current
     if (!audio) return
 
-    void audio.play().catch((err: unknown) => {
-      failPlayback(playbackErrorMessage(err, 'TTS failed'))
+    void audio.play().catch((cause: unknown) => {
+      failPlayback(playbackErrorMessage(cause, 'TTS failed'))
     })
   }, [getSynthesizer, failPlayback])
 

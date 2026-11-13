@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getSessionPermissionMode, setSessionPermissionMode } from '@/api/sessionPermissionModes'
-import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { useOpenCodeServerId } from '@/contexts/opencode-server-context'
 import { serverScopedKey } from '@/lib/serverScope'
 import { showToast } from '@/lib/toast'
 import type { SessionPermissionModeState, SetSessionPermissionModeRequest } from '@opencode-manager/shared/schemas'

@@ -1,47 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router-dom'
+import { z } from 'zod'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import { installMatchMedia, installWebSocket, installWindowSize, type WebSocketFake } from '@/test/browserFakes'
+import { renderWithProviders, createTestQueryClient } from '@/test/render'
+import type { FetchRoute, FetchRouteResult } from '@/test/fetchFake'
 import type { TerminalInfo } from '@opencode-manager/shared/types'
-import { useCreateTerminal, useRemoveTerminal, useTerminals } from '@/api/terminals'
-import { useMobile } from '@/hooks/useMobile'
 import { TerminalPanel } from './TerminalPanel'
-
-vi.mock('@/api/terminals', () => ({
-  useTerminals: vi.fn(),
-  useCreateTerminal: vi.fn(),
-  useRemoveTerminal: vi.fn(),
-}))
-
-vi.mock('@/hooks/useMobile', async () => {
-  const actual = await vi.importActual<typeof import('@/hooks/useMobile')>('@/hooks/useMobile')
-  return { ...actual, useMobile: vi.fn(() => false) }
-})
-
-vi.mock('./TerminalView', async () => {
-  const React = await import('react')
-  return {
-    TerminalView: React.forwardRef(function MockTerminalView(
-      props: { ptyID: string; active: boolean; onExited: () => void },
-      ref: React.Ref<unknown>,
-    ) {
-      React.useImperativeHandle(ref, () => ({ send: vi.fn() }))
-      return React.createElement(
-        'div',
-        {
-          'data-testid': 'terminal-view',
-          'data-pty-id': props.ptyID,
-          'data-active': String(props.active),
-        },
-        React.createElement(
-          'button',
-          { type: 'button', 'aria-label': `exit ${props.ptyID}`, onClick: props.onExited },
-          'exit',
-        ),
-      )
-    }),
-  }
-})
 
 const runningTerminal: TerminalInfo = {
   id: 't1',
@@ -61,289 +25,325 @@ const exitedTerminal: TerminalInfo = {
   exitCode: 0,
 }
 
-const createMutate = vi.fn()
-const removeMutate = vi.fn()
-const refetch = vi.fn()
+const createTerminalRequestSchema = z.object({ directory: z.string(), title: z.string() })
 
-function mockTerminalHooks(
-  terminals: TerminalInfo[] | undefined,
-  options: { isLoading?: boolean; isSuccess?: boolean } = {},
-) {
-  vi.mocked(useTerminals).mockReturnValue({
-    data: terminals,
-    isLoading: options.isLoading ?? false,
-    isSuccess: options.isSuccess ?? terminals !== undefined,
-    refetch,
-  } as unknown as ReturnType<typeof useTerminals>)
-  vi.mocked(useCreateTerminal).mockReturnValue({
-    mutate: createMutate,
-    isPending: false,
-  } as unknown as ReturnType<typeof useCreateTerminal>)
-  vi.mocked(useRemoveTerminal).mockReturnValue({
-    mutate: removeMutate,
-    isPending: false,
-  } as unknown as ReturnType<typeof useRemoveTerminal>)
+interface PanelHarness {
+  terminals: TerminalInfo[]
+  createRequests: () => number
+  deleteRequests: () => number
+  listRequests: () => number
+  finalTerminals: () => TerminalInfo[]
 }
 
-function renderPanel(initialEntry = '/repos/1?dialog=terminal', onClose = vi.fn()) {
-  return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <TerminalPanel target={{ kind: 'repo', repoId: 1 }} directory="/repo" isOpen onClose={onClose} />
-    </MemoryRouter>,
+interface PanelOptions {
+  route?: string
+  terminals?: TerminalInfo[]
+  listResponder?: FetchRoute['respond']
+  width?: number
+  onClose?: () => void
+  seedEmptyCache?: boolean
+}
+
+function renderPanel(options: PanelOptions = {}) {
+  installWindowSize(options.width ?? 900)
+  const queryClient = createTestQueryClient()
+  if (options.seedEmptyCache) {
+    queryClient.setQueryData(['terminals', 1, '/repo'], [])
+  }
+
+  const state: PanelHarness = {
+    terminals: options.terminals ?? [],
+    createRequests: () => result.fetchFake.findRequests('POST', '/api/repos/1/terminals').length,
+    deleteRequests: () => result.fetchFake.findRequests('DELETE', '/api/repos/1/terminals/:ptyID').length,
+    listRequests: () => result.fetchFake.findRequests('GET', '/api/repos/1/terminals').length,
+    finalTerminals: () => state.terminals,
+  }
+  let created = 0
+
+  const routes: FetchRoute[] = [
+    {
+      method: 'GET',
+      path: '/api/repos/1/terminals',
+      respond: options.listResponder ?? (() => ({ json: { terminals: state.terminals } })),
+    },
+    {
+      method: 'POST',
+      path: '/api/repos/1/terminals',
+      respond: (request) => {
+        created += 1
+        const body = createTerminalRequestSchema.parse(request.body)
+        const terminal: TerminalInfo = {
+          id: `created_${created}`,
+          title: body.title,
+          kind: 'shell',
+          cwd: body.directory,
+          status: 'running',
+        }
+        state.terminals = [...state.terminals, terminal]
+        return { json: terminal }
+      },
+    },
+    {
+      method: 'DELETE',
+      path: '/api/repos/1/terminals/:ptyID',
+      respond: (_request, params) => {
+        state.terminals = state.terminals.filter((terminal) => terminal.id !== params.ptyID)
+        return { status: 204 }
+      },
+    },
+    { method: 'PATCH', path: '/api/repos/1/terminals/:ptyID', respond: () => ({ status: 204 }) },
+  ]
+
+  const onClose = options.onClose ?? vi.fn()
+  const result = renderWithProviders(
+    <TerminalPanel target={{ kind: 'repo', repoId: 1 }} directory="/repo" isOpen onClose={onClose} />,
+    {
+      auth: false,
+      theme: false,
+      toaster: false,
+      queryClient,
+      initialEntries: [options.route ?? '/repos/1?dialog=terminal'],
+      fetchRoutes: routes,
+    },
   )
+
+  return { ...result, queryClient, onClose, state }
 }
+
+function terminalView(ptyID: string): HTMLElement {
+  const element = document.querySelector(`[data-terminal-id="${ptyID}"]`)
+  if (!(element instanceof HTMLElement)) throw new Error(`terminal view ${ptyID} missing`)
+  return element
+}
+
+async function waitForTerminal(ptyID: string): Promise<HTMLElement> {
+  await waitFor(() => expect(document.querySelector(`[data-terminal-id="${ptyID}"]`)).not.toBeNull())
+  return terminalView(ptyID)
+}
+
+function socketFor(socketFake: WebSocketFake, ptyID: string) {
+  const connection = socketFake.connectionFor(`/terminals/${ptyID}/connect`)
+  if (!connection) throw new Error(`terminal socket ${ptyID} missing`)
+  return connection
+}
+
+async function closeSocket(socketFake: WebSocketFake, ptyID: string, code = 1000) {
+  await waitForTerminal(ptyID)
+  act(() => socketFor(socketFake, ptyID).serverClose(code))
+}
+
+let socketFake: WebSocketFake
+
+beforeEach(() => {
+  installMatchMedia(false)
+  socketFake = installWebSocket()
+})
 
 describe('TerminalPanel', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    createMutate.mockReset()
-    removeMutate.mockReset()
-    refetch.mockReset()
-    refetch.mockResolvedValue({ data: [] })
-    vi.mocked(useMobile).mockReturnValue(false)
-    mockTerminalHooks([])
+  it('auto-creates a terminal when the directory has none', async () => {
+    const harness = renderPanel({ terminals: [] })
+
+    await waitFor(() => expect(harness.state.createRequests()).toBe(1))
+    expect(harness.fetchFake.lastRequest('POST', '/api/repos/1/terminals')?.body).toEqual({
+      directory: '/repo',
+      title: 'Terminal 1',
+    })
+    await waitForTerminal('created_1')
   })
 
-  it('renders a loading fallback before the lazy terminal view resolves', async () => {
-    mockTerminalHooks([runningTerminal])
-    renderPanel()
+  it('does not auto-create while the list request is unresolved or failed', async () => {
+    const harness = renderPanel({
+      listResponder: () => {
+        throw new Error('terminals unavailable')
+      },
+    })
 
-    expect(screen.getByText('Loading terminal...')).toBeInTheDocument()
-    expect(await screen.findAllByTestId('terminal-view')).toHaveLength(1)
+    expect(await screen.findByText('Could not load terminals: terminals unavailable')).toBeInTheDocument()
+    expect(harness.state.createRequests()).toBe(0)
   })
 
-  it('auto-creates a terminal when the directory has none', () => {
-    mockTerminalHooks([])
-    renderPanel()
+  it('auto-creates once the list resolves successfully empty', async () => {
+    let resolveList: (result: FetchRouteResult) => void = () => {}
+    const harness = renderPanel({
+      listResponder: () => new Promise<FetchRouteResult>((resolve) => { resolveList = resolve }),
+    })
 
-    expect(createMutate).toHaveBeenCalledTimes(1)
-    expect(createMutate).toHaveBeenCalledWith({ directory: '/repo', title: 'Terminal 1' }, expect.any(Object))
+    expect(harness.state.createRequests()).toBe(0)
+
+    await act(async () => {
+      resolveList({ json: { terminals: [] } })
+    })
+
+    await waitFor(() => expect(harness.state.createRequests()).toBe(1))
   })
 
-  it('does not auto-create while the list request is unresolved or failed', () => {
-    mockTerminalHooks(undefined, { isSuccess: false })
-    renderPanel()
+  it('auto-creates a shell when only exited terminals exist and none is requested', async () => {
+    const harness = renderPanel({ terminals: [exitedTerminal] })
 
-    expect(createMutate).not.toHaveBeenCalled()
+    await waitFor(() => expect(harness.state.createRequests()).toBe(1))
+    expect(harness.fetchFake.lastRequest('POST', '/api/repos/1/terminals')?.body).toEqual({
+      directory: '/repo',
+      title: 'Terminal 1',
+    })
   })
 
-  it('auto-creates once the list resolves successfully empty', () => {
-    mockTerminalHooks(undefined, { isSuccess: false })
-    const { rerender } = renderPanel()
-    expect(createMutate).not.toHaveBeenCalled()
+  it('decides on auto-creation once per opening, so a shell exiting later is not replaced', async () => {
+    const harness = renderPanel({ terminals: [runningTerminal] })
+    await waitForTerminal('t1')
 
-    mockTerminalHooks([], { isSuccess: true })
-    rerender(
-      <MemoryRouter initialEntries={['/repos/1?dialog=terminal']}>
-        <TerminalPanel target={{ kind: 'repo', repoId: 1 }} directory="/repo" isOpen onClose={vi.fn()} />
-      </MemoryRouter>,
-    )
+    harness.state.terminals = [{ ...runningTerminal, status: 'exited', exitCode: 0 }]
+    await act(async () => {
+      await harness.queryClient.refetchQueries({ queryKey: ['terminals', 1, '/repo'] })
+    })
 
-    expect(createMutate).toHaveBeenCalledTimes(1)
-    expect(createMutate).toHaveBeenCalledWith({ directory: '/repo', title: 'Terminal 1' }, expect.any(Object))
-  })
-
-  it('auto-creates a shell when only exited terminals exist and none is requested', () => {
-    mockTerminalHooks([exitedTerminal])
-    renderPanel()
-
-    expect(createMutate).toHaveBeenCalledTimes(1)
-    expect(createMutate).toHaveBeenCalledWith({ directory: '/repo', title: 'Terminal 1' }, expect.any(Object))
-  })
-
-  it('decides on auto-creation once per opening, so a shell exiting later is not replaced', () => {
-    mockTerminalHooks([runningTerminal])
-    const { rerender } = renderPanel()
-    expect(createMutate).not.toHaveBeenCalled()
-
-    mockTerminalHooks([{ ...runningTerminal, status: 'exited', exitCode: 0 }])
-    rerender(
-      <MemoryRouter initialEntries={['/repos/1?dialog=terminal']}>
-        <TerminalPanel target={{ kind: 'repo', repoId: 1 }} directory="/repo" isOpen onClose={vi.fn()} />
-      </MemoryRouter>,
-    )
-
-    expect(createMutate).not.toHaveBeenCalled()
+    expect(await screen.findByText('exited (0)')).toBeInTheDocument()
+    expect(harness.state.createRequests()).toBe(0)
   })
 
   it('shows a requested exited terminal without auto-creating a shell', async () => {
-    mockTerminalHooks([exitedTerminal])
-    renderPanel('/repos/1?dialog=terminal&terminal=t2')
+    const harness = renderPanel({
+      terminals: [exitedTerminal],
+      route: '/repos/1?dialog=terminal&terminal=t2',
+    })
 
-    const view = await screen.findByTestId('terminal-view')
-    expect(view).toHaveAttribute('data-active', 'true')
-    expect(createMutate).not.toHaveBeenCalled()
+    const view = await waitForTerminal('t2')
+    expect(view).not.toHaveClass('hidden')
+    expect(harness.state.createRequests()).toBe(0)
   })
 
   it('selects a running terminal over an exited one when none is requested', async () => {
-    mockTerminalHooks([exitedTerminal, runningTerminal])
-    renderPanel()
+    const harness = renderPanel({ terminals: [exitedTerminal, runningTerminal] })
 
-    const views = await screen.findAllByTestId('terminal-view')
-    expect(views.find((view) => view.getAttribute('data-pty-id') === 't1')).toHaveAttribute('data-active', 'true')
-    expect(createMutate).not.toHaveBeenCalled()
+    const view = await waitForTerminal('t1')
+    expect(view).not.toHaveClass('hidden')
+    expect(terminalView('t2')).toHaveClass('hidden')
+    expect(harness.state.createRequests()).toBe(0)
   })
 
   it('opens a requested terminal without auto-creating a shell from a stale cached empty list', async () => {
-    const actual = await vi.importActual<typeof import('@/api/terminals')>('@/api/terminals')
-    vi.mocked(useTerminals).mockImplementation(actual.useTerminals)
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    queryClient.setQueryData(['terminals', 1, '/repo'], [])
-    let resolveList: (response: Response) => void = () => {}
-    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { resolveList = resolve }))
-    vi.stubGlobal('fetch', fetchMock)
-    const panel = (isOpen: boolean) => (
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/repos/1?dialog=terminal&terminal=t2']}>
-          <TerminalPanel target={{ kind: 'repo', repoId: 1 }} directory="/repo" isOpen={isOpen} onClose={vi.fn()} />
-        </MemoryRouter>
-      </QueryClientProvider>
-    )
+    let resolveList: (result: FetchRouteResult) => void = () => {}
+    const harness = renderPanel({
+      seedEmptyCache: true,
+      route: '/repos/1?dialog=terminal&terminal=t2',
+      listResponder: () => new Promise<FetchRouteResult>((resolve) => { resolveList = resolve }),
+    })
 
-    try {
-      const { rerender } = render(panel(false))
-      rerender(panel(true))
+    await waitFor(() => expect(harness.state.listRequests()).toBe(1))
+    expect(harness.state.createRequests()).toBe(0)
 
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
-      expect(createMutate).not.toHaveBeenCalled()
+    await act(async () => {
+      resolveList({ json: { terminals: [exitedTerminal] } })
+    })
 
-      resolveList(new Response(JSON.stringify({ terminals: [exitedTerminal] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }))
-
-      const view = await screen.findByTestId('terminal-view')
-      expect(view).toHaveAttribute('data-pty-id', 't2')
-      expect(view).toHaveAttribute('data-active', 'true')
-      expect(createMutate).not.toHaveBeenCalled()
-    } finally {
-      vi.unstubAllGlobals()
-    }
+    const view = await waitForTerminal('t2')
+    expect(view).not.toHaveClass('hidden')
+    expect(harness.state.createRequests()).toBe(0)
   })
 
   it('exposes an accessible name for the mobile panel close control', async () => {
-    mockTerminalHooks([runningTerminal])
-    vi.mocked(useMobile).mockReturnValue(true)
-    const onClose = vi.fn()
-    renderPanel('/repos/1?dialog=terminal', onClose)
-    await screen.findAllByTestId('terminal-view')
+    const harness = renderPanel({ terminals: [runningTerminal], width: 400 })
+    await waitForTerminal('t1')
 
     fireEvent.click(screen.getByRole('button', { name: 'Close terminal panel' }))
 
-    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(harness.onClose).toHaveBeenCalledTimes(1)
   })
 
   it('activates the terminal referenced by the terminal URL param', async () => {
-    mockTerminalHooks([runningTerminal, exitedTerminal])
-    renderPanel('/repos/1?dialog=terminal&terminal=t2')
+    renderPanel({
+      terminals: [runningTerminal, exitedTerminal],
+      route: '/repos/1?dialog=terminal&terminal=t2',
+    })
 
-    const views = await screen.findAllByTestId('terminal-view')
-    const active = views.find((view) => view.getAttribute('data-pty-id') === 't2')
-    const inactive = views.find((view) => view.getAttribute('data-pty-id') === 't1')
-
-    expect(active).toHaveAttribute('data-active', 'true')
-    expect(inactive).toHaveAttribute('data-active', 'false')
+    const active = await waitForTerminal('t2')
+    expect(active).not.toHaveClass('hidden')
+    expect(terminalView('t1')).toHaveClass('hidden')
   })
 
   it('shows an exited badge with the exit code', async () => {
-    mockTerminalHooks([exitedTerminal])
-    renderPanel()
-    await screen.findAllByTestId('terminal-view')
+    renderPanel({ terminals: [exitedTerminal] })
+    await waitForTerminal('t2')
 
     expect(screen.getByText('exited (0)')).toBeInTheDocument()
   })
 
   it('asks for confirmation before closing a running terminal', async () => {
-    mockTerminalHooks([runningTerminal])
-    renderPanel()
-    await screen.findAllByTestId('terminal-view')
+    const harness = renderPanel({ terminals: [runningTerminal] })
+    await waitForTerminal('t1')
 
     fireEvent.click(screen.getByLabelText('Close Terminal'))
 
     expect(screen.getByText('Close this terminal?')).toBeInTheDocument()
-    expect(removeMutate).not.toHaveBeenCalled()
+    expect(harness.state.deleteRequests()).toBe(0)
 
     fireEvent.click(screen.getByRole('button', { name: 'Close terminal' }))
 
-    expect(removeMutate).toHaveBeenCalledWith({ ptyID: 't1', directory: '/repo' }, expect.any(Object))
+    await waitFor(() => expect(harness.fetchFake.lastRequest('DELETE', '/api/repos/1/terminals/:ptyID')?.path).toBe('/api/repos/1/terminals/t1'))
+    await waitFor(() => expect(harness.fetchFake.lastRequest('DELETE', '/api/repos/1/terminals/:ptyID')?.searchParams.get('directory')).toBe('/repo'))
   })
 
   it('removes an exited terminal without confirmation', async () => {
-    mockTerminalHooks([exitedTerminal])
-    renderPanel()
-    await screen.findAllByTestId('terminal-view')
+    const harness = renderPanel({ terminals: [exitedTerminal] })
+    await waitForTerminal('t2')
 
     fireEvent.click(screen.getByLabelText('Close Build'))
 
     expect(screen.queryByText('Close this terminal?')).not.toBeInTheDocument()
-    expect(removeMutate).toHaveBeenCalledWith({ ptyID: 't2', directory: '/repo' }, expect.any(Object))
+    await waitFor(() =>
+      expect(harness.fetchFake.findRequests('DELETE', '/api/repos/1/terminals/:ptyID')).toHaveLength(1),
+    )
   })
 
   it('removes a cleanly exited terminal, closes the panel when it was the last, and does not respawn', async () => {
-    mockTerminalHooks([runningTerminal])
-    refetch.mockResolvedValue({ data: [{ ...runningTerminal, status: 'exited', exitCode: 0 }] })
-    removeMutate.mockImplementation((_variables: unknown, options: { onSuccess?: () => void }) => {
-      options.onSuccess?.()
+    const harness = renderPanel({
+      terminals: [runningTerminal],
+      route: '/repos/1?dialog=terminal&terminal=t1',
     })
-    const onClose = vi.fn()
-    renderPanel('/repos/1?dialog=terminal&terminal=t1', onClose)
-    await screen.findAllByTestId('terminal-view')
+    await waitForTerminal('t1')
 
-    fireEvent.click(screen.getByLabelText('exit t1'))
+    harness.state.terminals = [{ ...runningTerminal, status: 'exited', exitCode: 0 }]
+    await closeSocket(socketFake, 't1')
 
-    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
-    expect(removeMutate).toHaveBeenCalledWith({ ptyID: 't1', directory: '/repo' }, expect.any(Object))
+    await waitFor(() => expect(harness.onClose).toHaveBeenCalledTimes(1))
+    expect(harness.state.deleteRequests()).toBe(1)
     expect(screen.queryByLabelText('Close Terminal')).not.toBeInTheDocument()
-    expect(createMutate).not.toHaveBeenCalled()
+    expect(harness.state.createRequests()).toBe(0)
   })
 
   it('keeps a terminal that exited with a non-zero code so the failure stays inspectable', async () => {
-    mockTerminalHooks([runningTerminal])
-    refetch.mockResolvedValue({ data: [{ ...runningTerminal, status: 'exited', exitCode: 2 }] })
-    const onClose = vi.fn()
-    const { rerender } = renderPanel('/repos/1?dialog=terminal&terminal=t1', onClose)
-    await screen.findAllByTestId('terminal-view')
+    const harness = renderPanel({
+      terminals: [runningTerminal],
+      route: '/repos/1?dialog=terminal&terminal=t1',
+    })
+    await waitForTerminal('t1')
 
-    fireEvent.click(screen.getByLabelText('exit t1'))
-
-    await waitFor(() => expect(refetch).toHaveBeenCalledTimes(1))
-    expect(removeMutate).not.toHaveBeenCalled()
-    expect(onClose).not.toHaveBeenCalled()
-    expect(screen.getByLabelText('Close Terminal')).toBeInTheDocument()
-
-    mockTerminalHooks([{ ...runningTerminal, status: 'exited', exitCode: 2 }])
-    rerender(
-      <MemoryRouter initialEntries={['/repos/1?dialog=terminal&terminal=t1']}>
-        <TerminalPanel target={{ kind: 'repo', repoId: 1 }} directory="/repo" isOpen onClose={onClose} />
-      </MemoryRouter>,
-    )
+    harness.state.terminals = [{ ...runningTerminal, status: 'exited', exitCode: 2 }]
+    await closeSocket(socketFake, 't1')
 
     expect(await screen.findByText('exited (2)')).toBeInTheDocument()
+    expect(harness.state.deleteRequests()).toBe(0)
+    expect(harness.onClose).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('Close Terminal')).toBeInTheDocument()
   })
 
   it('keeps the panel open and selects another running terminal when one exits cleanly', async () => {
     const otherTerminal: TerminalInfo = { ...runningTerminal, id: 't3', title: 'Shell' }
-    mockTerminalHooks([runningTerminal, otherTerminal])
-    refetch.mockResolvedValue({
-      data: [runningTerminal, { ...otherTerminal, status: 'exited', exitCode: 0 }],
+    const harness = renderPanel({
+      terminals: [runningTerminal, otherTerminal],
+      route: '/repos/1?dialog=terminal&terminal=t3',
     })
-    removeMutate.mockImplementation((_variables: unknown, options: { onSuccess?: () => void }) => {
-      options.onSuccess?.()
-    })
-    const onClose = vi.fn()
-    renderPanel('/repos/1?dialog=terminal&terminal=t3', onClose)
+    const view = await waitForTerminal('t3')
+    expect(view).not.toHaveClass('hidden')
 
-    const views = await screen.findAllByTestId('terminal-view')
-    expect(views.find((view) => view.getAttribute('data-pty-id') === 't3')).toHaveAttribute('data-active', 'true')
-
-    fireEvent.click(screen.getByLabelText('exit t3'))
+    harness.state.terminals = [runningTerminal, { ...otherTerminal, status: 'exited', exitCode: 0 }]
+    await closeSocket(socketFake, 't3')
 
     await waitFor(() => expect(screen.queryByLabelText('Close Shell')).not.toBeInTheDocument())
-    expect(removeMutate).toHaveBeenCalledWith({ ptyID: 't3', directory: '/repo' }, expect.any(Object))
-    expect(onClose).not.toHaveBeenCalled()
-    expect(screen.getByTestId('terminal-view')).toHaveAttribute('data-pty-id', 't1')
-    expect(screen.getByTestId('terminal-view')).toHaveAttribute('data-active', 'true')
-    expect(createMutate).not.toHaveBeenCalled()
+    expect(harness.state.deleteRequests()).toBe(1)
+    expect(harness.onClose).not.toHaveBeenCalled()
+    const remaining = terminalView('t1')
+    expect(remaining).not.toHaveClass('hidden')
+    expect(harness.state.createRequests()).toBe(0)
   })
 
   it('keeps an action terminal that exited cleanly so its output stays visible', async () => {
@@ -355,101 +355,90 @@ describe('TerminalPanel', () => {
       cwd: '/repo',
       status: 'running',
     }
-    mockTerminalHooks([runningActionTerminal])
-    refetch.mockResolvedValue({ data: [{ ...runningActionTerminal, status: 'exited', exitCode: 0 }] })
-    const onClose = vi.fn()
-    const { rerender } = renderPanel('/repos/1?dialog=terminal&terminal=t4', onClose)
-    await screen.findAllByTestId('terminal-view')
+    const harness = renderPanel({
+      terminals: [runningActionTerminal],
+      route: '/repos/1?dialog=terminal&terminal=t4',
+    })
+    await waitForTerminal('t4')
 
-    fireEvent.click(screen.getByLabelText('exit t4'))
-
-    await waitFor(() => expect(refetch).toHaveBeenCalledTimes(1))
-    expect(removeMutate).not.toHaveBeenCalled()
-    expect(onClose).not.toHaveBeenCalled()
-    expect(screen.getByLabelText('Close Say hi')).toBeInTheDocument()
-
-    mockTerminalHooks([{ ...runningActionTerminal, status: 'exited', exitCode: 0 }])
-    rerender(
-      <MemoryRouter initialEntries={['/repos/1?dialog=terminal&terminal=t4']}>
-        <TerminalPanel target={{ kind: 'repo', repoId: 1 }} directory="/repo" isOpen onClose={onClose} />
-      </MemoryRouter>,
-    )
+    harness.state.terminals = [{ ...runningActionTerminal, status: 'exited', exitCode: 0 }]
+    await closeSocket(socketFake, 't4')
 
     expect(await screen.findByText('exited (0)')).toBeInTheDocument()
+    expect(harness.state.deleteRequests()).toBe(0)
+    expect(harness.onClose).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('Close Say hi')).toBeInTheDocument()
   })
 
   it('sends a single delete when a closed terminal reports its exit', async () => {
-    mockTerminalHooks([runningTerminal])
-    const onClose = vi.fn()
-    renderPanel('/repos/1?dialog=terminal&terminal=t1', onClose)
-    await screen.findAllByTestId('terminal-view')
+    const harness = renderPanel({
+      terminals: [runningTerminal],
+      route: '/repos/1?dialog=terminal&terminal=t1',
+    })
+    await waitForTerminal('t1')
 
     fireEvent.click(screen.getByLabelText('Close Terminal'))
     fireEvent.click(screen.getByRole('button', { name: 'Close terminal' }))
+    act(() => socketFor(socketFake, 't1').serverClose(1000))
 
-    expect(removeMutate).toHaveBeenCalledTimes(1)
-
-    fireEvent.click(screen.getByLabelText('exit t1'))
-
-    expect(refetch).not.toHaveBeenCalled()
-    expect(removeMutate).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(harness.state.deleteRequests()).toBe(1))
+    await waitFor(() => expect(screen.queryByLabelText('Close Terminal')).not.toBeInTheDocument())
+    expect(harness.state.deleteRequests()).toBe(1)
+    expect(harness.state.listRequests()).toBeGreaterThan(0)
   })
 
   it('closes the panel after the user closes the last terminal', async () => {
-    mockTerminalHooks([runningTerminal])
-    removeMutate.mockImplementation((_variables: unknown, options: { onSuccess?: () => void }) => {
-      options.onSuccess?.()
+    const harness = renderPanel({
+      terminals: [runningTerminal],
+      route: '/repos/1?dialog=terminal&terminal=t1',
     })
-    const onClose = vi.fn()
-    renderPanel('/repos/1?dialog=terminal&terminal=t1', onClose)
-    await screen.findAllByTestId('terminal-view')
+    await waitForTerminal('t1')
 
     fireEvent.click(screen.getByLabelText('Close Terminal'))
     fireEvent.click(screen.getByRole('button', { name: 'Close terminal' }))
 
-    expect(onClose).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(harness.onClose).toHaveBeenCalledTimes(1))
   })
 
   it('keeps the panel open when other terminals remain after a manual close', async () => {
     const otherTerminal: TerminalInfo = { ...runningTerminal, id: 't3', title: 'Shell' }
-    mockTerminalHooks([runningTerminal, otherTerminal])
-    removeMutate.mockImplementation((_variables: unknown, options: { onSuccess?: () => void }) => {
-      options.onSuccess?.()
+    const harness = renderPanel({
+      terminals: [runningTerminal, otherTerminal],
+      route: '/repos/1?dialog=terminal&terminal=t3',
     })
-    const onClose = vi.fn()
-    renderPanel('/repos/1?dialog=terminal&terminal=t3', onClose)
-    await screen.findAllByTestId('terminal-view')
+    await waitForTerminal('t3')
 
     fireEvent.click(screen.getByLabelText('Close Shell'))
     fireEvent.click(screen.getByRole('button', { name: 'Close terminal' }))
 
-    expect(removeMutate).toHaveBeenCalledWith({ ptyID: 't3', directory: '/repo' }, expect.any(Object))
-    expect(onClose).not.toHaveBeenCalled()
+    await waitFor(() =>
+      expect(harness.fetchFake.findRequests('DELETE', '/api/repos/1/terminals/:ptyID')).toHaveLength(1),
+    )
+    expect(harness.fetchFake.lastRequest('DELETE', '/api/repos/1/terminals/:ptyID')?.path).toBe('/api/repos/1/terminals/t3')
+    expect(harness.onClose).not.toHaveBeenCalled()
   })
 
   it('numbers new shell tabs so they can be told apart', async () => {
-    mockTerminalHooks([runningTerminal])
-    renderPanel()
-    await screen.findAllByTestId('terminal-view')
+    const harness = renderPanel({ terminals: [runningTerminal] })
+    await waitForTerminal('t1')
 
     fireEvent.click(screen.getByRole('button', { name: 'New terminal' }))
 
-    expect(createMutate).toHaveBeenCalledWith({ directory: '/repo', title: 'Terminal 2' }, expect.any(Object))
+    await waitFor(() => expect(harness.state.createRequests()).toBe(1))
+    expect(harness.fetchFake.lastRequest('POST', '/api/repos/1/terminals')?.body).toEqual({
+      directory: '/repo',
+      title: 'Terminal 2',
+    })
   })
 
   it('renders the key bar only on mobile', async () => {
-    mockTerminalHooks([runningTerminal])
-
-    vi.mocked(useMobile).mockReturnValue(false)
-    const first = renderPanel()
-    await screen.findAllByTestId('terminal-view')
+    const desktop = renderPanel({ terminals: [runningTerminal] })
+    await waitForTerminal('t1')
     expect(screen.queryByTestId('terminal-key-bar')).not.toBeInTheDocument()
+    desktop.unmount()
 
-    first.unmount()
-
-    vi.mocked(useMobile).mockReturnValue(true)
-    renderPanel()
-    await screen.findAllByTestId('terminal-view')
+    renderPanel({ terminals: [runningTerminal], width: 400 })
+    await waitForTerminal('t1')
     expect(screen.getByTestId('terminal-key-bar')).toBeInTheDocument()
   })
 })

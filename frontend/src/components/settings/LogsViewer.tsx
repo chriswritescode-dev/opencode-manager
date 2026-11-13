@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Pause, Play, Trash2 } from 'lucide-react'
+import { z } from 'zod'
 import type { ManagerLogLevel, ManagerLogSource } from '@opencode-manager/shared/schemas'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Card, CardContent } from '@/components/ui/card'
@@ -12,19 +13,22 @@ import { getOpenCodeServerIssue, useServerHealth, type OpenCodeServerIssue } fro
 import { DEFAULTS } from '@/config'
 import { cn } from '@/lib/utils'
 
-const ISSUE_TITLES: Record<OpenCodeServerIssue['state'], string> = {
+const ISSUE_TITLES = {
   failed: 'OpenCode server failed',
   recovering: 'OpenCode server is recovering',
   unhealthy: 'OpenCode server is unhealthy',
-}
+} satisfies Record<OpenCodeServerIssue['state'], string>
 
-type LevelFilter = ManagerLogLevel | 'all'
-type SourceFilter = ManagerLogSource | 'all'
+const levelFilterSchema = z.enum(['all', 'info', 'warn', 'error'])
+const sourceFilterSchema = z.enum(['all', 'manager', 'opencode'])
 
-const SOURCE_LABELS: Record<ManagerLogSource, string> = {
+type LevelFilter = z.infer<typeof levelFilterSchema>
+type SourceFilter = z.infer<typeof sourceFilterSchema>
+
+const SOURCE_LABELS = {
   manager: 'Manager',
   opencode: 'OpenCode server',
-}
+} satisfies Record<ManagerLogSource, string>
 
 const LEVEL_OPTIONS: Array<{ value: LevelFilter; label: string }> = [
   { value: 'all', label: 'All levels' },
@@ -39,12 +43,12 @@ const SOURCE_OPTIONS: Array<{ value: SourceFilter; label: string }> = [
   { value: 'opencode', label: SOURCE_LABELS.opencode },
 ]
 
-const LEVEL_CHIP_CLASSES: Record<ManagerLogLevel, string> = {
+const LEVEL_CHIP_CLASSES = {
   error: 'bg-destructive/15 text-destructive',
   warn: 'bg-warning/15 text-warning',
   info: 'bg-accent text-accent-foreground',
   debug: 'bg-muted text-muted-foreground',
-}
+} satisfies Record<ManagerLogLevel, string>
 
 export function LogsViewer() {
   const [level, setLevel] = useState<LevelFilter>('all')
@@ -89,7 +93,10 @@ export function LogsViewer() {
     <Card className="flex h-full min-h-0 flex-col border-0 bg-transparent shadow-none">
       <CardContent className="flex min-h-0 flex-1 flex-col gap-3 p-0">
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <Select value={level} onValueChange={(value) => setLevel(value as LevelFilter)}>
+          <Select value={level} onValueChange={(value) => {
+            const parsed = levelFilterSchema.safeParse(value)
+            if (parsed.success) setLevel(parsed.data)
+          }}>
             <SelectTrigger className="min-w-0 flex-1 sm:w-44 sm:flex-none" aria-label="Log level filter">
               <SelectValue />
             </SelectTrigger>
@@ -101,7 +108,10 @@ export function LogsViewer() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={source} onValueChange={(value) => setSource(value as SourceFilter)}>
+          <Select value={source} onValueChange={(value) => {
+            const parsed = sourceFilterSchema.safeParse(value)
+            if (parsed.success) setSource(parsed.data)
+          }}>
             <SelectTrigger className="min-w-0 flex-1 sm:w-44 sm:flex-none" aria-label="Log source filter">
               <SelectValue />
             </SelectTrigger>

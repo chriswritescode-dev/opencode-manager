@@ -1,0 +1,600 @@
+import { serve } from '@hono/node-server'
+import { createNodeWebSocket, type NodeWebSocket } from '@hono/node-ws'
+import { Hono } from 'hono'
+import { cors } from 'hono/cors'
+import { serveStatic } from '@hono/node-server/serve-static'
+import { readFile } from 'fs/promises'
+import { z } from 'zod'
+import type { Database } from 'bun:sqlite'
+import { initializeDatabase } from './db/schema'
+import { createRepoRoutes } from './routes/repos'
+import { createRepoTerminalSocketRoutes } from './routes/repo-terminal-socket'
+import { createIPCServer, type IPCServer } from './ipc/ipcServer'
+import { GitAuthService } from './services/git-auth'
+import { createSettingsRoutes } from './routes/settings'
+import { createDevicePairingRoutes } from './routes/device-pairing'
+import { createHealthRoutes } from './routes/health'
+import { createTTSRoutes, cleanupExpiredCache } from './routes/tts'
+import { createSTTRoutes } from './routes/stt'
+import { createFileRoutes } from './routes/files'
+import { createFilesystemRoutes } from './routes/filesystem'
+import { createScheduleRoutes, createServerScheduleRoutes } from './routes/schedules'
+import { createProvidersRoutes } from './routes/providers'
+import { createOAuthRoutes } from './routes/oauth'
+import { createSSERoutes } from './routes/sse'
+import { createSSHRoutes } from './routes/ssh'
+import { createNotificationRoutes } from './routes/notifications'
+import { createMcpOauthProxyRoutes } from './routes/mcp-oauth-proxy'
+import { createAuthRoutes, createAuthInfoRoutes, syncAdminFromEnv } from './routes/auth'
+import { createAuth } from './auth'
+import { createAuthMiddleware } from './auth/middleware'
+import { createPromptTemplateRoutes } from './routes/prompt-templates'
+import { createSessionPinRoutes } from './routes/session-pins'
+import { createSessionPermissionModeRoutes } from './routes/session-permission-modes'
+import { createSessionSandboxRoutes } from './routes/session-sandbox'
+import { createMultiRunRoutes } from './routes/multi-runs'
+import { createChangeWalkthroughRoutes } from './routes/change-walkthroughs'
+import { getChangeWalkthroughByWalkthroughSession } from './db/change-walkthroughs'
+import { createLogRoutes } from './routes/logs'
+import { createPreviewRoutes, createPreviewAvailability, type PreviewAvailability } from './routes/preview'
+import { createGlobalSecretRoutes } from './routes/secrets'
+import { createPreviewGatewayApp, PreviewSessionStore, type PreviewGateway } from './services/preview/gateway'
+import { createInternalRoutes } from './routes/internal'
+import { sweepStaleUploadSessions } from './routes/internal/repo-mirror-helpers'
+import { createOpenCodeProxyRoutes } from './routes/opencode-proxy'
+import { createAuthenticatedOpenCodeProxyRoutes } from './routes/opencode-auth-proxy'
+import { createOpenCodeServerProxyRoutes } from './routes/opencode-server-proxy'
+import { createOpenCodeServerRoutes } from './routes/opencode-servers'
+import {
+  createOpenCodeServerTerminalRoutes,
+  createOpenCodeServerTerminalSocketRoutes,
+} from './routes/opencode-server-terminals'
+import { sseAggregator } from './services/sse-aggregator'
+import { RemoteServerEventHub } from './services/remote-server-events'
+import { ensureDirectoryExists, writeFileContent, fileExists } from './services/file-operations'
+import { SettingsService } from './services/settings'
+import { RemoteAccessHeadersService } from './services/remote-access-headers'
+import { SessionPermissionModeService } from './services/session-permission-modes'
+import { SessionSandboxService } from './services/session-sandbox'
+import { SessionAncestry } from './services/session-ancestry'
+import { GoalOutcomeTracker } from './services/goal-outcomes'
+import { MultiRunService } from './services/multi-runs'
+import { ChangeWalkthroughService } from './services/change-walkthroughs'
+import { opencodeServerManager } from './services/opencode-single-server'
+import { createOpenCodeClient } from './services/opencode/client'
+import { OpenCodeServerRegistry } from './services/opencode-server-registry'
+import { getOpenCodeUpstreamBaseUrl } from './services/opencode/upstream'
+import { NotificationService } from './services/notification'
+import { ScheduleRunner, ScheduleService } from './services/schedules'
+import { CredentialProvider } from './services/credential-provider'
+import { TerminalService } from './services/terminal'
+import { ProjectConfigService } from './services/project-config'
+import { SecretsService } from './services/secrets'
+import { RepoEnvService } from './services/repo-env'
+import { RepoWorkspaceService } from './services/repo-workspace'
+import { createGitService } from './services/git/GitService'
+import { ScheduleWorktreeManager } from './services/schedule-worktree'
+import { migrateGlobalSkills } from './services/skills'
+import { convertAssistantOpenCodeConfigToV2, installAssistantWorkspace } from './services/assistant-mode'
+import { detectSandboxCapability } from './services/sandbox/capability'
+import { SandboxRuntimeService, stopSandboxesOnShutdown } from './services/sandbox/runtime'
+import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode-import'
+import { readOpenCodeConfigFile, foldLegacyConfigJsonSource, withOpenCodeConfigLock } from './services/opencode-config-file'
+import { seedOpenCodeConfigFile } from './services/opencode-config-apply'
+import { OpenCodeSupervisor } from './services/opencode-supervisor'
+import { logger } from './utils/logger'
+import {
+  getWorkspacePath,
+  getReposPath,
+  getConfigPath,
+  getAgentsMdPath,
+  getDatabasePath,
+  getTrustedOrigins,
+  ENV,
+} from '@opencode-manager/shared/config/env'
+import { DEFAULT_AGENTS_MD } from './constants'
+import { LOCAL_OPENCODE_SERVER_ID, NotificationEventType } from '@opencode-manager/shared/schemas'
+
+const PackageJsonSchema = z.object({ version: z.string().optional() })
+
+const ServerErrorCodeSchema = z.object({ code: z.string().optional() })
+
+const REFLECT_ANY_ORIGIN_PREFIXES = ['/api/opencode-proxy/', '/api/internal/']
+
+export type BackendOpenCodeSupervisor = Pick<
+  OpenCodeSupervisor,
+  'start' | 'stop' | 'restart' | 'getStatus' | 'checkNow'
+>
+
+export type BackendScheduleRunner = Pick<ScheduleRunner, 'start' | 'stop'>
+
+export interface BackendAppDependencies {
+  database?: Database
+  createSupervisor?: (
+    manager: typeof opencodeServerManager,
+    settings: SettingsService,
+  ) => BackendOpenCodeSupervisor
+  createScheduleRunner?: (service: ScheduleService) => BackendScheduleRunner
+  installAssistantWorkspace?: typeof installAssistantWorkspace
+  migrateGlobalSkills?: () => Promise<void>
+}
+
+export interface BackendApp {
+  app: Hono
+  injectWebSocket: NodeWebSocket['injectWebSocket']
+  preview: { gateway: PreviewGateway; availability: PreviewAvailability }
+  initialize: () => Promise<void>
+  shutdown: () => Promise<void>
+}
+
+export interface PreviewGatewayServerOptions {
+  preview: BackendApp['preview']
+  port: number
+  hostname: string
+  serveFn?: typeof serve
+}
+
+async function getAppVersion(): Promise<string> {
+  try {
+    const packageUrl = new URL('../../package.json', import.meta.url)
+    const packageJsonRaw = await readFile(packageUrl, 'utf-8')
+    const parsedPackageJson = PackageJsonSchema.safeParse(JSON.parse(packageJsonRaw))
+    return parsedPackageJson.success ? parsedPackageJson.data.version ?? 'unknown' : 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
+
+export function startPreviewGateway({ preview, port, hostname, serveFn = serve }: PreviewGatewayServerOptions) {
+  const server = serveFn({
+    fetch: preview.gateway.app.fetch,
+    port,
+    hostname,
+  })
+  server.on('listening', () => {
+    preview.availability.markAvailable()
+    logger.info(`Preview gateway running on http://${hostname}:${port}`)
+  })
+  server.on('error', (cause: Error) => {
+    preview.availability.markUnavailable()
+    const code = ServerErrorCodeSchema.safeParse(cause)
+    logger.warn(`Preview gateway failed to listen on port ${port}${code.success && code.data.code ? ` (${code.data.code})` : ''}; preview disabled`)
+  })
+  preview.gateway.injectWebSocket(server)
+  return server
+}
+
+export function createBackendApp(dependencies: BackendAppDependencies = {}): BackendApp {
+  const { PORT, HOST } = ENV.SERVER
+  const database = dependencies.database ?? initializeDatabase(getDatabasePath())
+
+  const app = new Hono()
+  const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app })
+
+  app.use('/*', cors({
+    origin: (origin, c) => {
+      if (origin && REFLECT_ANY_ORIGIN_PREFIXES.some(prefix => c.req.path.startsWith(prefix))) {
+        return origin
+      }
+      const trustedOrigins = getTrustedOrigins()
+      if (!origin) return trustedOrigins[0]
+      if (trustedOrigins.includes(origin)) return origin
+      return trustedOrigins[0]
+    },
+    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization', 'CF-Access-Client-Id', 'CF-Access-Client-Secret'],
+    credentials: true,
+  }))
+
+  const auth = createAuth(database)
+  const requireAuth = createAuthMiddleware(auth)
+  const openCodeClient = createOpenCodeClient(
+    () => new SettingsService(database).getOpenCodeServerPassword(),
+    () => opencodeServerManager.getEffectiveServerHost(),
+  )
+  const opencodeServerRegistry = new OpenCodeServerRegistry(database, openCodeClient)
+
+  let ipcServer: IPCServer | undefined
+  const gitAuthService = new GitAuthService()
+  const gitService = createGitService(gitAuthService)
+  const projectConfigService = new ProjectConfigService(database, gitService, gitAuthService)
+  const secretsService = new SecretsService(database)
+  const repoEnvService = new RepoEnvService(database, projectConfigService, secretsService)
+  const sandboxRuntimeService = new SandboxRuntimeService(database, repoEnvService)
+  const settingsService = new SettingsService(database)
+  const openCodeSupervisor = dependencies.createSupervisor?.(opencodeServerManager, settingsService)
+    ?? new OpenCodeSupervisor(opencodeServerManager, settingsService)
+  const installWorkspace = dependencies.installAssistantWorkspace ?? installAssistantWorkspace
+  const migrateSkills = dependencies.migrateGlobalSkills ?? migrateGlobalSkills
+
+  const terminalService = new TerminalService(
+    {
+      client: openCodeClient,
+      baseUrl: () => getOpenCodeUpstreamBaseUrl(opencodeServerManager.getEffectiveServerHost()),
+      includeLocalEnv: true,
+    },
+    new CredentialProvider(database),
+    repoEnvService,
+  )
+  const resolveServerTerminalService = (serverId: string): TerminalService => {
+    const connection = opencodeServerRegistry.getConnection(serverId)
+    return terminalService.forTarget({
+      client: opencodeServerRegistry.getClient(serverId),
+      baseUrl: () => connection.baseUrl,
+      includeLocalEnv: false,
+    })
+  }
+  const sessionAncestry = new SessionAncestry((serverId) => opencodeServerRegistry.getClient(serverId))
+  const sessionSandboxService = new SessionSandboxService(database, sessionAncestry, settingsService, {
+    removeSessionSandbox: (rootSessionId) => sandboxRuntimeService.removeSessionSandbox(rootSessionId),
+  })
+  const scheduleWorktreeManager = new ScheduleWorktreeManager(gitAuthService, database)
+  const scheduleService = new ScheduleService(database, openCodeClient, scheduleWorktreeManager, opencodeServerRegistry, {
+    sessions: sessionSandboxService,
+    runtime: sandboxRuntimeService,
+  })
+  scheduleService.setWorktreeRemovedHandler(async (directory) => {
+    try {
+      await terminalService.removeAll(directory)
+    } catch (error) {
+      logger.warn(`Failed to remove terminals for schedule worktree ${directory}:`, error)
+    }
+  })
+  const repoWorkspaces = new RepoWorkspaceService(database, openCodeClient, gitAuthService, projectConfigService, terminalService, scheduleService)
+  const scheduleRunnerInstance = dependencies.createScheduleRunner?.(scheduleService) ?? new ScheduleRunner(scheduleService)
+
+  const notificationService = new NotificationService(database, opencodeServerRegistry)
+  const sessionPermissionModeService = new SessionPermissionModeService(database, opencodeServerRegistry, settingsService, sessionAncestry)
+  const goalOutcomes = new GoalOutcomeTracker()
+
+  const multiRunService = new MultiRunService(database, openCodeClient, repoWorkspaces, sessionPermissionModeService, (serverId) => opencodeServerRegistry.getClient(serverId))
+  const changeWalkthroughService = new ChangeWalkthroughService(database, openCodeClient, settingsService, gitAuthService, gitService)
+
+  sseAggregator.onEvent((directory, event) => {
+    sessionSandboxService.handleEvent(directory, event).catch((err) => {
+      logger.error('Session sandbox event handling error:', err)
+    })
+    try {
+      changeWalkthroughService.handleEvent(event)
+    } catch (err) {
+      logger.error('Change walkthrough event handling error:', err)
+    }
+  })
+
+  sseAggregator.onServerEvent((serverId, directory, event) => {
+    sessionPermissionModeService.handleEvent(directory, event, serverId).catch((err) => {
+      logger.error('Session permission mode event handling error:', err)
+    })
+    const outcome = goalOutcomes.observe(serverId, directory, event)
+    if (outcome) {
+      void notificationService.notifyGoalOutcome(outcome).catch((error) => {
+        logger.error('Goal outcome notification error:', error)
+      })
+    }
+  })
+
+  notificationService.addEventSuppressor((event, sessionId, serverId) =>
+    sessionPermissionModeService.suppressesPermissionNotification(event, sessionId, serverId),
+  )
+
+  notificationService.addEventSuppressor(async (event, sessionId, serverId) => {
+    if (serverId !== LOCAL_OPENCODE_SERVER_ID) return false
+    if (!sessionId) return false
+    if (event.type !== NotificationEventType.SESSION_IDLE && event.type !== NotificationEventType.SESSION_FAILED) return false
+    return getChangeWalkthroughByWalkthroughSession(database, sessionId) !== null
+  })
+
+  if (ENV.VAPID.PUBLIC_KEY && ENV.VAPID.PRIVATE_KEY) {
+    if (!ENV.VAPID.SUBJECT) {
+      logger.warn('VAPID_SUBJECT is not set — push notifications require a mailto: subject (e.g. mailto:you@example.com)')
+    } else if (!ENV.VAPID.SUBJECT.startsWith('mailto:')) {
+      logger.warn(`VAPID_SUBJECT="${ENV.VAPID.SUBJECT}" does not use mailto: format — iOS/Safari push notifications will fail`)
+    }
+
+    notificationService.configureVapid({
+      publicKey: ENV.VAPID.PUBLIC_KEY,
+      privateKey: ENV.VAPID.PRIVATE_KEY,
+      subject: ENV.VAPID.SUBJECT || 'mailto:push@localhost',
+    })
+    sseAggregator.onServerEvent((serverId, directory, event) => {
+      notificationService.handleSSEEvent(directory, event, serverId).catch((err) => {
+        logger.error('Push notification dispatch error:', err)
+      })
+    })
+  }
+
+  sseAggregator.setOpenCodeClient(openCodeClient)
+  sseAggregator.setResyncGate(() => opencodeServerManager.isLifecycleInitialized())
+  opencodeServerManager.onLifecycleInitialized(() => sseAggregator.releasePendingResync())
+  sseAggregator.onServerConnected((serverId) => {
+    void sessionPermissionModeService.acceptPendingRequestsForActiveSessions(serverId).catch((err) => {
+      logger.error(`Failed to accept pending permission requests for server ${serverId}:`, err)
+    })
+    if (serverId === LOCAL_OPENCODE_SERVER_ID) {
+      void convertAssistantOpenCodeConfigToV2(openCodeClient.api).catch((err) => {
+        logger.error('Failed to convert the Assistant OpenCode config to v2:', err)
+      })
+    }
+  })
+
+  const remoteServerEvents = new RemoteServerEventHub(opencodeServerRegistry, sseAggregator)
+
+  sseAggregator.setScheduledSessionsResolver(
+    () => scheduleService.getActiveRunSessions(),
+  )
+
+  const previewSessionStore = new PreviewSessionStore()
+  const previewAvailability = createPreviewAvailability(false)
+
+  app.route('/api/auth', createAuthRoutes(auth))
+  app.route('/api/auth-info', createAuthInfoRoutes(auth))
+  app.route('/api/health', createHealthRoutes(database, openCodeSupervisor))
+
+  app.route('/api/mcp-oauth-proxy', createMcpOauthProxyRoutes(openCodeClient, requireAuth))
+  app.route('/api/internal', createInternalRoutes(database, scheduleService, notificationService, settingsService, openCodeClient, sessionPermissionModeService, repoWorkspaces, gitAuthService, multiRunService, changeWalkthroughService, sessionSandboxService, repoEnvService))
+  app.route('/api/opencode-proxy', createOpenCodeProxyRoutes(database, settingsService, upgradeWebSocket))
+
+  const protectedApi = new Hono()
+  protectedApi.use('/*', requireAuth)
+
+  protectedApi.route('/repos', createRepoTerminalSocketRoutes(database, gitAuthService, openCodeClient, terminalService, upgradeWebSocket))
+  protectedApi.route('/repos', createRepoRoutes(database, gitAuthService, scheduleService, openCodeClient, terminalService, projectConfigService, repoWorkspaces, secretsService))
+  protectedApi.route('/settings', createSettingsRoutes(database, gitAuthService, openCodeClient, openCodeSupervisor))
+  protectedApi.route('/device-pairing', createDevicePairingRoutes({
+    mintPairingCode: (headers) => auth.api.createDevicePairingCode({ headers }),
+    remoteAccessHeaders: new RemoteAccessHeadersService(database),
+    readAllowPrivateNetworkHttp: () =>
+      settingsService.getSettings('default').preferences.devicePairing?.allowPrivateNetworkHttp === true,
+  }))
+  protectedApi.route('/files', createFileRoutes())
+  protectedApi.route('/filesystem', createFilesystemRoutes())
+  protectedApi.route('/providers', createProvidersRoutes(openCodeClient))
+  protectedApi.route('/oauth', createOAuthRoutes(openCodeClient))
+  protectedApi.route('/tts', createTTSRoutes(database))
+  protectedApi.route('/stt', createSTTRoutes(database))
+  protectedApi.route('/sse', createSSERoutes())
+  protectedApi.route('/ssh', createSSHRoutes(gitAuthService))
+  protectedApi.route('/notifications', createNotificationRoutes(notificationService))
+  protectedApi.route('/prompt-templates', createPromptTemplateRoutes(database))
+  protectedApi.route('/secrets', createGlobalSecretRoutes(secretsService, 'secret'))
+  protectedApi.route('/variables', createGlobalSecretRoutes(secretsService, 'variable'))
+  protectedApi.route('/session-pins', createSessionPinRoutes(database))
+  protectedApi.route('/opencode-servers/:serverId/schedules', createServerScheduleRoutes(scheduleService))
+  protectedApi.route('/opencode-servers', createOpenCodeServerTerminalSocketRoutes(resolveServerTerminalService, upgradeWebSocket))
+  protectedApi.route('/opencode-servers', createOpenCodeServerTerminalRoutes(resolveServerTerminalService))
+  protectedApi.route('/opencode-servers', createOpenCodeServerRoutes(opencodeServerRegistry, () => remoteServerEvents.getStatuses()))
+  protectedApi.route('/session-permission-modes', createSessionPermissionModeRoutes(sessionPermissionModeService))
+  protectedApi.route('/session-sandbox', createSessionSandboxRoutes(sessionSandboxService))
+  protectedApi.route('/multi-runs', createMultiRunRoutes(multiRunService))
+  protectedApi.route('/change-walkthroughs', createChangeWalkthroughRoutes(changeWalkthroughService))
+  protectedApi.route('/schedules', createScheduleRoutes(scheduleService))
+  protectedApi.route('/logs', createLogRoutes())
+  protectedApi.route('/preview', createPreviewRoutes({ store: previewSessionStore, isEnabled: previewAvailability.isEnabled }))
+
+  app.route('/api', protectedApi)
+
+  app.route('/api/opencode/servers', createOpenCodeServerProxyRoutes(opencodeServerRegistry, requireAuth))
+  app.route('/api/opencode', createAuthenticatedOpenCodeProxyRoutes(openCodeClient, requireAuth))
+
+  const isProduction = ENV.SERVER.NODE_ENV === 'production'
+
+  if (isProduction) {
+    app.use('/*', async (c, next) => {
+      await next()
+      if (c.req.path === '/sw.js') {
+        c.res.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate')
+        c.res.headers.set('Pragma', 'no-cache')
+        c.res.headers.set('Expires', '0')
+      }
+    })
+
+    app.use('/*', serveStatic({ root: './frontend/dist' }))
+
+    app.get('*', async (c) => {
+      if (c.req.path.startsWith('/api/')) {
+        return c.notFound()
+      }
+      const fs = await import('fs/promises')
+      const path = await import('path')
+      const indexPath = path.join(process.cwd(), 'frontend/dist/index.html')
+      const html = await fs.readFile(indexPath, 'utf-8')
+      return c.html(html)
+    })
+  } else {
+    app.get('/', async (c) => {
+      const version = await getAppVersion()
+      return c.json({
+        name: 'OpenCode WebUI',
+        version,
+        status: 'running',
+        endpoints: {
+          health: '/api/health',
+          repos: '/api/repos',
+          settings: '/api/settings',
+          sessions: '/api/sessions',
+          files: '/api/files',
+          providers: '/api/providers',
+          opencode_proxy: '/api/opencode/*'
+        }
+      })
+    })
+
+    app.get('/api/network-info', async (c) => {
+      const os = await import('os')
+      const interfaces = os.networkInterfaces()
+      const ips = Object.values(interfaces)
+        .flat()
+        .filter(info => info && !info.internal && info.family === 'IPv4')
+        .map(info => info!.address)
+
+      const requestHost = c.req.header('host') || `localhost:${PORT}`
+      const protocol = c.req.header('x-forwarded-proto') || 'http'
+
+      return c.json({
+        host: HOST,
+        port: PORT,
+        requestHost,
+        protocol,
+        availableIps: ips,
+        apiUrls: [
+          `${protocol}://localhost:${PORT}`,
+          ...ips.map(ip => `${protocol}://${ip}:${PORT}`)
+        ]
+      })
+    })
+  }
+
+  const ensureOpenCodeConfigFileExists = async (): Promise<void> => {
+    await withOpenCodeConfigLock(foldLegacyConfigJsonSource)
+
+    const existing = await readOpenCodeConfigFile()
+    if (existing) {
+      if (!existing.isValid) {
+        logger.warn('OpenCode config file has validation issues', existing.validationIssues)
+      }
+      return
+    }
+
+    const status = await getOpenCodeImportStatus()
+    if (status.configSourcePath) {
+      logger.info(`Found importable OpenCode config at ${status.configSourcePath}, importing...`)
+      try {
+        const result = await syncOpenCodeImport({ overwriteState: false, status })
+        if (result.configImported) {
+          logger.info(`Imported OpenCode config from ${status.configSourcePath} to workspace`)
+          return
+        }
+      } catch (error) {
+        logger.warn(`Failed to import OpenCode config from ${status.configSourcePath}`, error)
+      }
+    }
+
+    await seedOpenCodeConfigFile()
+    logger.info('Created minimal seed config')
+  }
+
+  const ensureHomeStateImported = async (): Promise<void> => {
+    try {
+      const status = await getOpenCodeImportStatus()
+      if (status.workspaceStateExists) {
+        return
+      }
+
+      if (!status.stateSourcePath) {
+        return
+      }
+
+      const result = await syncOpenCodeImport({ overwriteState: false, importConfig: false, status })
+      if (result.stateImported) {
+        logger.info(`Imported OpenCode state from ${status.stateSourcePath}`)
+      }
+    } catch (error) {
+      logger.warn('Failed to import OpenCode state, continuing without imported state', error)
+    }
+  }
+
+  const ensureDefaultAgentsMdExists = async (): Promise<void> => {
+    const agentsMdPath = getAgentsMdPath()
+    const exists = await fileExists(agentsMdPath)
+
+    if (!exists) {
+      await writeFileContent(agentsMdPath, DEFAULT_AGENTS_MD)
+      logger.info(`Created default AGENTS.md at: ${agentsMdPath}`)
+    }
+  }
+
+  const initialize = async (): Promise<void> => {
+    try {
+      if (ENV.SERVER.NODE_ENV === 'production' && !ENV.AUTH.SECRET) {
+        logger.error('AUTH_SECRET is required in production mode')
+        logger.error('Generate one with: openssl rand -base64 32')
+        logger.error('Set it as environment variable: AUTH_SECRET=your-secret')
+        process.exit(1)
+      }
+
+      await ensureDirectoryExists(getWorkspacePath())
+      await ensureDirectoryExists(getReposPath())
+      await ensureDirectoryExists(getConfigPath())
+      logger.info('Workspace directories initialized')
+
+      await cleanupExpiredCache()
+      await sweepStaleUploadSessions()
+
+      await ensureOpenCodeConfigFileExists()
+      await ensureHomeStateImported()
+      await ensureDefaultAgentsMdExists()
+
+      settingsService.initializeLastKnownGoodConfig()
+
+      await migrateSkills()
+
+      await installWorkspace({ db: database })
+      logger.info('Assistant workspace installed')
+
+      ipcServer = await createIPCServer(process.env.STORAGE_PATH || undefined)
+      await gitAuthService.initialize(ipcServer, database)
+      logger.info(`Git IPC server running at ${ipcServer.ipcHandlePath}`)
+
+      await syncAdminFromEnv(auth, database)
+
+      opencodeServerManager.setDatabase(database)
+      detectSandboxCapability()
+      void sandboxRuntimeService.prepareSandboxOnBoot().catch((error) => {
+        logger.warn('Sandbox preparation failed:', error)
+      })
+      const openCodeStatus = await openCodeSupervisor.start()
+      if (openCodeStatus.healthy) {
+        logger.info(`OpenCode server running on port ${openCodeStatus.port}`)
+      } else {
+        logger.warn(`OpenCode server unavailable after startup recovery: ${openCodeStatus.lastError ?? openCodeStatus.state}`)
+      }
+    } catch (error) {
+      logger.error('Failed to initialize workspace:', error)
+    }
+
+    sseAggregator.start()
+    remoteServerEvents.start()
+    void scheduleRunnerInstance.start()
+  }
+
+  let isShuttingDown = false
+
+  const shutdown = async (): Promise<void> => {
+    if (isShuttingDown) return
+    isShuttingDown = true
+
+    try {
+      remoteServerEvents.shutdown()
+      logger.info('Remote server event hub stopped')
+      sseAggregator.shutdown()
+      logger.info('SSE Aggregator stopped')
+      if (ipcServer) {
+        await ipcServer.dispose()
+        logger.info('Git IPC server stopped')
+      }
+      await openCodeSupervisor.stop()
+      scheduleRunnerInstance.stop()
+      logger.info('Schedule runner stopped')
+      logger.info('OpenCode server stopped')
+    } catch (error) {
+      logger.error('Error during shutdown:', error)
+    }
+    try {
+      await stopSandboxesOnShutdown(database)
+      logger.info('Sandbox microVMs stopped')
+    } catch (error) {
+      logger.error('Error stopping sandbox microVMs:', error)
+    }
+  }
+
+  return {
+    app,
+    injectWebSocket,
+    preview: {
+      gateway: createPreviewGatewayApp(previewSessionStore),
+      availability: previewAvailability,
+    },
+    initialize,
+    shutdown,
+  }
+}

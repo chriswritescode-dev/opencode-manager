@@ -106,17 +106,14 @@ export async function getFile(userPath: string): Promise<FileInfo> {
   logger.info(`Getting file for path: ${userPath} -> ${validatedPath}`)
   
   try {
-    // Check if path exists
     const exists = await fileExists(validatedPath)
     if (!exists) {
       throw new Error('Path does not exist')
     }
     
-    // Get file stats
     const stats = await getFileStats(validatedPath)
     
     if (stats.isDirectory) {
-      // It's a directory - list contents
       const entries = await listDirectory(validatedPath)
       const children: FileInfo[] = []
       
@@ -145,7 +142,6 @@ export async function getFile(userPath: string): Promise<FileInfo> {
         workspaceRoot: SHARED_WORKSPACE_BASE,
       }
     } else {
-      // It's a file - get content
       let content = ''
       const mimeType = await detectMimeType(validatedPath)
       
@@ -183,8 +179,8 @@ export async function uploadFile(userPath: string, file: File, relativePath?: st
     throw new Error('File too large')
   }
   
-  const mimeType = (file.type || getKnownMimeType(file.name) || 'text/plain') as AllowedMimeType
-  if (!ALLOWED_MIME_TYPES.includes(mimeType) && !mimeType.startsWith('text/')) {
+  const mimeType = file.type || getKnownMimeType(file.name) || 'text/plain'
+  if (!ALLOWED_MIME_TYPES.some((allowed) => allowed === mimeType) && !mimeType.startsWith('text/')) {
     throw new Error('File type not allowed')
   }
   
@@ -253,13 +249,10 @@ export async function renameOrMoveFile(userPath: string, body: { newPath: string
   const oldValidatedPath = validatePath(userPath)
   const newValidatedPath = validatePath(body.newPath)
   
-  // Create parent directory if needed
   await mkdirSafe(path.dirname(newValidatedPath))
   
-  // Move/rename file
   await fs.rename(oldValidatedPath, newValidatedPath)
   
-  // Get stats of new file
   const stats = await getFileStats(newValidatedPath)
   
   return {
@@ -292,34 +285,32 @@ function validatePath(userPath: string): string {
   return resolved
 }
 
+const MIME_TYPES_BY_EXTENSION = new Map<string, AllowedMimeType>([
+  ['.txt', 'text/plain'],
+  ['.html', 'text/html'],
+  ['.htm', 'text/html'],
+  ['.css', 'text/css'],
+  ['.js', 'text/javascript'],
+  ['.ts', 'text/typescript'],
+  ['.jsx', 'text/javascript'],
+  ['.tsx', 'text/typescript'],
+  ['.json', 'application/json'],
+  ['.jsonc', 'application/json'],
+  ['.xml', 'application/xml'],
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.gif', 'image/gif'],
+  ['.webp', 'image/webp'],
+  ['.svg', 'image/svg+xml'],
+  ['.pdf', 'application/pdf'],
+  ['.zip', 'application/zip'],
+  ['.md', 'text/markdown'],
+  ['.mdx', 'text/markdown'],
+])
+
 function getKnownMimeType(filePath: string): AllowedMimeType | undefined {
-  const ext = path.extname(filePath).toLowerCase()
-  
-  const mimeTypes: Record<string, AllowedMimeType> = {
-    '.txt': 'text/plain',
-    '.html': 'text/html',
-    '.htm': 'text/html',
-    '.css': 'text/css',
-    '.js': 'text/javascript',
-    '.ts': 'text/typescript',
-    '.jsx': 'text/javascript',
-    '.tsx': 'text/typescript',
-    '.json': 'application/json',
-    '.jsonc': 'application/json',
-    '.xml': 'application/xml',
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif',
-    '.webp': 'image/webp',
-    '.svg': 'image/svg+xml',
-    '.pdf': 'application/pdf',
-    '.zip': 'application/zip',
-    '.md': 'text/markdown',
-    '.mdx': 'text/markdown',
-  }
-  
-  return mimeTypes[ext]
+  return MIME_TYPES_BY_EXTENSION.get(path.extname(filePath).toLowerCase())
 }
 
 async function detectMimeType(filePath: string): Promise<DetectedMimeType> {

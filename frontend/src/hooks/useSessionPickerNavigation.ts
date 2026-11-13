@@ -13,14 +13,8 @@ import {
 } from '@/lib/navigation'
 
 export interface SessionPickerNavigationOptions {
-  /**
-   * `replace` rewrites the entry the picker was opened from so Back returns to the page behind it;
-   * `push` adds an entry and closes the picker; `panel` adds an entry, carries the current `panel`
-   * search param onto the destination path and leaves the picker open.
-   */
   mode: 'push' | 'replace' | 'panel'
   onClose: () => void
-  /** Where to go after the open session is deleted, instead of the current repo's session list. */
   deleteActiveSessionPath?: string
 }
 
@@ -32,16 +26,6 @@ export interface SessionPickerNavigation {
   onNavigate: (path: string) => void
 }
 
-/**
- * Builds the session picker handlers shared by the mobile sheet, the desktop dialog, the desktop
- * tool panel and the session page picker. The route in view comes from the location: choosing the
- * session already open on the same server only closes the picker, and does nothing in `panel` mode
- * where the picker stays open. An assistant session keeps `?assistant=1` when the chosen session
- * belongs to the current repo.
- *
- * @param options Navigation mode, the picker's close callback, and an optional delete destination.
- * @returns Handlers for selecting sessions and repos and for following a prepared path.
- */
 export function useSessionPickerNavigation({
   mode,
   onClose,

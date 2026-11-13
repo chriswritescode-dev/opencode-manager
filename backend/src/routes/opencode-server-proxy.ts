@@ -1,5 +1,4 @@
 import { Hono } from 'hono'
-import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { MiddlewareHandler } from 'hono'
 import {
   OpenCodeServerError,
@@ -9,6 +8,7 @@ import {
 import { filterProxyHeaders } from '../utils/proxy-headers'
 import { forwardProxyRequest, ProxyHeadersTimeoutError } from '../utils/proxy-forward'
 import { logger } from '../utils/logger'
+import { toContentfulStatus } from '../utils/error-utils'
 
 const MOUNT_PREFIX = '/api/opencode/servers/'
 const REQUEST_EXCLUDED_HEADERS = new Set(['cookie', 'origin', 'referer'])
@@ -42,10 +42,6 @@ function decodePathSegments(path: string): string[] | null {
   return segments
 }
 
-/**
- * Resolves the upstream path for a request mounted at `/api/opencode/servers`.
- * Only OpenCode API paths are forwardable, and encoded traversal segments are refused.
- */
 function resolveUpstreamPath(pathname: string): UpstreamPath {
   const remainder = pathname.slice(MOUNT_PREFIX.length)
   const separator = remainder.indexOf('/')
@@ -59,11 +55,6 @@ function resolveUpstreamPath(pathname: string): UpstreamPath {
 
 type UpstreamTarget = { basePath: string; url: URL }
 
-/**
- * Builds the upstream URL for a resolved API path. The returned `basePath` is the
- * connection base path without trailing slashes and is used to bound the final,
- * URL-normalized pathname to the connection's own `/api/` space.
- */
 function resolveUpstreamTarget(
   connection: OpenCodeServerConnection,
   path: string,
@@ -80,11 +71,6 @@ function isWithinUpstreamApiPath(basePath: string, pathname: string): boolean {
   return pathname.startsWith(`${basePath}/api/`)
 }
 
-/**
- * Serves `/:serverId/*` behind `requireAuth`, proxying each request to the registry-resolved remote
- * OpenCode server while keeping the normalized upstream pathname inside that connection's own `/api/`
- * space. Maps an upstream header timeout to 504 and an unreachable server to 502.
- */
 export function createOpenCodeServerProxyRoutes(
   registry: OpenCodeServerRegistry,
   requireAuth: MiddlewareHandler,
@@ -107,7 +93,7 @@ export function createOpenCodeServerProxyRoutes(
       connection = registry.getConnection(c.req.param('serverId'))
     } catch (error) {
       if (error instanceof OpenCodeServerError) {
-        return c.json({ error: error.message }, error.status as ContentfulStatusCode)
+        return c.json({ error: error.message }, toContentfulStatus(error.status))
       }
       logger.error('Failed to resolve OpenCode server connection', error)
       return c.json({ error: 'Failed to proxy request' }, 500)

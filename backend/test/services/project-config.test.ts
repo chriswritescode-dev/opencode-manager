@@ -1,25 +1,48 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { createHash } from 'node:crypto'
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { migrate } from '../../src/db/migration-runner'
-import { allMigrations } from '../../src/db/migrations'
+import { z } from 'zod'
 import { createRepo, setRepoSetting } from '../../src/db/queries'
 import { createGitService } from '../../src/services/git/GitService'
-import { ProjectConfigService, ProjectConfigError } from '../../src/services/project-config'
-import type { GitAuthService } from '../../src/services/git-auth'
-import type { CreateTerminalInput, TerminalService } from '../../src/services/terminal'
+import { ProjectConfigService, ProjectConfigError, type ProjectTerminalLauncher } from '../../src/services/project-config'
+import type { CreateTerminalInput } from '../../src/services/terminal'
 import { formatTerminalTitle } from '@opencode-manager/shared/utils'
-import type { ProjectAction } from '@opencode-manager/shared/schemas'
+import { ProjectActionSchema, RepoProjectFileSchema, type ProjectAction } from '@opencode-manager/shared/schemas'
 import type { Repo, TerminalInfo } from '@opencode-manager/shared/types'
+import { createTestDatabase } from '../helpers/test-database'
+import { createGitAuthService } from '../helpers/git-fixtures'
 
-const gitAuthService = { getGitEnvironment: () => ({}) } as unknown as GitAuthService
+type RepoProjectFileInput = z.input<typeof RepoProjectFileSchema>
+
+const WrittenRepoFileSchema = z.object({
+  customKey: z.string(),
+  projectActions: z.array(ProjectActionSchema),
+})
+
+const WrittenSetupFileSchema = z.object({ setupWorktree: z.array(z.string()) })
+
+const gitAuthService = createGitAuthService()
+
+async function captureProjectConfigError(run: () => object | void | Promise<object | void>): Promise<ProjectConfigError> {
+  try {
+    await run()
+  } catch (error) {
+    if (error instanceof ProjectConfigError) return error
+    throw error
+  }
+  throw new Error('expected a ProjectConfigError')
+}
 
 function createService(db: Database): ProjectConfigService {
   return new ProjectConfigService(db, createGitService(gitAuthService), gitAuthService)
+}
+
+function createDatabase(): Database {
+  return createTestDatabase()
 }
 
 function createAction(overrides: Partial<ProjectAction> = {}): ProjectAction {
@@ -51,14 +74,15 @@ function createStatefulTerminalService(gate: { promise: Promise<void> } | null) 
       id: `pty-${created}`,
       title: formatTerminalTitle({ kind: input.kind, name: input.name, actionId: input.actionId }),
       kind: input.kind,
-      ...(input.actionId ? { actionId: input.actionId } : {}),
       cwd: target,
       status: 'running',
     }
+    if (input.actionId) terminal.actionId = input.actionId
     terminals.push(terminal)
     return terminal
   })
-  return { service: { list, create } as unknown as TerminalService, list, create, terminals }
+  const service: ProjectTerminalLauncher = { list, create }
+  return { service, list, create, terminals }
 }
 
 describe('ProjectConfigService personal settings', () => {
@@ -67,8 +91,7 @@ describe('ProjectConfigService personal settings', () => {
   let repo: Repo
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
+    db = createDatabase()
     service = createService(db)
     repo = createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
   })
@@ -113,17 +136,13 @@ describe('ProjectConfigService personal settings', () => {
     ])
   })
 
-  it('rejects duplicate action ids', () => {
-    let caught: unknown
-    try {
+  it('rejects duplicate action ids', async () => {
+    const error = await captureProjectConfigError(() => {
       service.setPersonalActions(repo, [createAction(), createAction({ name: 'Other' })])
-    } catch (error: unknown) {
-      caught = error
-    }
+    })
 
-    expect(caught).toBeInstanceOf(ProjectConfigError)
-    expect((caught as ProjectConfigError).status).toBe(400)
-    expect((caught as ProjectConfigError).message).toBe('Duplicate action id')
+    expect(error.status).toBe(400)
+    expect(error.message).toBe('Duplicate action id')
   })
 
   it('reads corrupt stored action JSON as an empty list', () => {
@@ -171,8 +190,7 @@ describe('ProjectConfigService worktree resolution', () => {
   })
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
+    db = createDatabase()
     service = createService(db)
     baseRepo = createRepo(db, {
       localPath: basePath,
@@ -243,14 +261,18 @@ describe('ProjectConfigService repository file', () => {
     return path.join(directory, '.ocm', 'project.json')
   }
 
-  function writeRepoFile(content: unknown): void {
+  function writeRepoFile(content: RepoProjectFileInput): void {
     fs.mkdirSync(path.dirname(repoFilePath()), { recursive: true })
-    fs.writeFileSync(repoFilePath(), typeof content === 'string' ? content : JSON.stringify(content, null, 2))
+    fs.writeFileSync(repoFilePath(), JSON.stringify(content, null, 2))
+  }
+
+  function writeRepoFileText(text: string): void {
+    fs.mkdirSync(path.dirname(repoFilePath()), { recursive: true })
+    fs.writeFileSync(repoFilePath(), text)
   }
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
+    db = createDatabase()
     service = createService(db)
     directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ocm-repo-file-'))
     repo = createRepo(db, {
@@ -326,7 +348,7 @@ describe('ProjectConfigService repository file', () => {
   })
 
   it('reports invalid JSON with an error and no repository items', async () => {
-    writeRepoFile('{not json')
+    writeRepoFileText('{not json')
 
     const config = await service.getConfig(repo, directory)
 
@@ -337,7 +359,7 @@ describe('ProjectConfigService repository file', () => {
   })
 
   it('reports a schema-invalid file with an error and no repository items', async () => {
-    writeRepoFile({ version: 2 })
+    writeRepoFileText('{"version": 2}')
 
     const config = await service.getConfig(repo, directory)
 
@@ -413,7 +435,7 @@ describe('ProjectConfigService repository file', () => {
 
     await service.moveItem(repo, directory, { kind: 'action', id: 'serve', to: 'repo' })
 
-    const raw = JSON.parse(fs.readFileSync(repoFilePath(), 'utf8')) as { customKey: string; projectActions: unknown[] }
+    const raw = WrittenRepoFileSchema.parse(JSON.parse(fs.readFileSync(repoFilePath(), 'utf8')))
     expect(raw.customKey).toBe('keep-me')
     expect(raw.projectActions).toEqual([createAction()])
     expect(service.getPersonalActions(repo)).toEqual([])
@@ -671,7 +693,7 @@ describe('ProjectConfigService repository file', () => {
 
     await service.moveItem(repo, directory, { kind: 'setup', command: 'personal-cmd', to: 'repo' })
 
-    const raw = JSON.parse(fs.readFileSync(repoFilePath(), 'utf8')) as { setupWorktree: string[] }
+    const raw = WrittenSetupFileSchema.parse(JSON.parse(fs.readFileSync(repoFilePath(), 'utf8')))
     expect(raw.setupWorktree).toHaveLength(20)
     expect(service.getPersonalSetup(repo)).toEqual([])
   })
@@ -688,8 +710,7 @@ describe('ProjectConfigService repository file', () => {
 
   it('restores the repository file and personal settings when the file write fails', async () => {
     service.setPersonalActions(repo, [createAction()])
-    const writeSeam = service as unknown as { writeRepoFile(filePath: string, file: unknown): void }
-    const writeSpy = vi.spyOn(writeSeam, 'writeRepoFile').mockImplementationOnce(() => {
+    const writeSpy = vi.spyOn(service, 'writeRepoFile').mockImplementationOnce(() => {
       throw new Error('disk full')
     })
 
@@ -733,8 +754,7 @@ describe('ProjectConfigService repository file', () => {
       ],
     })
     const originalBytes = fs.readFileSync(repoFilePath(), 'utf8')
-    const writeSeam = service as unknown as { writeRepoFile(filePath: string, file: unknown): void }
-    const writeSpy = vi.spyOn(writeSeam, 'writeRepoFile').mockImplementationOnce(() => {
+    const writeSpy = vi.spyOn(service, 'writeRepoFile').mockImplementationOnce(() => {
       throw new Error('disk full')
     })
 
@@ -771,8 +791,7 @@ describe('ProjectConfigService repository file', () => {
 
   it('restores the repository file and rolls back personal settings when the trust write fails', async () => {
     service.setPersonalActions(repo, [createAction()])
-    const trustSeam = service as unknown as { setRepoTrust(repo: Repo, hash: string | null): void }
-    const trustSpy = vi.spyOn(trustSeam, 'setRepoTrust').mockImplementationOnce(() => {
+    const trustSpy = vi.spyOn(service, 'setRepoTrust').mockImplementationOnce(() => {
       throw new Error('trust write failed')
     })
 
@@ -812,8 +831,7 @@ describe('ProjectConfigService repository file', () => {
   it('keeps the repository file when the trust write fails moving back', async () => {
     writeRepoFile({ version: 1, projectActions: [{ id: 'serve', name: 'Serve', command: 'pnpm dev' }] })
     const originalBytes = fs.readFileSync(repoFilePath(), 'utf8')
-    const trustSeam = service as unknown as { setRepoTrust(repo: Repo, hash: string | null): void }
-    const trustSpy = vi.spyOn(trustSeam, 'setRepoTrust').mockImplementationOnce(() => {
+    const trustSpy = vi.spyOn(service, 'setRepoTrust').mockImplementationOnce(() => {
       throw new Error('trust write failed')
     })
 
@@ -836,7 +854,7 @@ describe('ProjectConfigService runAction', () => {
   let repo: Repo
   let directory: string
 
-  function writeRepoFile(content: unknown): void {
+  function writeRepoFile(content: RepoProjectFileInput): void {
     const filePath = path.join(directory, '.ocm', 'project.json')
     fs.mkdirSync(path.dirname(filePath), { recursive: true })
     fs.writeFileSync(filePath, JSON.stringify(content, null, 2))
@@ -845,21 +863,24 @@ describe('ProjectConfigService runAction', () => {
   function createFakeTerminalService(terminals: TerminalInfo[] = []) {
     const list = vi.fn(async () => terminals)
     const create = vi.fn(
-      async (target: string, input: CreateTerminalInput): Promise<TerminalInfo> => ({
-        id: 'pty-1',
-        title: formatTerminalTitle({ kind: input.kind, name: input.name, actionId: input.actionId }),
-        kind: input.kind,
-        ...(input.actionId ? { actionId: input.actionId } : {}),
-        cwd: target,
-        status: 'running',
-      }),
+      async (target: string, input: CreateTerminalInput): Promise<TerminalInfo> => {
+        const terminal: TerminalInfo = {
+          id: 'pty-1',
+          title: formatTerminalTitle({ kind: input.kind, name: input.name, actionId: input.actionId }),
+          kind: input.kind,
+          cwd: target,
+          status: 'running',
+        }
+        if (input.actionId) terminal.actionId = input.actionId
+        return terminal
+      },
     )
-    return { service: { list, create } as unknown as TerminalService, list, create }
+    const service: ProjectTerminalLauncher = { list, create }
+    return { service, list, create }
   }
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
+    db = createDatabase()
     service = createService(db)
     directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ocm-run-action-'))
     repo = createRepo(db, {
@@ -937,17 +958,11 @@ describe('ProjectConfigService runAction', () => {
     writeRepoFile({ version: 1, projectActions: [{ id: 'repo-serve', name: 'Serve', command: 'pnpm dev' }] })
     const terminalService = createFakeTerminalService()
 
-    let caught: unknown
-    try {
-      await service.runAction(repo, directory, 'repo-serve', terminalService.service)
-    } catch (error: unknown) {
-      caught = error
-    }
+    const error = await captureProjectConfigError(() => service.runAction(repo, directory, 'repo-serve', terminalService.service))
 
-    expect(caught).toBeInstanceOf(ProjectConfigError)
-    expect((caught as ProjectConfigError).status).toBe(409)
-    expect((caught as ProjectConfigError).code).toBe('REPO_CONFIG_UNTRUSTED')
-    expect((caught as ProjectConfigError).details).toMatchObject({ hash: expect.stringMatching(/^[a-f0-9]{64}$/) })
+    expect(error.status).toBe(409)
+    expect(error.code).toBe('REPO_CONFIG_UNTRUSTED')
+    expect(error.details).toMatchObject({ hash: expect.stringMatching(/^[a-f0-9]{64}$/) })
     expect(terminalService.create).not.toHaveBeenCalled()
   })
 
@@ -1018,14 +1033,14 @@ describe('ProjectConfigService runAction', () => {
         id: `pty-${attempts}`,
         title: formatTerminalTitle({ kind: input.kind, name: input.name, actionId: input.actionId }),
         kind: input.kind,
-        ...(input.actionId ? { actionId: input.actionId } : {}),
         cwd: target,
         status: 'running',
       }
+      if (input.actionId) terminal.actionId = input.actionId
       terminals.push(terminal)
       return terminal
     })
-    const terminalService = { list, create } as unknown as TerminalService
+    const terminalService: ProjectTerminalLauncher = { list, create }
 
     await expect(service.runAction(repo, directory, 'serve', terminalService)).rejects.toThrow('spawn failed')
 
@@ -1063,13 +1078,14 @@ describe('ProjectConfigService runWorktreeSetup', () => {
   let repo: Repo
   let directory: string
 
-  function writeRepoFile(content: unknown): void {
+  function writeRepoFile(content: RepoProjectFileInput): void {
     const filePath = path.join(directory, '.ocm', 'project.json')
     fs.mkdirSync(path.dirname(filePath), { recursive: true })
     fs.writeFileSync(filePath, JSON.stringify(content, null, 2))
   }
 
   function createFakeTerminalService() {
+    const list = vi.fn(async (): Promise<TerminalInfo[]> => [])
     const create = vi.fn(
       async (target: string, input: CreateTerminalInput): Promise<TerminalInfo> => ({
         id: 'pty-setup',
@@ -1079,12 +1095,12 @@ describe('ProjectConfigService runWorktreeSetup', () => {
         status: 'running',
       }),
     )
-    return { service: { create } as unknown as TerminalService, create }
+    const service: ProjectTerminalLauncher = { list, create }
+    return { service, list, create }
   }
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
+    db = createDatabase()
     service = createService(db)
     directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ocm-worktree-setup-'))
     repo = createRepo(db, {
@@ -1178,10 +1194,11 @@ describe('ProjectConfigService runWorktreeSetup', () => {
 
   it('returns failed when the terminal cannot be created', async () => {
     service.setPersonalSetup(repo, ['pnpm install'])
-    const create = vi.fn(async () => {
+    const list = vi.fn(async (): Promise<TerminalInfo[]> => [])
+    const create = vi.fn(async (): Promise<TerminalInfo> => {
       throw new Error('spawn failed')
     })
-    const terminalService = { create } as unknown as TerminalService
+    const terminalService: ProjectTerminalLauncher = { list, create }
 
     const result = await service.runWorktreeSetup(repo, directory, terminalService)
 

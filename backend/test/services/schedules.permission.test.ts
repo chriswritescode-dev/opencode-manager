@@ -1,277 +1,115 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ScheduleJob, ScheduleRun } from '@opencode-manager/shared/types'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Database } from 'bun:sqlite'
+import type { ScheduleJob } from '@opencode-manager/shared/types'
 import { buildSchedulePermissionRuleset } from '@opencode-manager/shared/schemas'
-
-const mocks = vi.hoisted(() => ({
-  getRepoById: vi.fn(),
-  createScheduleJob: vi.fn(),
-  createScheduleRun: vi.fn(),
-  deleteScheduleJob: vi.fn(),
-  deleteScheduleRunById: vi.fn(),
-  deleteScheduleRunsByIds: vi.fn(),
-  listScheduleRunArtifactsByJob: vi.fn(),
-  cleanupOrphanedSchedules: vi.fn(),
-  getScheduleJobById: vi.fn(),
-  getRunningScheduleRunByJob: vi.fn(),
-  getScheduleRunById: vi.fn(),
-  listEnabledScheduleJobs: vi.fn(),
-  listRunningScheduleRuns: vi.fn(),
-  listScheduleJobIdsByRepo: vi.fn(),
-  listScheduleJobsByRepo: vi.fn(),
-  listScheduleRunsByJob: vi.fn(),
-  updateScheduleJob: vi.fn(),
-  updateScheduleJobRunState: vi.fn(),
-  updateScheduleRun: vi.fn(),
-  updateScheduleRunMetadata: vi.fn(),
-  buildCreateSchedulePersistenceInput: vi.fn(),
-  buildUpdatedSchedulePersistenceInput: vi.fn(),
-  computeNextRunAtForJob: vi.fn(),
-
-  resolveOpenCodeModel: vi.fn(),
-  onEvent: vi.fn(),
-  onServerConnected: vi.fn(),
-  loggerError: vi.fn(),
-  updateScheduleRunWorktree: vi.fn(),
-  stubWorktreeManager: {
-    prepare: vi.fn().mockResolvedValue(null),
-    finalize: vi.fn().mockResolvedValue({ commitHash: null }),
-    pruneRunArtifacts: vi.fn().mockResolvedValue(undefined),
-  },
-}))
-
-vi.mock('../../src/db/queries', () => ({
-  getRepoById: mocks.getRepoById,
-}))
-
-vi.mock('../../src/db/schedules', () => ({
-  createScheduleJob: mocks.createScheduleJob,
-  createScheduleRun: mocks.createScheduleRun,
-  deleteScheduleJob: mocks.deleteScheduleJob,
-  deleteScheduleRunById: mocks.deleteScheduleRunById,
-  deleteScheduleRunsByIds: mocks.deleteScheduleRunsByIds,
-  listScheduleRunArtifactsByJob: mocks.listScheduleRunArtifactsByJob,
-  cleanupOrphanedSchedules: mocks.cleanupOrphanedSchedules,
-  getScheduleJobById: mocks.getScheduleJobById,
-  getRunningScheduleRunByJob: mocks.getRunningScheduleRunByJob,
-  getScheduleRunById: mocks.getScheduleRunById,
-  listEnabledScheduleJobs: mocks.listEnabledScheduleJobs,
-  listRunningScheduleRuns: mocks.listRunningScheduleRuns,
-  listScheduleJobIdsByRepo: mocks.listScheduleJobIdsByRepo,
-  listScheduleJobsByRepo: mocks.listScheduleJobsByRepo,
-  listScheduleRunsByJob: mocks.listScheduleRunsByJob,
-  updateScheduleJob: mocks.updateScheduleJob,
-  updateScheduleJobRunState: mocks.updateScheduleJobRunState,
-  updateScheduleRun: mocks.updateScheduleRun,
-  updateScheduleRunMetadata: mocks.updateScheduleRunMetadata,
-  updateScheduleRunWorktree: mocks.updateScheduleRunWorktree,
-}))
-
-vi.mock('../../src/services/schedule-config', () => ({
-  buildCreateSchedulePersistenceInput: mocks.buildCreateSchedulePersistenceInput,
-  buildUpdatedSchedulePersistenceInput: mocks.buildUpdatedSchedulePersistenceInput,
-  computeNextRunAtForJob: mocks.computeNextRunAtForJob,
-}))
-
-vi.mock('../../src/services/opencode-models', () => ({
-  resolveOpenCodeModel: mocks.resolveOpenCodeModel,
-}))
-
-vi.mock('../../src/services/sse-aggregator', () => ({
-  sseAggregator: {
-    onEvent: mocks.onEvent,
-    onServerConnected: mocks.onServerConnected,
-  },
-}))
-
-vi.mock('../../src/utils/logger', () => ({
-  logger: {
-    error: mocks.loggerError,
-    info: vi.fn(),
-    warn: vi.fn(),
-  },
-}))
-
-const mockCronStop = vi.fn()
-
-vi.mock('croner', () => ({
-  Cron: vi.fn().mockImplementation(() => ({ stop: mockCronStop })),
-}))
-
-import { ScheduleService } from '../../src/services/schedules'
-import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
-import { assistantMessage, createStubScheduleApi } from '../helpers/stub-schedule-api'
-
-const repo = {
-  id: 42,
-  fullPath: '/workspace/repos/sample-project',
-  localPath: 'sample-project',
-  repoUrl: 'https://github.com/example/sample-project',
-}
-
-const baseJob: ScheduleJob = {
-  id: 7,
-  repoId: 42,
-  name: 'Weekly engineering summary',
-  description: 'Summarize repo health and recent changes.',
-  enabled: true,
-  showInInbox: true,
-  scheduleMode: 'interval',
-  intervalMinutes: 60,
-  cronExpression: null,
-  timezone: null,
-  agentSlug: null,
-  prompt: 'Review the repository and summarize the current state.',
-  model: null,
-  skillMetadata: null,
-  permissionConfig: null,
-  mcpServers: [],
-  branch: null,
-  workspaceMode: 'worktree',
-  sandbox: null,
-  nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0),
-  lastRunAt: Date.UTC(2026, 2, 9, 12, 0, 0),
-  createdAt: Date.UTC(2026, 2, 8, 12, 0, 0),
-  updatedAt: Date.UTC(2026, 2, 9, 12, 0, 0),
-}
-
-const baseRun: ScheduleRun = {
-  id: 5,
-  jobId: 7,
-  repoId: 42,
-  triggerSource: 'manual',
-  status: 'running',
-  startedAt: Date.UTC(2026, 2, 9, 12, 5, 0),
-  finishedAt: null,
-  viewedAt: null,
-  createdAt: Date.UTC(2026, 2, 9, 12, 5, 0),
-  sessionId: null,
-  sessionTitle: null,
-  logText: null,
-  responseText: null,
-  errorText: null,
-  runBranch: null,
-  commitHash: null,
-  worktreePath: null,
-}
+import type { Repo } from '../../src/types/repo'
+import { getScheduleRunById } from '../../src/db/schedules'
+import { ScheduleRunRegistry, ScheduleService } from '../../src/services/schedules'
+import { assistantMessage, createStubScheduleApi, createStubScheduleClient } from '../helpers/stub-schedule-api'
+import { createStubWorktreeManager } from '../helpers/fake-schedule-service'
+import { createTestDatabase, seedRepo, seedScheduleJob } from '../helpers/test-database'
+import { createTempWorkspace, type TempWorkspace } from '../helpers/test-env'
 
 describe('ScheduleService permission ruleset in session creation', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    Reflect.get(ScheduleService, 'activeRuns').clear()
-    Reflect.get(ScheduleService, 'activeTeardowns')?.clear()
+  let workspace: TempWorkspace
+  let db: Database
+  let repo: Repo
+  let job: ScheduleJob
+  let runs: ScheduleRunRegistry
 
-    mocks.getRepoById.mockReturnValue(repo)
-    mocks.getRunningScheduleRunByJob.mockReturnValue(null)
-    mocks.createScheduleRun.mockReturnValue(baseRun)
-    mocks.resolveOpenCodeModel.mockResolvedValue({ providerID: 'openai', id: 'gpt-5-mini', model: 'openai/gpt-5-mini' })
-    mocks.onEvent.mockReturnValue(vi.fn())
-    mocks.onServerConnected.mockReturnValue(vi.fn())
+  function createStubClient(sessionID: string, agents: string[] = ['build', 'plan']) {
+    const stub = createStubScheduleApi({
+      sessionID,
+      messages: [assistantMessage('', { completed: true })],
+      agents,
+    })
+    return { stub, client: createStubScheduleClient(stub) }
+  }
+
+  function createService(client: ReturnType<typeof createStubScheduleClient>) {
+    return new ScheduleService(db, client, createStubWorktreeManager(), null, null, runs)
+  }
+
+  function updateJob(overrides: Partial<ScheduleJob>): void {
+    job = { ...job, ...overrides }
+    db.prepare('UPDATE schedule_jobs SET agent_slug = ?, permission_config = ? WHERE id = ?').run(
+      job.agentSlug,
+      job.permissionConfig ? JSON.stringify(job.permissionConfig) : null,
+      job.id,
+    )
+  }
+
+  beforeEach(() => {
+    workspace = createTempWorkspace('ocm-schedule-permission-')
+    db = createTestDatabase()
+    repo = seedRepo(db, { localPath: 'sample-project' })
+    job = seedScheduleJob(db, repo.id, {
+      name: 'Weekly engineering summary',
+      prompt: 'Review the repository and summarize the current state.',
+      branch: null,
+      intervalMinutes: 60,
+    })
+    runs = new ScheduleRunRegistry()
+  })
+
+  afterEach(async () => {
+    await vi.waitFor(() => expect(runs.snapshot(job.id)).toBeNull(), { timeout: 5000 })
+    db.close()
+    workspace.restore()
   })
 
   it('sends the default permission ruleset when job.permissionConfig is null', async () => {
-    mocks.getScheduleJobById.mockReturnValue(baseJob)
-    mocks.updateScheduleRunMetadata.mockReturnValue({ ...baseRun, sessionId: 'ses-perm-1' })
+    const { stub, client } = createStubClient('ses-perm-1')
 
-    const stub = createStubScheduleApi({
-      sessionID: 'ses-perm-1',
-      messages: [assistantMessage('', { completed: true })],
-    })
-    const service = new ScheduleService(
-      {} as never,
-      createStubOpenCodeClient({ api: stub.api }),
-      mocks.stubWorktreeManager as never,
-    )
+    await createService(client).runJob(repo.id, job.id, 'manual')
 
-    await service.runJob(42, 7, 'manual')
-
-    await vi.waitFor(() => {
-      expect(stub.api.session.create).toHaveBeenCalledWith({
-        title: 'Scheduled: Weekly engineering summary',
-        agent: undefined,
-        model: { providerID: 'openai', id: 'gpt-5-mini', variant: undefined },
-        location: { directory: repo.fullPath },
-        permissions: buildSchedulePermissionRuleset(null),
-      })
+    expect(stub.api.session.create).toHaveBeenCalledWith({
+      title: 'Scheduled: Weekly engineering summary',
+      agent: undefined,
+      model: { providerID: 'openai', id: 'gpt-5-mini', variant: undefined },
+      location: { directory: repo.fullPath },
+      permissions: buildSchedulePermissionRuleset(null),
     })
   })
 
   it('sends the custom permission ruleset when job.permissionConfig is set', async () => {
     const customConfig = { allowExternalDirectory: true, allowQuestions: true, bashDenyPatterns: [] }
-    mocks.getScheduleJobById.mockReturnValue({ ...baseJob, permissionConfig: customConfig })
-    mocks.updateScheduleRunMetadata.mockReturnValue({ ...baseRun, sessionId: 'ses-perm-2' })
+    updateJob({ permissionConfig: customConfig })
+    const { stub, client } = createStubClient('ses-perm-2')
 
-    const stub = createStubScheduleApi({
-      sessionID: 'ses-perm-2',
-      messages: [assistantMessage('', { completed: true })],
-    })
-    const service = new ScheduleService(
-      {} as never,
-      createStubOpenCodeClient({ api: stub.api }),
-      mocks.stubWorktreeManager as never,
-    )
+    await createService(client).runJob(repo.id, job.id, 'manual')
 
-    await service.runJob(42, 7, 'manual')
-
-    await vi.waitFor(() => {
-      expect(stub.api.session.create).toHaveBeenCalledWith({
-        title: 'Scheduled: Weekly engineering summary',
-        agent: undefined,
-        model: { providerID: 'openai', id: 'gpt-5-mini', variant: undefined },
-        location: { directory: repo.fullPath },
-        permissions: buildSchedulePermissionRuleset(customConfig),
-      })
+    expect(stub.api.session.create).toHaveBeenCalledWith({
+      title: 'Scheduled: Weekly engineering summary',
+      agent: undefined,
+      model: { providerID: 'openai', id: 'gpt-5-mini', variant: undefined },
+      location: { directory: repo.fullPath },
+      permissions: buildSchedulePermissionRuleset(customConfig),
     })
   })
 
   it('preserves the title and agent alongside the permission ruleset', async () => {
-    mocks.getScheduleJobById.mockReturnValue({ ...baseJob, agentSlug: 'my-agent' })
-    mocks.updateScheduleRunMetadata.mockReturnValue({ ...baseRun, sessionId: 'ses-perm-3' })
+    updateJob({ agentSlug: 'my-agent' })
+    const { stub, client } = createStubClient('ses-perm-3', ['build', 'my-agent'])
 
-    const stub = createStubScheduleApi({
-      sessionID: 'ses-perm-3',
-      messages: [assistantMessage('', { completed: true })],
-      agents: ['build', 'my-agent'],
-    })
-    const service = new ScheduleService(
-      {} as never,
-      createStubOpenCodeClient({ api: stub.api }),
-      mocks.stubWorktreeManager as never,
-    )
+    await createService(client).runJob(repo.id, job.id, 'manual')
 
-    await service.runJob(42, 7, 'manual')
-
-    await vi.waitFor(() => {
-      expect(stub.api.session.create).toHaveBeenCalledWith({
-        title: 'Scheduled: Weekly engineering summary',
-        agent: 'my-agent',
-        model: { providerID: 'openai', id: 'gpt-5-mini', variant: undefined },
-        location: { directory: repo.fullPath },
-        permissions: buildSchedulePermissionRuleset(null),
-      })
+    expect(stub.api.session.create).toHaveBeenCalledWith({
+      title: 'Scheduled: Weekly engineering summary',
+      agent: 'my-agent',
+      model: { providerID: 'openai', id: 'gpt-5-mini', variant: undefined },
+      location: { directory: repo.fullPath },
+      permissions: buildSchedulePermissionRuleset(null),
     })
   })
 
   it('runs with the default agent when the agent is not available at the run location', async () => {
-    mocks.getScheduleJobById.mockReturnValue({ ...baseJob, agentSlug: 'assistant' })
-    mocks.updateScheduleRunMetadata.mockReturnValue({ ...baseRun, sessionId: 'ses-perm-4' })
+    updateJob({ agentSlug: 'assistant' })
+    const { stub, client } = createStubClient('ses-perm-4', ['build', 'plan'])
 
-    const stub = createStubScheduleApi({
-      sessionID: 'ses-perm-4',
-      messages: [assistantMessage('', { completed: true })],
-      agents: ['build', 'plan'],
-    })
-    const service = new ScheduleService(
-      {} as never,
-      createStubOpenCodeClient({ api: stub.api }),
-      mocks.stubWorktreeManager as never,
-    )
-
-    await service.runJob(42, 7, 'manual')
+    const run = await createService(client).runJob(repo.id, job.id, 'manual')
 
     expect(stub.api.session.create).toHaveBeenCalledWith(expect.objectContaining({ agent: undefined }))
-    expect(mocks.updateScheduleRunMetadata).toHaveBeenCalledWith(
-      expect.anything(), 42, 7, baseRun.id,
-      expect.objectContaining({ logText: expect.stringContaining('Agent: default') }),
-    )
+    expect(getScheduleRunById(db, repo.id, job.id, run.id)?.logText).toContain('Agent: default')
   })
 })

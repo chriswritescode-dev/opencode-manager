@@ -8,8 +8,8 @@ async function removeFile(filePath: string): Promise<void> {
   await fs.unlink(filePath).catch(() => {})
 }
 
-export async function validateSSHPrivateKey(key: string): Promise<{ valid: boolean; hasPassphrase: boolean; error?: string }> {
-  if (!key || typeof key !== 'string') {
+export async function validateSSHPrivateKey(key: string | null | undefined): Promise<{ valid: boolean; hasPassphrase: boolean; error?: string }> {
+  if (!key) {
     return { valid: false, hasPassphrase: false, error: 'SSH key is required' }
   }
 

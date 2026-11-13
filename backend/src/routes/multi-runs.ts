@@ -19,7 +19,9 @@ function listTarget(repoId: string | undefined, serverId: string | undefined, di
   return { kind: 'repo', repoId: parseId(repoId, 'repoId', MultiRunError) }
 }
 
-export function createMultiRunRoutes(service: MultiRunService) {
+export type MultiRunRoutesService = Pick<MultiRunService, 'discard' | 'fuse' | 'launch' | 'list'>
+
+export function createMultiRunRoutes(service: MultiRunRoutesService) {
   const app = new Hono()
 
   app.get('/', (c) => {

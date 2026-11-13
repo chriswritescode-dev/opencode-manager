@@ -7,8 +7,15 @@ import { decryptSecret } from '../utils/crypto'
 import { isSSHUrl, normalizeSSHUrl, extractHostFromSSHUrl } from '@opencode-manager/shared/utils'
 import { getOpenCodeConfigHome } from '@opencode-manager/shared/config/env'
 import type { GitCredential } from '@opencode-manager/shared'
+import { getErrorMessage } from '../utils/error-utils'
 import { logger } from '../utils/logger'
 import { CredentialProvider } from './credential-provider'
+
+export type GitAuthEnvironmentProvider = Pick<GitAuthService, 'getGitEnvironment'>
+
+export interface GitEnvironment {
+  [key: string]: string
+}
 
 export class GitAuthService {
   private askpassHandler: AskpassHandler | null = null
@@ -57,32 +64,29 @@ export class GitAuthService {
     this.sshPort = port
   }
 
-  getSSHEnvironment(): Record<string, string> {
+  getSSHEnvironment(): GitEnvironment {
     const knownHostsPath = this.sshHostKeyHandler?.getKnownHostsPath()
     const port = this.sshPort || undefined
-    
-    if (!this.sshKeyPath) {
+    const env: GitEnvironment = {}
+
+    if (this.sshKeyPath === null) {
       if (knownHostsPath) {
         const sshCommand = buildSSHCommandWithKnownHosts(knownHostsPath, port)
         logger.info(`SSH environment: Using known_hosts=${knownHostsPath}, SSH_COMMAND=${sshCommand}`)
-        return {
-          GIT_SSH_COMMAND: sshCommand,
-          ...(this.sshHostKeyHandler?.getEnv() || {}),
-        }
+        env.GIT_SSH_COMMAND = sshCommand
+      } else {
+        logger.info(`SSH environment: No SSH key and no known_hosts path, returning host key handler env only`)
       }
-      logger.info(`SSH environment: No SSH key and no known_hosts path, returning host key handler env only`)
-      return {
-        ...(this.sshHostKeyHandler?.getEnv() || {}),
-      }
+      Object.assign(env, this.sshHostKeyHandler?.getEnv() ?? {})
+      return env
     }
 
     const sshResult = buildSSHCommand(this.sshKeyPath, this.sshPassphrase || undefined, knownHostsPath, port)
     logger.info(`SSH environment: Using SSH key=${this.sshKeyPath}, known_hosts=${knownHostsPath}, SSH_COMMAND=${sshResult.command}`)
-    return {
-      GIT_SSH_COMMAND: sshResult.command,
-      ...(sshResult.env || {}),
-      ...(this.sshHostKeyHandler?.getEnv() || {}),
-    }
+    env.GIT_SSH_COMMAND = sshResult.command
+    Object.assign(env, sshResult.env ?? {})
+    Object.assign(env, this.sshHostKeyHandler?.getEnv() ?? {})
+    return env
   }
 
   async setupSSHForRepoUrl(repoUrl: string | undefined, database?: Database, skipSSHVerification: boolean = false): Promise<boolean> {
@@ -117,7 +121,7 @@ export class GitAuthService {
         await this.autoAcceptHostKey(normalizedUrl)
       } catch (error) {
         await this.cleanupSSHKey()
-        throw new Error(`Failed to auto-accept SSH host key for ${sshHost}: ${(error as Error).message}`)
+        throw new Error(`Failed to auto-accept SSH host key for ${sshHost}: ${getErrorMessage(error)}`)
       }
     } else {
       const verified = await this.verifyHostKeyBeforeOperation(normalizedUrl)
@@ -155,13 +159,12 @@ export class GitAuthService {
     }
   }
 
-  getGitEnvironment(silent: boolean = false): Record<string, string> {
-    const env: Record<string, string> = {
-      GIT_TERMINAL_PROMPT: '0',
-      LANG: 'en_US.UTF-8',
-      LC_ALL: 'en_US.UTF-8',
-      XDG_CONFIG_HOME: getOpenCodeConfigHome(),
-    }
+  getGitEnvironment(silent: boolean = false): GitEnvironment {
+    const env: GitEnvironment = {}
+    env.GIT_TERMINAL_PROMPT = '0'
+    env.LANG = 'en_US.UTF-8'
+    env.LC_ALL = 'en_US.UTF-8'
+    env.XDG_CONFIG_HOME = getOpenCodeConfigHome()
 
     if (silent) {
       env.VSCODE_GIT_FETCH_SILENT = 'true'

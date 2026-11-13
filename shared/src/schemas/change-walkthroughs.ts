@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { gitRefSchema } from './git'
+import { JsonValueSchema } from '../utils/json'
 
 export const WALKTHROUGH_DIFF_MAX_CHARS = 60000;
 export const WALKTHROUGH_HUNK_MAX_CHARS = 8000;
@@ -98,7 +99,11 @@ export function parseWalkthroughSourceKey(key: string): WalkthroughSource | null
   return null
 }
 
-function parseWalkthroughSourceCandidate(candidate: unknown): WalkthroughSource | null {
+function parseWalkthroughSourceCandidate(candidate: {
+  kind: WalkthroughSource['kind']
+  base?: string
+  number?: number
+}): WalkthroughSource | null {
   const parsed = WalkthroughSourceSchema.safeParse(candidate)
   return parsed.success ? parsed.data : null
 }
@@ -126,7 +131,7 @@ export type WalkthroughOmittedFile = z.infer<typeof WalkthroughOmittedFileSchema
 export const WalkthroughGenerationErrorSchema = z.object({
   message: z.string(),
   code: z.string().optional(),
-  details: z.unknown().optional(),
+  details: JsonValueSchema.optional(),
 });
 
 export type WalkthroughGenerationError = z.infer<typeof WalkthroughGenerationErrorSchema>;

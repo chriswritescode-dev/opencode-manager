@@ -1,46 +1,72 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Mock } from 'vitest'
 import { Hono } from 'hono'
-import { Database } from 'bun:sqlite'
-import { allMigrations } from '../../src/db/migrations'
+import type { ChangeWalkthroughState } from '@opencode-manager/shared/schemas'
 import { getOrCreateInternalToken } from '../../src/services/internal-token'
-import { migrate } from '../../src/db/migration-runner'
-import type { ChangeWalkthroughService } from '../../src/services/change-walkthroughs'
+import type { ChangeWalkthroughRoutesService } from '../../src/routes/change-walkthroughs'
 import { createInternalTestApp } from '../helpers/internal-test-app'
+import { createTestDatabase } from '../helpers/test-database'
+import { readJson } from '../helpers/read-json'
+import { ChangeWalkthroughStateSchema } from '@opencode-manager/shared/schemas'
 
 const SESSION_ID = 'ses_walkthrough'
 
+function state(overrides: Partial<ChangeWalkthroughState> = {}): ChangeWalkthroughState {
+  return {
+    walkthrough: null,
+    currentDiffHash: 'hash',
+    hasChanges: true,
+    stale: false,
+    generating: false,
+    running: false,
+    error: null,
+    ...overrides,
+  }
+}
+
+function createChangeWalkthroughFakes(
+  overrides: Partial<ChangeWalkthroughRoutesService> = {},
+): ChangeWalkthroughRoutesService {
+  return {
+    cancelGeneration: vi.fn<ChangeWalkthroughRoutesService['cancelGeneration']>(async () => true),
+    getState: vi.fn<ChangeWalkthroughRoutesService['getState']>(async () => state()),
+    listHelperSessionIds: vi.fn<ChangeWalkthroughRoutesService['listHelperSessionIds']>(() => []),
+    publishFromWalkthroughSession: vi.fn<ChangeWalkthroughRoutesService['publishFromWalkthroughSession']>(
+      async () => ({ path: '/tmp/walkthrough.md' }),
+    ),
+    readChangesForWalkthroughSession: vi.fn<ChangeWalkthroughRoutesService['readChangesForWalkthroughSession']>(
+      async () => '',
+    ),
+    refine: vi.fn<ChangeWalkthroughRoutesService['refine']>(async () => state()),
+    startGeneration: vi.fn<ChangeWalkthroughRoutesService['startGeneration']>(async () => state({ generating: true })),
+    ...overrides,
+  }
+}
+
 describe('internal/change-walkthroughs routes', () => {
-  let db: Database
+  let db: ReturnType<typeof createTestDatabase>
   let app: Hono
   let token: string
-  let startGeneration: ReturnType<typeof vi.fn>
-  let getState: ReturnType<typeof vi.fn>
+  let startGeneration: Mock<ChangeWalkthroughRoutesService['startGeneration']>
+  let getState: Mock<ChangeWalkthroughRoutesService['getState']>
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
-
-    startGeneration = vi.fn(async () => ({
-      walkthrough: null,
-      currentDiffHash: 'hash',
-      stale: false,
-      generating: true,
-      error: null,
-    }))
-    getState = vi.fn(async () => ({
-      walkthrough: null,
-      currentDiffHash: 'hash',
-      stale: false,
-      generating: false,
-      error: null,
-    }))
+    db = createTestDatabase()
+    startGeneration = vi.fn<ChangeWalkthroughRoutesService['startGeneration']>(async () => state({ generating: true }))
+    getState = vi.fn<ChangeWalkthroughRoutesService['getState']>(async () => state())
 
     app = new Hono()
     app.route(
       '/api/internal',
-      createInternalTestApp(db, { changeWalkthroughService: { startGeneration, getState } as unknown as ChangeWalkthroughService }),
+      createInternalTestApp(db, {
+        changeWalkthroughService: createChangeWalkthroughFakes({ startGeneration, getState }),
+      }),
     )
     token = getOrCreateInternalToken(db)
+  })
+
+  afterEach(() => {
+    db.close()
   })
 
   it('POST /api/internal/change-walkthroughs/:id returns 401 without a bearer token', async () => {
@@ -60,7 +86,8 @@ describe('internal/change-walkthroughs routes', () => {
     expect(res.status).toBe(202)
     expect(startGeneration).toHaveBeenCalledTimes(1)
     expect(startGeneration).toHaveBeenCalledWith(SESSION_ID, { source: { kind: 'staged' } })
-    await expect(res.json()).resolves.toMatchObject({ generating: true })
+    const body = await readJson(res, ChangeWalkthroughStateSchema)
+    expect(body.generating).toBe(true)
   })
 
   it('POST /api/internal/change-walkthroughs/:id accepts an empty body', async () => {

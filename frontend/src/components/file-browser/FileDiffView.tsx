@@ -41,10 +41,7 @@ export interface FileDiffContentProps {
   isMobile?: boolean;
 }
 
-const statusConfig: Record<
-  GitFileStatusType,
-  { icon: typeof FileText; color: string; bgColor: string; label: string }
-> = {
+const statusConfig = {
   modified: {
     icon: FileEdit,
     color: GIT_STATUS_COLORS.modified,
@@ -81,7 +78,10 @@ const statusConfig: Record<
     bgColor: "bg-success/10",
     label: GIT_STATUS_LABELS.copied,
   },
-};
+} satisfies Record<
+  GitFileStatusType,
+  { icon: typeof FileText; color: string; bgColor: string; label: string }
+>;
 
 export function FileDiffContent({
   filePath,

@@ -2,11 +2,11 @@ import { DEFAULTS } from '@opencode-manager/shared/config'
 import {
   LOCAL_OPENCODE_SERVER_ID,
   type OpenCodeStreamEvent,
-  type SSHHostKeyRequestEvent,
 } from '@opencode-manager/shared/schemas'
-import type { V2Event } from '@opencode-manager/shared/opencode'
-import { isRecord } from '@opencode-manager/shared/utils'
+import { parseJsonText, JsonValueSchema, type JsonValue } from '@opencode-manager/shared/utils'
+import { z } from 'zod'
 import { createBrowserEventStreamTransport } from './browserTransport'
+import { parseStreamEventPayload } from './eventSchemas'
 import type {
   EventStreamHealthState,
   EventStreamStatusHandler,
@@ -40,9 +40,25 @@ interface OpenCodeEventStreamOptions {
 
 const { RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS, CONNECT_TIMEOUT_MS, STALL_THRESHOLD_MS, WATCHDOG_TICK_MS } = DEFAULTS.SSE
 
+const StreamEnvelopeSchema = z.looseObject({
+  payload: JsonValueSchema.optional(),
+  directory: JsonValueSchema.optional(),
+  serverId: JsonValueSchema.optional(),
+})
+
+const ConnectedPayloadSchema = z.object({
+  clientId: z.string().optional(),
+  connected: z.number().optional(),
+  total: z.number().optional(),
+})
+
+const ResyncPayloadSchema = z.object({
+  serverId: z.string().optional(),
+})
+
 export class OpenCodeEventStream {
   private connection: { close(): void } | null = null
-  private readonly transport: EventStreamTransport
+  private transport: EventStreamTransport
   private subscribers = new Map<string, Subscriber>()
   private directoryRefCounts = new Map<string, number>()
   private pendingDirectories = new Set<string>()
@@ -70,10 +86,17 @@ export class OpenCodeEventStream {
   constructor(options: OpenCodeEventStreamOptions = {}) {
     this.transport = options.transport ?? createBrowserEventStreamTransport()
 
-    if (typeof window !== 'undefined') {
+    if ('window' in globalThis) {
       window.addEventListener('pagehide', this.handlePageHide)
       window.addEventListener('pageshow', this.handlePageShow)
     }
+  }
+
+  setTransport(transport: EventStreamTransport): void {
+    this.disconnect()
+    this.subscribers.clear()
+    this.directoryRefCounts.clear()
+    this.transport = transport
   }
 
   subscribeGlobalMonitor(input: SubscriberInput): GlobalMonitorSubscription {
@@ -271,33 +294,19 @@ export class OpenCodeEventStream {
     }
   }
 
-  /**
-   * Parses one raw stream frame, marks the connection active, and broadcasts the unwrapped event
-   * to every subscriber. Frames that fail to parse still count as activity.
-   */
   private handleMessage(data: string): void {
-    try {
-      this.markActivity()
-      const event = flattenEventEnvelope(JSON.parse(data))
-      if (event) this.broadcast(event)
-    } catch {
-      this.markActivity()
-    }
+    this.markActivity()
+    const event = flattenEventEnvelope(parseJsonText(data))
+    if (event) this.broadcast(event)
   }
 
   private handleConnected(data: string): void {
-    try {
-      const parsed = JSON.parse(data) as { clientId?: unknown; connected?: unknown; total?: unknown }
-      if (typeof parsed.clientId === 'string') {
-        this.clientId = parsed.clientId
-      }
-      if (typeof parsed.connected === 'number') {
-        this.upstreamConnectedCount = parsed.connected
-      }
-      if (typeof parsed.total === 'number') {
-        this.upstreamTotalCount = parsed.total
-      }
-    } catch {
+    const payload = ConnectedPayloadSchema.safeParse(parseJsonText(data))
+    if (payload.success) {
+      if (payload.data.clientId !== undefined) this.clientId = payload.data.clientId
+      if (payload.data.connected !== undefined) this.upstreamConnectedCount = payload.data.connected
+      if (payload.data.total !== undefined) this.upstreamTotalCount = payload.data.total
+    } else {
       this.clientId = null
     }
 
@@ -425,10 +434,6 @@ export class OpenCodeEventStream {
     })
   }
 
-  /**
-   * Acknowledges a resync request by marking the stream active and notifying each subscriber with the
-   * directories it tracks and the server the resync belongs to.
-   */
   private handleResync(data?: string): void {
     this.markActivity()
     const directories = Array.from(this.directoryRefCounts.keys())
@@ -442,10 +447,6 @@ export class OpenCodeEventStream {
     })
   }
 
-  /**
-   * Delivers an event to every subscriber, isolating each callback so a throwing subscriber cannot
-   * prevent the remaining subscribers from receiving it.
-   */
   private broadcast(event: OpenCodeStreamEvent): void {
     this.subscribers.forEach((subscriber) => {
       try {
@@ -511,41 +512,33 @@ export class OpenCodeEventStream {
   }
 }
 
-/**
- * Reads the optional `serverId` from a resync frame, returning `undefined` when the payload is
- * absent, malformed, or carries no string id.
- */
 function parseResyncServerId(data?: string): string | undefined {
   if (!data) return undefined
-  try {
-    const parsed = JSON.parse(data) as { serverId?: unknown }
-    return typeof parsed.serverId === 'string' ? parsed.serverId : undefined
-  } catch {
-    return undefined
-  }
+  const payload = ResyncPayloadSchema.safeParse(parseJsonText(data))
+  return payload.success ? payload.data.serverId : undefined
 }
 
-/**
- * Type guard for a decoded stream payload, requiring an object with a string `type` discriminator.
- */
-function isEventPayload(value: unknown): value is V2Event | SSHHostKeyRequestEvent {
-  return isRecord(value) && typeof value.type === 'string'
+function flattenEventEnvelope(frame: JsonValue | null): OpenCodeStreamEvent | null {
+  const envelope = StreamEnvelopeSchema.safeParse(frame)
+  if (!envelope.success) return null
+
+  const payload = envelope.data.payload
+  const event =
+    (payload === undefined ? null : parseStreamEventPayload(payload)) ??
+    parseStreamEventPayload(frame)
+  if (!event) return null
+
+  const flattened: OpenCodeStreamEvent = { ...event }
+  const directory = optionalString(envelope.data.directory)
+  const serverId = optionalString(envelope.data.serverId)
+  if (directory !== undefined) flattened.directory = directory
+  if (serverId !== undefined) flattened.serverId = serverId
+  return flattened
 }
 
-/**
- * Unwraps a transport envelope into the stream event consumers expect, copying `directory` and
- * `serverId` onto it when present. A bare event without an envelope is passed through unchanged;
- * anything else returns `null`.
- */
-function flattenEventEnvelope(parsed: unknown): OpenCodeStreamEvent | null {
-  if (!isRecord(parsed)) return null
-  if (!isEventPayload(parsed.payload)) return isEventPayload(parsed) ? { ...parsed } : null
-
-  const { payload, directory, serverId } = parsed
-  const event: OpenCodeStreamEvent = { ...payload }
-  if (typeof directory === 'string') event.directory = directory
-  if (typeof serverId === 'string') event.serverId = serverId
-  return event
+function optionalString(value: JsonValue | undefined): string | undefined {
+  const parsed = z.string().safeParse(value)
+  return parsed.success ? parsed.data : undefined
 }
 
 export const openCodeEventStream = new OpenCodeEventStream()

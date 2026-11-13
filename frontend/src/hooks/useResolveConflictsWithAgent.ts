@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { createSessionWithPrompt } from '@/api/opencode'
-import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { useOpenCodeServerId } from '@/contexts/opencode-server-context'
 import { buildConflictResolutionPrompt } from '@/lib/git-conflict-prompt'
 import { getSessionPath } from '@/lib/navigation'
 import { invalidateSessionListCaches } from '@/lib/queryInvalidation'

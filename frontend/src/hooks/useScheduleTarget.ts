@@ -4,11 +4,13 @@ import { useAssistantMode } from '@/hooks/useAssistantMode'
 import { isAssistantRepoId, scheduleTargetFromAssistant, scheduleTargetFromRepo } from '@/lib/schedules/schedule-target'
 import type { ScheduleTarget } from '@/lib/schedules/schedule-target'
 
-export function useScheduleTarget(repoId: number | undefined): {
+interface ScheduleTargetState {
   scheduleTarget: ScheduleTarget | undefined
   isLoading: boolean
   isError: boolean
-} {
+}
+
+export function useScheduleTarget(repoId: number | undefined): ScheduleTargetState {
   const assistantQuery = useAssistantMode(repoId)
 
   const repoQuery = useQuery({

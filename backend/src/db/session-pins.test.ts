@@ -1,20 +1,22 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { Database } from 'bun:sqlite'
-import { migrate } from './migration-runner'
-import { allMigrations } from './migrations'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import type { Database } from 'bun:sqlite'
+import { z } from 'zod'
+import { createTestDatabase } from '../../test/helpers/test-database'
+import { selectRow } from './rows'
 import { listSessionPins, setSessionPin, ensureSessionPinsTable } from './session-pins'
 
-function createTestDb(): Database {
-  const db = new Database(':memory:')
-  migrate(db, allMigrations)
-  return db
-}
+const TableNameRowSchema = z.object({ name: z.string() })
 
 describe('session-pins', () => {
   let db: Database
 
   beforeEach(() => {
-    db = createTestDb()
+    db = createTestDatabase()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    db.close()
   })
 
   describe('listSessionPins', () => {
@@ -32,13 +34,13 @@ describe('session-pins', () => {
       expect(pins[0]!.pinnedAt).toEqual(expect.any(Number))
     })
 
-    it('pinning the same (sessionId, directory) twice does not create a duplicate', async () => {
+    it('pinning the same (sessionId, directory) twice does not create a duplicate', () => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
       setSessionPin(db, 'ses_1', '/w/a', true)
-      const first = listSessionPins(db)
-      const firstPinnedAt = first[0]!.pinnedAt
+      const firstPinnedAt = listSessionPins(db)[0]!.pinnedAt
 
-      // Delay to guarantee a different pinnedAt timestamp
-      await new Promise(r => setTimeout(r, 5))
+      vi.setSystemTime(new Date('2026-01-01T00:00:01.000Z'))
       const second = setSessionPin(db, 'ses_1', '/w/a', true)
       expect(second).toHaveLength(1)
       expect(second[0]!.pinnedAt).toBeGreaterThan(firstPinnedAt)
@@ -66,12 +68,13 @@ describe('session-pins', () => {
       db.run('DROP TABLE session_pins')
 
       ensureSessionPinsTable(db)
-      const table = db
-        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_pins'")
-        .get() as { name: string } | undefined
+      const table = selectRow(
+        db,
+        TableNameRowSchema,
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_pins'",
+      )
 
-      expect(table).toBeTruthy()
-      expect(table!.name).toBe('session_pins')
+      expect(table?.name).toBe('session_pins')
     })
   })
 })

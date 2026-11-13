@@ -1,54 +1,24 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
 import { useGit } from './useGit'
-import * as gitApi from '../api/git'
-import * as toast from '../lib/toast'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { GitStatusResponse } from '../types/git'
+import type { FetchRouteResult, HttpMethod } from '@/test/fetchFake'
+import type { JsonValue } from '@opencode-manager/shared/utils'
+import { renderHookWithProviders } from '@/test/render'
+import type { GitStatusResponse } from '@/types/git'
+import { vcsInfoQueryKey } from '@/lib/queryInvalidation'
 
-vi.mock('../api/git', () => ({
-  gitFetch: vi.fn(),
-  gitPull: vi.fn(),
-  gitPush: vi.fn(),
-  gitCommit: vi.fn(),
-  gitStageFiles: vi.fn(),
-  gitUnstageFiles: vi.fn(),
-  gitDiscardFiles: vi.fn(),
-  gitReset: vi.fn(),
-  gitRenameBranch: vi.fn(),
-  gitDeleteBranch: vi.fn(),
-  gitStashPush: vi.fn(),
-  gitStashApply: vi.fn(),
-  gitStashDrop: vi.fn(),
-  gitContinueOperation: vi.fn(),
-  gitAbortOperation: vi.fn(),
-  gitGenerateCommitMessage: vi.fn(),
-  gitIntegrateBranch: vi.fn(),
-  fetchGitStatus: vi.fn(),
-  fetchGitLog: vi.fn(),
-  fetchGitDiff: vi.fn(),
-  createBranch: vi.fn(),
-  getApiErrorMessage: vi.fn((error: unknown) => typeof error === 'string' ? error : String(error)),
-}))
-vi.mock('../lib/toast', () => ({
-  showToast: {
-    success: vi.fn(),
-    error: vi.fn(),
-    info: vi.fn(),
-    warning: vi.fn(),
-    loading: vi.fn(),
-    promise: vi.fn(),
-    dismiss: vi.fn(),
-  },
-}))
+type GitHook = ReturnType<typeof useGit>
 
-const mockInvalidateQueries = vi.fn()
-const mockSetQueryData = vi.fn()
-const mockSetQueriesData = vi.fn()
+const hookProviders = {
+  auth: false,
+  theme: false,
+  tts: false,
+} as const
 
-const mockRealQueryClient = vi.hoisted(() => ({ current: null as unknown }))
+const REPO_ID = 1
+const REPO_PATH = '/abs/repos/my-repo'
 
-const mockGitStatus: GitStatusResponse = {
+const gitStatus: GitStatusResponse = {
   branch: 'main',
   ahead: 0,
   behind: 0,
@@ -57,558 +27,359 @@ const mockGitStatus: GitStatusResponse = {
   operation: null,
 }
 
-vi.mock('@tanstack/react-query', async () => {
-  const actual = await vi.importActual('@tanstack/react-query')
-  return {
-    ...actual,
-    useQueryClient: vi.fn(() => {
-      const real = mockRealQueryClient.current as {
-        invalidateQueries: (...args: unknown[]) => unknown
-        setQueryData: (...args: unknown[]) => unknown
-        setQueriesData: (...args: unknown[]) => unknown
-        getQueryData: (...args: unknown[]) => unknown
-      } | null
-      return {
-        invalidateQueries: (...args: unknown[]) => {
-          mockInvalidateQueries(...args)
-          return real?.invalidateQueries(...args)
-        },
-        setQueryData: (...args: unknown[]) => {
-          mockSetQueryData(...args)
-          return real?.setQueryData(...args)
-        },
-        setQueriesData: (...args: unknown[]) => {
-          mockSetQueriesData(...args)
-          return real?.setQueriesData(...args)
-        },
-        getQueryData: (...args: unknown[]) => real?.getQueryData(...args),
-      }
-    })
-  }
-})
+interface MutationCase {
+  name: string
+  run: (git: GitHook) => Promise<void>
+  method: HttpMethod
+  path: string
+  body?: JsonValue
+  respond?: () => FetchRouteResult
+  toast: string
+  repoMetaInvalidated: boolean
+  stashesInvalidated: boolean
+  branchesInvalidated: boolean
+  vcsInvalidated: boolean
+}
 
-const createWrapper = () => {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false }
-    }
+function statusReply(): FetchRouteResult {
+  return { json: gitStatus }
+}
+
+function deleteBranchReply(): FetchRouteResult {
+  return { json: { remoteDeleted: false, status: gitStatus } }
+}
+
+const mutationCases: MutationCase[] = [
+  {
+    name: 'fetch',
+    run: async (git) => { await git.fetch.mutateAsync() },
+    method: 'POST',
+    path: `/api/repos/${REPO_ID}/git/fetch`,
+    toast: 'Fetch completed',
+    repoMetaInvalidated: true,
+    stashesInvalidated: false,
+    branchesInvalidated: true,
+    vcsInvalidated: false,
+  },
+  {
+    name: 'pull',
+    run: async (git) => { await git.pull.mutateAsync() },
+    method: 'POST',
+    path: `/api/repos/${REPO_ID}/git/pull`,
+    toast: 'Pull completed',
+    repoMetaInvalidated: true,
+    stashesInvalidated: false,
+    branchesInvalidated: true,
+    vcsInvalidated: false,
+  },
+  {
+    name: 'push',
+    run: async (git) => { await git.push.mutateAsync(undefined) },
+    method: 'POST',
+    path: `/api/repos/${REPO_ID}/git/push`,
+    body: { setUpstream: false },
+    toast: 'Push completed',
+    repoMetaInvalidated: false,
+    stashesInvalidated: false,
+    branchesInvalidated: false,
+    vcsInvalidated: false,
+  },
+  {
+    name: 'commit',
+    run: async (git) => { await git.commit.mutateAsync({ message: 'test commit' }) },
+    method: 'POST',
+    path: `/api/repos/${REPO_ID}/git/commit`,
+    body: { message: 'test commit' },
+    toast: 'Commit created',
+    repoMetaInvalidated: false,
+    stashesInvalidated: false,
+    branchesInvalidated: false,
+    vcsInvalidated: false,
+  },
+  {
+    name: 'stageFiles',
+    run: async (git) => { await git.stageFiles.mutateAsync(['file.txt']) },
+    method: 'POST',
+    path: `/api/repos/${REPO_ID}/git/stage`,
+    body: { paths: ['file.txt'] },
+    toast: 'Files staged',
+    repoMetaInvalidated: false,
+    stashesInvalidated: false,
+    branchesInvalidated: false,
+    vcsInvalidated: false,
+  },
+  {
+    name: 'unstageFiles',
+    run: async (git) => { await git.unstageFiles.mutateAsync(['file.txt']) },
+    method: 'POST',
+    path: `/api/repos/${REPO_ID}/git/unstage`,
+    body: { paths: ['file.txt'] },
+    toast: 'Files unstaged',
+    repoMetaInvalidated: false,
+    stashesInvalidated: false,
+    branchesInvalidated: false,
+    vcsInvalidated: false,
+  },
+  {
+    name: 'reset',
+    run: async (git) => { await git.reset.mutateAsync('abc123') },
+    method: 'POST',
+    path: `/api/repos/${REPO_ID}/git/reset`,
+    body: { commitHash: 'abc123' },
+    toast: 'Reset to commit',
+    repoMetaInvalidated: false,
+    stashesInvalidated: false,
+    branchesInvalidated: false,
+    vcsInvalidated: false,
+  },
+  {
+    name: 'continueOperation',
+    run: async (git) => { await git.continueOperation.mutateAsync() },
+    method: 'POST',
+    path: `/api/repos/${REPO_ID}/git/operation/continue`,
+    toast: 'Operation continued',
+    repoMetaInvalidated: true,
+    stashesInvalidated: false,
+    branchesInvalidated: true,
+    vcsInvalidated: false,
+  },
+  {
+    name: 'abortOperation',
+    run: async (git) => { await git.abortOperation.mutateAsync() },
+    method: 'POST',
+    path: `/api/repos/${REPO_ID}/git/operation/abort`,
+    toast: 'Operation aborted',
+    repoMetaInvalidated: true,
+    stashesInvalidated: false,
+    branchesInvalidated: true,
+    vcsInvalidated: false,
+  },
+  {
+    name: 'stashPush',
+    run: async (git) => { await git.stashPush.mutateAsync({ message: 'wip', includeUntracked: true }) },
+    method: 'POST',
+    path: `/api/repos/${REPO_ID}/git/stash`,
+    body: { message: 'wip', includeUntracked: true },
+    toast: 'Changes stashed',
+    repoMetaInvalidated: false,
+    stashesInvalidated: true,
+    branchesInvalidated: false,
+    vcsInvalidated: false,
+  },
+  {
+    name: 'stashApply',
+    run: async (git) => { await git.stashApply.mutateAsync({ index: 0, hash: 'abc123', pop: true }) },
+    method: 'POST',
+    path: `/api/repos/${REPO_ID}/git/stash/0/apply`,
+    body: { hash: 'abc123', pop: true },
+    toast: 'Stash popped',
+    repoMetaInvalidated: false,
+    stashesInvalidated: true,
+    branchesInvalidated: false,
+    vcsInvalidated: false,
+  },
+  {
+    name: 'stashDrop',
+    run: async (git) => { await git.stashDrop.mutateAsync({ index: 0, hash: 'abc123' }) },
+    method: 'DELETE',
+    path: `/api/repos/${REPO_ID}/git/stash/0`,
+    body: { hash: 'abc123' },
+    toast: 'Stash dropped',
+    repoMetaInvalidated: false,
+    stashesInvalidated: true,
+    branchesInvalidated: false,
+    vcsInvalidated: false,
+  },
+  {
+    name: 'deleteBranch',
+    run: async (git) => { await git.deleteBranch.mutateAsync({ name: 'feature', force: false, deleteRemote: false }) },
+    method: 'DELETE',
+    path: `/api/repos/${REPO_ID}/git/branches`,
+    body: { name: 'feature', force: false, deleteRemote: false },
+    respond: deleteBranchReply,
+    toast: 'Branch deleted',
+    repoMetaInvalidated: false,
+    stashesInvalidated: false,
+    branchesInvalidated: true,
+    vcsInvalidated: false,
+  },
+  {
+    name: 'renameBranch',
+    run: async (git) => { await git.renameBranch.mutateAsync({ from: 'main', to: 'renamed' }) },
+    method: 'POST',
+    path: `/api/repos/${REPO_ID}/git/branches/rename`,
+    body: { from: 'main', to: 'renamed' },
+    toast: 'Branch renamed',
+    repoMetaInvalidated: true,
+    stashesInvalidated: false,
+    branchesInvalidated: true,
+    vcsInvalidated: true,
+  },
+]
+
+function renderGit() {
+  const rendered = renderHookWithProviders(() => useGit(REPO_ID), {
+    ...hookProviders,
+    fetchRoutes: [
+      ...mutationCases.map(({ method, path, respond }) => ({
+        method,
+        path,
+        respond: respond ?? statusReply,
+      })),
+      {
+        method: 'POST',
+        path: `/api/repos/${REPO_ID}/git/integrate`,
+        respond: () => ({ json: { targetRepoId: 2, integratedCommits: 1, targetStatus: gitStatus } }),
+      },
+    ],
   })
-  return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  )
+
+  const otherStatus = { ...gitStatus, branch: 'dev' }
+  rendered.queryClient.setQueryData(['repo', REPO_ID], { id: REPO_ID, fullPath: REPO_PATH })
+  rendered.queryClient.setQueryData(['repos'], [])
+  rendered.queryClient.setQueryData(['repo', 'siblings'], [])
+  rendered.queryClient.setQueryData(['branches', REPO_ID], [])
+  rendered.queryClient.setQueryData(['gitStatus', REPO_ID], gitStatus)
+  rendered.queryClient.setQueryData(['reposGitStatus', [1, 2]], new Map([[1, otherStatus], [2, otherStatus]]))
+  rendered.queryClient.setQueryData(['gitLog', REPO_ID], { commits: [] })
+  rendered.queryClient.setQueryData(['fileDiff', REPO_ID], [])
+  rendered.queryClient.setQueryData(['gitStashes'], { stashes: [] })
+  rendered.queryClient.setQueryData(vcsInfoQueryKey(REPO_PATH), { branch: 'main' })
+
+  return { ...rendered, otherStatus }
 }
 
 describe('useGit', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockInvalidateQueries.mockClear()
-    mockRealQueryClient.current = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    })
-    vi.mocked(gitApi.gitFetch).mockResolvedValue(mockGitStatus)
-    vi.mocked(gitApi.gitPull).mockResolvedValue(mockGitStatus)
-    vi.mocked(gitApi.gitPush).mockResolvedValue(mockGitStatus)
-    vi.mocked(gitApi.gitCommit).mockResolvedValue(mockGitStatus)
-    vi.mocked(gitApi.gitStageFiles).mockResolvedValue(mockGitStatus)
-    vi.mocked(gitApi.gitUnstageFiles).mockResolvedValue(mockGitStatus)
-    vi.mocked(gitApi.gitDiscardFiles).mockResolvedValue(mockGitStatus)
-    vi.mocked(gitApi.gitReset).mockResolvedValue(mockGitStatus)
-    vi.mocked(gitApi.gitRenameBranch).mockResolvedValue(mockGitStatus)
-    vi.mocked(gitApi.gitDeleteBranch).mockResolvedValue({ remoteDeleted: false, status: mockGitStatus })
-    vi.mocked(gitApi.gitStashPush).mockResolvedValue(mockGitStatus)
-    vi.mocked(gitApi.gitStashApply).mockResolvedValue(mockGitStatus)
-    vi.mocked(gitApi.gitStashDrop).mockResolvedValue(mockGitStatus)
-    vi.mocked(gitApi.gitContinueOperation).mockResolvedValue(mockGitStatus)
-    vi.mocked(gitApi.gitAbortOperation).mockResolvedValue(mockGitStatus)
-    vi.mocked(gitApi.gitGenerateCommitMessage).mockResolvedValue({ message: 'generated message' })
-    vi.mocked(gitApi.gitIntegrateBranch).mockResolvedValue({ targetRepoId: 2, integratedCommits: 1, targetStatus: mockGitStatus })
-    vi.mocked(gitApi.fetchGitStatus).mockResolvedValue(mockGitStatus)
-  })
+  it.each(mutationCases)(
+    '$name records the returned status and refreshes the working-tree queries',
+    async (mutationCase) => {
+      const { result, queryClient, fetchFake, otherStatus } = renderGit()
 
-  const expectTargetedStatusCacheUpdate = () => {
-    expect(mockSetQueryData).toHaveBeenCalledWith(['gitStatus', 1], mockGitStatus)
-    expect(mockSetQueriesData).toHaveBeenCalledWith(
-      expect.objectContaining({
-        queryKey: ['reposGitStatus'],
-        predicate: expect.any(Function),
-      }),
-      expect.any(Function),
-    )
-
-    const [filters, updater] = mockSetQueriesData.mock.calls[0]
-    expect(filters.predicate({ queryKey: ['reposGitStatus', [1, 2]] })).toBe(true)
-    expect(filters.predicate({ queryKey: ['reposGitStatus', [2, 3]] })).toBe(false)
-    expect(filters.predicate({ queryKey: ['other', [1]] })).toBe(false)
-
-    const otherStatus = { ...mockGitStatus, branch: 'dev' }
-    const oldData = new Map<number, GitStatusResponse>([[1, otherStatus], [2, otherStatus]])
-    const updated = updater(oldData)
-    expect(updated).not.toBe(oldData)
-    expect(updated.get(1)).toBe(mockGitStatus)
-    expect(updated.get(2)).toBe(otherStatus)
-  }
-
-  it('returns all mutations', () => {
-    const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-    expect(result.current).toHaveProperty('fetch')
-    expect(result.current).toHaveProperty('pull')
-    expect(result.current).toHaveProperty('push')
-    expect(result.current).toHaveProperty('commit')
-    expect(result.current).toHaveProperty('stageFiles')
-    expect(result.current).toHaveProperty('unstageFiles')
-    expect(result.current).toHaveProperty('log')
-    expect(result.current).toHaveProperty('diff')
-  })
-
-  describe('fetch mutation', () => {
-    it('calls correct API and invalidates queries on success', async () => {
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.fetch.mutateAsync()
+      await act(async () => {
+        await mutationCase.run(result.current)
       })
 
-      expect(gitApi.gitFetch).toHaveBeenCalledWith(1)
-      expectTargetedStatusCacheUpdate()
-      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['reposGitStatus'] })
-      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['gitStatus', 1] })
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['fileDiff', 1] })
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitLog', 1] })
-    })
-
-    it('shows toast error on failure', async () => {
-      const mockGitFetch = vi.mocked(gitApi.gitFetch)
-      mockGitFetch.mockRejectedValue('Fetch failed')
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.fetch.mutateAsync().catch(() => {})
-      })
-
-      expect(toast.showToast.error).toHaveBeenCalledWith('Fetch failed')
-    })
-  })
-
-  describe('pull mutation', () => {
-    it('calls correct API and invalidates queries on success', async () => {
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.pull.mutateAsync()
-      })
-
-      expect(gitApi.gitPull).toHaveBeenCalledWith(1)
-      expectTargetedStatusCacheUpdate()
-      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['reposGitStatus'] })
-      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['gitStatus', 1] })
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['fileDiff', 1] })
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitLog', 1] })
-    })
-
-    it('shows toast error on failure', async () => {
-      const mockGitPull = vi.mocked(gitApi.gitPull)
-      mockGitPull.mockRejectedValue('Pull failed')
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.pull.mutateAsync().catch(() => {})
-      })
-
-      expect(toast.showToast.error).toHaveBeenCalledWith('Pull failed')
-    })
-  })
-
-  describe('push mutation', () => {
-    it('calls correct API and invalidates queries on success', async () => {
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.push.mutateAsync(undefined)
-      })
-
-      expect(gitApi.gitPush).toHaveBeenCalledWith(1, false)
-      expectTargetedStatusCacheUpdate()
-      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['reposGitStatus'] })
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['fileDiff', 1] })
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitLog', 1] })
-    })
-
-    it('shows toast error on failure', async () => {
-      const mockGitPush = vi.mocked(gitApi.gitPush)
-      mockGitPush.mockRejectedValue('Push failed')
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.push.mutateAsync(undefined).catch(() => {})
-      })
-
-      expect(toast.showToast.error).toHaveBeenCalledWith('Push failed')
-    })
-  })
-
-  describe('commit mutation', () => {
-    it('calls correct API and invalidates queries on success', async () => {
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.commit.mutateAsync({ message: 'test commit' })
-      })
-
-      expect(gitApi.gitCommit).toHaveBeenCalledWith(1, 'test commit', undefined)
-      expectTargetedStatusCacheUpdate()
-      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['reposGitStatus'] })
-      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['gitStatus', 1] })
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['fileDiff', 1] })
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitLog', 1] })
-    })
-
-    it('shows toast error on failure', async () => {
-      const mockGitCommit = vi.mocked(gitApi.gitCommit)
-      mockGitCommit.mockRejectedValue('Commit failed')
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.commit.mutateAsync({ message: 'test' }).catch(() => {})
-      })
-
-      expect(toast.showToast.error).toHaveBeenCalledWith('Commit failed')
-    })
-  })
-
-  describe('stageFiles mutation', () => {
-    it('calls correct API and invalidates queries on success', async () => {
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.stageFiles.mutateAsync(['file.txt'])
-      })
-
-      expect(gitApi.gitStageFiles).toHaveBeenCalledWith(1, ['file.txt'])
-      expectTargetedStatusCacheUpdate()
-      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['reposGitStatus'] })
-      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['gitStatus', 1] })
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['fileDiff', 1] })
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitLog', 1] })
-    })
-
-    it('shows toast error on failure', async () => {
-      const mockGitStageFiles = vi.mocked(gitApi.gitStageFiles)
-      mockGitStageFiles.mockRejectedValue('Stage failed')
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.stageFiles.mutateAsync(['file.txt']).catch(() => {})
-      })
-
-      expect(toast.showToast.error).toHaveBeenCalledWith('Stage failed')
-    })
-  })
-
-  describe('unstageFiles mutation', () => {
-    it('calls correct API and invalidates queries on success', async () => {
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.unstageFiles.mutateAsync(['file.txt'])
-      })
-
-      expect(gitApi.gitUnstageFiles).toHaveBeenCalledWith(1, ['file.txt'])
-      expectTargetedStatusCacheUpdate()
-      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['reposGitStatus'] })
-      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['gitStatus', 1] })
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['fileDiff', 1] })
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitLog', 1] })
-    })
-
-    it('shows toast error on failure', async () => {
-      const mockGitUnstageFiles = vi.mocked(gitApi.gitUnstageFiles)
-      mockGitUnstageFiles.mockRejectedValue('Unstage failed')
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.unstageFiles.mutateAsync(['file.txt']).catch(() => {})
-      })
-
-      expect(toast.showToast.error).toHaveBeenCalledWith('Unstage failed')
-    })
-  })
-
-  describe('renameBranch mutation', () => {
-    it('calls correct API and updates the status cache on success', async () => {
-      const realClient = mockRealQueryClient.current as QueryClient
-      realClient.setQueryData(['repo', 1], { fullPath: '/abs/repos/my-repo' })
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.renameBranch.mutateAsync({ from: 'main', to: 'renamed' })
-      })
-
-      expect(gitApi.gitRenameBranch).toHaveBeenCalledWith(1, { from: 'main', to: 'renamed' })
-      expectTargetedStatusCacheUpdate()
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({
-        queryKey: ['opencode', 'vcs', '/abs/repos/my-repo', 'info'],
-        exact: true,
-      })
-      expect(toast.showToast.success).toHaveBeenCalledWith('Branch renamed')
-    })
-
-    it('shows toast error on failure', async () => {
-      vi.mocked(gitApi.gitRenameBranch).mockRejectedValue('Rename failed')
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.renameBranch.mutateAsync({ from: 'main', to: 'renamed' }).catch(() => {})
-      })
-
-      expect(toast.showToast.error).toHaveBeenCalledWith('Rename failed')
-    })
-  })
-
-  describe('deleteBranch mutation', () => {
-    it('calls correct API, updates the status cache and shows success toast', async () => {
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.deleteBranch.mutateAsync({ name: 'feature', force: false, deleteRemote: false })
-      })
-
-      expect(gitApi.gitDeleteBranch).toHaveBeenCalledWith(1, { name: 'feature', force: false, deleteRemote: false })
-      expectTargetedStatusCacheUpdate()
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['branches', 1] })
-      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['repos'] })
-      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['repo', 1] })
-      expect(toast.showToast.success).toHaveBeenCalledWith('Branch deleted')
-    })
-
-    it('shows toast error on failure', async () => {
-      vi.mocked(gitApi.gitDeleteBranch).mockRejectedValue('Delete failed')
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.deleteBranch
-          .mutateAsync({ name: 'feature', force: false, deleteRemote: false })
-          .catch(() => {})
-      })
-
-      expect(toast.showToast.error).toHaveBeenCalledWith('Delete failed')
-    })
-  })
-
-  describe('stashPush mutation', () => {
-    it('invalidates the shared stash list prefix and updates the status cache', async () => {
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.stashPush.mutateAsync({ message: 'wip', includeUntracked: true })
-      })
-
-      expect(gitApi.gitStashPush).toHaveBeenCalledWith(1, { message: 'wip', includeUntracked: true })
-      expectTargetedStatusCacheUpdate()
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitStashes'] })
-      expect(toast.showToast.success).toHaveBeenCalledWith('Changes stashed')
-    })
-
-    it('shows toast error on failure', async () => {
-      vi.mocked(gitApi.gitStashPush).mockRejectedValue('Stash failed')
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.stashPush.mutateAsync({ message: 'wip', includeUntracked: true }).catch(() => {})
-      })
-
-      expect(toast.showToast.error).toHaveBeenCalledWith('Stash failed')
-    })
-  })
-
-  describe('stashApply success', () => {
-    it('sends the hash and pop flag, invalidates the shared stash list prefix and shows the pop toast', async () => {
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.stashApply.mutateAsync({ index: 0, hash: 'abc123', pop: true })
-      })
-
-      expect(gitApi.gitStashApply).toHaveBeenCalledWith(1, 0, { hash: 'abc123', pop: true })
-      expectTargetedStatusCacheUpdate()
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitStashes'] })
-      expect(toast.showToast.success).toHaveBeenCalledWith('Stash popped')
-    })
-  })
-
-  describe('stashDrop mutation', () => {
-    it('sends the hash, invalidates the shared stash list prefix and updates the status cache', async () => {
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.stashDrop.mutateAsync({ index: 0, hash: 'abc123' })
-      })
-
-      expect(gitApi.gitStashDrop).toHaveBeenCalledWith(1, 0, { hash: 'abc123' })
-      expectTargetedStatusCacheUpdate()
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitStashes'] })
-      expect(toast.showToast.success).toHaveBeenCalledWith('Stash dropped')
-    })
-  })
-
-  describe('generateCommitMessage mutation', () => {
-    it('calls the API and returns the generated message', async () => {
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await expect(result.current.generateCommitMessage.mutateAsync()).resolves.toEqual({
-        message: 'generated message',
-      })
-      expect(gitApi.gitGenerateCommitMessage).toHaveBeenCalledWith(1)
-    })
-
-    it('shows toast error on failure', async () => {
-      vi.mocked(gitApi.gitGenerateCommitMessage).mockRejectedValue('Generation failed')
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.generateCommitMessage.mutateAsync().catch(() => {})
-      })
-
-      expect(toast.showToast.error).toHaveBeenCalledWith('Generation failed')
-    })
-  })
-
-  describe('integrateBranch mutation', () => {
-    it('writes the target status cache and refreshes the repo list without invalidating the source or batched status', async () => {
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.integrateBranch.mutateAsync({ targetBranch: 'main', strategy: 'merge' })
-      })
-
-      expect(gitApi.gitIntegrateBranch).toHaveBeenCalledWith(1, { targetBranch: 'main', strategy: 'merge' })
-      expect(toast.showToast.success).toHaveBeenCalledWith('Integrated 1 commit into main')
-      expect(mockSetQueryData).toHaveBeenCalledWith(['gitStatus', 2], mockGitStatus)
-      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['gitStatus', 1] })
-      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['gitStatus', 2] })
-      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['reposGitStatus'] })
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['repos'] })
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitLog', 2] })
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['fileDiff', 2] })
-    })
-  })
-
-  describe('stashApply mutation', () => {
-    it('invalidates the cached working-tree state and refreshes the stash list when apply conflicts', async () => {
-      const realClient = mockRealQueryClient.current as QueryClient
-      realClient.setQueryData(['gitStatus', 1], mockGitStatus)
-      realClient.setQueryData(['fileDiff', 1, 'file.txt', undefined], { path: 'file.txt', diff: 'cached' })
-
-      vi.mocked(gitApi.gitStashApply).mockRejectedValue(
-        'CONFLICT (content): Merge conflict in file.txt',
+      const request = fetchFake.lastRequest(mutationCase.method, mutationCase.path)
+      expect(request).toBeDefined()
+      expect(request?.body).toEqual(mutationCase.body ?? null)
+      expect(queryClient.getQueryData(['gitStatus', REPO_ID])).toEqual(gitStatus)
+
+      const batch = queryClient.getQueryData<Map<number, GitStatusResponse>>(['reposGitStatus', [1, 2]])
+      expect(batch?.get(1)).toEqual(gitStatus)
+      expect(batch?.get(2)).toBe(otherStatus)
+
+      expect(queryClient.getQueryState(['gitLog', REPO_ID])?.isInvalidated).toBe(true)
+      expect(queryClient.getQueryState(['fileDiff', REPO_ID])?.isInvalidated).toBe(true)
+      expect(queryClient.getQueryState(['gitStashes'])?.isInvalidated).toBe(mutationCase.stashesInvalidated)
+      expect(queryClient.getQueryState(['branches', REPO_ID])?.isInvalidated).toBe(
+        mutationCase.branchesInvalidated,
       )
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.stashApply.mutateAsync({ index: 0, hash: 'abc123', pop: false }).catch(() => {})
-      })
-
-      expect(gitApi.gitStashApply).toHaveBeenCalledWith(1, 0, { hash: 'abc123', pop: false })
-      expect(realClient.getQueryState(['gitStatus', 1])?.isInvalidated).toBe(true)
-      expect(realClient.getQueryState(['fileDiff', 1, 'file.txt', undefined])?.isInvalidated).toBe(true)
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitStashes'] })
-
-      const aggregateCall = mockInvalidateQueries.mock.calls.find(
-        ([arg]) => (arg as { queryKey?: unknown[] } | undefined)?.queryKey?.[0] === 'reposGitStatus',
+      expect(queryClient.getQueryState(['repos'])?.isInvalidated).toBe(mutationCase.repoMetaInvalidated)
+      expect(queryClient.getQueryState(['repo', REPO_ID])?.isInvalidated).toBe(
+        mutationCase.repoMetaInvalidated,
       )
-      expect(aggregateCall).toBeDefined()
-      const predicate = (aggregateCall![0] as { predicate: (query: { queryKey: unknown[] }) => boolean }).predicate
-      expect(predicate({ queryKey: ['reposGitStatus', [1, 2]] })).toBe(true)
-      expect(predicate({ queryKey: ['reposGitStatus', [2, 3]] })).toBe(false)
+      expect(queryClient.getQueryState(vcsInfoQueryKey(REPO_PATH))?.isInvalidated).toBe(
+        mutationCase.vcsInvalidated,
+      )
+      expect(queryClient.getQueryState(['gitStatus', REPO_ID])?.isInvalidated).toBe(false)
+      expect(await screen.findByText(mutationCase.toast)).toBeInTheDocument()
+    },
+  )
 
-      expect(toast.showToast.error).toHaveBeenCalledWith('CONFLICT (content): Merge conflict in file.txt')
-      expect(toast.showToast.success).not.toHaveBeenCalled()
-      expect(gitApi.gitStashDrop).not.toHaveBeenCalled()
+  it('integrates a branch into the target repo without invalidating either status cache', async () => {
+    const { result, queryClient, fetchFake } = renderGit()
+    queryClient.setQueryData(['gitStatus', 2], gitStatus)
+    queryClient.setQueryData(['gitLog', 2], { commits: [] })
+    queryClient.setQueryData(['fileDiff', 2], [])
+
+    await act(async () => {
+      await result.current.integrateBranch.mutateAsync({ targetBranch: 'main', strategy: 'merge' })
     })
+
+    expect(fetchFake.lastRequest('POST', `/api/repos/${REPO_ID}/git/integrate`)?.body).toEqual({
+      targetBranch: 'main',
+      strategy: 'merge',
+    })
+    expect(fetchFake.findRequests('POST', `/api/repos/${REPO_ID}/git/integrate`)).toHaveLength(1)
+    expect(queryClient.getQueryState(['gitStatus', REPO_ID])?.isInvalidated).toBe(false)
+    expect(queryClient.getQueryState(['gitStatus', 2])?.isInvalidated).toBe(false)
+    expect(queryClient.getQueryState(['reposGitStatus', [1, 2]])?.isInvalidated).toBe(false)
+    expect(queryClient.getQueryState(['repos'])?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(['gitLog', 2])?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(['fileDiff', 2])?.isInvalidated).toBe(true)
+    expect(await screen.findByText('Integrated 1 commit into main')).toBeInTheDocument()
   })
 
-  describe('continueOperation mutation', () => {
-    it('calls the API, updates the status cache and shows success', async () => {
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
+  it.each([
+    {
+      name: 'applying a stash',
+      run: async (git: GitHook) => { await git.stashApply.mutateAsync({ index: 0, hash: 'abc123', pop: false }) },
+      path: `/api/repos/${REPO_ID}/git/stash/0/apply`,
+      stashesInvalidated: true,
+    },
+    {
+      name: 'continuing an operation',
+      run: async (git: GitHook) => { await git.continueOperation.mutateAsync() },
+      path: `/api/repos/${REPO_ID}/git/operation/continue`,
+      stashesInvalidated: false,
+    },
+  ])('invalidates the working-tree state and reports the conflict when $name conflicts', async ({ run, path, stashesInvalidated }) => {
+    const { result, queryClient, fetchFake } = renderHookWithProviders(() => useGit(REPO_ID), {
+      ...hookProviders,
+      fetchRoutes: [
+        {
+          method: 'POST',
+          path,
+          respond: () => ({ status: 500, json: { error: 'CONFLICT (content): Merge conflict in file.txt' } }),
+        },
+      ],
+    })
+    queryClient.setQueryData(['gitStatus', REPO_ID], gitStatus)
+    queryClient.setQueryData(['fileDiff', REPO_ID, 'file.txt', undefined], { path: 'file.txt', diff: 'cached' })
+    queryClient.setQueryData(['gitStashes'], { stashes: [] })
 
-      await waitFor(() => {
-        result.current.continueOperation.mutateAsync()
-      })
-
-      expect(gitApi.gitContinueOperation).toHaveBeenCalledWith(1)
-      expectTargetedStatusCacheUpdate()
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['repo', 1] })
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['repo', 'siblings'] })
-      expect(toast.showToast.success).toHaveBeenCalledWith('Operation continued')
+    await act(async () => {
+      await expect(run(result.current)).rejects.toThrow('CONFLICT (content): Merge conflict in file.txt')
     })
 
-    it('shows a toast error on failure', async () => {
-      vi.mocked(gitApi.gitContinueOperation).mockRejectedValue('Continue failed')
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.continueOperation.mutateAsync().catch(() => {})
-      })
-
-      expect(toast.showToast.error).toHaveBeenCalledWith('Continue failed')
-    })
-
-    it('invalidates cached working-tree state and surfaces the error when continue stops on a later conflict', async () => {
-      const realClient = mockRealQueryClient.current as QueryClient
-      realClient.setQueryData(['gitStatus', 1], mockGitStatus)
-      realClient.setQueryData(['fileDiff', 1, 'file.txt', undefined], { path: 'file.txt', diff: 'cached' })
-
-      vi.mocked(gitApi.gitContinueOperation).mockRejectedValue(
-        'CONFLICT (content): Merge conflict in other.txt',
-      )
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.continueOperation.mutateAsync().catch(() => {})
-      })
-
-      expect(gitApi.gitContinueOperation).toHaveBeenCalledWith(1)
-      expect(realClient.getQueryState(['gitStatus', 1])?.isInvalidated).toBe(true)
-      expect(realClient.getQueryState(['fileDiff', 1, 'file.txt', undefined])?.isInvalidated).toBe(true)
-
-      const aggregateCall = mockInvalidateQueries.mock.calls.find(
-        ([arg]) => (arg as { queryKey?: unknown[] } | undefined)?.queryKey?.[0] === 'reposGitStatus',
-      )
-      expect(aggregateCall).toBeDefined()
-      const predicate = (aggregateCall![0] as { predicate: (query: { queryKey: unknown[] }) => boolean }).predicate
-      expect(predicate({ queryKey: ['reposGitStatus', [1, 2]] })).toBe(true)
-      expect(predicate({ queryKey: ['reposGitStatus', [2, 3]] })).toBe(false)
-
-      expect(toast.showToast.error).toHaveBeenCalledWith('CONFLICT (content): Merge conflict in other.txt')
-      expect(toast.showToast.success).not.toHaveBeenCalled()
-    })
+    expect(queryClient.getQueryState(['gitStatus', REPO_ID])?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(['fileDiff', REPO_ID, 'file.txt', undefined])?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(['gitStashes'])?.isInvalidated).toBe(stashesInvalidated)
+    expect(fetchFake.findRequests('DELETE', `/api/repos/${REPO_ID}/git/stash/0`)).toHaveLength(0)
+    expect(await screen.findByText('Merge conflict detected. Resolve conflicts before continuing.')).toBeInTheDocument()
+    expect(screen.queryByText('Changes stashed')).toBeNull()
   })
 
-  describe('abortOperation mutation', () => {
-    it('calls the API, updates the status cache and shows success', async () => {
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.abortOperation.mutateAsync()
-      })
-
-      expect(gitApi.gitAbortOperation).toHaveBeenCalledWith(1)
-      expectTargetedStatusCacheUpdate()
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['repo', 1] })
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['repo', 'siblings'] })
-      expect(toast.showToast.success).toHaveBeenCalledWith('Operation aborted')
+  it('returns the generated commit message', async () => {
+    const { result, fetchFake } = renderHookWithProviders(() => useGit(REPO_ID), {
+      ...hookProviders,
+      fetchRoutes: [
+        {
+          method: 'POST',
+          path: `/api/repos/${REPO_ID}/git/commit-message`,
+          respond: () => ({ json: { message: 'generated message' } }),
+        },
+      ],
     })
 
-    it('shows a toast error on failure', async () => {
-      vi.mocked(gitApi.gitAbortOperation).mockRejectedValue('Abort failed')
-      const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        result.current.abortOperation.mutateAsync().catch(() => {})
-      })
-
-      expect(toast.showToast.error).toHaveBeenCalledWith('Abort failed')
+    await expect(result.current.generateCommitMessage.mutateAsync()).resolves.toEqual({
+      message: 'generated message',
     })
+    await waitFor(() => expect(fetchFake.findRequests('POST', `/api/repos/${REPO_ID}/git/commit-message`)).toHaveLength(1))
+  })
+
+  it.each(mutationCases)('shows the server failure message when $name fails', async (mutationCase) => {
+    const { result } = renderHookWithProviders(() => useGit(REPO_ID), {
+      ...hookProviders,
+      fetchRoutes: [
+        { method: mutationCase.method, path: mutationCase.path, respond: () => ({ status: 500, json: { error: 'boom' } }) },
+      ],
+    })
+
+    await act(async () => {
+      await expect(mutationCase.run(result.current)).rejects.toThrow('boom')
+    })
+
+    expect(await screen.findByText('boom')).toBeInTheDocument()
   })
 })

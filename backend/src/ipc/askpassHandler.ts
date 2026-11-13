@@ -1,6 +1,8 @@
 import * as path from 'path'
 import { fileURLToPath } from 'url'
-import type { IPCServer, IPCHandler } from './ipcServer'
+import { z } from 'zod'
+import type { JsonValue } from '@opencode-manager/shared/utils'
+import type { IPCServer, IPCHandler, IpcEnvironment } from './ipcServer'
 import { CredentialProvider } from '../services/credential-provider'
 import { logger } from '../utils/logger'
 
@@ -12,16 +14,18 @@ interface Credentials {
   password: string
 }
 
-interface AskpassRequest {
-  askpassType: 'https' | 'ssh'
-  argv: string[]
-  cwd?: string
-  repoId?: number
-}
+const AskpassRequestSchema = z.object({
+  askpassType: z.enum(['https', 'ssh']),
+  argv: z.array(z.string()),
+  cwd: z.string().optional(),
+  repoId: z.number().optional(),
+})
+
+type AskpassRequest = z.infer<typeof AskpassRequestSchema>
 
 export class AskpassHandler implements IPCHandler {
   private cache = new Map<string, Credentials>()
-  private env: Record<string, string>
+  private env: IpcEnvironment
 
   constructor(
     private ipcServer: IPCServer | undefined,
@@ -46,7 +50,8 @@ export class AskpassHandler implements IPCHandler {
     }
   }
 
-  async handle(request: AskpassRequest): Promise<string> {
+  async handle(payload: JsonValue): Promise<string> {
+    const request = AskpassRequestSchema.parse(payload)
     logger.info(`Askpass request received: type=${request.askpassType}, argv=${JSON.stringify(request.argv)}`)
     if (request.askpassType === 'https') {
       return this.handleHttpsAskpass(request)
@@ -93,7 +98,7 @@ export class AskpassHandler implements IPCHandler {
     return ''
   }
 
-  getEnv(): Record<string, string> {
+  getEnv(): IpcEnvironment {
     return {
       ...this.env,
       ...(this.ipcServer?.getEnv() || {}),

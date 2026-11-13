@@ -5,7 +5,6 @@ import { getPathWithReturnTo } from '@/lib/navigation'
 import { openDialogParam } from './useDialogParam'
 import { useUrlParams } from './useUrlParams'
 
-/** Opens a navigation item's route or dialog; returns false for items it does not handle. */
 export function useOpenNavItem(): (item: MoreDrawerItem) => boolean {
   const location = useLocation()
   const navigate = useNavigate()

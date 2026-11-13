@@ -13,13 +13,15 @@ import {
 } from '../src/internal-token-store.js'
 import type { TokenStore } from '../src/token-store.js'
 
-const TOKEN_ENV_NAME = TOKEN_ENV
+interface StoreCalls {
+  get: string[]
+  set: Array<{ account: string; token: string }>
+  delete: string[]
+}
 
-function makeInMemoryStore(seed: Record<string, string> = {}): TokenStore & {
-  calls: { get: string[]; set: Array<{ account: string; token: string }>; delete: string[] }
-} {
+function makeInMemoryStore(seed: Record<string, string> = {}): TokenStore & { calls: StoreCalls } {
   const tokens = { ...seed }
-  const calls = { get: [] as string[], set: [] as Array<{ account: string; token: string }>, delete: [] as string[] }
+  const calls: StoreCalls = { get: [], set: [], delete: [] }
   return {
     describe: () => ({ kind: 'file', location: '<in-memory>' }),
     async get(account: string) {
@@ -50,28 +52,24 @@ function makeFailingStore(err: TokenStoreError): TokenStore {
 }
 
 describe('internal token store facade', () => {
-  const savedToken = process.env[TOKEN_ENV_NAME]
+  const savedToken = process.env[TOKEN_ENV]
 
   beforeEach(() => {
-    delete process.env[TOKEN_ENV_NAME]
+    delete process.env[TOKEN_ENV]
   })
 
   afterEach(() => {
-    if (savedToken === undefined) delete process.env[TOKEN_ENV_NAME]
-    else process.env[TOKEN_ENV_NAME] = savedToken
+    if (savedToken === undefined) delete process.env[TOKEN_ENV]
+    else process.env[TOKEN_ENV] = savedToken
   })
 
   describe('selectTokenStore', () => {
-    it('uses the keychain store on darwin', () => {
-      expect(selectTokenStore('darwin').describe().kind).toBe('keychain')
-    })
-
-    it('uses the file store on linux', () => {
-      expect(selectTokenStore('linux').describe().kind).toBe('file')
-    })
-
-    it('uses the file store on win32', () => {
-      expect(selectTokenStore('win32').describe().kind).toBe('file')
+    it.each([
+      ['darwin', 'keychain'],
+      ['linux', 'file'],
+      ['win32', 'file'],
+    ] as const)('selects the %s store as %s', (platform, kind) => {
+      expect(selectTokenStore(platform).describe().kind).toBe(kind)
     })
   })
 
@@ -81,42 +79,38 @@ describe('internal token store facade', () => {
     expect(store.calls.get).toEqual(['https://m'])
   })
 
-  it('OCM_TOKEN wins over the store', async () => {
-    process.env[TOKEN_ENV_NAME] = 'tok_env'
-    const store = makeInMemoryStore({ 'https://m': 'tok_stored' })
-    await expect(getToken('https://m', store)).resolves.toBe('tok_env')
-    expect(store.calls.get).toEqual([])
-  })
+  it('OCM_TOKEN wins over the store whether or not it holds a token', async () => {
+    process.env[TOKEN_ENV] = 'tok_env'
+    const populated = makeInMemoryStore({ 'https://m': 'tok_stored' })
+    await expect(getToken('https://m', populated)).resolves.toBe('tok_env')
+    expect(populated.calls.get).toEqual([])
 
-  it('OCM_TOKEN is used when the store is empty', async () => {
-    process.env[TOKEN_ENV_NAME] = 'tok_env'
-    const store = makeInMemoryStore()
-    await expect(getToken('https://m', store)).resolves.toBe('tok_env')
-    expect(store.calls.get).toEqual([])
+    const empty = makeInMemoryStore()
+    await expect(getToken('https://m', empty)).resolves.toBe('tok_env')
   })
 
   it('blank OCM_TOKEN falls through to the store', async () => {
-    process.env[TOKEN_ENV_NAME] = '   '
+    process.env[TOKEN_ENV] = '   '
     const store = makeInMemoryStore({ 'https://m': 'tok_stored' })
     await expect(getToken('https://m', store)).resolves.toBe('tok_stored')
     expect(store.calls.get).toEqual(['https://m'])
   })
 
-  it('envToken reports the trimmed override', () => {
-    process.env[TOKEN_ENV_NAME] = '  tok_env  '
-    expect(envToken()).toBe('tok_env')
-  })
-
-  it('envToken reports null when the override is blank', () => {
-    process.env[TOKEN_ENV_NAME] = '   '
-    expect(envToken()).toBeNull()
+  it.each([
+    ['  tok_env  ', 'tok_env'],
+    ['   ', null],
+    [undefined, null],
+  ])('envToken reports %s as %s', (value, expected) => {
+    if (value === undefined) delete process.env[TOKEN_ENV]
+    else process.env[TOKEN_ENV] = value
+    expect(envToken()).toBe(expected)
   })
 
   it('setToken never writes the env', async () => {
-    process.env[TOKEN_ENV_NAME] = 'tok_env'
+    process.env[TOKEN_ENV] = 'tok_env'
     const store = makeInMemoryStore()
     await setToken('https://m', 'tok_new', store)
-    expect(process.env[TOKEN_ENV_NAME]).toBe('tok_env')
+    expect(process.env[TOKEN_ENV]).toBe('tok_env')
     expect(store.calls.set).toEqual([{ account: 'https://m', token: 'tok_new' }])
   })
 
@@ -146,7 +140,7 @@ describe('internal token store facade', () => {
   })
 
   it('hasStoredToken reports true from the env override without an account', async () => {
-    process.env[TOKEN_ENV_NAME] = 'tok_env'
+    process.env[TOKEN_ENV] = 'tok_env'
     const store = makeInMemoryStore()
     await expect(hasStoredToken(undefined, store)).resolves.toBe(true)
     expect(store.calls.get).toEqual([])
@@ -164,15 +158,15 @@ describe('internal token store facade', () => {
   })
 
   it('hasStoredToken prefers the env override over a failing store', async () => {
-    process.env[TOKEN_ENV_NAME] = 'tok_env'
+    process.env[TOKEN_ENV] = 'tok_env'
     const store = makeFailingStore(new TokenStoreError('keychain locked', 'keychain'))
     await expect(hasStoredToken('https://m', store)).resolves.toBe(true)
   })
 
   it('describeTokenStore reports env when OCM_TOKEN is set', () => {
-    process.env[TOKEN_ENV_NAME] = 'tok_env'
+    process.env[TOKEN_ENV] = 'tok_env'
     const store = makeInMemoryStore()
-    expect(describeTokenStore(store)).toEqual({ kind: 'env', location: TOKEN_ENV_NAME })
+    expect(describeTokenStore(store)).toEqual({ kind: 'env', location: TOKEN_ENV })
   })
 
   it('describeTokenStore reports the store when OCM_TOKEN is unset', () => {
@@ -180,13 +174,12 @@ describe('internal token store facade', () => {
     expect(describeTokenStore(store)).toEqual({ kind: 'file', location: '<in-memory>' })
   })
 
-  it('describeTokenWriteTarget reports the store even when OCM_TOKEN is set', () => {
-    process.env[TOKEN_ENV_NAME] = 'tok_env'
-    const store = makeInMemoryStore()
-    expect(describeTokenWriteTarget(store)).toEqual({ kind: 'file', location: '<in-memory>' })
-  })
-
-  it('describeTokenWriteTarget reports the store when OCM_TOKEN is unset', () => {
+  it.each([
+    ['set', 'tok_env'],
+    ['unset', undefined],
+  ])('describeTokenWriteTarget reports the store when OCM_TOKEN is %s', (_label, envValue) => {
+    if (envValue === undefined) delete process.env[TOKEN_ENV]
+    else process.env[TOKEN_ENV] = envValue
     const store = makeInMemoryStore()
     expect(describeTokenWriteTarget(store)).toEqual({ kind: 'file', location: '<in-memory>' })
   })

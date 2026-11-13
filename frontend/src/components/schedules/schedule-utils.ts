@@ -77,9 +77,6 @@ export function formatScheduleSandbox(sandbox: ScheduleSandboxConfig | null | un
   return sandbox.resources ? `On · ${formatSandboxResources(sandbox.resources)}` : 'On · server defaults'
 }
 
-/**
- * Describes which schedule runs are announced in the Reports inbox.
- */
 export function formatScheduleInbox(showInInbox: boolean): string {
   return showInInbox ? 'Every run' : 'Failures only'
 }
@@ -96,7 +93,7 @@ function isNumericToken(value: string): boolean {
   return /^\d+$/.test(value)
 }
 
-function parseTimeValue(value: string): { hour: number; minute: number } {
+function parseTimeValue(value: string) {
   const [hourValue = '9', minuteValue = '0'] = value.split(':')
   const hour = Number.parseInt(hourValue, 10)
   const minute = Number.parseInt(minuteValue, 10)
@@ -148,7 +145,7 @@ function expandDayOfWeekExpression(expression: string): string[] | null {
     return null
   }
 
-  return weekdayOptions.filter((option) => days.has(option.value)).map((option) => option.value)
+  return weekdayOptions.flatMap((option) => (days.has(option.value) ? [option.value] : []))
 }
 
 function sortWeekdayValues(values: string[]): string[] {
@@ -156,7 +153,7 @@ function sortWeekdayValues(values: string[]): string[] {
   return [...new Set(values)].sort((left, right) => (order.get(left) ?? 99) - (order.get(right) ?? 99))
 }
 
-export function detectSchedulePreset(job?: ScheduleJob): {
+export interface SchedulePresetState {
   preset: SchedulePreset
   intervalMinutes: string
   timeOfDay: string
@@ -165,10 +162,12 @@ export function detectSchedulePreset(job?: ScheduleJob): {
   monthlyDay: string
   cronExpression: string
   timezone: string
-} {
+}
+
+export function detectSchedulePreset(job?: ScheduleJob): SchedulePresetState {
   const defaultTimezone = job?.timezone ?? getLocalTimeZone()
   const defaults = {
-    preset: 'interval' as SchedulePreset,
+    preset: 'interval',
     intervalMinutes: String(job?.intervalMinutes ?? 60),
     timeOfDay: '09:00',
     hourlyMinute: '0',
@@ -176,7 +175,7 @@ export function detectSchedulePreset(job?: ScheduleJob): {
     monthlyDay: '1',
     cronExpression: job?.cronExpression ?? '0 9 * * 1-5',
     timezone: defaultTimezone,
-  }
+  } satisfies SchedulePresetState
 
   if (!job || job.scheduleMode === 'interval') {
     return defaults

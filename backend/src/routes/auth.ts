@@ -1,12 +1,23 @@
 import { Hono } from 'hono'
 import type { Database } from 'bun:sqlite'
-import { isAdminConfigured, type AuthInstance } from '../auth'
+import { isAdminConfigured, type AuthEnv, type AuthInstance, type Session } from '../auth'
 import { applyClientIpHeaders, resolveSocketIp } from '../auth/client-ip'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { logger } from '../utils/logger'
 import { deletePushSubscriptionsForSessions } from '../db/push-subscriptions'
 
-export function createAuthRoutes(auth: AuthInstance): Hono {
+export type AuthRouteHandler = Pick<AuthInstance, 'handler'>
+
+export interface AuthSessionReader {
+  getSession(context: { headers: Headers }): Promise<Session | null>
+}
+
+export interface AuthInfoProvider {
+  api: AuthSessionReader
+  $context: AuthInstance['$context']
+}
+
+export function createAuthRoutes(auth: AuthRouteHandler): Hono {
   const app = new Hono()
 
   app.all('/*', (c) => {
@@ -17,11 +28,11 @@ export function createAuthRoutes(auth: AuthInstance): Hono {
   return app
 }
 
-export async function syncAdminFromEnv(auth: AuthInstance, db: Database): Promise<void> {
-  if (!isAdminConfigured()) return
+export async function syncAdminFromEnv(auth: AuthInstance, db: Database, env: AuthEnv = ENV.AUTH): Promise<void> {
+  if (!isAdminConfigured(env)) return
 
-  const adminEmail = ENV.AUTH.ADMIN_EMAIL!
-  const adminPassword = ENV.AUTH.ADMIN_PASSWORD!
+  const adminEmail = env.ADMIN_EMAIL ?? ''
+  const adminPassword = env.ADMIN_PASSWORD ?? ''
 
   const ctx = await auth.$context
   const existingAdmin = await ctx.adapter.findOne<{ id: string }>({
@@ -30,7 +41,7 @@ export async function syncAdminFromEnv(auth: AuthInstance, db: Database): Promis
   })
 
   if (existingAdmin) {
-    if (ENV.AUTH.ADMIN_PASSWORD_RESET) {
+    if (env.ADMIN_PASSWORD_RESET) {
       const credentialAccount = (await ctx.internalAdapter.findAccounts(existingAdmin.id))
         .find((account) => account.providerId === 'credential')
 
@@ -65,26 +76,26 @@ export async function syncAdminFromEnv(auth: AuthInstance, db: Database): Promis
   }
 }
 
-export function createAuthInfoRoutes(auth: AuthInstance) {
+export function createAuthInfoRoutes(auth: AuthInfoProvider, env: AuthEnv = ENV.AUTH) {
   const app = new Hono()
 
   app.get('/config', async (c) => {
     const enabledProviders: string[] = ['credentials']
     
-    if (ENV.AUTH.GITHUB_CLIENT_ID && ENV.AUTH.GITHUB_CLIENT_SECRET) {
+    if (env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET) {
       enabledProviders.push('github')
     }
-    if (ENV.AUTH.GOOGLE_CLIENT_ID && ENV.AUTH.GOOGLE_CLIENT_SECRET) {
+    if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
       enabledProviders.push('google')
     }
-    if (ENV.AUTH.DISCORD_CLIENT_ID && ENV.AUTH.DISCORD_CLIENT_SECRET) {
+    if (env.DISCORD_CLIENT_ID && env.DISCORD_CLIENT_SECRET) {
       enabledProviders.push('discord')
     }
 
     enabledProviders.push('passkey')
 
     const userCount = await (await auth.$context).adapter.count({ model: 'user' })
-    const adminConfigured = isAdminConfigured()
+    const adminConfigured = isAdminConfigured(env)
     
     return c.json({
       enabledProviders,

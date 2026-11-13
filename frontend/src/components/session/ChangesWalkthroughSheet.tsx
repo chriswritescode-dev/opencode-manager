@@ -23,24 +23,36 @@ import {
 } from '@opencode-manager/shared/schemas'
 import type { ChangeWalkthrough, WalkthroughSource } from '@opencode-manager/shared/schemas'
 import { formatOpenCodeModelRef, type ModelRef } from '@opencode-manager/shared/opencode'
+import { z } from 'zod'
 
-interface WalkthroughErrorLike {
-  message?: string
-  code?: string
+const walkthroughErrorSchema = z.object({
+  message: z.string().optional(),
+  code: z.string().optional(),
+})
+
+const walkthroughSourceKindSchema = z.enum([
+  'session',
+  'uncommitted',
+  'staged',
+  'unstaged',
+  'branch',
+  'pullRequest',
+])
+
+type WalkthroughSourceKind = z.infer<typeof walkthroughSourceKindSchema>
+
+function errorCode(cause: unknown): string | undefined {
+  return walkthroughErrorSchema.safeParse(cause).data?.code
 }
 
-function errorCode(error: unknown): string | undefined {
-  return (error as WalkthroughErrorLike | null)?.code
-}
-
-function isNoChangesError(error: unknown): boolean {
-  const code = errorCode(error)
+function isNoChangesError(cause: unknown): boolean {
+  const code = errorCode(cause)
   return code === 'WALKTHROUGH_NO_CHANGES' || code === 'WALKTHROUGH_NO_TEXT_CHANGES'
 }
 
-function walkthroughErrorMessage(error: unknown): string {
-  const message = (error as WalkthroughErrorLike | null)?.message
-  if (isNoChangesError(error)) {
+function walkthroughErrorMessage(cause: unknown): string {
+  const message = walkthroughErrorSchema.safeParse(cause).data?.message
+  if (isNoChangesError(cause)) {
     return message || 'This session has no text changes to walk through'
   }
   return message || 'Failed to load the walkthrough'
@@ -80,7 +92,7 @@ function useChangesWalkthrough(): ChangesWalkthroughContextValue {
   return value
 }
 
-const WALKTHROUGH_SOURCE_OPTIONS: { value: WalkthroughSource['kind']; label: string }[] = [
+const WALKTHROUGH_SOURCE_OPTIONS: Array<{ value: WalkthroughSourceKind; label: string }> = [
   { value: 'session', label: 'This session' },
   { value: 'uncommitted', label: 'Uncommitted' },
   { value: 'staged', label: 'Staged' },
@@ -89,12 +101,11 @@ const WALKTHROUGH_SOURCE_OPTIONS: { value: WalkthroughSource['kind']; label: str
   { value: 'pullRequest', label: 'Pull request' },
 ]
 
-/** Chooses which set of changes the walkthrough covers from the surrounding chrome; git sources commit as soon as they are valid. */
 export const ChangesWalkthroughSourcePicker = memo(function ChangesWalkthroughSourcePicker() {
   const { sourceKind, setSourceKind, baseInput, setSource } = useChangesWalkthrough()
 
   const handleKindChange = useCallback(
-    (next: WalkthroughSource['kind']) => {
+    (next: WalkthroughSourceKind) => {
       setSourceKind(next)
       if (next === 'pullRequest') return
       const nextSource = toWalkthroughSource({ kind: next, base: baseInput })
@@ -104,7 +115,10 @@ export const ChangesWalkthroughSourcePicker = memo(function ChangesWalkthroughSo
   )
 
   return (
-    <Select value={sourceKind} onValueChange={(value) => handleKindChange(value as WalkthroughSource['kind'])}>
+    <Select value={sourceKind} onValueChange={(value) => {
+      const parsedKind = walkthroughSourceKindSchema.safeParse(value)
+      if (parsedKind.success) handleKindChange(parsedKind.data)
+    }}>
       <SelectTrigger
         aria-label="Changes to walk through"
         className="h-7 w-auto gap-1 px-2 text-xs md:text-xs"
@@ -122,7 +136,6 @@ export const ChangesWalkthroughSourcePicker = memo(function ChangesWalkthroughSo
   )
 })
 
-/** Collects the base branch or pull request number for git-backed walkthrough sources. */
 const WalkthroughSourceInputs = memo(function WalkthroughSourceInputs() {
   const { sourceKind, baseInput, setBaseInput, numberInput, setNumberInput, setSource } =
     useChangesWalkthrough()
@@ -163,10 +176,6 @@ const WalkthroughSourceInputs = memo(function WalkthroughSourceInputs() {
   )
 })
 
-/**
- * A one-shot request to open the walkthrough on a given source. A new request object re-applies, so a
- * repeated request for the same source takes effect; `source` undefined leaves the selection alone.
- */
 export interface WalkthroughSourceRequest {
   sessionId: string
   source?: WalkthroughSource
@@ -181,7 +190,6 @@ interface ChangesWalkthroughProviderProps {
   children: ReactNode
 }
 
-/** Loads a session's change walkthrough and shares its state with the surrounding chrome and body. */
 export function ChangesWalkthroughProvider({
   sessionId,
   active,
@@ -266,7 +274,6 @@ export function ChangesWalkthroughProvider({
   return <ChangesWalkthroughContext.Provider value={value}>{children}</ChangesWalkthroughContext.Provider>
 }
 
-/** Stops the in-flight walkthrough session from the chrome; renders nothing when the walkthrough is neither generating nor running. */
 export const ChangesWalkthroughCancel = memo(function ChangesWalkthroughCancel() {
   const { generating, running, stopping, stop } = useChangesWalkthrough()
 
@@ -287,7 +294,6 @@ export const ChangesWalkthroughCancel = memo(function ChangesWalkthroughCancel()
   )
 })
 
-/** Regenerates the current walkthrough from the chrome; renders nothing until one exists. */
 export const ChangesWalkthroughRegenerate = memo(function ChangesWalkthroughRegenerate() {
   const { walkthrough, generating, regenerate, sourcePending } = useChangesWalkthrough()
 
@@ -306,7 +312,6 @@ export const ChangesWalkthroughRegenerate = memo(function ChangesWalkthroughRege
   )
 })
 
-/** Renders the walkthrough body; the provider and its chrome supply the surrounding panel. */
 export const ChangesWalkthroughView = memo(function ChangesWalkthroughView() {
   const {
     isLoading,
@@ -479,7 +484,6 @@ interface ChangesWalkthroughSheetProps {
   onOpenSession?: (walkthroughSessionId: string) => void
 }
 
-/** The walkthrough as a right-side sheet: full screen on mobile, a drawer over the page on desktop. */
 export function ChangesWalkthroughSheet({
   sessionId,
   open,

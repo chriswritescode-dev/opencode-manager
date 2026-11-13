@@ -1,365 +1,119 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { GitCredential } from '@opencode-manager/shared'
-import type { IPCServer } from '../../src/ipc/ipcServer'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { existsSync } from 'node:fs'
 import type { Database } from 'bun:sqlite'
-
-vi.mock('bun:sqlite', () => ({
-  Database: vi.fn(),
-}))
-
-vi.mock('@opencode-manager/shared/config/env', () => ({
-  getWorkspacePath: vi.fn(() => '/tmp/test-workspace'),
-  getReposPath: vi.fn(() => '/tmp/test-repos'),
-  getOpenCodeConfigFilePath: vi.fn(() => '/tmp/test-workspace/.config/opencode.json'),
-  getAgentsMdPath: vi.fn(() => '/tmp/test-workspace/AGENTS.md'),
-  getDatabasePath: vi.fn(() => ':memory:'),
-  getConfigPath: vi.fn(() => '/tmp/test-workspace/config'),
-  ENV: {
-    SERVER: { PORT: 5003, HOST: '0.0.0.0', NODE_ENV: 'test' },
-    AUTH: { TRUSTED_ORIGINS: 'http://localhost:5173', SECRET: 'test-secret-for-encryption-key-32c' },
-    WORKSPACE: { BASE_PATH: '/tmp/test-workspace', REPOS_DIR: 'repos', CONFIG_DIR: 'config' },
-    OPENCODE: { PORT: 5551, HOST: '127.0.0.1' },
-    DATABASE: { PATH: ':memory:' },
-    FILE_LIMITS: {
-      MAX_SIZE_BYTES: 1024 * 1024,
-      MAX_UPLOAD_SIZE_BYTES: 10 * 1024 * 1024,
-    },
-  },
-  FILE_LIMITS: {
-    MAX_SIZE_BYTES: 1024 * 1024,
-    MAX_UPLOAD_SIZE_BYTES: 10 * 1024 * 1024,
-  },
-}))
-
-vi.mock('@opencode-manager/shared/config', () => ({
-  DEFAULTS: {
-    SSE: {
-      RECONNECT_DELAY_MS: 1000,
-      MAX_RECONNECT_DELAY_MS: 30000,
-      IDLE_GRACE_PERIOD_MS: 120000,
-    },
-  },
-}))
-
-vi.mock('../../src/utils/ssh-key-manager', () => ({
-  writeTemporarySSHKey: vi.fn().mockResolvedValue('/tmp/test-workspace/.ssh-keys/test-key'),
-  cleanupSSHKey: vi.fn().mockResolvedValue(undefined),
-  buildSSHCommand: vi.fn((keyPath: string, passphrase?: string, knownHostsPath?: string) => {
-    const knownHostsOption = knownHostsPath 
-      ? `-o UserKnownHostsFile="${knownHostsPath}" -o StrictHostKeyChecking=accept-new` 
-      : '-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null'
-    const baseCommand = `ssh -i ${keyPath} -o IdentitiesOnly=yes -o PasswordAuthentication=no ${knownHostsOption}`
-    if (passphrase) {
-      return {
-        command: `sshpass -e ${baseCommand}`,
-        env: { SSHPASS: passphrase }
-      }
-    }
-    return { command: baseCommand }
-  }),
-  buildSSHCommandWithKnownHosts: vi.fn((knownHostsPath: string) => 
-    `ssh -o UserKnownHostsFile="${knownHostsPath}" -o StrictHostKeyChecking=accept-new -o PasswordAuthentication=no`
-  ),
-}))
-
-vi.mock('../../src/utils/crypto', () => ({
-  encryptSecret: vi.fn((s: string) => `encrypted:${s}`),
-  decryptSecret: vi.fn((s: string) => {
-    if (!s.startsWith('encrypted:')) throw new Error('Decryption failed')
-    return s.slice(10)
-  }),
-}))
-
+import type { GitCredential } from '@opencode-manager/shared'
 import { GitAuthService } from '../../src/services/git-auth'
 import { encryptSecret } from '../../src/utils/crypto'
+import { createTestDatabase } from '../helpers/test-database'
 
-vi.mock('../../src/utils/logger', () => ({
-  logger: {
-    info: vi.fn(),
-    error: vi.fn(),
-    warn: vi.fn(),
-  },
-}))
+const PRIVATE_KEY = `-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+QyNTUxOQAAACBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4
+aRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAAgBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4
+aRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAADHN0cmluZy1rZXktdGVzdAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4v
+MDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWpr
+bG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaan
+qKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj
+5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w==
+-----END OPENSSH PRIVATE KEY-----`
 
-vi.mock('../ipc/ipcServer', () => ({
-  IPCServer: vi.fn(),
-}))
+function sshCredential(overrides: Partial<GitCredential> = {}): GitCredential {
+  return {
+    name: 'test-credential',
+    host: 'github.com',
+    type: 'ssh',
+    sshPrivateKeyEncrypted: encryptSecret(PRIVATE_KEY),
+    ...overrides,
+  }
+}
 
-vi.mock('../../src/ipc/askpassHandler', () => ({
-  AskpassHandler: vi.fn().mockImplementation(() => ({
-    getEnv: vi.fn().mockReturnValue({}),
-  })),
-}))
+function keyPathFrom(command: string | undefined): string | null {
+  const match = command?.match(/-i "([^"]+)"/)
+  return match?.[1] ?? null
+}
 
-vi.mock('../../src/ipc/sshHostKeyHandler', () => ({
-  SSHHostKeyHandler: vi.fn().mockImplementation(() => ({
-    initialize: vi.fn().mockResolvedValue(undefined),
-    getKnownHostsPath: vi.fn().mockReturnValue(null),
-    getEnv: vi.fn().mockReturnValue({}),
-  })),
-}))
+describe('GitAuthService SSH key setup', () => {
+  let db: Database
+  let service: GitAuthService
 
-vi.mock('../../src/services/credential-provider', () => ({
-  CredentialProvider: vi.fn().mockImplementation(() => ({
-    getGhCliEnv: vi.fn().mockReturnValue({}),
-    getSshCredentialsForHost: vi.fn().mockReturnValue([]),
-    getPatCredentialForHost: vi.fn().mockReturnValue(null),
-    getGitCredentials: vi.fn().mockReturnValue([]),
-  })),
-}))
-
-describe('GitAuthService with passphrase support', () => {
-  let gitAuthService: GitAuthService
-  let mockIpcServer: IPCServer
-  let mockDatabase: Database
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    gitAuthService = new GitAuthService()
-    mockIpcServer = {
-      registerHandler: vi.fn(),
-    } as unknown as IPCServer
-    mockDatabase = {} as Database
-    gitAuthService.initialize(mockIpcServer, mockDatabase)
+  beforeEach(async () => {
+    db = createTestDatabase()
+    service = new GitAuthService()
+    await service.initialize(undefined, db)
   })
 
-  afterEach(() => {
-    vi.clearAllMocks()
+  afterEach(async () => {
+    await service.cleanupSSHKey()
+    db.close()
   })
 
-  describe('setupSSHKey with passphrase', () => {
-    it('decrypts and stores passphrase from credential', async () => {
-      const privateKey = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4\naRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAAgBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4\naRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAADHN0cmluZy1rZXktdGVzdAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4v\nMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWpr\nbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaan\nqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj\n5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w==\n-----END OPENSSH PRIVATE KEY-----'
-      const passphrase = 'my-secret-passphrase'
-      
-      const credential: GitCredential = {
-        name: 'test-credential',
-        host: 'github.com',
-        type: 'ssh',
-        sshPrivateKeyEncrypted: encryptSecret(privateKey),
-        hasPassphrase: true,
-        passphrase: encryptSecret(passphrase),
-      }
+  it('writes the decrypted key and builds an sshpass command when the credential has a passphrase', async () => {
+    const passphrase = 'my-secret-passphrase'
 
-      await gitAuthService['setupSSHKey'](credential)
+    await service.setupSSHKey(sshCredential({ hasPassphrase: true, passphrase: encryptSecret(passphrase) }))
 
-      const sshPassphrase = gitAuthService['sshPassphrase']
-      expect(sshPassphrase).toBe(passphrase)
-    })
-
-    it('handles credential without passphrase', async () => {
-      const privateKey = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4\naRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAAgBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4\naRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAADHN0cmluZy1rZXktdGVzdAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4v\nMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWpr\nbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaan\nqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj\n5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w==\n-----END OPENSSH PRIVATE KEY-----'
-      
-      const credential: GitCredential = {
-        name: 'test-credential',
-        host: 'github.com',
-        type: 'ssh',
-        sshPrivateKeyEncrypted: encryptSecret(privateKey),
-        hasPassphrase: false,
-      }
-
-      await gitAuthService['setupSSHKey'](credential)
-
-      const sshPassphrase = gitAuthService['sshPassphrase']
-      expect(sshPassphrase).toBeNull()
-    })
-
-    it('clears previous passphrase when setting up new credential', async () => {
-      const privateKey1 = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4\naRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAAgBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4\naRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAADHN0cmluZy1rZXktdGVzdAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4v\nMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWpr\nbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaan\nqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj\n5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w==\n-----END OPENSSH PRIVATE KEY-----'
-      const passphrase1 = 'passphrase1'
-      const privateKey2 = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4\naRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAAgBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4\naRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAADHN0cmluZy1rZXktdGVzdAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4v\nMDEyMzQ1Njc4OTo7PD0+PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj\n5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w==\n-----END OPENSSH PRIVATE KEY-----'
-      const passphrase2 = 'passphrase2'
-
-      const credential1: GitCredential = {
-        name: 'test-credential-1',
-        host: 'github.com',
-        type: 'ssh',
-        sshPrivateKeyEncrypted: encryptSecret(privateKey1),
-        hasPassphrase: true,
-        passphrase: encryptSecret(passphrase1),
-      }
-
-      const credential2: GitCredential = {
-        name: 'test-credential-2',
-        host: 'gitlab.com',
-        type: 'ssh',
-        sshPrivateKeyEncrypted: encryptSecret(privateKey2),
-        hasPassphrase: true,
-        passphrase: encryptSecret(passphrase2),
-      }
-
-      await gitAuthService['setupSSHKey'](credential1)
-      expect(gitAuthService['sshPassphrase']).toBe(passphrase1)
-
-      await gitAuthService['setupSSHKey'](credential2)
-      expect(gitAuthService['sshPassphrase']).toBe(passphrase2)
-    })
-
-    it('handles decryption errors gracefully', async () => {
-      const credential: GitCredential = {
-        name: 'test-credential',
-        host: 'github.com',
-        type: 'ssh',
-        sshPrivateKeyEncrypted: 'invalid-encrypted-data',
-        hasPassphrase: true,
-        passphrase: encryptSecret('passphrase'),
-      }
-
-      await expect(gitAuthService['setupSSHKey'](credential)).rejects.toThrow()
-    })
+    const env = service.getSSHEnvironment()
+    const keyPath = keyPathFrom(env.GIT_SSH_COMMAND)
+    expect(keyPath).not.toBeNull()
+    expect(existsSync(keyPath!)).toBe(true)
+    expect(env.GIT_SSH_COMMAND).toContain('sshpass -e')
+    expect(env.SSHPASS).toBe(passphrase)
   })
 
-  describe('getSSHEnvironment', () => {
-    it('includes sshpass command when passphrase is available', async () => {
-      const privateKey = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4\naRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAAgBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4\naRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAADHN0cmluZy1rZXktdGVzdAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4v\nMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWpr\nbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaan\nqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj\n5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w==\n-----END OPENSSH PRIVATE KEY-----'
-      const passphrase = 'my-passphrase'
-      
-      const credential: GitCredential = {
-        name: 'test-credential',
-        host: 'github.com',
-        type: 'ssh',
-        sshPrivateKeyEncrypted: encryptSecret(privateKey),
-        hasPassphrase: true,
-        passphrase: encryptSecret(passphrase),
-      }
+  it('writes the key without sshpass when the credential has no passphrase', async () => {
+    await service.setupSSHKey(sshCredential({ hasPassphrase: false }))
 
-      await gitAuthService['setupSSHKey'](credential)
-      const env = gitAuthService['getSSHEnvironment']()
-
-      expect(env.GIT_SSH_COMMAND).toContain('sshpass -e')
-      expect(env.SSHPASS).toBe(passphrase)
-    })
-
-    it('does not include sshpass when passphrase is not available', async () => {
-      const privateKey = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4\naRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAAgBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4\naRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAADHN0cmluZy1rZXktdGVzdAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4v\nMDEyMzQ1Njc4OTo7PD0+PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj\n5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w==\n-----END OPENSSH PRIVATE KEY-----'
-      
-      const credential: GitCredential = {
-        name: 'test-credential',
-        host: 'github.com',
-        type: 'ssh',
-        sshPrivateKeyEncrypted: encryptSecret(privateKey),
-        hasPassphrase: false,
-      }
-
-      await gitAuthService['setupSSHKey'](credential)
-      const env = gitAuthService['getSSHEnvironment']()
-
-      expect(env.GIT_SSH_COMMAND).not.toContain('sshpass')
-    })
-
-    it('returns empty object when no SSH key is set up', () => {
-      const env = gitAuthService['getSSHEnvironment']()
-      expect(env).toEqual({})
-    })
+    const env = service.getSSHEnvironment()
+    expect(keyPathFrom(env.GIT_SSH_COMMAND)).not.toBeNull()
+    expect(env.GIT_SSH_COMMAND).not.toContain('sshpass')
+    expect(env.SSHPASS).toBeUndefined()
   })
 
-  describe('cleanupSSHKey', () => {
-    it('clears passphrase from memory', async () => {
-      const privateKey = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4\naRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAAgBmNkCQ0YDZ\niVJmHqMvK1PqjWxV4aRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAADHN0cmlu\nZy1rZXktdGVzdAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4v\nMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWpr\nbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaan\nqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj\n5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w==\n-----END OPENSSH PRIVATE KEY-----'
-      const passphrase = 'my-passphrase'
-      
-      const credential: GitCredential = {
-        name: 'test-credential',
-        host: 'github.com',
-        type: 'ssh',
-        sshPrivateKeyEncrypted: encryptSecret(privateKey),
-        hasPassphrase: true,
-        passphrase: encryptSecret(passphrase),
-      }
+  it('switches to the passphrase of the newest credential', async () => {
+    await service.setupSSHKey(sshCredential({
+      name: 'ssh-with-pass',
+      hasPassphrase: true,
+      passphrase: encryptSecret('pass1'),
+    }))
+    expect(service.getSSHEnvironment().SSHPASS).toBe('pass1')
 
-      await gitAuthService['setupSSHKey'](credential)
-      expect(gitAuthService['sshPassphrase']).toBe(passphrase)
+    await service.setupSSHKey(sshCredential({
+      name: 'ssh-no-pass',
+      hasPassphrase: false,
+    }))
+    expect(service.getSSHEnvironment().GIT_SSH_COMMAND).not.toContain('sshpass')
 
-      await gitAuthService['cleanupSSHKey']()
-      expect(gitAuthService['sshPassphrase']).toBeNull()
-    })
-
-    it('clears passphrase and key path together', async () => {
-      const privateKey = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4\naRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAAgBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4\naRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAADHN0cmluZy1rZXktdGVzdAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4v\nMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWpr\nbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaan\nqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj\n5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w==\n-----END OPENSSH PRIVATE KEY-----'
-      const passphrase = 'my-passphrase'
-      
-      const credential: GitCredential = {
-        name: 'test-credential',
-        host: 'github.com',
-        type: 'ssh',
-        sshPrivateKeyEncrypted: encryptSecret(privateKey),
-        hasPassphrase: true,
-        passphrase: encryptSecret(passphrase),
-      }
-
-      await gitAuthService['setupSSHKey'](credential)
-      expect(gitAuthService['sshPassphrase']).toBe(passphrase)
-      expect(gitAuthService['sshKeyPath']).toBeTruthy()
-
-      await gitAuthService['cleanupSSHKey']()
-      expect(gitAuthService['sshPassphrase']).toBeNull()
-      expect(gitAuthService['sshKeyPath']).toBeNull()
-    })
+    await service.setupSSHKey(sshCredential({
+      name: 'ssh-with-pass-2',
+      hasPassphrase: true,
+      passphrase: encryptSecret('pass2'),
+    }))
+    expect(service.getSSHEnvironment().SSHPASS).toBe('pass2')
   })
 
-  describe('integration with passphrase-protected keys', () => {
-    it('properly handles full SSH key lifecycle with passphrase', async () => {
-      const privateKey = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4\naRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAAgBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4\naRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAADHN0cmluZy1rZXktdGVzdAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4v\nMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWpr\nbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaan\nqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj\n5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w==\n-----END OPENSSH PRIVATE KEY-----'
-      const passphrase = 'secure-passphrase-123'
-      
-      const credential: GitCredential = {
-        name: 'production-ssh',
-        host: 'github.com',
-        type: 'ssh',
-        sshPrivateKeyEncrypted: encryptSecret(privateKey),
-        hasPassphrase: true,
-        passphrase: encryptSecret(passphrase),
-      }
+  it('rejects a credential whose encrypted key cannot be decrypted', async () => {
+    await expect(service.setupSSHKey(sshCredential({ sshPrivateKeyEncrypted: 'invalid-encrypted-data' }))).rejects.toThrow()
+  })
 
-      await gitAuthService['setupSSHKey'](credential)
-      
-      expect(gitAuthService['sshPassphrase']).toBe(passphrase)
-      expect(gitAuthService['sshKeyPath']).toBeTruthy()
+  it('removes the key file and clears the environment on cleanup', async () => {
+    await service.setupSSHKey(sshCredential({ hasPassphrase: true, passphrase: encryptSecret('my-passphrase') }))
+    const keyPath = keyPathFrom(service.getSSHEnvironment().GIT_SSH_COMMAND)
+    expect(keyPath).not.toBeNull()
 
-      const env = gitAuthService['getSSHEnvironment']()
-      expect(env.GIT_SSH_COMMAND).toContain('sshpass -e')
-      expect(env.SSHPASS).toBe(passphrase)
+    await service.cleanupSSHKey()
 
-      await gitAuthService['cleanupSSHKey']()
-      
-      expect(gitAuthService['sshPassphrase']).toBeNull()
-      expect(gitAuthService['sshKeyPath']).toBeNull()
-    })
+    expect(existsSync(keyPath!)).toBe(false)
+    expect(keyPathFrom(service.getSSHEnvironment().GIT_SSH_COMMAND)).toBeNull()
+    expect(service.getSSHEnvironment().SSHPASS).toBeUndefined()
+  })
 
-    it('handles switching between credentials with and without passphrases', async () => {
-      const validKey1 = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4\naRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAAgBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4\naRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAADHN0cmluZy1rZXktdGVzdAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4v\nMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWpr\nbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaan\nqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj\n5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w==\n-----END OPENSSH PRIVATE KEY-----'
-      const validKey2 = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4\naRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAAgBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4\naRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4aAAAADHN0cmluZy1rZXktdGVzdAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4v\nMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWpr\nbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaan\nqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj\n5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w==\n-----END OPENSSH PRIVATE KEY-----'
-      
-      const credentialWithPassphrase: GitCredential = {
-        name: 'ssh-with-pass',
-        host: 'github.com',
-        type: 'ssh',
-        sshPrivateKeyEncrypted: encryptSecret(validKey1),
-        hasPassphrase: true,
-        passphrase: encryptSecret('pass1'),
-      }
+  it('ignores a PAT credential', async () => {
+    await service.setupSSHKey({ name: 'pat', host: 'github.com', type: 'pat', token: 'ghp_token' })
 
-      const credentialWithoutPassphrase: GitCredential = {
-        name: 'ssh-no-pass',
-        host: 'gitlab.com',
-        type: 'ssh',
-        sshPrivateKeyEncrypted: encryptSecret(validKey2),
-        hasPassphrase: false,
-      }
+    expect(keyPathFrom(service.getSSHEnvironment().GIT_SSH_COMMAND)).toBeNull()
+  })
 
-      await gitAuthService['setupSSHKey'](credentialWithPassphrase)
-      const env1 = gitAuthService['getSSHEnvironment']()
-      expect(env1.GIT_SSH_COMMAND).toContain('sshpass -e')
-      expect(env1.SSHPASS).toBe('pass1')
-
-      await gitAuthService['cleanupSSHKey']()
-
-      await gitAuthService['setupSSHKey'](credentialWithoutPassphrase)
-      const env2 = gitAuthService['getSSHEnvironment']()
-      expect(env2.GIT_SSH_COMMAND).not.toContain('sshpass')
-      expect(env2.SSHPASS).toBeUndefined()
-
-      await gitAuthService['cleanupSSHKey']()
-    })
+  it('returns no key command before a key is set up', () => {
+    expect(keyPathFrom(service.getSSHEnvironment().GIT_SSH_COMMAND)).toBeNull()
   })
 })

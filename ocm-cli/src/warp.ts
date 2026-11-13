@@ -21,7 +21,7 @@ export type WarpSpawn = (
   command: string,
   args: string[],
   options: { stdio: 'inherit'; env: NodeJS.ProcessEnv },
-) => unknown
+) => void
 
 export type WarpExec = (binary: string, args: string[], env: NodeJS.ProcessEnv) => void
 
@@ -48,7 +48,6 @@ export function buildAttachInvocation(target: AttachTarget): AttachInvocation {
   }
 }
 
-/** Builds a plain local `opencode` launch with every Manager attach variable removed. */
 export function buildLocalInvocation(env: NodeJS.ProcessEnv = process.env): AttachInvocation {
   return {
     args: [],
@@ -73,8 +72,8 @@ export function runPendingWarp(spawn: WarpSpawn = spawnSync, exec: WarpExec | un
 }
 
 function defaultExec(command: string, args: string[], env: NodeJS.ProcessEnv): void {
-  if (typeof Bun === 'undefined') return
+  if (globalThis.Bun === undefined) return
   const binary = Bun.which(command)
-  if (!binary || typeof process.execve !== 'function') return
+  if (!binary || process.execve === undefined) return
   process.execve(binary, args, env)
 }

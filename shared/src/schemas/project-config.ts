@@ -36,11 +36,13 @@ export const REPO_PROJECT_ENV_MAX_ENTRIES = 100
 
 const REPO_PROJECT_ENV_RESERVED_NAMES = ['GH_TOKEN'] as const
 
+const REPO_PROJECT_ENV_RESERVED_NAME_SET: ReadonlySet<string> = new Set(REPO_PROJECT_ENV_RESERVED_NAMES)
+
 const REPO_PROJECT_ENV_RESERVED_PREFIXES = ['GITHUB_', 'GIT_'] as const
 
 function isRepoProjectEnvGitReserved(name: string): boolean {
   const normalized = name.toUpperCase()
-  if ((REPO_PROJECT_ENV_RESERVED_NAMES as readonly string[]).includes(normalized)) return true
+  if (REPO_PROJECT_ENV_RESERVED_NAME_SET.has(normalized)) return true
   return REPO_PROJECT_ENV_RESERVED_PREFIXES.some((prefix) => normalized.startsWith(prefix))
 }
 
