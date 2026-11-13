@@ -349,18 +349,19 @@ describe('OpenCodeServerManager - child environment', () => {
       ENV: '/workspace/repos/evil/envrc',
       HOME: '/tmp/evil-user-home',
     } satisfies Record<string, string>
+    const restoreEnv = applyTestEnv(
+      fromPreferences ? {} : vars,
+    )
     try {
       if (fromPreferences) {
         new SettingsService(context.db).updateSettings({
           serverEnvVars: Object.entries(vars).map(([key, value]) => ({ key, value })),
         })
-      } else {
-        for (const [key, value] of Object.entries(vars)) process.env[key] = value
       }
 
       await context.harness.manager.start()
     } finally {
-      for (const key of Object.keys(vars)) delete process.env[key]
+      restoreEnv()
     }
 
     const env = context.harness.spawnEnv()

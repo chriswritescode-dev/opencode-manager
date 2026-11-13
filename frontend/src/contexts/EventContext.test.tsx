@@ -499,14 +499,16 @@ afterEach(() => {
 describe('EventProvider permissions and forms', () => {
   it('defers authenticated bootstrap reads and the event stream until a session exists', async () => {
     const api = createApiState()
-    renderWithProviders(<Harness />, {
+    const result = renderWithProviders(<Harness />, {
       events: true,
       auth: 'anonymous',
       fetchRoutes: providerRoutes(api),
     })
 
     await waitFor(() => expect(screen.getByTestId('count')).toBeInTheDocument())
-    expect(api.permissions.length).toBe(0)
+    expect(result.fetchFake.findRequests('GET', '/api/repos')).toHaveLength(0)
+    expect(result.fetchFake.findRequests('GET', `${localApi}/permission/request`)).toHaveLength(0)
+    expect(result.eventStream?.openedUrls ?? []).toHaveLength(0)
   })
 
   it('syncs missed pending forms for a session', async () => {
