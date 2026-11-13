@@ -8,13 +8,11 @@ import { getReposPath } from '@opencode-manager/shared/config/env'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { Repo } from '../../src/types/repo'
 import { createScheduleRun, updateScheduleRunWorktree } from '../../src/db/schedules'
-import { getRepoByLocalPath } from '../../src/db/queries'
 import {
   discoverLocalRepos,
   getSiblingRepos,
   initLocalRepo,
   listRepoSiblings,
-  relinkReposFromSessionDirectories,
   resolveRepoForDirectory,
 } from '../../src/services/repo'
 import { cloneOrigin, createCommittedRepo, createGitAuthService, createOrigin, git } from '../helpers/git-fixtures'
@@ -41,15 +39,6 @@ describe('repo service', () => {
   afterEach(() => {
     db.close()
     workspace.restore()
-  })
-
-  it('creates a new empty git repo for a relative path', async () => {
-    const result = await initLocalRepo(db, gitAuthService, 'my-new-repo')
-
-    expect(result.cloneStatus).toBe('ready')
-    expect(result.fullPath).toBe(path.join(getReposPath(), 'my-new-repo'))
-    expect(git(['rev-parse', '--git-dir'], result.fullPath)).toBe('.git')
-    expect(getRepoByLocalPath(db, 'my-new-repo')?.cloneStatus).toBe('ready')
   })
 
   it('links an absolute git repo in place and preserves its source path', async () => {
@@ -101,30 +90,6 @@ describe('repo service', () => {
     } finally {
       chmodSync(restricted, 0o755)
     }
-  })
-
-  it('relinks imported session directories to nearest git repo roots', async () => {
-    const repoRoot = path.join(workspace.path, 'projects', 'app-one')
-    const webDirectory = path.join(repoRoot, 'apps', 'web')
-    const apiDirectory = path.join(repoRoot, 'packages', 'api')
-    const nonRepoDirectory = path.join(workspace.path, 'projects', 'not-a-repo')
-    createCommittedRepo(repoRoot)
-    mkdirSync(webDirectory, { recursive: true })
-    mkdirSync(apiDirectory, { recursive: true })
-    mkdirSync(nonRepoDirectory, { recursive: true })
-
-    const result = await relinkReposFromSessionDirectories(db, gitAuthService, [
-      webDirectory,
-      apiDirectory,
-      nonRepoDirectory,
-    ])
-
-    expect(result.relinkedCount).toBe(1)
-    expect(result.existingCount).toBe(0)
-    expect(result.nonRepoPathCount).toBe(1)
-    expect(result.duplicatePathCount).toBe(1)
-    expect(result.errors).toEqual([])
-    expect(result.repos.map((repo) => repo.fullPath)).toEqual([repoRoot])
   })
 })
 

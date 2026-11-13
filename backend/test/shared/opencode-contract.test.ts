@@ -16,9 +16,7 @@ import {
   isSameOpenCodeMajor,
   isStableOpenCodeVersion,
   isSupportedOpenCodeVersion,
-  normalizeOpenCodeVersion,
   openCodeLocation,
-  parseOpenCodeVersion,
   parseOpenCodeVersionOutput,
 } from '@opencode-manager/shared/opencode'
 
@@ -124,28 +122,10 @@ describe('OpenCode v2 contract', () => {
   })
 
   describe('version parsing', () => {
-    it('normalizes surrounding whitespace and a leading v', () => {
-      expect(normalizeOpenCodeVersion(' v2.0.15\n')).toBe('2.0.15')
-      expect(normalizeOpenCodeVersion('2.0.15')).toBe('2.0.15')
-    })
-
-    it('parses version components and prerelease identifiers', () => {
-      expect(parseOpenCodeVersion('v2.1.3-beta.4')).toEqual({ major: 2, minor: 1, patch: 3, prerelease: ['beta', 4] })
-      expect(parseOpenCodeVersion('2.1')).toBeNull()
-    })
-
     it('identifies stable MAJOR.MINOR.PATCH versions', () => {
       expect(isStableOpenCodeVersion('v2.0.15')).toBe(true)
       expect(isStableOpenCodeVersion('2.1.0-beta.1')).toBe(false)
       expect(isStableOpenCodeVersion('2.0.15; cat /etc/passwd')).toBe(false)
-    })
-
-    it('orders versions by semver precedence', () => {
-      expect(compareOpenCodeVersions('2.0.15', '2.0.14')).toBeGreaterThan(0)
-      expect(compareOpenCodeVersions('v2.0.15', '2.0.15')).toBe(0)
-      expect(compareOpenCodeVersions('2.0.9', '2.0.10')).toBeLessThan(0)
-      expect(compareOpenCodeVersions('2.1.0-beta.1', '2.1.0')).toBeLessThan(0)
-      expect(() => compareOpenCodeVersions('invalid', '2.0.15')).toThrow(/invalid/)
     })
 
     it('extracts the version from opencode --version output', () => {

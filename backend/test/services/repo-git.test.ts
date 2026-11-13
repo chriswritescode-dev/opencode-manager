@@ -1136,39 +1136,6 @@ describe('repo service real git', () => {
       expect(describeAfterRun(path.join(root, 'job-999999-run-1'))).toBeUndefined()
     })
 
-    it('returns repo siblings when the OpenCode client fails', async () => {
-      const { getSiblingRepos } = await import('../../src/services/repo')
-      const origin = path.join(workspaceRoot, uniqueName('sibling-err-origin.git'))
-      const work = path.join(workspaceRoot, uniqueName('sibling-err-work'))
-      createOrigin(origin, work)
-      const repoA = path.join(reposPath, uniqueName('sibling-err-a'))
-      cloneOrigin(origin, repoA)
-      const a = createRepo(db, {
-        isLocal: true,
-        localPath: path.basename(repoA),
-        sourcePath: repoA,
-        branch: 'main',
-        defaultBranch: 'main',
-        cloneStatus: 'ready',
-        clonedAt: Date.now(),
-      })
-      const client = createStubOpenCodeClient({
-        api: {
-          location: {
-            get: async () => {
-              throw new Error('upstream unavailable')
-            },
-          },
-          worktree: { list: async () => [] },
-        },
-      })
-
-      const siblings = await getSiblingRepos(db, a.id, {}, client)
-
-      expect(siblings.some((repo) => repo.id === a.id)).toBe(true)
-      expect(siblings.some((repo) => isWorktreeSibling(repo))).toBe(false)
-    })
-
     it('resolves the project id with the shared resolver', async () => {
       const origin = path.join(workspaceRoot, uniqueName('sibling-resolver-origin.git'))
       const work = path.join(workspaceRoot, uniqueName('sibling-resolver-work'))

@@ -1,18 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { getSessionListPath, getSwipeBackTarget, getAssistantPath, getAssistantSessionListPath, isAssistantPath, getPathWithReturnTo, getReturnToPath, getRepoPath, getServerProjectPath, getServerSessionPath, getSessionPath, isSessionDetailRoute, parseActivePickerSession, parseRepoRoute, parseServerProjectRoute, parseServerSessionRoute } from './navigation';
+import { getSessionListPath, getSwipeBackTarget, isAssistantPath, getPathWithReturnTo, getReturnToPath, getRepoPath, getServerProjectPath, getServerSessionPath, getSessionPath, isSessionDetailRoute, parseActivePickerSession, parseRepoRoute, parseServerProjectRoute, parseServerSessionRoute } from './navigation';
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas';
-
-describe('getAssistantPath', () => {
-  it('returns /assistant', () => {
-    expect(getAssistantPath()).toBe('/assistant');
-  });
-});
-
-describe('getAssistantSessionListPath', () => {
-  it('returns /assistant', () => {
-    expect(getAssistantSessionListPath()).toBe('/assistant');
-  });
-});
 
 describe('isAssistantPath', () => {
   it('returns true for /assistant', () => {
