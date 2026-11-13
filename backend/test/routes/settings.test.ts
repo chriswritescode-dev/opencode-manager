@@ -15,7 +15,6 @@ import { GitAuthService } from '../../src/services/git-auth'
 import { getOrCreateInternalToken } from '../../src/services/internal-token'
 import { clearOpenCodeVersionCache } from '../../src/services/opencode-installer'
 import { forceProcessAttestation } from '../../src/services/opencode/process-identity'
-import { opencodeServerManager } from '../../src/services/opencode-single-server'
 import { sseAggregator } from '../../src/services/sse-aggregator'
 import { createStubOpenCodeClient, type OpenCodeApiOverrides } from '../helpers/stub-opencode-client'
 import { createTestDatabase } from '../helpers/test-database'
@@ -130,7 +129,7 @@ describe('Settings routes', () => {
   let db: Database
   let reload: ReturnType<typeof vi.fn>
   let restart: ReturnType<typeof vi.fn>
-  let manager: SettingsRouteDependencies['openCodeManager']
+  let manager: SettingsRouteDependencies['openCodeManager'] & { isRestartPending: ReturnType<typeof vi.fn> }
   let installer: ReturnType<typeof vi.fn>
   let capability: ReturnType<typeof vi.fn>
   let resourceLimitError: ReturnType<typeof vi.fn>
@@ -185,6 +184,7 @@ describe('Settings routes', () => {
       clearStartupError: vi.fn(),
       getLastStartupError: vi.fn(() => null),
       markRestartPending: vi.fn(),
+      isRestartPending: vi.fn(() => false),
       restart: vi.fn(async () => undefined),
       checkHealth: vi.fn(async () => true),
     }
@@ -401,7 +401,7 @@ describe('Settings routes', () => {
     it('reloads a patch that names no entities while a restart is pending, and blocks entity patches', async () => {
       await writeConfig('opencode.json', '{"theme":"light"}')
       settingsApp = createApp()
-      opencodeServerManager.markRestartPending()
+      manager.isRestartPending.mockReturnValue(true)
 
       const entityRes = await settingsApp.request('/opencode-config', {
         method: 'PATCH',

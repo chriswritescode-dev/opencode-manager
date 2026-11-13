@@ -67,6 +67,7 @@ describe('opencode-proxy routes', () => {
 
   afterEach(() => {
     opencodeServerManager.setLifecycleInitialized(true)
+    opencodeServerManager.setOpenCodeClient(null)
     db.close()
   })
 

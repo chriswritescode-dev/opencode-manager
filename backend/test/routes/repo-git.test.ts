@@ -224,7 +224,7 @@ describe('repo git routes', () => {
       expect(body.status).toEqual({ ahead: 0, behind: 0 })
     })
 
-    it('returns 500 when the checkout is not a git repository', async () => {
+    it('returns 400 NOT_A_REPO when the checkout is not a git repository', async () => {
       const plainPath = path.join(workspace.path, 'repos', 'plain-branches')
       mkdirSync(plainPath, { recursive: true })
       const plain = seedRepo(db, { localPath: 'plain-branches', sourcePath: plainPath })
@@ -270,7 +270,7 @@ describe('repo git routes', () => {
       expect(body.files).toEqual([])
     })
 
-    it('returns 500 when the checkout is not a git repository', async () => {
+    it('returns 400 NOT_A_REPO when the checkout is not a git repository', async () => {
       const plainPath = path.join(workspace.path, 'repos', 'plain-discard')
       mkdirSync(plainPath, { recursive: true })
       const plain = seedRepo(db, { localPath: 'plain-discard', sourcePath: plainPath })

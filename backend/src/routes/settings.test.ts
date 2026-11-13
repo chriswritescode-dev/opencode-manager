@@ -65,6 +65,7 @@ function createSettingsDeps(): SettingsRouteDependencies {
       clearStartupError: () => undefined,
       getLastStartupError: () => null,
       markRestartPending: vi.fn(),
+      isRestartPending: () => false,
       restart: async () => undefined,
       checkHealth: async () => true,
     },

@@ -379,7 +379,7 @@ class OpenCodeServerManager {
     this.db = db
   }
 
-  setOpenCodeClient(client: OpenCodeClient) {
+  setOpenCodeClient(client: OpenCodeClient | null) {
     this.openCodeClient = client
   }
 

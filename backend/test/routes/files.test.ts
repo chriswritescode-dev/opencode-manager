@@ -252,7 +252,7 @@ describe('file routes', () => {
     })
 
     it('returns 404 when the path does not exist', async () => {
-      files.getFile.mockReturnValue(Promise.reject({ message: 'File or directory not found', statusCode: 404 }))
+      files.getFile.mockRejectedValue({ message: 'File or directory not found', statusCode: 404 })
 
       const response = await app.request('/api/files/test-repo/nonexistent.txt')
       const body = await readJson(response, ErrorResponseSchema)
@@ -264,7 +264,7 @@ describe('file routes', () => {
     it.each(['test-repo/../etc/passwd', 'test-repo/..%2Fetc'])(
       'returns the service path traversal rejection for %s',
       async (requestPath) => {
-        files.getFile.mockReturnValue(Promise.reject({ message: 'Path traversal detected', statusCode: 403 }))
+        files.getFile.mockRejectedValue({ message: 'Path traversal detected', statusCode: 403 })
 
         const response = await app.request(`/api/files/${requestPath}`)
         const body = await readJson(response, ErrorResponseSchema)
@@ -426,7 +426,7 @@ describe('file routes', () => {
     })
 
     it('maps a deletion failure to its status code', async () => {
-      files.deleteFileOrFolder.mockReturnValue(Promise.reject({ message: 'File not found', statusCode: 404 }))
+      files.deleteFileOrFolder.mockRejectedValue({ message: 'File not found', statusCode: 404 })
 
       const response = await app.request('/api/files/test-repo/nonexistent.ts', { method: 'DELETE' })
       const body = await readJson(response, ErrorResponseSchema)
@@ -457,7 +457,7 @@ describe('file routes', () => {
     })
 
     it('maps a patch failure to its status code', async () => {
-      files.applyFilePatches.mockReturnValue(Promise.reject({ message: 'Invalid patch', statusCode: 404 }))
+      files.applyFilePatches.mockRejectedValue({ message: 'Invalid patch', statusCode: 404 })
       const requestBody: FilePatchRequest = {
         patches: [{ type: 'replace', startLine: 999 }],
       }
@@ -496,7 +496,7 @@ describe('file routes', () => {
     })
 
     it('maps a rename failure to its status code', async () => {
-      files.renameOrMoveFile.mockReturnValue(Promise.reject({ message: 'File not found', statusCode: 404 }))
+      files.renameOrMoveFile.mockRejectedValue({ message: 'File not found', statusCode: 404 })
 
       const response = await app.request('/api/files/test-repo/nonexistent.ts', {
         method: 'PATCH',

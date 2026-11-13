@@ -36,21 +36,20 @@ import { expectLoggedMessage, resetTestLogs, testLogEntries } from '../../helper
 import { FAKE_MSB_SCRIPT, FAKE_MSB_STATE_ENV } from '../../helpers/fake-msb'
 import { createTestDatabase } from '../../helpers/test-database'
 import { git } from '../../helpers/git-fixtures'
+import { applyTestEnv } from '../../helpers/test-env'
 
-const originalWorkspacePath = process.env.WORKSPACE_PATH
-const originalGitConfigGlobal = process.env.GIT_CONFIG_GLOBAL
-const originalGitConfigSystem = process.env.GIT_CONFIG_SYSTEM
-const originalGitConfigNoSystem = process.env.GIT_CONFIG_NOSYSTEM
 const suiteBinDir = mkdtempSync(path.join(realpathSync(tmpdir()), 'ocm-runtime-bin-'))
 writeFileSync(path.join(suiteBinDir, 'msb'), FAKE_MSB_SCRIPT, { mode: 0o755 })
-process.env.PATH = `${suiteBinDir}${path.delimiter}${process.env.PATH ?? ''}`
-process.env.GIT_CONFIG_GLOBAL = '/dev/null'
-process.env.GIT_CONFIG_SYSTEM = '/dev/null'
-process.env.GIT_CONFIG_NOSYSTEM = '1'
-overrideSandboxExecutableTrustValidator(() => true)
 const suiteWorkspaceParent = mkdtempSync(path.join(realpathSync(tmpdir()), 'ocm-runtime-test-'))
-process.env.WORKSPACE_PATH = suiteWorkspaceParent
-process.env[FAKE_MSB_STATE_ENV] = path.join(suiteWorkspaceParent, 'fake-msb')
+const restoreTestEnv = applyTestEnv({
+  PATH: `${suiteBinDir}${path.delimiter}${process.env.PATH ?? ''}`,
+  GIT_CONFIG_GLOBAL: '/dev/null',
+  GIT_CONFIG_SYSTEM: '/dev/null',
+  GIT_CONFIG_NOSYSTEM: '1',
+  WORKSPACE_PATH: suiteWorkspaceParent,
+  [FAKE_MSB_STATE_ENV]: path.join(suiteWorkspaceParent, 'fake-msb'),
+})
+overrideSandboxExecutableTrustValidator(() => true)
 
 const reposRoot = getReposPath()
 const worktreesRoot = getScheduleWorktreesPath()
@@ -479,15 +478,8 @@ describe('SandboxRuntimeService', () => {
   })
 
   afterAll(() => {
-    if (originalWorkspacePath === undefined) delete process.env.WORKSPACE_PATH
-    else process.env.WORKSPACE_PATH = originalWorkspacePath
-    if (originalGitConfigGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL
-    else process.env.GIT_CONFIG_GLOBAL = originalGitConfigGlobal
-    if (originalGitConfigSystem === undefined) delete process.env.GIT_CONFIG_SYSTEM
-    else process.env.GIT_CONFIG_SYSTEM = originalGitConfigSystem
-    if (originalGitConfigNoSystem === undefined) delete process.env.GIT_CONFIG_NOSYSTEM
-    else process.env.GIT_CONFIG_NOSYSTEM = originalGitConfigNoSystem
-    delete process.env[FAKE_MSB_STATE_ENV]
+    restoreTestEnv()
+    overrideSandboxExecutableTrustValidator(null)
     rmSync(suiteWorkspaceParent, { recursive: true, force: true })
     rmSync(suiteBinDir, { recursive: true, force: true })
   })

@@ -74,7 +74,7 @@ import {
 export interface SettingsRouteDependencies {
   openCodeManager: Pick<
     typeof opencodeServerManager,
-    'getVersion' | 'fetchVersion' | 'clearStartupError' | 'getLastStartupError' | 'markRestartPending' | 'restart' | 'checkHealth'
+    'getVersion' | 'fetchVersion' | 'clearStartupError' | 'getLastStartupError' | 'markRestartPending' | 'isRestartPending' | 'restart' | 'checkHealth'
   >
   installOpenCodeVersion: (version: string) => Promise<string>
   detectSandboxCapability: () => SandboxCapability
@@ -528,7 +528,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     }
   })
 
-  app.route('/opencode-config', createOpenCodeConfigRoutes(settingsService, openCodeClient))
+  app.route('/opencode-config', createOpenCodeConfigRoutes(settingsService, openCodeClient, {
+    isRestartPending: () => deps.openCodeManager.isRestartPending(),
+  }))
   app.route('/remote-access-headers', createRemoteAccessHeaderRoutes(new RemoteAccessHeadersService(db)))
 
   app.post('/opencode-restart', async (c) => {

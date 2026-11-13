@@ -33,6 +33,7 @@ import { logger } from '../utils/logger'
 
 interface OpenCodeConfigRoutesOptions {
   redactSecrets?: boolean
+  isRestartPending?: () => boolean
 }
 
 async function readMcpStatus(openCodeClient: OpenCodeClient): Promise<McpStatusMap> {
@@ -70,6 +71,7 @@ export function createOpenCodeConfigRoutes(
   options: OpenCodeConfigRoutesOptions = {},
 ) {
   const app = new Hono()
+  const isRestartPending = options.isRestartPending ?? (() => opencodeServerManager.isRestartPending())
 
   app.get('/', async (c) => {
     try {
@@ -173,7 +175,7 @@ export function createOpenCodeConfigRoutes(
       return c.json({ error: 'Invalid config data', details: parsed.error.issues }, 400)
     }
 
-    if (opencodeServerManager.isRestartPending() && patchNamesOpenCodeConfigEntities(parsed.data.patch)) {
+    if (isRestartPending() && patchNamesOpenCodeConfigEntities(parsed.data.patch)) {
       return c.json({
         error: 'OpenCode has not loaded the saved configuration yet. Restart OpenCode before editing entries.',
       }, 409)

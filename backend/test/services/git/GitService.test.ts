@@ -6,13 +6,16 @@ import type { Database } from 'bun:sqlite'
 import { createRepo } from '../../../src/db/queries'
 import { createGitService, type GitService } from '../../../src/services/git/GitService'
 import type { Repo } from '../../../src/types/repo'
+import { applyTestEnv } from '../../helpers/test-env'
 import { createTestDatabase } from '../../helpers/test-database'
 import { cloneOrigin, createCommittedRepo, createGitAuthService, createOrigin, git, uniqueName } from '../../helpers/git-fixtures'
 
 const workspaceRoot = mkdtempSync(path.join(tmpdir(), 'git-service-'))
-process.env.WORKSPACE_PATH = workspaceRoot
-process.env.GIT_CONFIG_NOSYSTEM = '1'
-process.env.GIT_CONFIG_GLOBAL = '/dev/null'
+const restoreEnv = applyTestEnv({
+  WORKSPACE_PATH: workspaceRoot,
+  GIT_CONFIG_NOSYSTEM: '1',
+  GIT_CONFIG_GLOBAL: '/dev/null',
+})
 
 const reposPath = path.join(workspaceRoot, 'repos')
 
@@ -37,6 +40,7 @@ describe('GitService', () => {
   })
 
   afterAll(() => {
+    restoreEnv()
     rmSync(workspaceRoot, { recursive: true, force: true })
   })
 
