@@ -5,13 +5,13 @@ import { logger } from '../utils/logger'
 import { handleOpenCodeError } from '../utils/route-helpers'
 import {
   addRecentModel,
+  awaitOpenCodePlugins,
   removeRecentModel,
   setModelVariant,
   toggleFavoriteModel,
   type IntegrationInfo,
 } from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from '../services/opencode/client'
-import { runWhenIntegrationReady } from '../services/opencode/integration-ready'
 
 type IntegrationConnectKeyInput = NonNullable<Parameters<OpenCodeClient['api']['integration']['connect']['key']>[0]>
 import {
@@ -80,6 +80,7 @@ export function createProvidersRoutes(openCodeClient: OpenCodeClient) {
 
   app.get('/credentials', async (c) => {
     try {
+      await awaitOpenCodePlugins(openCodeClient.api)
       const integrations = await openCodeClient.api.integration.list()
       const providers = integrations.data
         .filter((integration) => credentialConnections(integration).length > 0)
@@ -93,9 +94,8 @@ export function createProvidersRoutes(openCodeClient: OpenCodeClient) {
   app.get('/:id/credentials/status', async (c) => {
     try {
       const integrationID = c.req.param('id')
-      const integration = await runWhenIntegrationReady(openCodeClient.api, { integrationID }, () =>
-        openCodeClient.api.integration.get({ integrationID }),
-      )
+      await awaitOpenCodePlugins(openCodeClient.api)
+      const integration = await openCodeClient.api.integration.get({ integrationID })
       return c.json({ hasCredentials: credentialConnections(integration.data).length > 0 })
     } catch (error) {
       return handleOpenCodeError(c, error, 'Failed to check credential status')
@@ -113,9 +113,8 @@ export function createProvidersRoutes(openCodeClient: OpenCodeClient) {
         key: validated.apiKey,
         answer: validated.answer,
       }
-      await runWhenIntegrationReady(openCodeClient.api, { integrationID }, () =>
-        openCodeClient.api.integration.connect.key(connectInput),
-      )
+      await awaitOpenCodePlugins(openCodeClient.api)
+      await openCodeClient.api.integration.connect.key(connectInput)
 
       return c.json({ success: true })
     } catch (error) {
@@ -129,9 +128,8 @@ export function createProvidersRoutes(openCodeClient: OpenCodeClient) {
   app.delete('/:id/credentials', async (c) => {
     try {
       const integrationID = c.req.param('id')
-      const integration = await runWhenIntegrationReady(openCodeClient.api, { integrationID }, () =>
-        openCodeClient.api.integration.get({ integrationID }),
-      )
+      await awaitOpenCodePlugins(openCodeClient.api)
+      const integration = await openCodeClient.api.integration.get({ integrationID })
 
       for (const connection of credentialConnections(integration.data)) {
         await openCodeClient.api.credential.remove({ credentialID: connection.id })

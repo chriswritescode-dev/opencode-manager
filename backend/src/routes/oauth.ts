@@ -5,7 +5,7 @@ import {
   OAuthCallbackRequestSchema,
 } from '../../../shared/src/schemas/auth'
 import type { OpenCodeClient } from '../services/opencode/client'
-import { runWhenIntegrationReady } from '../services/opencode/integration-ready'
+import { awaitOpenCodePlugins } from '@opencode-manager/shared/opencode'
 import { handleOpenCodeError } from '../utils/route-helpers'
 
 export function createOAuthRoutes(openCodeClient: OpenCodeClient) {
@@ -13,6 +13,7 @@ export function createOAuthRoutes(openCodeClient: OpenCodeClient) {
 
   app.get('/auth-methods', async (c) => {
     try {
+      await awaitOpenCodePlugins(openCodeClient.api)
       const integrations = await openCodeClient.api.integration.list()
       const providers = Object.fromEntries(
         integrations.data.map((integration) => [integration.id, integration.methods]),
@@ -29,13 +30,12 @@ export function createOAuthRoutes(openCodeClient: OpenCodeClient) {
       const validated = OAuthAuthorizeRequestSchema.parse(body)
 
       const integrationID = c.req.param('id')
-      const attempt = await runWhenIntegrationReady(openCodeClient.api, { integrationID }, () =>
-        openCodeClient.api.integration.oauth.connect({
-          integrationID,
-          methodID: validated.methodID,
-          answer: validated.answer,
-        }),
-      )
+      await awaitOpenCodePlugins(openCodeClient.api)
+      const attempt = await openCodeClient.api.integration.oauth.connect({
+        integrationID,
+        methodID: validated.methodID,
+        answer: validated.answer,
+      })
 
       return c.json({
         attemptID: attempt.data.attemptID,

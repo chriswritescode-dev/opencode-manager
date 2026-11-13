@@ -66,6 +66,9 @@ export function createStubOpenCodeApi(overrides: OpenCodeApiOverrides = {}): Ope
     connect: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),
   })
+  applyNamespace(api.provider, {
+    list: vi.fn(async () => ({ location: { directory: '/tmp/repo' }, data: [] })),
+  })
   applyNamespace(api.integration, {
     list: vi.fn(async () => ({ location: { directory: '/tmp/repo' }, data: [] })),
     get: vi.fn(async () => ({
@@ -106,6 +109,7 @@ export function createStubOpenCodeApi(overrides: OpenCodeApiOverrides = {}): Ope
   applyNamespace(api.location, overrides.location)
   applyNamespace(api.worktree, overrides.worktree)
   applyNamespace(api.mcp, overrides.mcp)
+  applyNamespace(api.provider, overrides.provider)
   applyNamespace(api.integration, overrides.integration)
   applyNamespace(api.credential, overrides.credential)
   applyNamespace(api.skill, overrides.skill)
