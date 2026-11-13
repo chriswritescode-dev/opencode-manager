@@ -226,13 +226,8 @@ export function OpenCodeConfigManager() {
     key: 'agents' | 'commands',
     name: string,
     value: OpenCodeAgentPatch | OpenCodeCommandPatch,
-    previousName?: string,
   ) => {
-    const entries: ManagedConfigPatch = { [name]: value }
-    if (previousName && previousName !== name) {
-      entries[previousName] = null
-    }
-    patchManagedConfigSafely({ [key]: entries })
+    patchManagedConfigSafely({ [key]: { [name]: value } })
   }
 
   const deleteManagedEntity = (key: 'agents' | 'commands', name: string) => {
@@ -434,7 +429,7 @@ export function OpenCodeConfigManager() {
                   <CommandsEditor
                     commands={managedCommands}
                     directoryCommands={directoryCommands}
-                    onSave={(name, command, previousName) => saveManagedEntity('commands', name, command, previousName)}
+                    onSave={(name, command) => saveManagedEntity('commands', name, command)}
                     onDelete={(name) => deleteManagedEntity('commands', name)}
                   />,
                 )}
@@ -467,7 +462,7 @@ export function OpenCodeConfigManager() {
                   <AgentsEditor
                     agents={managedAgents}
                     directoryAgents={directoryAgents}
-                    onSave={(name, agent, previousName) => saveManagedEntity('agents', name, agent, previousName)}
+                    onSave={(name, agent) => saveManagedEntity('agents', name, agent)}
                     onDelete={(name) => deleteManagedEntity('agents', name)}
                   />,
                 )}
