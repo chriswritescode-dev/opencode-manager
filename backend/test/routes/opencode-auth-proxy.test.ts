@@ -211,6 +211,62 @@ describe('authenticated opencode proxy routes', () => {
     expect(forwardRaw).toHaveBeenCalledTimes(1)
     expect(await forwardedJson(forwardRaw)).toEqual(body)
   })
+
+  function rpcUnavailable(): Response {
+    return new Response(
+      JSON.stringify({ _tag: 'RpcError', type: 'rpc.unavailable', message: 'RPC is unavailable: opencode.goal' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+
+  async function rpcCall(path: string): Promise<Response> {
+    return buildApp(forwardRaw).request(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: { sessionID: 'ses_1' } }),
+    })
+  }
+
+  it('retries an RPC call once while the directory instance loads its RPCs', async () => {
+    forwardRaw
+      .mockResolvedValueOnce(rpcUnavailable())
+      .mockResolvedValueOnce(new Response(JSON.stringify({ output: null }), { status: 200 }))
+
+    vi.useFakeTimers()
+    try {
+      const pending = rpcCall('/api/opencode/rpc/opencode.goal/get')
+      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(1_000)
+      const res = await pending
+      expect(res.status).toBe(200)
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(forwardRaw).toHaveBeenCalledTimes(2)
+    expect(forwardRaw.mock.calls[1]?.[0].url).toContain('/rpc/opencode.goal/get')
+  })
+
+  it('does not retry an unavailable RPC outside an RPC path', async () => {
+    forwardRaw.mockResolvedValueOnce(rpcUnavailable())
+
+    const res = await buildApp(forwardRaw).request('/api/opencode/session/ses_1/message', { method: 'POST' })
+
+    expect(res.status).toBe(400)
+    expect(forwardRaw).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not retry a different RPC failure', async () => {
+    forwardRaw.mockResolvedValueOnce(new Response(
+      JSON.stringify({ _tag: 'RpcError', type: 'rpc.failed', message: 'RPC failed' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    ))
+
+    const res = await rpcCall('/api/opencode/rpc/opencode.goal/get')
+
+    expect(res.status).toBe(400)
+    expect(forwardRaw).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('authenticated opencode proxy streaming', () => {

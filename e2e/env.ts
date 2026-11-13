@@ -43,6 +43,7 @@ export function createServerEnv() {
     WORKSPACE_PATH: path.join(E2E_TMP, 'workspace'),
     REPO_BROWSE_ROOT: path.join(E2E_TMP, 'workspace'),
     AUTH_SECRET,
+    AUTH_RATE_LIMIT_MAX: '500',
     AUTH_TRUSTED_ORIGINS: `${BASE_URL},http://localhost:${SERVER_PORT}`,
     AUTH_SECURE_COOKIES: 'false',
     PASSKEY_ORIGIN: BASE_URL,

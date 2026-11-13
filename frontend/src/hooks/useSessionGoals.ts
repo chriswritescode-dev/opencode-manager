@@ -1,6 +1,6 @@
-import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient, type Query, type QueryClient } from '@tanstack/react-query'
 import { getSessionGoal, runCommand, type RunCommandInput } from '@/api/opencode'
-import { useOpenCodeServerId } from '@/contexts/opencode-server-context'
+import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/opencode-server-context'
 import { useSyncSessionSelection } from '@/hooks/useOpenCode'
 import { serverScopedKey } from '@/lib/serverScope'
 import { showToast } from '@/lib/toast'
@@ -13,14 +13,30 @@ import {
 
 export const SESSION_GOAL_QUERY_ROOT = 'session-goal'
 
-function sessionGoalQueryKey(sessionID: string, serverId: string) {
-  return serverScopedKey([SESSION_GOAL_QUERY_ROOT, sessionID], serverId)
+const SESSION_GOAL_KEY_BASE_LENGTH = 3
+
+function sessionGoalQueryKey(sessionID: string, directory: string | undefined, serverId: string) {
+  return serverScopedKey([SESSION_GOAL_QUERY_ROOT, sessionID, directory], serverId)
+}
+
+function isSessionGoalQueryFor(query: Query, sessionID: string, serverId: string): boolean {
+  const { queryKey } = query
+  if (queryKey[0] !== SESSION_GOAL_QUERY_ROOT || queryKey[1] !== sessionID) return false
+  if (isLocalOpenCodeServer(serverId)) return queryKey.length === SESSION_GOAL_KEY_BASE_LENGTH
+  return (
+    queryKey.length === SESSION_GOAL_KEY_BASE_LENGTH + 1
+    && queryKey[SESSION_GOAL_KEY_BASE_LENGTH] === serverId
+  )
+}
+
+function sessionGoalQueryPredicate(sessionID: string, serverId: string) {
+  return (query: Query) => isSessionGoalQueryFor(query, sessionID, serverId)
 }
 
 export function useSessionGoal(sessionID: string, directory: string | undefined) {
   const serverId = useOpenCodeServerId()
   return useQuery<SessionGoalRead>({
-    queryKey: sessionGoalQueryKey(sessionID, serverId),
+    queryKey: sessionGoalQueryKey(sessionID, directory, serverId),
     queryFn: () => getSessionGoal(sessionID, directory, serverId),
     enabled: Boolean(directory),
   })
@@ -34,9 +50,9 @@ export function applySessionGoalEvent(
   const change = goalChangeFromEvent(event)
   if (!change) return false
   const nextGoal: SessionGoalRead = { supported: true, goal: change.goal }
-  const queryKey = sessionGoalQueryKey(change.sessionID, serverId)
-  void queryClient.cancelQueries({ queryKey })
-  queryClient.setQueryData<SessionGoalRead>(queryKey, nextGoal)
+  const predicate = sessionGoalQueryPredicate(change.sessionID, serverId)
+  void queryClient.cancelQueries({ predicate })
+  queryClient.setQueriesData<SessionGoalRead>({ predicate }, nextGoal)
   return true
 }
 
@@ -55,7 +71,7 @@ export function useSessionGoalCommand(directory: string | undefined) {
       await runCommand({ ...command, name: GOAL_COMMAND_NAME }, serverId)
     },
     onSuccess: (_result, input) => {
-      void queryClient.invalidateQueries({ queryKey: sessionGoalQueryKey(input.sessionID, serverId) })
+      void queryClient.invalidateQueries({ predicate: sessionGoalQueryPredicate(input.sessionID, serverId) })
     },
     onError: (error: Error) => {
       showToast.error(error.message ?? 'Goal command failed')

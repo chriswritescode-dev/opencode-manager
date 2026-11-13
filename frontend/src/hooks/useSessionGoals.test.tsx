@@ -52,7 +52,7 @@ function deferred() {
 
 describe('useSessionGoal', () => {
   it('reads the goal from the local server', async () => {
-    const { result, fetchFake } = renderHookWithProviders(() => useSessionGoal('ses_1', '/repo'), {
+    const { result, fetchFake, queryClient } = renderHookWithProviders(() => useSessionGoal('ses_1', '/repo'), {
       ...hookProviders,
       fetchRoutes: [goalRoute()],
     })
@@ -62,6 +62,8 @@ describe('useSessionGoal', () => {
     const request = fetchFake.lastRequest('POST', goalReadPath)
     expect(request?.body).toEqual({ input: { sessionID: 'ses_1' } })
     expect(request?.searchParams.get('location[directory]')).toBe('/repo')
+    expect(queryClient.getQueryData(['session-goal', 'ses_1', '/repo'])).toEqual(supportedGoal)
+    expect(queryClient.getQueryCache().find({ queryKey: ['session-goal', 'ses_1', '/other'] })).toBeUndefined()
   })
 
   it('reads the goal from the current remote server and scopes its cache key', async () => {
@@ -80,7 +82,7 @@ describe('useSessionGoal', () => {
 
     await waitFor(() => expect(result.current.data).toEqual(supportedGoal))
 
-    expect(queryClient.getQueryCache().find({ queryKey: ['session-goal', 'ses_1', 'srv_remote'] })).toBeDefined()
+    expect(queryClient.getQueryCache().find({ queryKey: ['session-goal', 'ses_1', '/repo', 'srv_remote'] })).toBeDefined()
   })
 
   it('does not poll for goal updates', async () => {
@@ -147,11 +149,42 @@ describe('applySessionGoalEvent', () => {
     expect(result.current.data).toEqual(supportedGoal)
   })
 
+  it('updates every cached goal for the session directory on the event server only', async () => {
+    const { result, queryClient } = renderHookWithProviders(() => useSessionGoal('ses_1', '/repo'), {
+      ...hookProviders,
+      fetchRoutes: [goalRoute()],
+    })
+
+    await waitFor(() => expect(result.current.data).toEqual(supportedGoal))
+
+    queryClient.setQueryData(['session-goal', 'ses_1', '/elsewhere'], supportedGoal)
+    queryClient.setQueryData(['session-goal', 'ses_2', '/repo'], supportedGoal)
+    queryClient.setQueryData(['session-goal', 'ses_1', '/repo', 'srv_remote'], supportedGoal)
+
+    await act(async () => {
+      applySessionGoalEvent(
+        queryClient,
+        { type: 'rpc.opencode.goal.changed', data: { sessionID: 'ses_1', goal: updatedGoal } },
+        'local',
+      )
+    })
+
+    const nextGoal = { supported: true, goal: updatedGoal }
+    expect(queryClient.getQueryData(['session-goal', 'ses_1', '/repo'])).toEqual(nextGoal)
+    expect(queryClient.getQueryData(['session-goal', 'ses_1', '/elsewhere'])).toEqual(nextGoal)
+    expect(queryClient.getQueryData(['session-goal', 'ses_2', '/repo'])).toEqual(supportedGoal)
+    expect(queryClient.getQueryData(['session-goal', 'ses_1', '/repo', 'srv_remote'])).toEqual(supportedGoal)
+  })
+
   it('writes the change under the event server scoped key', async () => {
     const { queryClient } = renderHookWithProviders(() => useSessionGoal('ses_1', '/repo'), {
       ...hookProviders,
       fetchRoutes: [goalRoute()],
     })
+
+    queryClient.setQueryData(['session-goal', 'ses_1', '/repo', 'srv_remote'], supportedGoal)
+    queryClient.setQueryData(['session-goal', 'ses_2', '/repo', 'srv_remote'], supportedGoal)
+    queryClient.setQueryData(['session-goal', 'ses_1', 'other', 'srv_other'], supportedGoal)
 
     await act(async () => {
       applySessionGoalEvent(
@@ -161,11 +194,13 @@ describe('applySessionGoalEvent', () => {
       )
     })
 
-    expect(queryClient.getQueryData(['session-goal', 'ses_1', 'srv_remote'])).toEqual({
+    expect(queryClient.getQueryData(['session-goal', 'ses_1', '/repo', 'srv_remote'])).toEqual({
       supported: true,
       goal: updatedGoal,
     })
-    expect(queryClient.getQueryData(['session-goal', 'ses_1'])).toEqual(supportedGoal)
+    expect(queryClient.getQueryData(['session-goal', 'ses_2', '/repo', 'srv_remote'])).toEqual(supportedGoal)
+    expect(queryClient.getQueryData(['session-goal', 'ses_1', 'other', 'srv_other'])).toEqual(supportedGoal)
+    expect(queryClient.getQueryData(['session-goal', 'ses_1', '/repo'])).toEqual(supportedGoal)
   })
 
   it('keeps the event goal when an in-flight read resolves afterwards', async () => {
@@ -175,7 +210,9 @@ describe('applySessionGoalEvent', () => {
       fetchRoutes: [goalRoute(() => pending.promise)],
     })
 
-    await waitFor(() => expect(queryClient.getQueryState(['session-goal', 'ses_1'])?.fetchStatus).toBe('fetching'))
+    await waitFor(() =>
+      expect(queryClient.getQueryState(['session-goal', 'ses_1', '/repo'])?.fetchStatus).toBe('fetching'),
+    )
 
     act(() => {
       applySessionGoalEvent(
@@ -238,6 +275,24 @@ describe('useSessionGoalCommand', () => {
     expect(paths.indexOf('/api/opencode/api/session/ses_1/agent')).toBeLessThan(
       paths.indexOf('/api/opencode/api/session/ses_1/command'),
     )
+  })
+
+  it('refetches the goal queries for the session after the command succeeds', async () => {
+    const { result, fetchFake } = renderHookWithProviders(
+      () => ({ goal: useSessionGoal('ses_1', '/repo'), command: useSessionGoalCommand('/repo') }),
+      {
+        ...hookProviders,
+        fetchRoutes: [goalRoute(), commandRoute, ...switchRoutes],
+      },
+    )
+
+    await waitFor(() => expect(fetchFake.findRequests('POST', goalReadPath)).toHaveLength(1))
+
+    await act(async () => {
+      await result.current.command.mutateAsync({ sessionID: 'ses_1', text: 'pause' })
+    })
+
+    await waitFor(() => expect(fetchFake.findRequests('POST', goalReadPath)).toHaveLength(2))
   })
 
   it('reports the command failure message', async () => {

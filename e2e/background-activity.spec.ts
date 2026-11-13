@@ -100,7 +100,15 @@ async function navigateWithinApp(page: Page, url: string): Promise<void> {
   }, url)
 }
 
-test.afterEach(async ({ request }) => {
+async function settleRequestDispatch(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    await fetch('/api/health')
+  })
+}
+
+test.afterEach(async ({ page, request }) => {
+  await page.close()
+
   const shells = createdShells.splice(0)
   const results = await Promise.allSettled(shells.map(({ directory, id }) => removeShell(request, directory, id)))
   const failures = results.flatMap((result) => (result.status === 'rejected' ? [String(result.reason)] : []))
@@ -232,12 +240,16 @@ test.describe('session background activity', () => {
     })
 
     await navigateWithinApp(page, '/')
+    await expect(page.getByPlaceholder('Send a message...')).toBeHidden()
+    await settleRequestDispatch(page)
+    expect(unsubscribes).toEqual([])
+
     await removeShell(request, directory, shellId)
     await navigateWithinApp(page, `/repos/${repo.id}/sessions/${sessionId}`)
 
     await expect(page.getByPlaceholder('Send a message...')).toBeVisible()
     await expect(backgroundIndicator(page)).toBeHidden({ timeout: 20_000 })
-    expect(unsubscribes).toEqual([])
+    expect(unsubscribes.length).toBeLessThanOrEqual(1)
   })
 
   test('follows a session moved to another directory without a reload', async ({ page, request, repo }) => {

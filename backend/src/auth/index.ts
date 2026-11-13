@@ -59,6 +59,9 @@ export function createAuth(
     database: db,
     secret: env.SECRET,
     trustedOrigins,
+    rateLimit: {
+      max: env.RATE_LIMIT_MAX,
+    },
     emailAndPassword: {
       enabled: true,
       minPasswordLength: 8,

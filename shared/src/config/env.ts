@@ -140,6 +140,7 @@ export const ENV = {
     PASSKEY_RP_ID: getEnvString('PASSKEY_RP_ID', 'localhost'),
     PASSKEY_RP_NAME: getEnvString('PASSKEY_RP_NAME', 'OpenCode Manager'),
     PASSKEY_ORIGIN: getEnvString('PASSKEY_ORIGIN', 'http://localhost:5003'),
+    RATE_LIMIT_MAX: getEnvNumber('AUTH_RATE_LIMIT_MAX', 100),
   },
 
 } as const

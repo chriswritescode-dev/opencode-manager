@@ -141,6 +141,7 @@ export async function renderPromptInput(fixture: PromptInputFixture = {}) {
           key={active.sessionID ?? 'test-session'}
           sessionID={active.sessionID ?? 'test-session'}
           directory={active.directory ?? '/test'}
+          goalDirectory={active.directory ?? '/test'}
           isSessionActive={active.isSessionActive ?? false}
           isStreamingResponse={active.isStreamingResponse ?? false}
           onScrollToBottom={() => {}}

@@ -127,6 +127,7 @@ export interface PromptInputHandle {
 
 interface PromptInputProps {
   directory?: string
+  goalDirectory: string | undefined
   sessionID: string
   onVoiceConversationActiveChange?: (active: boolean) => void
   onSuggestionsOpenChange?: (open: boolean) => void
@@ -140,6 +141,7 @@ interface PromptInputProps {
 
 export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(function PromptInput({ 
   directory,
+  goalDirectory,
   sessionID,
   onVoiceConversationActiveChange,
   onSuggestionsOpenChange,
@@ -259,7 +261,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const goalCommand = useSessionGoalCommand(directory)
   const isPromptSubmitPending = sendPrompt.isPending || sendShell.isPending || goalCommand.isPending
   const interruptSession = useInterruptSession()
-  const { data: goalRead } = useSessionGoal(sessionID, directory)
+  const { data: goalRead } = useSessionGoal(sessionID, goalDirectory)
   const { searchCommands, findCommand, recentNames } = useCommands({ directory })
   const recordCommand = useRecentCommandsStore((state) => state.recordCommand)
   const isExactCommandPrompt = (value: string) => {

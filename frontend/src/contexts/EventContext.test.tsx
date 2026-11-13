@@ -1190,16 +1190,16 @@ describe('EventProvider permissions and forms', () => {
     }
     const updatedGoal: GoalState = { ...initialGoal, rounds: 1, updatedAt: 2000 }
     const queryClient = createTestQueryClient()
-    queryClient.setQueryData(['session-goal', 'session-1'], { supported: true, goal: initialGoal })
+    queryClient.setQueryData(['session-goal', 'session-1', '/repo'], { supported: true, goal: initialGoal })
     const harness = await renderProvider({ queryClient })
 
     harness.push(goalChanged('session-1', updatedGoal, { directory: '/repo' }))
 
-    expect(queryClient.getQueryData(['session-goal', 'session-1'])).toEqual({ supported: true, goal: updatedGoal })
+    expect(queryClient.getQueryData(['session-goal', 'session-1', '/repo'])).toEqual({ supported: true, goal: updatedGoal })
 
     harness.push(sessionIdle('other', { directory: '/repo' }))
 
-    expect(queryClient.getQueryData(['session-goal', 'session-1'])).toEqual({ supported: true, goal: updatedGoal })
+    expect(queryClient.getQueryData(['session-goal', 'session-1', '/repo'])).toEqual({ supported: true, goal: updatedGoal })
   })
 
   it('invalidates the sibling caches when a branch changes outside a repo row', async () => {

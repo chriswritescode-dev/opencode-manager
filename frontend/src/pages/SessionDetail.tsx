@@ -980,7 +980,7 @@ export function SessionDetail() {
               <div className={cn(isFormSheetOpen && "shrink-0 bg-background px-[3%]")}>
                 <div className={cn(!isFormSheetOpen && "px-[3%] md:px-0")}>
                   <SessionSendErrorBanner sessionId={sessionId} isConnected={streamConnected} isReconnecting={streamReconnecting} />
-                  <SessionGoalBar sessionID={sessionId} directory={sessionDirectory} />
+                  <SessionGoalBar sessionID={sessionId} directory={resolvedDirectory} />
                   <BackgroundWorkBar
                     sessionID={sessionId}
                     directory={sessionDirectory}
@@ -994,6 +994,7 @@ export function SessionDetail() {
                     key={sessionId}
                     ref={promptInputRef}
                     directory={sessionDirectory}
+                    goalDirectory={resolvedDirectory}
                     sessionID={sessionId}
                     onVoiceConversationActiveChange={setIsVoiceConversationActive}
                     onSuggestionsOpenChange={setHasComposerSuggestions}
