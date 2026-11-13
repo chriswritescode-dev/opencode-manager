@@ -100,7 +100,7 @@ function applyRevertBoundary(
 }
 
 async function fetchCompleteSessionHistory(sessionID: string, serverId?: string): Promise<SessionMessageInfo[]> {
-  let history: SessionMessageInfo[] = []
+  const pagesNewestFirst: SessionMessageInfo[][] = []
   const seenIds = new Set<string>()
   const seenCursors = new Set<string>()
   let cursor: string | undefined
@@ -109,9 +109,9 @@ async function fetchCompleteSessionHistory(sessionID: string, serverId?: string)
     const page = await listSessionMessages(sessionID, cursor === undefined ? {} : { cursor }, serverId)
     const older = page.messages.filter((message) => !seenIds.has(message.id))
     for (const message of older) seenIds.add(message.id)
-    history = [...older, ...history]
+    pagesNewestFirst.push(older)
 
-    if (!page.nextCursor || seenCursors.has(page.nextCursor)) return history
+    if (!page.nextCursor || seenCursors.has(page.nextCursor)) return pagesNewestFirst.reverse().flat()
     seenCursors.add(page.nextCursor)
     cursor = page.nextCursor
   }

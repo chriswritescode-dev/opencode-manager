@@ -114,7 +114,7 @@ async function chooseFromLocal(
   const matchIds = new Set(matches.map((repo) => repo.repoId))
   return selectDialog<SwitchChoice>(context, 'Switch to Manager repo', [
     ...matches.map((repo) => repoOption(repo, MATCH_CATEGORY)),
-    ...repos.filter((repo) => !matchIds.has(repo.repoId)).map((repo) => repoOption(repo, REPO_CATEGORY)),
+    ...repos.flatMap((repo) => (matchIds.has(repo.repoId) ? [] : [repoOption(repo, REPO_CATEGORY)])),
   ])
 }
 

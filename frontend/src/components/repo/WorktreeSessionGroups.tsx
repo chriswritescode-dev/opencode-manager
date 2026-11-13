@@ -441,18 +441,17 @@ function buildGroupEntries(
     })
   })
 
-  const groups = worktrees
-    .filter((worktree) => ownerFilter === 'all' || worktree.worktreeSource === ownerFilter)
-    .map((worktree): WorktreeGroup => {
-      const groupSessions = sessionsByDirectory.get(worktree.fullPath) ?? []
-      return {
-        worktree,
-        directory: worktree.fullPath,
-        sessions: groupSessions,
-        lastActive: groupSessions[0]?.time.updated ?? 0,
-      }
-    })
-    .filter((group) => !hideEmpty || group.sessions.length > 0)
+  const groups = worktrees.flatMap((worktree): WorktreeGroup[] => {
+    if (ownerFilter !== 'all' && worktree.worktreeSource !== ownerFilter) return []
+    const groupSessions = sessionsByDirectory.get(worktree.fullPath) ?? []
+    const group: WorktreeGroup = {
+      worktree,
+      directory: worktree.fullPath,
+      sessions: groupSessions,
+      lastActive: groupSessions[0]?.time.updated ?? 0,
+    }
+    return !hideEmpty || groupSessions.length > 0 ? [group] : []
+  })
 
   const scheduleEntries = new Map<number, Extract<GroupEntry, { kind: 'schedule' }>>()
   const multiRunEntries = new Map<number, Extract<GroupEntry, { kind: 'multiRun' }>>()

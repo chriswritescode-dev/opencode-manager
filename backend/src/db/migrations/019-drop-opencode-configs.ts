@@ -18,9 +18,7 @@ function firstExistingConfigSourcePath(): string | null {
   const candidates = [
     process.env.OPENCODE_IMPORT_CONFIG_PATH,
     path.join(os.homedir(), '.config', 'opencode', 'opencode.json'),
-  ]
-    .filter((value): value is string => Boolean(value))
-    .map((value) => path.resolve(value))
+  ].flatMap((value) => (value ? [path.resolve(value)] : []))
 
   return Array.from(new Set(candidates)).find((candidate) => existsSync(candidate)) ?? null
 }

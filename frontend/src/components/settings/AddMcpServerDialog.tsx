@@ -27,9 +27,11 @@ interface KeyValueEntry {
 
 function toRecord(entries: KeyValueEntry[]): Record<string, string> | undefined {
   const record = Object.fromEntries(
-    entries
-      .filter((entry) => entry.key.trim() && entry.value.trim())
-      .map((entry) => [entry.key.trim(), entry.value.trim()]),
+    entries.flatMap((entry): [string, string][] => {
+      const key = entry.key.trim()
+      const value = entry.value.trim()
+      return key && value ? [[key, value]] : []
+    }),
   )
   return Object.keys(record).length > 0 ? record : undefined
 }

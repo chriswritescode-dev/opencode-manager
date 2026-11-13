@@ -533,7 +533,7 @@ export function installResizeObserver(): ResizeObserverFake {
   vi.stubGlobal('ResizeObserver', FakeResizeObserver)
 
   return {
-    observedElements: () => observations.filter((entry) => entry.element.isConnected).map((entry) => entry.element),
+    observedElements: () => observations.flatMap((entry) => (entry.element.isConnected ? [entry.element] : [])),
     reportHeight: (height) => {
       act(() => {
         for (const entry of [...observations]) {

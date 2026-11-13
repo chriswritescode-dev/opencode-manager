@@ -201,12 +201,14 @@ export class ScheduleWorktreeManager {
   ): Promise<void> {
     const sharedPath = getScheduleWorktreePath(job.id, null)
     const sharedBranch = getScheduleWorktreeBranch(job.id, null)
-    const runWorktrees = artifacts
-      .map((artifact) => artifact.worktreePath)
-      .filter((worktreePath): worktreePath is string => worktreePath !== null && worktreePath !== sharedPath)
-    const branches = artifacts
-      .map((artifact) => artifact.runBranch)
-      .filter((branch): branch is string => branch !== null && branch.length > 0 && branch !== sharedBranch)
+    const runWorktrees = artifacts.flatMap((artifact) => {
+      const worktreePath = artifact.worktreePath
+      return worktreePath !== null && worktreePath !== sharedPath ? [worktreePath] : []
+    })
+    const branches = artifacts.flatMap((artifact) => {
+      const branch = artifact.runBranch
+      return branch !== null && branch.length > 0 && branch !== sharedBranch ? [branch] : []
+    })
 
     if (runWorktrees.length === 0 && branches.length === 0) return
 

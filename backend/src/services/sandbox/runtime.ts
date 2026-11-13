@@ -993,9 +993,10 @@ async function admitVmStart(name: string, maxRunningVms: number): Promise<void> 
   if (running.length < maxRunningVms) return
 
   const execTimeoutMs = ENV.SANDBOX.EXEC_TIMEOUT_MS
-  const candidates = running
-    .map((vmName) => ({ vmName, lastUsedAt: vmStates.get(vmName)?.lastUsedAt ?? 0 }))
-    .filter((candidate) => Date.now() - candidate.lastUsedAt >= execTimeoutMs)
+  const candidates = running.flatMap((vmName) => {
+    const lastUsedAt = vmStates.get(vmName)?.lastUsedAt ?? 0
+    return Date.now() - lastUsedAt >= execTimeoutMs ? [{ vmName, lastUsedAt }] : []
+  })
   if (candidates.length === 0) {
     throw new Error(
       `${running.length} sandbox VMs are already running (the limit in Settings → Sandbox is ${maxRunningVms}) and none has been idle for ${execTimeoutMs / 60000} minutes; retry when a sandboxed command finishes or raise the limit`,
@@ -1196,9 +1197,9 @@ export class SandboxRuntimeService {
 
   private async runManagedSandboxStop(): Promise<void> {
     for (;;) {
-      const inFlight = [...vmStates.values()]
-        .map((state) => state.inFlightBoot)
-        .filter((boot): boot is Promise<void> => boot !== null)
+      const inFlight: Promise<void>[] = [...vmStates.values()].flatMap((state) =>
+        state.inFlightBoot === null ? [] : [state.inFlightBoot],
+      )
       if (inFlight.length === 0) break
       await Promise.all(inFlight.map((boot) => boot.catch(() => undefined)))
     }

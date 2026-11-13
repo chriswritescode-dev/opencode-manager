@@ -96,16 +96,14 @@ export function buildModelSections(
 
 function uniqueModelSections(sections: ModelSection[]): ModelSection[] {
   const seen = new Set<string>()
-  return sections
-    .map((section) => ({
-      ...section,
-      options: section.options.filter((option) => {
-        if (seen.has(option.value)) return false
-        seen.add(option.value)
-        return true
-      }),
-    }))
-    .filter((section) => section.options.length > 0)
+  return sections.flatMap((section): ModelSection[] => {
+    const options = section.options.filter((option) => {
+      if (seen.has(option.value)) return false
+      seen.add(option.value)
+      return true
+    })
+    return options.length > 0 ? [{ ...section, options }] : []
+  })
 }
 
 function compareSearchMatches(a: ModelOption, b: ModelOption): number {

@@ -1216,7 +1216,7 @@ describe('mirrorUpFast targets the selected repo', () => {
     await mirrorUpFast(plan, { api, force: false, onPhase: (p) => phases.push(p) })
 
     expect(phases.map((p) => p.kind)).toEqual(['bundling', 'uploading', 'uploading', 'uploading', 'processing', 'patching'])
-    const sent = phases.filter((p): p is Extract<MirrorUpFastPhase, { kind: 'uploading' }> => p.kind === 'uploading').map((p) => p.bytesSent)
+    const sent = phases.flatMap((p): number[] => (p.kind === 'uploading' ? [p.bytesSent] : []))
     expect(sent[0]).toBe(0)
     expect(sent[1]!).toBeGreaterThan(0)
     expect(sent[2]!).toBeGreaterThan(sent[1]!)

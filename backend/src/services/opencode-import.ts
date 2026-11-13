@@ -77,9 +77,7 @@ export interface ImportedSessionDirectorySummary {
 }
 
 export function getImportPathCandidates(envKey: string, fallbackPath: string): string[] {
-  const candidates = [process.env[envKey], fallbackPath]
-    .filter((value): value is string => Boolean(value))
-    .map((value) => path.resolve(value))
+  const candidates = [process.env[envKey], fallbackPath].flatMap((value) => (value ? [path.resolve(value)] : []))
 
   return Array.from(new Set(candidates))
 }
@@ -89,9 +87,10 @@ function getExistingConfigSourcePaths(): string[] {
   if (explicitPath && existsSync(path.resolve(explicitPath))) {
     return [path.resolve(explicitPath)]
   }
-  return [...OPENCODE_CONFIG_SOURCE_NAMES, LEGACY_OPENCODE_CONFIG_SOURCE_NAME]
-    .map(name => path.join(os.homedir(), '.config', 'opencode', name))
-    .filter(candidate => existsSync(candidate))
+  return [...OPENCODE_CONFIG_SOURCE_NAMES, LEGACY_OPENCODE_CONFIG_SOURCE_NAME].flatMap(name => {
+    const candidate = path.join(os.homedir(), '.config', 'opencode', name)
+    return existsSync(candidate) ? [candidate] : []
+  })
 }
 
 async function getFirstExistingPathWithDatabase(paths: string[]): Promise<string | null> {

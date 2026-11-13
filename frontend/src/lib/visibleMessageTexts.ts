@@ -8,9 +8,9 @@ export function collectVisibleAssistantTexts(
 ): string[] {
   const containerRect = container.getBoundingClientRect()
   const textById = new Map(
-    messages
-      .filter((message) => message.type === 'assistant')
-      .map((message) => [message.id, getAssistantText(message).trim()]),
+    messages.flatMap((message): [string, string][] =>
+      message.type === 'assistant' ? [[message.id, getAssistantText(message).trim()]] : [],
+    ),
   )
   return Array.from(container.querySelectorAll<HTMLElement>('[data-message-id]'))
     .filter((element) => {

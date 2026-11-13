@@ -145,7 +145,7 @@ function expandDayOfWeekExpression(expression: string): string[] | null {
     return null
   }
 
-  return weekdayOptions.filter((option) => days.has(option.value)).map((option) => option.value)
+  return weekdayOptions.flatMap((option) => (days.has(option.value) ? [option.value] : []))
 }
 
 function sortWeekdayValues(values: string[]): string[] {

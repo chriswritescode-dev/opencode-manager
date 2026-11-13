@@ -99,12 +99,13 @@ function prepareSingleSkillFiles(files: SkillInstallFile[]): PreparedSkillFiles 
   const skillDir = path.dirname(skillMd.relativePath)
   const { name, description, body } = parseSkillMarkdown(skillMd.content.toString('utf-8'))
   const prefix = skillDir === '.' ? '' : skillDir + '/'
-  const strippedFiles = normalized
-    .filter(f => f.relativePath === skillMd.relativePath || f.relativePath.startsWith(prefix))
-    .map(f => ({
+  const strippedFiles = normalized.flatMap(f => {
+    if (f.relativePath !== skillMd.relativePath && !f.relativePath.startsWith(prefix)) return []
+    return [{
       ...f,
       relativePath: skillDir === '.' ? f.relativePath : f.relativePath.substring(prefix.length),
-    }))
+    }]
+  })
   for (const f of strippedFiles) {
     const checkPath = normalizeUploadRelativePath(f.relativePath)
     if (checkPath.startsWith('..')) {

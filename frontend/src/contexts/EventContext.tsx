@@ -99,13 +99,13 @@ function usePendingSessionIDs(bySession: Record<string, unknown[]>): string[] {
 }
 
 function groupBySession<T extends SessionScopedItem>(items: T[]): Record<string, T[]> {
-  return items.reduce<Record<string, T[]>>((grouped, item) => {
-    const existing = grouped[item.sessionID] ?? []
-    return {
-      ...grouped,
-      [item.sessionID]: [...existing, item],
-    }
-  }, {})
+  const groups = new Map<string, T[]>()
+  for (const item of items) {
+    const existing = groups.get(item.sessionID)
+    if (existing) existing.push(item)
+    else groups.set(item.sessionID, [item])
+  }
+  return Object.fromEntries(groups)
 }
 
 function sortById<T extends SessionScopedItem>(items: T[]): T[] {

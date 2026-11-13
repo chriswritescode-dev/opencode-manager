@@ -13,7 +13,7 @@ export function getRepoBranchLabel(repo: Pick<Repo, 'currentBranch' | 'branch'>)
 const ORIGIN_REMOTE_PREFIX = 'remotes/origin/'
 
 export function getOriginOnlyBranchNames(branches: Pick<GitBranch, 'name' | 'type'>[]): string[] {
-  const localNames = new Set(branches.filter((b) => b.type === 'local').map((b) => b.name))
+  const localNames = new Set(branches.flatMap((b) => (b.type === 'local' ? [b.name] : [])))
   const seen = new Set<string>()
   const result: string[] = []
 
