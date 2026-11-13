@@ -508,7 +508,7 @@ describe('EventProvider permissions and forms', () => {
     await waitFor(() => expect(screen.getByTestId('count')).toBeInTheDocument())
     expect(result.fetchFake.findRequests('GET', '/api/repos')).toHaveLength(0)
     expect(result.fetchFake.findRequests('GET', `${localApi}/permission/request`)).toHaveLength(0)
-    expect(result.eventStream?.openedUrls ?? []).toHaveLength(0)
+    expect(result.eventStream?.openedUrls).toHaveLength(0)
   })
 
   it('syncs missed pending forms for a session', async () => {
