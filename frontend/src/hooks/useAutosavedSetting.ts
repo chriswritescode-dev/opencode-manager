@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
-import { useDebouncedValue } from './useDebouncedValue'
 
 export const AUTOSAVE_DELAY_MS = 800
 
@@ -44,9 +43,14 @@ export function useAutosavedSetting<TStored, TDraft, TCommitted>({
 
   const [draft, setDraft] = useState<TDraft>(() => toDraft(stored))
   const committed = useRef<TCommitted>(toCommitted(draft, undefined))
+  const pendingCommit = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     const nextDraft = handlers.current.toDraft(stored)
+    if (pendingCommit.current !== null) {
+      clearTimeout(pendingCommit.current)
+      pendingCommit.current = null
+    }
     setDraft(nextDraft)
     committed.current = handlers.current.toCommitted(nextDraft, committed.current)
   }, [stored])
@@ -60,11 +64,18 @@ export function useAutosavedSetting<TStored, TDraft, TCommitted>({
     persist(next, previous)
   }, [])
 
-  const debouncedDraft = useDebouncedValue(draft, delayMs)
-
   useEffect(() => {
-    commitDraft(debouncedDraft)
-  }, [commitDraft, debouncedDraft])
+    pendingCommit.current = setTimeout(() => {
+      pendingCommit.current = null
+      commitDraft(draft)
+    }, delayMs)
+    return () => {
+      if (pendingCommit.current !== null) {
+        clearTimeout(pendingCommit.current)
+        pendingCommit.current = null
+      }
+    }
+  }, [commitDraft, delayMs, draft])
 
   const commit = useCallback(() => {
     commitDraft(draft)

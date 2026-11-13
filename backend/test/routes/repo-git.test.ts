@@ -374,12 +374,21 @@ describe('repo git routes', () => {
       expect(diff.diff).toContain('+hello')
     })
 
-    it('fails when the commit does not exist', async () => {
-      const response = await app.request(`/${repo.id}/git/commit/${'0'.repeat(40)}`)
-      const body = await readJson(response, ErrorSchema)
+    it.each([
+      { label: 'a full-length hash', hash: '0'.repeat(40) },
+      { label: 'a short hash', hash: 'deadbeef' },
+    ])('returns 404 for $label that does not exist', async ({ hash }) => {
+      const detailsResponse = await app.request(`/${repo.id}/git/commit/${hash}`)
+      const detailsBody = await readJson(detailsResponse, ErrorSchema)
 
-      expect(response.status).toBe(500)
-      expect(body.error).not.toBe('')
+      expect(detailsResponse.status).toBe(404)
+      expect(detailsBody.error).toBe('Commit not found')
+
+      const diffResponse = await app.request(`/${repo.id}/git/commit/${hash}/diff?path=notes.txt`)
+      const diffBody = await readJson(diffResponse, ErrorSchema)
+
+      expect(diffResponse.status).toBe(404)
+      expect(diffBody.error).toBe('Commit not found')
     })
 
     it('returns 400 when the commit diff has no path', async () => {

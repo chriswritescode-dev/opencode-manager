@@ -14,6 +14,16 @@ export function isNoUpstreamError(error: Error): boolean {
   return patterns.some(pattern => pattern.test(error.message))
 }
 
+export function isUnknownRevisionError(cause: unknown): boolean {
+  const patterns = [
+    /fatal: bad object/i,
+    /unknown revision/i,
+    /bad revision/i,
+  ]
+  const message = getErrorMessage(cause)
+  return patterns.some(pattern => pattern.test(message))
+}
+
 export class GitOperationError extends Error {
   constructor(
     readonly code: GitErrorCode,

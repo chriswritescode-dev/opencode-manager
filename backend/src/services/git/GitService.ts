@@ -5,7 +5,7 @@ import { getErrorMessage } from '../../utils/error-utils'
 import { getRepoById, getRepoByDirectory, updateRepoBranch, listRepos } from '../../db/queries'
 import { updateScheduleJobsBranch } from '../../db/schedules'
 import { isSSHUrl, getBranchNameError } from '@opencode-manager/shared/utils'
-import { GitOperationError, isNoUpstreamError, parseGitError } from '../../utils/git-errors'
+import { GitOperationError, isNoUpstreamError, isUnknownRevisionError, parseGitError } from '../../utils/git-errors'
 import { listGitWorktrees, resolveMainCheckoutPath } from '../repo'
 import { MAX_COMMIT_PROMPT_DIFF_CHARS, type CommitMessageContext } from './commit-message-prompt'
 import type { Database } from 'bun:sqlite'
@@ -595,12 +595,15 @@ export class GitService {
         files
       }
     } catch (error: unknown) {
+      if (isUnknownRevisionError(error)) {
+        return null
+      }
       logger.error(`Failed to get commit details for repo ${repoId}:`, error)
       throw new Error(`Failed to get commit details: ${getErrorMessage(error)}`)
     }
   }
 
-  async getCommitDiff(repoId: number, hash: string, filePath: string, database: Database): Promise<FileDiffResponse> {
+  async getCommitDiff(repoId: number, hash: string, filePath: string, database: Database): Promise<FileDiffResponse | null> {
     try {
       const repo = getRepoById(database, repoId)
       if (!repo) {
@@ -618,6 +621,9 @@ export class GitService {
       const status = this.detectDiffStatus(diff)
       return this.parseDiffOutput(diff, status, filePath)
     } catch (error: unknown) {
+      if (isUnknownRevisionError(error)) {
+        return null
+      }
       logger.error(`Failed to get commit diff for repo ${repoId}:`, error)
       throw new Error(`Failed to get commit diff: ${getErrorMessage(error)}`)
     }

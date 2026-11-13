@@ -1002,7 +1002,6 @@ describe('SessionPickerDialog', () => {
 
       const row = await screen.findByRole('option', { name: /Remote session/ })
       expect(row).toHaveTextContent('Kitchen')
-      expect(screen.queryByRole('button', { name: 'Session actions' })).not.toBeInTheDocument()
 
       fireEvent.click(row)
 
@@ -1027,23 +1026,64 @@ describe('SessionPickerDialog', () => {
       expect(server.deletedSessionIDs()).toEqual([])
     })
 
-    it('does not arm Ctrl+D for a remote active work row despite the delete hint', async () => {
+    it('deletes a remote active work row through the owning server on a second Ctrl+D', async () => {
       const server = createSessionServer({
         repos,
         remoteServers: [kitchen],
         remoteSessions: [remoteSession],
       })
-      renderPicker(server, { remote })
+      const { fetchFake, onDeleteActiveSession } = renderPicker(server, {
+        remote,
+        activeSessionID: 'ses_remote',
+      })
       openActiveTab()
 
+      const remoteDeletePath = '/api/opencode/servers/srv_kitchen/api/session/ses_remote'
       const row = await screen.findByRole('option', { name: /Remote session/ })
       expect(row).toHaveAttribute('aria-selected', 'true')
       expect(screen.getByText(/Ctrl\+D delete/)).toBeInTheDocument()
 
       fireEvent.keyDown(combobox(), { key: 'd', ctrlKey: true })
 
-      await waitFor(() => expect(screen.queryByText(/Press Ctrl\+D/)).not.toBeInTheDocument())
-      expect(server.deletedSessionIDs()).toEqual([])
+      await waitFor(() =>
+        expect(screen.getByRole('option', { name: /Press Ctrl\+D again/ })).toBeInTheDocument(),
+      )
+      expect(fetchFake.findRequests('DELETE', remoteDeletePath)).toHaveLength(0)
+
+      fireEvent.keyDown(combobox(), { key: 'd', ctrlKey: true })
+
+      await waitFor(() => expect(fetchFake.findRequests('DELETE', remoteDeletePath)).toHaveLength(1))
+      expect(fetchFake.findRequests('DELETE', '/api/opencode/api/session/ses_remote')).toHaveLength(0)
+      await waitFor(() => expect(onDeleteActiveSession).toHaveBeenCalled())
+      await waitFor(() => expect(server.deletedSessionIDs()).toEqual(['ses_remote']))
+      await waitFor(() => expect(screen.queryByText(/Press Ctrl\+D again/)).not.toBeInTheDocument())
+    })
+
+    it('offers Delete but not Pin in a remote active work row menu', async () => {
+      const user = userEvent.setup()
+      const server = createSessionServer({
+        repos,
+        remoteServers: [kitchen],
+        remoteSessions: [remoteSession],
+      })
+      const { fetchFake } = renderPicker(server, { remote })
+      openActiveTab()
+
+      await screen.findByRole('option', { name: /Remote session/ })
+      await user.click(screen.getByRole('button', { name: 'Session actions' }))
+
+      expect(await screen.findByRole('menuitem', { name: 'Delete' })).toBeInTheDocument()
+      expect(screen.queryByRole('menuitem', { name: 'Pin' })).not.toBeInTheDocument()
+
+      await user.click(screen.getByRole('menuitem', { name: 'Delete' }))
+      const dialog = await screen.findByRole('dialog', { name: 'Delete Session' })
+      await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+
+      await waitFor(() =>
+        expect(
+          fetchFake.findRequests('DELETE', '/api/opencode/servers/srv_kitchen/api/session/ses_remote'),
+        ).toHaveLength(1),
+      )
     })
 
     it('deletes a local active work row through the local server', async () => {
@@ -1057,9 +1097,10 @@ describe('SessionPickerDialog', () => {
       const { fetchFake } = renderPicker(server, { remote })
       openActiveTab()
 
-      await screen.findByRole('option', { name: /Local task/ })
+      const localRow = await screen.findByRole('option', { name: /Local task/ })
+      const rowContainer = localRow.parentElement ?? localRow
 
-      await user.click(screen.getByRole('button', { name: 'Session actions' }))
+      await user.click(within(rowContainer).getByRole('button', { name: 'Session actions' }))
       await user.click(await screen.findByText('Delete'))
 
       const dialog = await screen.findByRole('dialog', { name: 'Delete Session' })

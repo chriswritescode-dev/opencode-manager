@@ -16,7 +16,7 @@ import {
   type OpenCodeRestartTarget,
 } from '../../src/services/opencode-restart'
 
-function lifecycleStatus(healthy: boolean): OpenCodeLifecycleStatus {
+function lifecycleStatus(healthy: boolean, lastError: string | null = healthy ? null : 'OpenCode server failed to become healthy'): OpenCodeLifecycleStatus {
   return {
     state: healthy ? 'healthy' : 'failed',
     healthy,
@@ -24,7 +24,7 @@ function lifecycleStatus(healthy: boolean): OpenCodeLifecycleStatus {
     version: '2.0.15',
     minVersion: '2.0.15',
     versionSupported: true,
-    lastError: healthy ? null : 'OpenCode server failed to become healthy',
+    lastError,
     activeRecoveryAction: null,
     attemptedRecoveryActions: [],
     nextRecoveryAction: null,
@@ -34,8 +34,8 @@ function lifecycleStatus(healthy: boolean): OpenCodeLifecycleStatus {
   }
 }
 
-function createSupervisor(healthy: boolean): OpenCodeRestartTarget {
-  return { restart: vi.fn<OpenCodeRestartTarget['restart']>(async () => lifecycleStatus(healthy)) }
+function createSupervisor(healthy: boolean, lastError: string | null = healthy ? null : 'OpenCode server failed to become healthy'): OpenCodeRestartTarget {
+  return { restart: vi.fn<OpenCodeRestartTarget['restart']>(async () => lifecycleStatus(healthy, lastError)) }
 }
 
 function createManager(): OpenCodeManagerProcess {
@@ -85,16 +85,31 @@ describe('restartOpenCode', () => {
     expect(supervisor.restart).toHaveBeenCalledWith('settings_restart')
   })
 
-  it('throws with the startup failure reason when the supervisor restart is unhealthy', async () => {
+  it('throws with the supervisor failure reason when the supervisor restart is unhealthy', async () => {
+    const supervisor = createSupervisor(false, 'supervisor-specific failure')
+
+    await expect(restartOpenCode(supervisor, 'settings_restart', createManager()))
+      .rejects.toThrow('supervisor-specific failure')
+  })
+
+  it('falls back to the startup failure reason when the supervisor reports no error', async () => {
     const manager = createManager()
     vi.mocked(manager.getLastStartupError).mockReturnValue('OpenCode server failed to become healthy')
 
-    await expect(restartOpenCode(createSupervisor(false), 'settings_restart', manager))
+    await expect(restartOpenCode(createSupervisor(false, null), 'settings_restart', manager))
       .rejects.toThrow('OpenCode server failed to become healthy')
   })
 
-  it('uses a generic failure message when no startup error is recorded', async () => {
-    await expect(restartOpenCode(createSupervisor(false), 'settings_restart', createManager())).rejects.toThrow(
+  it('prefers the supervisor failure over the manager startup error', async () => {
+    const manager = createManager()
+    vi.mocked(manager.getLastStartupError).mockReturnValue('startup error from the manager')
+
+    await expect(restartOpenCode(createSupervisor(false, 'supervisor-specific failure'), 'settings_restart', manager))
+      .rejects.toThrow('supervisor-specific failure')
+  })
+
+  it('uses a generic failure message when neither the supervisor nor the manager reports an error', async () => {
+    await expect(restartOpenCode(createSupervisor(false, null), 'settings_restart', createManager())).rejects.toThrow(
       'OpenCode server restart did not complete successfully',
     )
   })

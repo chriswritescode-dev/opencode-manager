@@ -1,12 +1,13 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { z } from 'zod'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { format, startOfDay } from 'date-fns'
 import { ChevronsUpDown, MoreHorizontal, Pin, PinOff, Plus } from 'lucide-react'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
 import { useOpenCodeServerId } from '@/contexts/opencode-server-context'
 import { openCodeLocationQueryOptions } from '@/lib/openCodeLocation'
+import { deleteSession as deleteSessionOnServer } from '@/api/opencode'
 import type { Repo, Session } from '@/api/types'
 import { ACTIVE_WORK_GROUPS, MS_PER_MINUTE, formatActivityEmptyMessage } from '@/lib/activeWork'
 import { Button } from '@/components/ui/button'
@@ -30,6 +31,8 @@ import { partitionSessions } from '@/components/session/session-partition'
 import { buildRepoByDirectory, isRepoReady } from '@/components/navigation/sidebar-session-tree'
 import { useDeleteSession } from '@/hooks/useOpenCode'
 import { useActiveWork, useActivityWindowMinutes } from '@/hooks/useActiveWork'
+import { activeWorkSessionsQueryKey } from '@/lib/queryInvalidation'
+import { showToast } from '@/lib/toast'
 import { useSessionSearch } from '@/hooks/useSessionSearch'
 import { useSessionPins, useToggleSessionPin } from '@/hooks/useSessionPins'
 import { usePersistentBoolean } from '@/hooks/usePersistentBoolean'
@@ -205,7 +208,7 @@ interface SessionPickerRowItemProps {
   onOpen: (row: SessionPickerRow) => void
   onHover: (index: number) => void
   onTogglePin: (row: SessionPickerRow) => void
-  onRequestDelete: (session: Session) => void
+  onRequestDelete: (row: SessionPickerRow) => void
   registerRef: (key: string, node: HTMLDivElement | null) => void
 }
 
@@ -287,7 +290,7 @@ const SessionPickerRowItem = memo(function SessionPickerRowItem({
         </span>
       </div>
       <div className="flex shrink-0 items-center pr-1">
-        {row.serverId || !showActions ? null : <DropdownMenu>
+        {showActions ? <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
               type="button"
@@ -303,13 +306,15 @@ const SessionPickerRowItem = memo(function SessionPickerRowItem({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="z-[200]" onClick={(event) => event.stopPropagation()}>
-            <DropdownMenuItem onClick={() => onTogglePin(row)}>
-              {isPinned ? <PinOff className="h-4 w-4 mr-2" /> : <Pin className="h-4 w-4 mr-2" />}
-              {isPinned ? 'Unpin' : 'Pin'}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onRequestDelete(row.session)}>Delete</DropdownMenuItem>
+            {row.serverId ? null : (
+              <DropdownMenuItem onClick={() => onTogglePin(row)}>
+                {isPinned ? <PinOff className="h-4 w-4 mr-2" /> : <Pin className="h-4 w-4 mr-2" />}
+                {isPinned ? 'Unpin' : 'Pin'}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onClick={() => onRequestDelete(row)}>Delete</DropdownMenuItem>
           </DropdownMenuContent>
-        </DropdownMenu>}
+        </DropdownMenu> : null}
       </div>
     </div>
   )
@@ -330,7 +335,7 @@ interface SessionPickerRowActions {
   openRow: (row: SessionPickerRow | undefined) => void
   deleteRow: (row: SessionPickerRow | undefined) => void
   handleTogglePin: (row: SessionPickerRow) => void
-  handleRequestDelete: (session: Session) => void
+  handleRequestDelete: (row: SessionPickerRow) => void
   deleteDialogProps: {
     open: boolean
     onOpenChange: (open: boolean) => void
@@ -351,7 +356,9 @@ function useSessionPickerRowActions({
   const togglePin = useToggleSessionPin()
   const pinnedKeys = useMemo(() => buildPinnedSessionKeys(sessionPins ?? []), [sessionPins])
   const deleteSession = useDeleteSession(directories)
-  const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null)
+  const queryClient = useQueryClient()
+  const [rowToDelete, setRowToDelete] = useState<SessionPickerRow | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null)
 
   const clearPendingDelete = useCallback(() => {
@@ -371,23 +378,37 @@ function useSessionPickerRowActions({
   )
 
   const performDelete = useCallback(
-    (session: Session) => {
-      if (session.id === activeSessionID) onDeleteActiveSession()
-      return deleteSession
-        .mutateAsync({ id: session.id, directory: session.location.directory })
-        .catch(() => undefined)
+    async (row: SessionPickerRow) => {
+      if (row.session.id === activeSessionID) onDeleteActiveSession()
+      const serverId = row.serverId
+      if (!serverId) {
+        await deleteSession
+          .mutateAsync({ id: row.session.id, directory: row.session.location.directory })
+          .catch(() => undefined)
+        return
+      }
+      setIsDeleting(true)
+      try {
+        await deleteSessionOnServer(row.session.id, serverId)
+        showToast.success('Session deleted')
+      } catch {
+        showToast.error('Failed to delete sessions')
+      } finally {
+        setIsDeleting(false)
+        void queryClient.invalidateQueries({ queryKey: activeWorkSessionsQueryKey(serverId) })
+      }
     },
-    [deleteSession, activeSessionID, onDeleteActiveSession],
+    [deleteSession, activeSessionID, onDeleteActiveSession, queryClient],
   )
 
   const deleteRow = useCallback(
     (row: SessionPickerRow | undefined) => {
-      if (!row || row.serverId) return
+      if (!row) return
       if (pendingDeleteKey !== row.key) {
         setPendingDeleteKey(row.key)
         return
       }
-      void performDelete(row.session).finally(() => {
+      void performDelete(row).finally(() => {
         setPendingDeleteKey(null)
       })
     },
@@ -406,30 +427,30 @@ function useSessionPickerRowActions({
     [togglePin, pinnedKeys],
   )
 
-  const handleRequestDelete = useCallback((session: Session) => {
-    setSessionToDelete(session)
+  const handleRequestDelete = useCallback((row: SessionPickerRow) => {
+    setRowToDelete(row)
   }, [])
 
   const confirmDelete = useCallback(() => {
-    if (!sessionToDelete) return
-    void performDelete(sessionToDelete).finally(() => {
-      setSessionToDelete(null)
+    if (!rowToDelete) return
+    void performDelete(rowToDelete).finally(() => {
+      setRowToDelete(null)
     })
-  }, [sessionToDelete, performDelete])
+  }, [rowToDelete, performDelete])
 
   const deleteDialogProps = useMemo(
     () => ({
-      open: sessionToDelete !== null,
+      open: rowToDelete !== null,
       onOpenChange: (nextOpen: boolean) => {
-        if (!nextOpen) setSessionToDelete(null)
+        if (!nextOpen) setRowToDelete(null)
       },
       onConfirm: () => {
         void confirmDelete()
       },
-      onCancel: () => setSessionToDelete(null),
-      isDeleting: deleteSession.isPending,
+      onCancel: () => setRowToDelete(null),
+      isDeleting: deleteSession.isPending || isDeleting,
     }),
-    [sessionToDelete, confirmDelete, deleteSession.isPending],
+    [rowToDelete, confirmDelete, deleteSession.isPending, isDeleting],
   )
 
   return {
@@ -462,7 +483,7 @@ interface SessionPickerListProps {
   onOpenRow: (row: SessionPickerRow) => void
   onHoverRow: (index: number) => void
   onTogglePin: (row: SessionPickerRow) => void
-  onRequestDelete: (session: Session) => void
+  onRequestDelete: (row: SessionPickerRow) => void
   registerRef: (key: string, node: HTMLDivElement | null) => void
   listRef?: React.RefObject<HTMLDivElement | null>
   onScroll?: (event: React.UIEvent<HTMLDivElement>) => void

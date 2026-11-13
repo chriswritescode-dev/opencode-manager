@@ -570,10 +570,13 @@ describe('GitService', () => {
       await expect(service.getCommitDetails(4242, 'HEAD', db)).rejects.toThrow('Repository not found')
     })
 
-    it('throws for an unknown hash', async () => {
+    it.each([
+      { label: 'a short hash', hash: 'does-not-exist' },
+      { label: 'a full-length hash', hash: '0'.repeat(40) },
+    ])('returns null for $label that does not exist', async ({ hash }) => {
       const repo = initRepo()
 
-      await expect(service.getCommitDetails(repo.id, 'does-not-exist', db)).rejects.toThrow('Failed to get commit details')
+      expect(await service.getCommitDetails(repo.id, hash, db)).toBeNull()
     })
   })
 
@@ -588,12 +591,12 @@ describe('GitService', () => {
 
       const diff = await service.getCommitDiff(repo.id, hash, 'file.ts', db)
 
-      expect(diff.path).toBe('file.ts')
-      expect(diff.status).toBe('modified')
-      expect(diff.diff).toContain('+new line')
-      expect(diff.additions).toBe(1)
-      expect(diff.deletions).toBe(1)
-      expect(diff.isBinary).toBe(false)
+      expect(diff?.path).toBe('file.ts')
+      expect(diff?.status).toBe('modified')
+      expect(diff?.diff).toContain('+new line')
+      expect(diff?.additions).toBe(1)
+      expect(diff?.deletions).toBe(1)
+      expect(diff?.isBinary).toBe(false)
     })
 
     it('reports a binary file', async () => {
@@ -608,8 +611,8 @@ describe('GitService', () => {
 
       const diff = await service.getCommitDiff(repo.id, hash, 'image.bin', db)
 
-      expect(diff.isBinary).toBe(true)
-      expect(diff.diff).toContain('Binary files')
+      expect(diff?.isBinary).toBe(true)
+      expect(diff?.diff).toContain('Binary files')
     })
 
     it('counts the deleted lines of a file removed in the commit', async () => {
@@ -622,19 +625,22 @@ describe('GitService', () => {
 
       const diff = await service.getCommitDiff(repo.id, hash, 'removed.txt', db)
 
-      expect(diff.status).toBe('deleted')
-      expect(diff.deletions).toBe(3)
-      expect(diff.additions).toBe(0)
+      expect(diff?.status).toBe('deleted')
+      expect(diff?.deletions).toBe(3)
+      expect(diff?.additions).toBe(0)
     })
 
     it('throws for an unknown repository', async () => {
       await expect(service.getCommitDiff(4242, 'HEAD', 'file.ts', db)).rejects.toThrow('Repository not found')
     })
 
-    it('throws for an unknown hash', async () => {
+    it.each([
+      { label: 'a short hash', hash: 'does-not-exist' },
+      { label: 'a full-length hash', hash: '0'.repeat(40) },
+    ])('returns null for $label that does not exist', async ({ hash }) => {
       const repo = initRepo()
 
-      await expect(service.getCommitDiff(repo.id, 'does-not-exist', 'file.ts', db)).rejects.toThrow('Failed to get commit diff')
+      expect(await service.getCommitDiff(repo.id, hash, 'file.ts', db)).toBeNull()
     })
   })
 })

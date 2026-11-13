@@ -278,6 +278,11 @@ export function createRepoGitRoutes(
     }
 
     const diff = await git.getCommitDiff(id, hash, filePath, database)
+
+    if (!diff) {
+      return c.json({ error: 'Commit not found' }, 404)
+    }
+
     return c.json(diff)
   }))
 

@@ -33,22 +33,28 @@ export interface OpenCodeManagerProcess {
   getLastStartupError: () => string | null
 }
 
-function restartFailureError(manager: OpenCodeManagerProcess): Error {
-  const startupError = manager.getLastStartupError()
-  return new Error(startupError ?? 'OpenCode server restart did not complete successfully')
+interface RestartOutcome {
+  healthy: boolean
+  error: string | null
+}
+
+function restartFailureError(manager: OpenCodeManagerProcess, supervisorError: string | null): Error {
+  const reason = supervisorError ?? manager.getLastStartupError()
+  return new Error(reason ?? 'OpenCode server restart did not complete successfully')
 }
 
 async function restartServer(
   supervisor: OpenCodeRestartTarget | undefined,
   reason: OpenCodeOperationReason,
   manager: OpenCodeManagerProcess,
-): Promise<boolean> {
+): Promise<RestartOutcome> {
   if (supervisor) {
-    return (await supervisor.restart(reason)).healthy
+    const status = await supervisor.restart(reason)
+    return { healthy: status.healthy, error: status.lastError }
   }
   manager.clearStartupError()
   await manager.restart()
-  return manager.checkHealth()
+  return { healthy: await manager.checkHealth(), error: null }
 }
 
 export async function restartOpenCode(
@@ -56,9 +62,9 @@ export async function restartOpenCode(
   reason: OpenCodeOperationReason = 'settings_restart',
   manager: OpenCodeManagerProcess = opencodeServerManager,
 ): Promise<void> {
-  const healthy = await restartServer(supervisor, reason, manager)
-  if (!healthy) {
-    throw restartFailureError(manager)
+  const outcome = await restartServer(supervisor, reason, manager)
+  if (!outcome.healthy) {
+    throw restartFailureError(manager, outcome.error)
   }
 }
 
