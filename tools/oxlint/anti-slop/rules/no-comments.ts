@@ -11,7 +11,7 @@ export const noCommentsRule = defineRule({
         "Remove this comment. Express intent through names, types, and tests instead of comments.",
     },
   },
-  create(context) {
+  createOnce(context) {
     return {
       Program() {
         for (const comment of context.sourceCode.getAllComments()) {

@@ -2,6 +2,7 @@ import { defineRule } from "@oxlint/plugins";
 
 import { isGlobalReflectMethodCall } from "../shared/reflect-method.ts";
 
+/** Ban Reflect.get, which bypasses ordinary property access and useful type evidence. */
 export const noReflectGetRule = defineRule({
   meta: {
     type: "problem",
@@ -14,7 +15,7 @@ export const noReflectGetRule = defineRule({
         "Replace `Reflect.get` with typed property access. Parse dynamic input into a named domain type before reading it.",
     },
   },
-  create(context) {
+  createOnce(context) {
     return {
       CallExpression(node) {
         if (node.callee.type === "Super" || node.callee.type === "V8IntrinsicExpression") return;

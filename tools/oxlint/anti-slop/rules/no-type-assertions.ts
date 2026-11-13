@@ -24,7 +24,7 @@ export const noTypeAssertionsRule = defineRule({
         "This assertion discards type evidence. Keep the precise type through inference, validate with `satisfies`, or parse untrusted input at its boundary.",
     },
   },
-  create(context) {
+  createOnce(context) {
     const checkAssertion = (node: TypeAssertion) => {
       if (isConstAssertion(node)) return;
       context.report({ node, messageId: "typeAssertion" });

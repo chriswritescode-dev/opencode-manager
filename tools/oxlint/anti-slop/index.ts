@@ -1,5 +1,7 @@
-import { definePlugin } from "@oxlint/plugins";
+import { eslintCompatPlugin } from "@oxlint/plugins";
 
+import { noArrayFilterMapRule } from "./rules/no-array-filter-map.ts";
+import { noReduceAccumulatorCopyRule } from "./rules/no-reduce-accumulator-copy.ts";
 import { noChainedTypeAssertionsRule } from "./rules/no-chained-type-assertions.ts";
 import { noCommentsRule } from "./rules/no-comments.ts";
 import { noConditionalEmptyObjectSpreadRule } from "./rules/no-conditional-empty-object-spread.ts";
@@ -16,10 +18,15 @@ import { noUnknownReturnsRule } from "./rules/no-unknown-returns.ts";
 import { noUnknownTypeAliasesRule } from "./rules/no-unknown-type-aliases.ts";
 import { noUnsafeDictionaryTypeRule } from "./rules/no-unsafe-dictionary-type.ts";
 import { noWidenThenAssertRule } from "./rules/no-widen-then-assert.ts";
+import { requireReadableSpacingRule } from "./rules/require-readable-spacing.ts";
+import { requireSafetyCommentForTypeAssertionRule } from "./rules/require-safety-comment-for-type-assertion.ts";
 
-const antiSlopPlugin = definePlugin({
+/** Generic Oxlint rules that reject low-evidence and low-signal implementation patterns. */
+const antiSlopPlugin = eslintCompatPlugin({
 	meta: { name: "anti-slop" },
 	rules: {
+		"no-array-filter-map": noArrayFilterMapRule,
+		"no-reduce-accumulator-copy": noReduceAccumulatorCopyRule,
 		"no-chained-type-assertions": noChainedTypeAssertionsRule,
 		"no-comments": noCommentsRule,
 		"no-conditional-empty-object-spread": noConditionalEmptyObjectSpreadRule,
@@ -29,13 +36,15 @@ const antiSlopPlugin = definePlugin({
 		"no-reflect-apply": noReflectApplyRule,
 		"no-reflect-get": noReflectGetRule,
 		"no-runtime-typeof": noRuntimeTypeofRule,
+		"no-unsafe-dictionary-type": noUnsafeDictionaryTypeRule,
 		"no-shape-in-symbol-names": noForbiddenTermInSymbolNamesRule,
 		"no-type-assertions": noTypeAssertionsRule,
 		"no-unknown-parameters": noUnknownParametersRule,
 		"no-unknown-returns": noUnknownReturnsRule,
 		"no-unknown-type-aliases": noUnknownTypeAliasesRule,
-		"no-unsafe-dictionary-type": noUnsafeDictionaryTypeRule,
 		"no-widen-then-assert": noWidenThenAssertRule,
+		"require-readable-spacing": requireReadableSpacingRule,
+		"require-safety-comment-for-type-assertion": requireSafetyCommentForTypeAssertionRule,
 	},
 });
 

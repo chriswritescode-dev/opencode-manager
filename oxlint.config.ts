@@ -69,6 +69,9 @@ const recommendedRules = {
 }
 
 const antiSlopRules = {
+  "oxc/no-accumulating-spread": "error",
+  "anti-slop/no-array-filter-map": "error",
+  "anti-slop/no-reduce-accumulator-copy": "error",
   "anti-slop/no-chained-type-assertions": "error",
   "anti-slop/no-comments": "error",
   "anti-slop/no-conditional-empty-object-spread": "error",
@@ -93,12 +96,24 @@ const unusedVarsWithUnderscorePattern = [
 ]
 
 export default defineConfig({
-  plugins: ["eslint", "typescript", "react"],
+  plugins: ["eslint", "typescript", "react", "oxc"],
   categories: { correctness: "off" },
   jsPlugins: [
     { name: "anti-slop", specifier: "./tools/oxlint/anti-slop/index.ts" },
   ],
   ignorePatterns: [
+    ".agent/**",
+    ".agents/**",
+    ".claude/**",
+    ".codex/**",
+    ".continue/**",
+    ".cursor/**",
+    ".gemini/**",
+    ".opencode/**",
+    ".pi/**",
+    ".roo/**",
+    ".windsurf/**",
+    "tools/oxlint/anti-slop/**",
     "**/dist/**",
     "**/coverage/**",
     "**/node_modules/**",

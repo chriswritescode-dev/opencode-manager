@@ -2,16 +2,13 @@ import { defineRule } from "@oxlint/plugins";
 
 import type { ESTree } from "@oxlint/plugins";
 
-function referencedAliasName(type: ESTree.TSType): string | null {
-	if (type.type === "TSParenthesizedType") return referencedAliasName(type.typeAnnotation);
-	if (type.type !== "TSTypeReference" || type.typeName.type !== "Identifier") return null;
-	return type.typeArguments === null ||
-		type.typeArguments === undefined ||
-		type.typeArguments.params.length === 0
-		? type.typeName.name
-		: null;
-}
+import {
+	createTypeAliasEnvironment,
+	resolvedTypeMatches,
+	type TypeAliasEnvironment,
+} from "../shared/type-alias-resolution.ts";
 
+/** Ban named aliases that merely conceal TypeScript's unknown top type. */
 export const noUnknownTypeAliasesRule = defineRule({
 	meta: {
 		type: "problem",
@@ -24,44 +21,33 @@ export const noUnknownTypeAliasesRule = defineRule({
 				"Type alias `{{alias}}` hides `unknown`. Keep `unknown` explicit at the parsing boundary or on an allowed `cause` field; otherwise use the parsed owner type.",
 		},
 	},
-	create(context) {
-		const aliases = new Map<string, ESTree.TSTypeAliasDeclaration>();
+	createOnce(context) {
+		let environment: TypeAliasEnvironment | null = null;
 
-		const resolvesToUnknown = (type: ESTree.TSType, visited = new Set<string>()): boolean => {
-			if (type.type === "TSUnknownKeyword") return true;
-			if (type.type === "TSParenthesizedType")
-				return resolvesToUnknown(type.typeAnnotation, visited);
-			const name = referencedAliasName(type);
-			if (name === null || visited.has(name)) return false;
-			const alias = aliases.get(name);
-			if (
-				alias === undefined ||
-				(alias.typeParameters !== null && alias.typeParameters !== undefined)
-			) {
-				return false;
-			}
-			const nextVisited = new Set(visited);
-			nextVisited.add(name);
-			return resolvesToUnknown(alias.typeAnnotation, nextVisited);
-		};
+		const resolvesToUnknown = (type: ESTree.TSType): boolean =>
+			environment !== null &&
+			resolvedTypeMatches(type, environment, (resolved, matches) => {
+				if (resolved.type === "TSUnknownKeyword") return true;
+				if (resolved.type === "TSParenthesizedType") {
+					return matches(resolved.typeAnnotation);
+				}
+				return resolved.type === "TSUnionType" && resolved.types.some(matches);
+			});
 
 		return {
 			Program(node) {
-				for (const statement of node.body) {
-					const declaration =
-						statement.type === "ExportNamedDeclaration" ? statement.declaration : statement;
-					if (declaration?.type === "TSTypeAliasDeclaration") {
-						aliases.set(declaration.id.name, declaration);
-					}
-				}
-				for (const alias of aliases.values()) {
-					if (!resolvesToUnknown(alias.typeAnnotation, new Set([alias.id.name]))) continue;
-					context.report({
-						node: alias.id,
-						messageId: "unknownAlias",
-						data: { alias: alias.id.name },
-					});
-				}
+				environment = createTypeAliasEnvironment(
+					node,
+					context.sourceCode.visitorKeys,
+				);
+			},
+			TSTypeAliasDeclaration(node) {
+				if (!resolvesToUnknown(node.typeAnnotation)) return;
+				context.report({
+					node: node.id,
+					messageId: "unknownAlias",
+					data: { alias: node.id.name },
+				});
 			},
 		};
 	},

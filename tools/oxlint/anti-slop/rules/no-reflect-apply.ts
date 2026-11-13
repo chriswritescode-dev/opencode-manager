@@ -2,6 +2,7 @@ import { defineRule } from "@oxlint/plugins";
 
 import { isGlobalReflectMethodCall } from "../shared/reflect-method.ts";
 
+/** Ban Reflect.apply, which bypasses ordinary typed function calls. */
 export const noReflectApplyRule = defineRule({
   meta: {
     type: "problem",
@@ -14,7 +15,7 @@ export const noReflectApplyRule = defineRule({
         "Replace `Reflect.apply` with a typed function call. Model dynamic dispatch behind a named interface.",
     },
   },
-  create(context) {
+  createOnce(context) {
     return {
       CallExpression(node) {
         if (node.callee.type === "Super" || node.callee.type === "V8IntrinsicExpression") return;
