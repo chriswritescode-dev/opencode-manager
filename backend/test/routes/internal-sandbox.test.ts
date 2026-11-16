@@ -47,7 +47,7 @@ const SandboxPlanSchema = z.union([
 
 const BlockedPlanSchema = z.object({ mode: z.literal('blocked'), reason: z.string() })
 const ErrorResponseSchema = z.object({ error: z.string() })
-const ClaimSchema = z.object({ sandboxed: z.boolean(), source: z.string(), since: z.number() })
+const ClaimSchema = z.object({ sandboxed: z.boolean() })
 
 interface ShellRequestBody {
   directory: string
@@ -152,7 +152,7 @@ describe('internal sandbox routes', () => {
       available: true,
     }
     return {
-      getClaim: async () => ({ sandboxed: false, source: 'default', since: 0 }),
+      getClaim: async () => ({ sandboxed: false }),
       getState: async () => state,
       resolveShellTarget: async () => ({
         rootSessionId: ROOT_SESSION_ID,
@@ -327,7 +327,7 @@ describe('internal sandbox routes', () => {
     const body = await readJson(res, ClaimSchema)
 
     expect(res.status).toBe(200)
-    expect(body).toEqual({ sandboxed: false, source: 'default', since: 0 })
+    expect(body).toEqual({ sandboxed: false })
   })
 
   it('GET /sessions/:sessionId reports sandboxed when the sandbox preference is on', async () => {
@@ -337,7 +337,7 @@ describe('internal sandbox routes', () => {
     const body = await readJson(res, ClaimSchema)
 
     expect(res.status).toBe(200)
-    expect(body).toEqual({ sandboxed: true, source: 'default', since: 0 })
+    expect(body).toEqual({ sandboxed: true })
   })
 
   it('GET /sessions/:sessionId returns 500 with an error when the service fails', async () => {

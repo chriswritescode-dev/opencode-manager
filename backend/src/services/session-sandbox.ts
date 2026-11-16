@@ -88,19 +88,14 @@ export class SessionSandboxService {
   }
 
   async getClaim(sessionId: string): Promise<SessionSandboxClaim> {
-    const available = this.sandboxSupported()
     const rootSessionId = await this.ancestry.resolveRootSessionId(sessionId)
 
-    if (!available) {
-      return { sandboxed: false, source: 'default', since: 0 }
+    if (!this.sandboxSupported()) {
+      return { sandboxed: false }
     }
 
     const stored = getSessionSandboxMode(this.db, rootSessionId)
-    if (!stored) {
-      return { sandboxed: this.defaultSandboxed(), source: 'default', since: 0 }
-    }
-
-    return { sandboxed: stored.sandboxed, source: stored.source, since: stored.toggledAt }
+    return { sandboxed: stored?.sandboxed ?? this.defaultSandboxed() }
   }
 
   async update(sessionId: string, request: SetSessionSandboxRequest): Promise<SessionSandboxState> {

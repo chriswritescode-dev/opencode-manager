@@ -13,7 +13,6 @@ export type ShellCreateBeforeEvent = {
 
 export type ToolMetadata = {
   sandbox?: JsonValue
-  sandboxProvider?: JsonValue
   path?: JsonValue
   [key: string]: JsonValue | undefined
 }
@@ -245,36 +244,8 @@ export interface SandboxShellPendingMarker {
 export interface SandboxShellState {
   pendingMarkers: Map<string, SandboxShellPendingMarker>
   sandboxedCallIDs: Set<string>
-  foreignOwners: Map<string, string>
   inFlightSandboxedCommands: Map<string, number>
 }
-
-export interface SandboxClaimRequest {
-  sessionID?: string
-  directory?: string
-}
-
-export interface SandboxClaim {
-  tier: string
-  since: number
-}
-
-export interface SandboxArbiterProvider {
-  id: string
-  claim: (request: SandboxClaimRequest) => Promise<SandboxClaim | null>
-}
-
-export interface SandboxArbiterDecision {
-  owner: string | null
-}
-
-export interface SandboxArbiterRegistry {
-  version: number
-  providers: Map<string, SandboxArbiterProvider>
-  decisions: Map<string, Promise<SandboxArbiterDecision>>
-}
-
-export const SANDBOX_ARBITER_STATE_KEY = 'opencode.sandbox-arbiter.v1'
 
 const SecretMaskStateSchema = z.object({
   byCwd: z.map(z.string(), z.array(z.string())),
@@ -291,15 +262,7 @@ const SandboxShellPendingMarkerSchema = z.object({
 const SandboxShellStateSchema = z.object({
   pendingMarkers: z.map(z.string(), SandboxShellPendingMarkerSchema),
   sandboxedCallIDs: z.set(z.string()),
-  foreignOwners: z.map(z.string(), z.string()),
   inFlightSandboxedCommands: z.map(z.string(), z.number()),
-})
-
-const SandboxArbiterRegistrySchema = z.custom<SandboxArbiterRegistry>((value) => {
-  if (!(value instanceof Object)) return false
-  if (!('version' in value) || !Number.isFinite(value.version)) return false
-  if (!('providers' in value) || !(value.providers instanceof Map)) return false
-  return 'decisions' in value && value.decisions instanceof Map
 })
 
 function readPluginGlobalState<S extends z.ZodType>(key: string, schema: S): z.infer<S> | undefined {
@@ -316,14 +279,9 @@ export function readSandboxShellState(): SandboxShellState | undefined {
   return readPluginGlobalState(SANDBOX_SHELL_STATE_KEY, SandboxShellStateSchema)
 }
 
-export function readSandboxArbiterRegistry(): SandboxArbiterRegistry | undefined {
-  return readPluginGlobalState(SANDBOX_ARBITER_STATE_KEY, SandboxArbiterRegistrySchema)
-}
-
 export function resetPluginGlobalState(): void {
   Reflect.deleteProperty(globalThis, Symbol.for(SECRET_MASK_STATE_KEY))
   Reflect.deleteProperty(globalThis, Symbol.for(SANDBOX_SHELL_STATE_KEY))
-  Reflect.deleteProperty(globalThis, Symbol.for(SANDBOX_ARBITER_STATE_KEY))
 }
 
 let importCount = 0

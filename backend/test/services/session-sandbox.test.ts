@@ -525,41 +525,28 @@ describe('SessionSandboxService', () => {
     })
   })
 
-  it('reports a claim with the toggle timestamp and source', async () => {
+  it('reports the stored sandbox flag for a session', async () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sandbox: { enabled: true } })
     const service = createService(db, createFakeSessionPermissionClient(), settingsService)
 
     setSessionSandboxed(db, 'ses_root', false)
-    const toggledAt = getSessionSandboxMode(db, 'ses_root')?.toggledAt
 
-    await expect(service.getClaim('ses_root')).resolves.toEqual({
-      sandboxed: false,
-      source: 'user',
-      since: toggledAt,
-    })
+    await expect(service.getClaim('ses_root')).resolves.toEqual({ sandboxed: false })
   })
 
-  it('reports a zero-since default claim for an unstored root session', async () => {
+  it('reports the default sandbox flag for an unstored root session', async () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sandbox: { enabled: true } })
     const service = createService(db, createFakeSessionPermissionClient(), settingsService)
 
-    await expect(service.getClaim('ses_root')).resolves.toEqual({
-      sandboxed: true,
-      source: 'default',
-      since: 0,
-    })
+    await expect(service.getClaim('ses_root')).resolves.toEqual({ sandboxed: true })
   })
 
-  it('reports an unsandboxed claim when support is disabled', async () => {
+  it('reports unsandboxed when support is disabled', async () => {
     const service = createService(db, createFakeSessionPermissionClient(), new SettingsService(db))
 
-    await expect(service.getClaim('ses_root')).resolves.toEqual({
-      sandboxed: false,
-      source: 'default',
-      since: 0,
-    })
+    await expect(service.getClaim('ses_root')).resolves.toEqual({ sandboxed: false })
   })
 
   it('rejects getClaim on an ancestry error', async () => {

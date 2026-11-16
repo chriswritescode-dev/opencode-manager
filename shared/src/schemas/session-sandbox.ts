@@ -39,10 +39,6 @@ export const SessionSandboxStateSchema = z.object({
 
 export type SessionSandboxState = z.infer<typeof SessionSandboxStateSchema>;
 
-export const SessionSandboxClaimSchema = z.object({
-  sandboxed: z.boolean(),
-  source: SessionSandboxSourceSchema,
-  since: z.number(),
-});
+export const SessionSandboxClaimSchema = z.object({ sandboxed: z.boolean() });
 
 export type SessionSandboxClaim = z.infer<typeof SessionSandboxClaimSchema>;

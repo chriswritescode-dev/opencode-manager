@@ -267,23 +267,25 @@ describe('ToolCallPart background indicator', () => {
     expect(screen.queryByText('background')).not.toBeInTheDocument()
   })
 
-  it('labels a sandboxed command with a non-manager provider', async () => {
-    await renderTool(
-      <ToolCallPart part={completedShell({ sandbox: true, sandboxProvider: 'forge' })} messageID="msg_1" />,
-    )
-
-    const badge = await screen.findByText('sandbox · forge')
-    expect(badge).toHaveAttribute('title', 'Executed inside the forge sandbox')
-  })
-
   it.each([
-    { name: 'the manager provider', metadata: { sandbox: true, sandboxProvider: 'ocm' } },
-    { name: 'no reported provider', metadata: { sandbox: true } },
-  ])('keeps the plain sandbox label for $name', async ({ metadata }) => {
+    {
+      name: 'keeps the plain sandbox label for a persisted forge provider',
+      metadata: { sandbox: true, sandboxProvider: 'forge' },
+    },
+    {
+      name: 'keeps the plain sandbox label for a persisted manager provider',
+      metadata: { sandbox: true, sandboxProvider: 'ocm' },
+    },
+    {
+      name: 'keeps the plain sandbox label when no provider was persisted',
+      metadata: { sandbox: true },
+    },
+  ])('$name', async ({ metadata }) => {
     await renderTool(<ToolCallPart part={completedShell(metadata)} messageID="msg_1" />)
 
     const badge = await screen.findByText('sandbox')
     expect(badge).toHaveAttribute('title', 'Executed inside the sandbox microVM')
+    expect(screen.queryByText(/sandbox · /)).not.toBeInTheDocument()
   })
 })
 

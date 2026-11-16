@@ -122,8 +122,6 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
     part.state.status === 'completed' &&
     (metadata.sandbox === true ||
       (rawCommand !== undefined && displayCommand !== rawCommand))
-  const sandboxProvider = readJsonString(metadata.sandboxProvider)
-  const sandboxProviderLabel = sandboxProvider !== undefined && sandboxProvider !== 'ocm' ? sandboxProvider : undefined
   const foregroundShellExit =
     part.name === 'shell' && !isBackgroundShell && part.state.status === 'completed'
       ? readJsonNumber(metadata.exit)
@@ -219,14 +217,10 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
     <Badge
       variant="outline"
       className="shrink-0 gap-1 border-success/40 bg-success/15 text-success"
-      title={
-        sandboxProviderLabel !== undefined
-          ? `Executed inside the ${sandboxProviderLabel} sandbox`
-          : 'Executed inside the sandbox microVM'
-      }
+      title="Executed inside the sandbox microVM"
     >
       <Shield className="w-3 h-3" />
-      {sandboxProviderLabel !== undefined ? `sandbox · ${sandboxProviderLabel}` : 'sandbox'}
+      sandbox
     </Badge>
   ) : null
 
