@@ -75,6 +75,31 @@ describe('ScheduleJobDialog — sandbox', () => {
     expect(await screen.findByText('Sandbox runtime is not installed')).toBeInTheDocument()
   })
 
+  it('ignores per-job sandbox resources for shared-worktree runs', async () => {
+    const user = userEvent.setup()
+    const dialog = await renderScheduleJobDialog({
+      preferences: sandboxPreferences(true),
+      job: makeScheduleJobFixture({
+        name: 'Nightly health check',
+        prompt: 'Check the repo.',
+        workspaceMode: 'shared-worktree',
+        sandbox: { enabled: true, resources: { cpus: 4, memoryMib: 12288 } },
+      }),
+    })
+
+    await goToGeneralTab(user)
+
+    expect(screen.getByLabelText('CPUs')).toBeDisabled()
+    expect(
+      screen.getByText("Shared-worktree runs use the repository's sandbox resources."),
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    await waitFor(() => expect(dialog.onSubmit).toHaveBeenCalledTimes(1))
+    expect(dialog.onSubmit.mock.calls[0][0].sandbox).toEqual({ enabled: true, resources: null })
+  })
+
   it('submits sandbox null when an existing sandboxed job is turned off', async () => {
     const user = userEvent.setup()
     const dialog = await renderScheduleJobDialog({

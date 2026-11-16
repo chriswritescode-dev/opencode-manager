@@ -101,6 +101,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
       ? (health === undefined ? 'Checking sandbox availability...' : (health.sandbox?.reason ?? 'Sandboxing is unavailable on this host.'))
       : null
   const parsedSandboxResources = parseSandboxResourceInput(sandboxCpus, sandboxMemoryGib)
+  const sharedWorktreeSandbox = workspaceMode === 'shared-worktree'
   const sandboxCpusPlaceholder = sandboxPreferences?.cpus !== undefined ? String(sandboxPreferences.cpus) : 'Server default'
   const sandboxMemoryPlaceholder = sandboxPreferences?.memoryMib !== undefined ? formatSandboxMemory(sandboxPreferences.memoryMib) : 'Server default'
 
@@ -243,9 +244,11 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
 
     const sandbox = !showSandbox || !sandboxEnabled
       ? null
-      : parsedSandboxResources.kind === 'valid'
-        ? { enabled: true, resources: parsedSandboxResources.resources }
-        : { enabled: true, resources: null }
+      : sharedWorktreeSandbox
+        ? { enabled: true, resources: null }
+        : parsedSandboxResources.kind === 'valid'
+          ? { enabled: true, resources: parsedSandboxResources.resources }
+          : { enabled: true, resources: null }
 
     const baseFields = {
       name: name.trim(),
@@ -302,7 +305,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     prompt.trim() ? null : 'prompt',
     isScheduleConfigInvalid ? 'valid timing' : null,
     showRepoSelector && !job && selectedRepoId === undefined ? 'repository' : null,
-    showSandbox && sandboxEnabled && parsedSandboxResources.kind === 'invalid' ? 'valid sandbox resources' : null,
+    showSandbox && sandboxEnabled && !sharedWorktreeSandbox && parsedSandboxResources.kind === 'invalid' ? 'valid sandbox resources' : null,
   ].filter((requirement): requirement is string => requirement !== null)
 
   return (
@@ -374,7 +377,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
               onMemoryGibChange: setSandboxMemoryGib,
               cpusPlaceholder: sandboxCpusPlaceholder,
               memoryPlaceholder: sandboxMemoryPlaceholder,
-              error: sandboxEnabled && parsedSandboxResources.kind === 'invalid' ? parsedSandboxResources.message : null,
+              error: sandboxEnabled && !sharedWorktreeSandbox && parsedSandboxResources.kind === 'invalid' ? parsedSandboxResources.message : null,
             } : undefined}
           />
 

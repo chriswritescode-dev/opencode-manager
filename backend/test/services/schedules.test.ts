@@ -16,7 +16,6 @@ import {
   updateScheduleRun,
   updateScheduleRunWorktree,
 } from '../../src/db/schedules'
-import { insertSessionSandboxModeIfAbsent } from '../../src/db/session-sandbox-modes'
 import {
   ScheduleRunner,
   ScheduleRunRegistry,
@@ -891,7 +890,6 @@ describe('ScheduleService', () => {
         worktreePath,
         runBranch: `schedule/${sandboxJob.id}/run-1`,
       })
-      insertSessionSandboxModeIfAbsent(db, 'ses-run-1', { sandboxed: true, source: 'user' })
 
       const run = await service.runJob(repo.id, sandboxJob.id, 'manual')
       await waitForRun(sandboxJob.id, run.id, { status: 'completed' })
@@ -899,8 +897,15 @@ describe('ScheduleService', () => {
       expect(runtime.registerCheckoutRunResources).toHaveBeenCalledWith(worktreePath, SANDBOX_RESOURCES)
       expect(runtime.registerCheckoutRunResources).not.toHaveBeenCalledWith(repo.fullPath, SANDBOX_RESOURCES)
       expect(runtime.planShell).toHaveBeenCalledWith(worktreePath, { locationDirectory: worktreePath }, true)
-      await vi.waitFor(() => expect(runtime.releaseCheckoutRunResources).toHaveBeenCalledWith(worktreePath))
+      await vi.waitFor(() => {
+        expect(runtime.releaseCheckoutRunResources).toHaveBeenCalledWith(worktreePath)
+        expect(runtime.removeCheckoutSandbox).toHaveBeenCalledWith(worktreePath)
+      })
       expect(runtime.releaseCheckoutRunResources).not.toHaveBeenCalledWith(repo.fullPath)
+      expect(runtime.removeCheckoutSandbox).not.toHaveBeenCalledWith(repo.fullPath)
+      const [removeOrder] = vi.mocked(runtime.removeCheckoutSandbox).mock.invocationCallOrder
+      const [finalizeOrder] = vi.mocked(worktreeManager.finalize).mock.invocationCallOrder
+      expect(removeOrder).toBeLessThan(finalizeOrder ?? 0)
     })
 
     it('plans a shared-worktree run in the shared directory without registering job resources', async () => {
@@ -911,8 +916,11 @@ describe('ScheduleService', () => {
 
       const run = await service.runJob(repo.id, sandboxJob.id, 'manual')
       await waitForRun(sandboxJob.id, run.id, { status: 'completed' })
+      await vi.waitFor(() => expect(runs.snapshot(sandboxJob.id)).toBeNull())
 
       expect(runtime.registerCheckoutRunResources).not.toHaveBeenCalled()
+      expect(runtime.releaseCheckoutRunResources).not.toHaveBeenCalled()
+      expect(runtime.removeCheckoutSandbox).not.toHaveBeenCalled()
       expect(runtime.planShell).toHaveBeenCalledWith(repo.fullPath, { locationDirectory: repo.fullPath }, true)
     })
 
@@ -920,7 +928,6 @@ describe('ScheduleService', () => {
       const { api, client } = createClient()
       const { sessions, runtime } = createSandboxDeps()
       vi.mocked(runtime.planShell).mockResolvedValue({ mode: 'blocked', reason: '2 sandbox VMs are already running' })
-      insertSessionSandboxModeIfAbsent(db, 'ses-run-1', { sandboxed: true, source: 'user' })
       const { service } = createService(client, { sandbox: { sessions, runtime } })
       const sandboxJob = seedJob({ sandbox: sandboxJobConfig })
 
@@ -929,74 +936,72 @@ describe('ScheduleService', () => {
         message: 'Sandbox could not start: 2 sandbox VMs are already running',
       })
 
-      const runs = listScheduleRunsByJob(db, repo.id, sandboxJob.id)
-      expect(runs[0]).toMatchObject({
+      const failedRuns = listScheduleRunsByJob(db, repo.id, sandboxJob.id)
+      expect(failedRuns[0]).toMatchObject({
         status: 'failed',
         sessionId: 'ses-run-1',
         errorText: 'Sandbox could not start: 2 sandbox VMs are already running',
       })
       expect(api.session.prompt).not.toHaveBeenCalled()
-      expect(runtime.removeCheckoutSandbox).toHaveBeenCalledWith(repo.fullPath)
+      expect(runtime.releaseCheckoutRunResources).toHaveBeenCalledWith(repo.fullPath)
+      expect(runtime.removeCheckoutSandbox).not.toHaveBeenCalled()
     })
 
     it('removes the sandbox after a completed run and survives a removal failure', async () => {
       const { client } = createClient({ messages: [assistantMessage('Done.', { completed: true })] })
       const { sessions, runtime } = createSandboxDeps()
+      const worktreeManager = createStubWorktreeManager()
       vi.mocked(runtime.removeCheckoutSandbox).mockRejectedValue(new Error('msb rm failed'))
-      insertSessionSandboxModeIfAbsent(db, 'ses-run-1', { sandboxed: true, source: 'user' })
-      const { service } = createService(client, { sandbox: { sessions, runtime } })
+      const { service } = createService(client, { sandbox: { sessions, runtime }, worktreeManager })
       const sandboxJob = seedJob({ sandbox: sandboxJobConfig })
+      const worktreePath = path.join(workspace.path, 'worktrees', `job-${sandboxJob.id}-run-1`)
+      mkdirSync(worktreePath, { recursive: true })
+      worktreeManager.prepare.mockResolvedValue({
+        directory: worktreePath,
+        worktreePath,
+        runBranch: `schedule/${sandboxJob.id}/run-1`,
+      })
 
       const run = await service.runJob(repo.id, sandboxJob.id, 'manual')
       const completed = await waitForRun(sandboxJob.id, run.id, { status: 'completed' })
 
       expect(completed.status).toBe('completed')
-      await vi.waitFor(() => expect(runtime.removeCheckoutSandbox).toHaveBeenCalledWith(repo.fullPath))
+      await vi.waitFor(() => expect(runtime.removeCheckoutSandbox).toHaveBeenCalledWith(worktreePath))
       expect(testLogEntries('warn').map((entry) => entry.message)).toContainEqual(
-        expect.stringContaining('Failed to remove the sandbox microVM'),
+        expect.stringContaining('Failed to remove the sandbox microVM for the scheduled run worktree'),
       )
     })
 
-    it('removes the sandbox of a cancelled run', async () => {
+    it('removes the sandbox of a cancelled dedicated worktree run', async () => {
       const { client } = createClient({ messages: [] })
       const { sessions, runtime } = createSandboxDeps()
-      insertSessionSandboxModeIfAbsent(db, 'ses-run-3', { sandboxed: true, source: 'user' })
       const { service } = createService(client, { sandbox: { sessions, runtime } })
-      const run = seedRunningRun(job.id)
-      updateScheduleRun(db, repo.id, job.id, run.id, { status: 'running', finishedAt: 0, sessionId: 'ses-run-3' })
+      const sandboxJob = seedJob({ sandbox: sandboxJobConfig })
+      const worktreePath = path.join(workspace.path, 'worktrees', `job-${sandboxJob.id}-run-1`)
+      mkdirSync(worktreePath, { recursive: true })
+      const run = seedRunningRun(sandboxJob.id)
+      updateScheduleRunWorktree(db, repo.id, sandboxJob.id, run.id, { worktreePath })
+      updateScheduleRun(db, repo.id, sandboxJob.id, run.id, { status: 'running', finishedAt: 0, sessionId: 'ses-run-3' })
 
-      const cancelled = await service.cancelRun(repo.id, job.id, run.id)
+      const cancelled = await service.cancelRun(repo.id, sandboxJob.id, run.id)
 
       expect(cancelled).toMatchObject({ status: 'cancelled' })
-      expect(runtime.removeCheckoutSandbox).toHaveBeenCalledWith(repo.fullPath)
+      expect(runtime.releaseCheckoutRunResources).toHaveBeenCalledWith(worktreePath)
+      expect(runtime.removeCheckoutSandbox).toHaveBeenCalledWith(worktreePath)
     })
 
-    it.each([
-      ['a sandboxed session', { sandboxed: true, source: 'user' as const }],
-      ['a user-disabled session', { sandboxed: false, source: 'user' as const }],
-    ])('removes the sandbox of a cancelled run with %s', async (_label, mode) => {
+    it('leaves the shared checkout sandbox to the idle sweep for a cancelled shared-worktree run', async () => {
       const { client } = createClient({ messages: [] })
       const { sessions, runtime } = createSandboxDeps()
-      insertSessionSandboxModeIfAbsent(db, 'ses-run-4', mode)
       const { service } = createService(client, { sandbox: { sessions, runtime } })
-      const run = seedRunningRun(job.id)
-      updateScheduleRun(db, repo.id, job.id, run.id, { status: 'running', finishedAt: 0, sessionId: 'ses-run-4' })
+      const sandboxJob = seedJob({ sandbox: sandboxJobConfig, workspaceMode: 'shared-worktree' })
+      const run = seedRunningRun(sandboxJob.id)
+      updateScheduleRun(db, repo.id, sandboxJob.id, run.id, { status: 'running', finishedAt: 0, sessionId: 'ses-run-5' })
 
-      await service.cancelRun(repo.id, job.id, run.id)
+      const cancelled = await service.cancelRun(repo.id, sandboxJob.id, run.id)
 
-      expect(runtime.removeCheckoutSandbox).toHaveBeenCalledWith(repo.fullPath)
-    })
-
-    it('keeps a default-disabled session sandbox untouched', async () => {
-      const { client } = createClient({ messages: [] })
-      const { sessions, runtime } = createSandboxDeps()
-      insertSessionSandboxModeIfAbsent(db, 'ses-run-5', { sandboxed: false, source: 'default' })
-      const { service } = createService(client, { sandbox: { sessions, runtime } })
-      const run = seedRunningRun(job.id)
-      updateScheduleRun(db, repo.id, job.id, run.id, { status: 'running', finishedAt: 0, sessionId: 'ses-run-5' })
-
-      await service.cancelRun(repo.id, job.id, run.id)
-
+      expect(cancelled).toMatchObject({ status: 'cancelled' })
+      expect(runtime.releaseCheckoutRunResources).not.toHaveBeenCalled()
       expect(runtime.removeCheckoutSandbox).not.toHaveBeenCalled()
     })
 

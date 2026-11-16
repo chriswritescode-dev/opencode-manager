@@ -283,7 +283,8 @@ export function GeneralTab({
                 <div className="space-y-0.5">
                   <p id="schedule-sandbox-label" className="text-sm font-medium">Run in sandbox</p>
                   <p className="text-xs text-muted-foreground">
-                    Each run and its subagents get a dedicated VM with Docker, removed after the run.
+                    Worktree and kept-worktree runs get a dedicated VM with Docker that is removed after the run.
+                    Shared-worktree runs use the repository checkout's VM.
                   </p>
                   {sandbox.unavailableReason ? (
                     <p className="text-xs text-destructive">{sandbox.unavailableReason}</p>
@@ -297,16 +298,24 @@ export function GeneralTab({
                 />
               </div>
               {sandbox.enabled && (
-                <SandboxResourceInputs
-                  idPrefix="schedule-sandbox"
-                  cpus={sandbox.cpus}
-                  onCpusChange={sandbox.onCpusChange}
-                  memoryGib={sandbox.memoryGib}
-                  onMemoryGibChange={sandbox.onMemoryGibChange}
-                  cpusPlaceholder={sandbox.cpusPlaceholder}
-                  memoryPlaceholder={sandbox.memoryPlaceholder}
-                  error={sandbox.error}
-                />
+                <>
+                  <SandboxResourceInputs
+                    idPrefix="schedule-sandbox"
+                    cpus={sandbox.cpus}
+                    onCpusChange={sandbox.onCpusChange}
+                    memoryGib={sandbox.memoryGib}
+                    onMemoryGibChange={sandbox.onMemoryGibChange}
+                    cpusPlaceholder={sandbox.cpusPlaceholder}
+                    memoryPlaceholder={sandbox.memoryPlaceholder}
+                    disabled={workspaceMode === 'shared-worktree'}
+                    error={sandbox.error}
+                  />
+                  {workspaceMode === 'shared-worktree' && (
+                    <p className="text-xs text-muted-foreground">
+                      Shared-worktree runs use the repository's sandbox resources.
+                    </p>
+                  )}
+                </>
               )}
             </div>
           </div>

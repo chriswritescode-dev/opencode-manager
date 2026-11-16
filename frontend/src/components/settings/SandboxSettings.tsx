@@ -324,11 +324,12 @@ export function SandboxSettings() {
             </div>
 
             <p className="text-xs text-muted-foreground @min-[1000px]:col-span-2">
-              Each sandboxed session gets its own microVM that mounts only that session's repository. A VM unused
-              for this long, or whose session's sandbox is turned off, is removed together with its Docker data, so
-              installed packages and Docker images are lost; the next sandboxed command creates a fresh VM. At most{' '}
-              {helperMaxRunningVms} run at once. CPU and memory changes apply on the session's next sandboxed command
-              and recreate its VM (the Docker data volume is kept).
+              Each repository checkout gets one microVM, shared by every sandboxed session in that checkout, and each
+              worktree is a separate checkout with its own VM. A VM idle for this long is removed together with its
+              Docker data, so installed packages and Docker images are lost and the next sandboxed command creates a
+              fresh VM. Turning a session's sandbox off or deleting a session does not remove the VM. At most{' '}
+              {helperMaxRunningVms} run at once. CPU and memory settings apply when a VM next starts; changing them
+              does not restart a running VM.
             </p>
           </>
         )}

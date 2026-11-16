@@ -245,6 +245,15 @@ describe('SandboxSettings', () => {
     expect(screen.getByLabelText('Max running sandbox VMs')).toBeInTheDocument()
   })
 
+  it('explains that VMs belong to a repository checkout rather than a session', async () => {
+    await renderSandbox({ sandbox: { enabled: true } })
+
+    expect(
+      screen.getByText(/Each repository checkout gets one microVM, shared by every sandboxed session in that checkout/),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/deleting a session does not remove the VM/)).toBeInTheDocument()
+  })
+
   it('hides the resource inputs while sandboxing is off', async () => {
     await renderSandbox()
 
