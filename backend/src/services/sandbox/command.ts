@@ -17,15 +17,25 @@ import { executeCommand, type ExecuteCommandResult } from '../../utils/process'
 import { z } from 'zod'
 import { parseJsonObject, parseJsonString, type JsonValue } from '@opencode-manager/shared/utils'
 
-export const SESSION_SANDBOX_NAME_PATTERN = /^ocm-session-[0-9a-f]{12}$/
+export const CHECKOUT_SANDBOX_NAME_PATTERN = /^ocm-checkout-[0-9a-f]{12}$/
+
+export const LEGACY_SESSION_SANDBOX_NAME_PATTERN = /^ocm-session-[0-9a-f]{12}$/
 
 export const SANDBOX_DOCKER_DATA_GUEST_PATH = '/var/lib/docker'
 export const SANDBOX_DOCKER_DATA_SIZE = '20G'
 
 const SANDBOX_GIT_RESOLVE_TIMEOUT_MS = 10000
 
-export function sessionSandboxName(rootSessionId: string): string {
-  return `ocm-session-${createHash('sha256').update(rootSessionId).digest('hex').slice(0, 12)}`
+export function checkoutSandboxName(checkoutKey: string): string {
+  return `ocm-checkout-${checkoutSandboxLabel(checkoutKey).slice(0, 12)}`
+}
+
+export function checkoutSandboxLabel(checkoutKey: string): string {
+  return createHash('sha256').update(checkoutKey).digest('hex')
+}
+
+export function isManagedSandboxName(name: string): boolean {
+  return CHECKOUT_SANDBOX_NAME_PATTERN.test(name) || LEGACY_SESSION_SANDBOX_NAME_PATTERN.test(name)
 }
 
 export function sandboxDockerDataVolumeName(name: string): string {
@@ -34,7 +44,7 @@ export function sandboxDockerDataVolumeName(name: string): string {
 
 export type SandboxVmSpec = {
   name: string
-  rootSessionId: string
+  checkoutKey: string
   projectMounts: string[]
   cpus: number
   memoryMib: number
@@ -240,7 +250,7 @@ export function buildSandboxCreateArgs(spec: SandboxVmSpec, options: { replace?:
     '--label',
     `ocm.net=${ENV.SANDBOX.NET}`,
     '--label',
-    `ocm.session=${spec.rootSessionId}`,
+    `ocm.checkout=${checkoutSandboxLabel(spec.checkoutKey)}`,
     '-m',
     `${spec.memoryMib}M`,
     '-c',
@@ -694,6 +704,22 @@ export async function resolveSessionSandboxMounts(locationDirectory: string): Pr
   }
 
   return isPathWithinRoot(top, common) ? [top] : [top, common]
+}
+
+export async function checkoutKeyFromMounts(projectMounts: string[]): Promise<string | null> {
+  const first = projectMounts[0]
+  if (first === undefined) return null
+  try {
+    return await realpath(first)
+  } catch {
+    return null
+  }
+}
+
+export async function resolveCheckoutKey(locationDirectory: string): Promise<string | null> {
+  const mounts = await resolveSessionSandboxMounts(locationDirectory)
+  if (mounts === null) return null
+  return checkoutKeyFromMounts(mounts)
 }
 
 export function resolveSandboxExecUser(): string {

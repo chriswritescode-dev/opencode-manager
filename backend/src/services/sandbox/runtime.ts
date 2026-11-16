@@ -27,7 +27,6 @@ import { getGitIdentityEnvForDirectory } from '../git-identity'
 import { getProcessIdentityAttestationError } from '../opencode/process-identity'
 import { detectSandboxCapability } from './capability'
 import {
-  SESSION_SANDBOX_NAME_PATTERN,
   buildCanonicalSandboxSpec,
   buildSandboxCreateArgs,
   buildSandboxInspectArgs,
@@ -41,6 +40,10 @@ import {
   buildSandboxStopManagedArgs,
   buildSandboxVerifyProvisionArgs,
   buildSandboxVolumeRemoveArgs,
+  checkoutKeyFromMounts,
+  checkoutSandboxName,
+  isManagedSandboxName,
+  resolveCheckoutKey,
   resolveExpectedSandboxNetworkPolicy,
   resolveSandboxRuntimeTmpfsSizeMib,
   resolveSandboxWorkDirectory,
@@ -50,7 +53,6 @@ import {
   sandboxNetworkPolicyMismatch,
   sandboxProjectRoots,
   sandboxVmMountRoots,
-  sessionSandboxName,
   type SandboxVmSpec,
 } from './command'
 
@@ -69,7 +71,6 @@ const SANDBOX_VOLUME_REMOVAL_MISSING_PATTERN = /not found|no such volume|unknown
 const SANDBOX_CREATE_EXISTS_PATTERN = /already exists/i
 
 export type SandboxShellTarget = {
-  rootSessionId: string
   locationDirectory: string
   resources: { cpus: number; memoryMib: number }
 }
@@ -210,14 +211,14 @@ async function bootSessionSandbox(spec: SandboxVmSpec, maxRunningVms: number): P
         const attestation = await attestSandboxConfig(spec, inspected.active_config)
         if (!attestation.trusted) {
           logger.warn(`Recreating unverifiable sandbox ${spec.name}: ${attestation.reason}`)
-          await removeSessionSandboxVm(spec.name)
+          await removeSandboxVm(spec.name)
           await createSessionSandbox(spec, maxRunningVms)
         }
       } else {
         const attestation = await attestSandboxConfig(spec, inspected.config)
         if (!attestation.trusted) {
           logger.warn(`Recreating unverifiable sandbox ${spec.name}: ${attestation.reason}`)
-          await removeSessionSandboxVm(spec.name)
+          await removeSandboxVm(spec.name)
           await createSessionSandbox(spec, maxRunningVms)
         } else {
           await withStartAdmission(spec.name, maxRunningVms, () => startSessionSandbox(spec.name))
@@ -227,7 +228,7 @@ async function bootSessionSandbox(spec: SandboxVmSpec, maxRunningVms: number): P
             logger.warn(
               `Recreating sandbox ${spec.name} that failed running attestation: ${runningAttestation.reason}`,
             )
-            await removeSessionSandboxVm(spec.name)
+            await removeSandboxVm(spec.name)
             await createSessionSandbox(spec, maxRunningVms)
           }
         }
@@ -250,7 +251,7 @@ async function bootSessionSandboxFromListing(spec: SandboxVmSpec, maxRunningVms:
     const attestation = await attestSessionSandbox(spec, entry.running)
     if (!attestation.trusted) {
       logger.warn(`Recreating unverifiable sandbox ${spec.name}: ${attestation.reason}`)
-      await removeSessionSandboxVm(spec.name)
+      await removeSandboxVm(spec.name)
       await createSessionSandbox(spec, maxRunningVms)
     } else if (!entry.running) {
       await withStartAdmission(spec.name, maxRunningVms, () => startSessionSandbox(spec.name))
@@ -260,7 +261,7 @@ async function bootSessionSandboxFromListing(spec: SandboxVmSpec, maxRunningVms:
         logger.warn(
           `Recreating sandbox ${spec.name} that failed running attestation: ${runningAttestation.reason}`,
         )
-        await removeSessionSandboxVm(spec.name)
+        await removeSandboxVm(spec.name)
         await createSessionSandbox(spec, maxRunningVms)
       }
     }
@@ -363,10 +364,10 @@ async function attestSandboxConfig(spec: SandboxVmSpec, config: JsonValue | unde
       reason: `sandbox network profile ${String(labels['ocm.net'])} does not match ${canonicalLabels['ocm.net']}`,
     }
   }
-  if (labels['ocm.session'] !== canonicalLabels['ocm.session']) {
+  if (labels['ocm.checkout'] !== canonicalLabels['ocm.checkout']) {
     return {
       trusted: false,
-      reason: `sandbox session label ${String(labels['ocm.session'])} does not match ${String(canonicalLabels['ocm.session'])}`,
+      reason: `sandbox checkout label ${String(labels['ocm.checkout'])} does not match ${String(canonicalLabels['ocm.checkout'])}`,
     }
   }
 
@@ -872,7 +873,7 @@ async function executeSandboxCreate(args: string[]): Promise<ExecuteCommandResul
   })
 }
 
-async function removeSessionSandboxVm(name: string): Promise<void> {
+async function removeSandboxVm(name: string): Promise<void> {
   await runSandboxRemoval(buildSandboxRemoveArgs(name), SANDBOX_REMOVAL_MISSING_PATTERN, 'msb rm')
 }
 
@@ -886,7 +887,7 @@ function removeSandboxVmAndVolume(name: string): Promise<void> {
     if (inFlightBoot !== null) {
       await inFlightBoot.catch(() => undefined)
     }
-    await removeSessionSandboxVm(name)
+    await removeSandboxVm(name)
     await runSandboxRemoval(
       buildSandboxVolumeRemoveArgs(sandboxDockerDataVolumeName(name)),
       SANDBOX_VOLUME_REMOVAL_MISSING_PATTERN,
@@ -987,7 +988,7 @@ async function admitVmStart(name: string, maxRunningVms: number): Promise<void> 
     if (entry === null) continue
     const entryName = parseJsonString(entry.name)
     if (entryName === null || entryName === name) continue
-    if (!SESSION_SANDBOX_NAME_PATTERN.test(entryName)) continue
+    if (!isManagedSandboxName(entryName)) continue
     if (sandboxEntryRunning(entry)) running.push(entryName)
   }
   if (running.length < maxRunningVms) return
@@ -1051,7 +1052,7 @@ async function sweepIdleSandboxes(db: Database): Promise<void> {
     const entry = parseJsonObject(value)
     if (entry === null) continue
     const name = parseJsonString(entry.name)
-    if (name === null || !SESSION_SANDBOX_NAME_PATTERN.test(name)) continue
+    if (name === null || !isManagedSandboxName(name)) continue
     const state = vmStates.get(name)
     if (state !== undefined && (state.inFlightBoot !== null || state.inFlightRemoval !== null)) continue
     const lastActivity = Math.max(state?.lastUsedAt ?? 0, idleSweepStartedAt)
@@ -1131,9 +1132,13 @@ export class SandboxRuntimeService {
         reason: `working directory ${directory} is outside this session's sandbox (mounted: ${projectMounts.join(', ')})`,
       }
     }
+    const checkoutKey = await checkoutKeyFromMounts(projectMounts)
+    if (checkoutKey === null) {
+      return { mode: 'blocked', reason: `could not resolve the checkout root for ${target.locationDirectory}` }
+    }
     const spec: SandboxVmSpec = {
-      name: sessionSandboxName(target.rootSessionId),
-      rootSessionId: target.rootSessionId,
+      name: checkoutSandboxName(checkoutKey),
+      checkoutKey,
       projectMounts,
       cpus: target.resources.cpus,
       memoryMib: target.resources.memoryMib,
@@ -1168,9 +1173,11 @@ export class SandboxRuntimeService {
     }
   }
 
-  async removeSessionSandbox(rootSessionId: string): Promise<void> {
+  async removeCheckoutSandbox(directory: string): Promise<void> {
     if (!detectSandboxCapability().available) return
-    await removeSandboxVmAndVolume(sessionSandboxName(rootSessionId))
+    const checkoutKey = await resolveCheckoutKey(directory)
+    if (checkoutKey === null) return
+    await removeSandboxVmAndVolume(checkoutSandboxName(checkoutKey))
   }
 
   async stopAllSandboxes(): Promise<void> {
@@ -1231,7 +1238,7 @@ async function confirmManagedSandboxesStopped(): Promise<void> {
     const entry = parseJsonObject(value)
     if (entry === null) continue
     const name = parseJsonString(entry.name)
-    if (name === null || !SESSION_SANDBOX_NAME_PATTERN.test(name)) continue
+    if (name === null || !isManagedSandboxName(name)) continue
     if (sandboxEntryRunning(entry)) {
       throw new Error('msb stop failed to stop the sandbox microVMs; a managed microVM is still running')
     }

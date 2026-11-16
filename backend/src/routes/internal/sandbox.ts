@@ -44,10 +44,13 @@ export function createInternalSandboxRoutes(
 
     try {
       const target = await sessionSandbox.resolveShellTarget(parsed.data.sessionId)
+      if (!target.sandboxed) {
+        return c.json({ mode: 'blocked', reason: 'Sandboxing is off for this session' }, 409)
+      }
       return c.json(
         await new SandboxRuntimeService(db, repoEnvService).planShell(
           parsed.data.directory,
-          { ...target, locationDirectory: parsed.data.locationDirectory },
+          { locationDirectory: parsed.data.locationDirectory, resources: target.resources },
           parsed.data.enforced === true,
         ),
       )

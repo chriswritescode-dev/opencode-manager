@@ -1,5 +1,5 @@
 import { ENV_NAME_PATTERN, SANDBOX_CONTROL_ENV_PREFIXES } from '@opencode-manager/shared/schemas'
-import { sandboxPlanTimeoutMs, SANDBOX_UNAVAILABLE_PREFIX } from './sandbox/command'
+import { sandboxPlanTimeoutMs, CHECKOUT_SANDBOX_NAME_PATTERN, SANDBOX_UNAVAILABLE_PREFIX } from './sandbox/command'
 import {
   SANDBOX_SHELL_ENV_FORWARD,
   SANDBOX_SHELL_ENV_NAME,
@@ -38,7 +38,7 @@ var FORGE_MARKER_PATTERN = /forge-sandbox-required-[0-9a-f-]{36} && /
 var FORGE_CONTAINER_ENV = 'FORGE_SANDBOX_CONTAINER'
 var FORGE_CONFLICT = ${JSON.stringify("Forge's sandbox also claims this shell call. Turn off the sandbox for this session in OpenCode Manager, or set sandbox.enabled to false in ~/.config/opencode/forge-config.jsonc.")}
 var SHELL_MARKER_PATTERN = /^(forge-sandbox-required-[0-9a-f-]{36} && )?(${SANDBOX_SHELL_MARKER_PREFIX}[0-9a-f-]{36}) && /
-var PLAN_NAME_PATTERN = /^ocm-session-[0-9a-f]{12}$/
+var PLAN_NAME_PATTERN = new RegExp(${JSON.stringify(CHECKOUT_SANDBOX_NAME_PATTERN.source)})
 var SHELL_STATE_KEY = Symbol.for(${JSON.stringify(SANDBOX_SHELL_STATE_KEY)})
 
 ${SECRET_MASK_STORE_SOURCE}

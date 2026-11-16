@@ -149,11 +149,11 @@ describe('ScheduleService', () => {
     const sessions: ScheduleSandboxDependencies['sessions'] = {
       assertSandboxRequestAllowed: vi.fn(),
       update: vi.fn(async () => SANDBOX_STATE),
-      resolveShellTarget: vi.fn(async () => ({ rootSessionId: 'ses-run-1', resources: SANDBOX_RESOURCES })),
+      resolveShellTarget: vi.fn(async () => ({ sandboxed: true, resources: SANDBOX_RESOURCES })),
     }
     const runtime: ScheduleSandboxDependencies['runtime'] = {
       planShell: vi.fn(async () => ({ mode: 'sandbox' as const, name: 'ocm-ses-run-1', workdir: repo.fullPath })),
-      removeSessionSandbox: vi.fn(async () => undefined),
+      removeCheckoutSandbox: vi.fn(async () => undefined),
     }
     return { sessions, runtime }
   }
@@ -866,7 +866,7 @@ describe('ScheduleService', () => {
       expect(sessions.update).toHaveBeenCalledWith('ses-run-1', { sandboxed: true, resources: SANDBOX_RESOURCES })
       expect(runtime.planShell).toHaveBeenCalledWith(
         repo.fullPath,
-        { rootSessionId: 'ses-run-1', resources: SANDBOX_RESOURCES, locationDirectory: repo.fullPath },
+        { locationDirectory: repo.fullPath, resources: SANDBOX_RESOURCES },
         true,
       )
       const [planOrder] = vi.mocked(runtime.planShell).mock.invocationCallOrder
@@ -894,13 +894,13 @@ describe('ScheduleService', () => {
         errorText: 'Sandbox could not start: 2 sandbox VMs are already running',
       })
       expect(api.session.prompt).not.toHaveBeenCalled()
-      expect(runtime.removeSessionSandbox).toHaveBeenCalledWith('ses-run-1')
+      expect(runtime.removeCheckoutSandbox).toHaveBeenCalledWith(repo.fullPath)
     })
 
     it('removes the sandbox after a completed run and survives a removal failure', async () => {
       const { client } = createClient({ messages: [assistantMessage('Done.', { completed: true })] })
       const { sessions, runtime } = createSandboxDeps()
-      vi.mocked(runtime.removeSessionSandbox).mockRejectedValue(new Error('msb rm failed'))
+      vi.mocked(runtime.removeCheckoutSandbox).mockRejectedValue(new Error('msb rm failed'))
       insertSessionSandboxModeIfAbsent(db, 'ses-run-1', { sandboxed: true, source: 'user', resources: SANDBOX_RESOURCES })
       const { service } = createService(client, { sandbox: { sessions, runtime } })
       const sandboxJob = seedJob({ sandbox: sandboxJobConfig })
@@ -909,7 +909,7 @@ describe('ScheduleService', () => {
       const completed = await waitForRun(sandboxJob.id, run.id, { status: 'completed' })
 
       expect(completed.status).toBe('completed')
-      await vi.waitFor(() => expect(runtime.removeSessionSandbox).toHaveBeenCalledWith('ses-run-1'))
+      await vi.waitFor(() => expect(runtime.removeCheckoutSandbox).toHaveBeenCalledWith(repo.fullPath))
       expect(testLogEntries('warn').map((entry) => entry.message)).toContainEqual(
         expect.stringContaining('Failed to remove the sandbox microVM'),
       )
@@ -926,7 +926,7 @@ describe('ScheduleService', () => {
       const cancelled = await service.cancelRun(repo.id, job.id, run.id)
 
       expect(cancelled).toMatchObject({ status: 'cancelled' })
-      expect(runtime.removeSessionSandbox).toHaveBeenCalledWith('ses-run-3')
+      expect(runtime.removeCheckoutSandbox).toHaveBeenCalledWith(repo.fullPath)
     })
 
     it.each([
@@ -942,7 +942,7 @@ describe('ScheduleService', () => {
 
       await service.cancelRun(repo.id, job.id, run.id)
 
-      expect(runtime.removeSessionSandbox).toHaveBeenCalledWith('ses-run-4')
+      expect(runtime.removeCheckoutSandbox).toHaveBeenCalledWith(repo.fullPath)
     })
 
     it('keeps a default-disabled session sandbox untouched', async () => {
@@ -955,7 +955,7 @@ describe('ScheduleService', () => {
 
       await service.cancelRun(repo.id, job.id, run.id)
 
-      expect(runtime.removeSessionSandbox).not.toHaveBeenCalled()
+      expect(runtime.removeCheckoutSandbox).not.toHaveBeenCalled()
     })
 
     it('leaves the sandbox dependencies untouched for a job without an enabled sandbox', async () => {
@@ -969,7 +969,7 @@ describe('ScheduleService', () => {
 
       expect(sessions.update).not.toHaveBeenCalled()
       expect(runtime.planShell).not.toHaveBeenCalled()
-      expect(runtime.removeSessionSandbox).not.toHaveBeenCalled()
+      expect(runtime.removeCheckoutSandbox).not.toHaveBeenCalled()
     })
 
     it('validates sandbox settings when saving a local schedule', async () => {

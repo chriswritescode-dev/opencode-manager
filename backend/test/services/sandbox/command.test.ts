@@ -1,12 +1,13 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import { spawnSync } from 'child_process'
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { createHash } from 'crypto'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { ENV, getAssistantOpenCodeDir, getForgeWorktreesPath, getOpenCodeAgentTmpPath, getOpenCodeGlobalSkillsPath, getOpenCodeToolOutputPath, getOpenCodeWorktreesPath, getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
 import { unwrapSandboxExecCommand } from '@opencode-manager/shared/utils'
 import {
-  SESSION_SANDBOX_NAME_PATTERN,
+  CHECKOUT_SANDBOX_NAME_PATTERN,
   SANDBOX_UNAVAILABLE_PREFIX,
   SANDBOX_DOCKER_DATA_GUEST_PATH,
   SANDBOX_DOCKER_DATA_SIZE,
@@ -24,8 +25,13 @@ import {
   buildSandboxVerifyProvisionArgs,
   buildSandboxVersionArgs,
   buildSandboxVolumeRemoveArgs,
+  checkoutKeyFromMounts,
+  checkoutSandboxLabel,
+  checkoutSandboxName,
+  isManagedSandboxName,
   parseMemoryMib,
   quoteForShell,
+  resolveCheckoutKey,
   resolveExpectedSandboxNetworkPolicy,
   resolveSandboxExecUser,
   resolveSandboxExecUserGid,
@@ -36,19 +42,19 @@ import {
   sandboxMountRoots,
   sandboxNetworkPolicyMismatch,
   sandboxVmMountRoots,
-  sessionSandboxName,
   type SandboxVmSpec,
 } from '../../../src/services/sandbox/command'
 import { isPathWithinRoot } from '../../../src/utils/fs-safe'
 
-const ROOT_SESSION_ID = 'ses_root'
-const VM_NAME = sessionSandboxName(ROOT_SESSION_ID)
+const CHECKOUT_KEY = '/workspace/repos/ai-test'
+const CHECKOUT_LABEL = createHash('sha256').update(CHECKOUT_KEY).digest('hex')
+const VM_NAME = checkoutSandboxName(CHECKOUT_KEY)
 const DOCKER_DATA_VOLUME = sandboxDockerDataVolumeName(VM_NAME)
 
 function vmSpec(overrides: Partial<SandboxVmSpec> = {}): SandboxVmSpec {
   return {
     name: VM_NAME,
-    rootSessionId: ROOT_SESSION_ID,
+    checkoutKey: CHECKOUT_KEY,
     projectMounts: [getReposPath()],
     cpus: ENV.SANDBOX.CPUS,
     memoryMib: parseMemoryMib(ENV.SANDBOX.MEMORY) ?? 0,
@@ -82,16 +88,24 @@ describe('sandbox command builders', () => {
     expect(buildSandboxPullArgs()).toEqual(['pull', ENV.SANDBOX.IMAGE])
   })
 
-  it('derives a stable, pattern-matching sandbox name from a root session id', () => {
-    expect(VM_NAME).toMatch(SESSION_SANDBOX_NAME_PATTERN)
-    expect(sessionSandboxName(ROOT_SESSION_ID)).toBe(VM_NAME)
-    expect(sessionSandboxName('ses_other')).not.toBe(VM_NAME)
-    expect(sessionSandboxName('ses_other')).toMatch(SESSION_SANDBOX_NAME_PATTERN)
-    expect(SESSION_SANDBOX_NAME_PATTERN.test('ocm-workspace')).toBe(false)
-    expect(SESSION_SANDBOX_NAME_PATTERN.test(`ocm-session-${'a'.repeat(11)}`)).toBe(false)
-    expect(SESSION_SANDBOX_NAME_PATTERN.test(`ocm-session-${'a'.repeat(13)}`)).toBe(false)
-    expect(SESSION_SANDBOX_NAME_PATTERN.test(`ocm-session-${'g'.repeat(12)}`)).toBe(false)
+  it('derives a stable, pattern-matching sandbox name from a checkout key', () => {
+    expect(VM_NAME).toMatch(CHECKOUT_SANDBOX_NAME_PATTERN)
+    expect(checkoutSandboxName(CHECKOUT_KEY)).toBe(VM_NAME)
+    expect(checkoutSandboxName('/workspace/repos/other')).not.toBe(VM_NAME)
+    expect(checkoutSandboxName('/workspace/repos/other')).toMatch(CHECKOUT_SANDBOX_NAME_PATTERN)
+    expect(CHECKOUT_SANDBOX_NAME_PATTERN.test('ocm-workspace')).toBe(false)
+    expect(CHECKOUT_SANDBOX_NAME_PATTERN.test(`ocm-checkout-${'a'.repeat(11)}`)).toBe(false)
+    expect(CHECKOUT_SANDBOX_NAME_PATTERN.test(`ocm-checkout-${'a'.repeat(13)}`)).toBe(false)
+    expect(CHECKOUT_SANDBOX_NAME_PATTERN.test(`ocm-checkout-${'g'.repeat(12)}`)).toBe(false)
+    expect(checkoutSandboxLabel(CHECKOUT_KEY)).toBe(CHECKOUT_LABEL)
+    expect(CHECKOUT_LABEL).toMatch(/^[0-9a-f]{64}$/)
     expect(sandboxDockerDataVolumeName(VM_NAME)).toBe(`${VM_NAME}-docker-data`)
+  })
+
+  it('recognizes checkout and legacy session sandbox names as managed', () => {
+    expect(isManagedSandboxName('ocm-checkout-0123456789ab')).toBe(true)
+    expect(isManagedSandboxName('ocm-session-0123456789ab')).toBe(true)
+    expect(isManagedSandboxName('ocm-workspace')).toBe(false)
   })
 
   it('builds ping args targeting the named sandbox with quiet output', () => {
@@ -156,7 +170,7 @@ describe('sandbox command builders', () => {
     }
     expect(labelArgs).toContain('ocm.managed=true')
     expect(labelArgs).toContain(`ocm.net=${ENV.SANDBOX.NET}`)
-    expect(labelArgs).toContain(`ocm.session=${ROOT_SESSION_ID}`)
+    expect(labelArgs).toContain(`ocm.checkout=${CHECKOUT_LABEL}`)
 
     const mountArgs: string[] = []
     for (let i = 0; i < args.length; i++) {
@@ -234,7 +248,7 @@ describe('sandbox command builders', () => {
     expect(canonical.image.Oci.reference).toBe(ENV.SANDBOX.IMAGE)
     expect(canonical.runtime.cmd).toEqual(['sleep', 'infinity'])
     expect(canonical.runtime.workdir).toBe(getReposPath())
-    expect(canonical.labels).toEqual({ 'ocm.managed': 'true', 'ocm.net': ENV.SANDBOX.NET, 'ocm.session': ROOT_SESSION_ID })
+    expect(canonical.labels).toEqual({ 'ocm.managed': 'true', 'ocm.net': ENV.SANDBOX.NET, 'ocm.checkout': CHECKOUT_LABEL })
   })
 
   it('never masks the assistant .opencode directory with a tmpfs overlay', () => {
@@ -294,7 +308,7 @@ describe('sandbox command builders', () => {
     expect(spec.image.Oci.reference).toBe(ENV.SANDBOX.IMAGE)
     expect(labels['ocm.managed']).toBe('true')
     expect(labels['ocm.net']).toBe(ENV.SANDBOX.NET)
-    expect(labels['ocm.session']).toBe(ROOT_SESSION_ID)
+    expect(labels['ocm.checkout']).toBe(CHECKOUT_LABEL)
     expect(resources.cpus).toBe(ENV.SANDBOX.CPUS)
     expect(resources.memory_mib).toBe(parseMemoryMib(ENV.SANDBOX.MEMORY))
     expect(runtime.workdir).toBe(getReposPath())
@@ -803,6 +817,37 @@ describe('sandbox network policy attestation helpers', () => {
       { ...publicPolicy, rules: [{ direction: 'egress', destination: { group: 'host' }, action: 'allow' }] },
       expected,
     )).toContain('network policy')
+  })
+})
+
+describe('resolveCheckoutKey', () => {
+  function restoreWorkspacePath(original: string | undefined): void {
+    if (original === undefined) {
+      delete process.env.WORKSPACE_PATH
+    } else {
+      process.env.WORKSPACE_PATH = original
+    }
+  }
+
+  it('returns the checkout root realpath for a sandboxed directory and null outside the roots', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ocm-checkout-key-'))
+    const originalWorkspacePath = process.env.WORKSPACE_PATH
+    try {
+      const repositories = path.join(tmp, 'repos')
+      const plain = path.join(repositories, 'plain')
+      mkdirSync(plain, { recursive: true })
+
+      process.env.WORKSPACE_PATH = tmp
+
+      await expect(resolveCheckoutKey(plain)).resolves.toBe(realpathSync(plain))
+      await expect(resolveCheckoutKey(path.join(repositories, 'nested', 'missing'))).resolves.toBeNull()
+      await expect(resolveCheckoutKey('/etc')).resolves.toBeNull()
+      await expect(checkoutKeyFromMounts([])).resolves.toBeNull()
+      await expect(checkoutKeyFromMounts([path.join(repositories, 'missing')])).resolves.toBeNull()
+    } finally {
+      restoreWorkspacePath(originalWorkspacePath)
+      rmSync(tmp, { recursive: true, force: true })
+    }
   })
 })
 

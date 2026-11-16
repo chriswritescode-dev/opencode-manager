@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { Hono } from 'hono'
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { z } from 'zod'
@@ -10,11 +10,11 @@ import { SettingsService } from '../../src/services/settings'
 import { getOrCreateInternalToken } from '../../src/services/internal-token'
 import {
   buildCanonicalSandboxSpec,
+  checkoutSandboxName,
   overrideSandboxExecutableTrustValidator,
   parseMemoryMib,
   resolveExpectedSandboxNetworkPolicy,
   resolveSandboxRuntimeTmpfsSizeMib,
-  sessionSandboxName,
 } from '../../src/services/sandbox/command'
 import type { SandboxVmSpec } from '../../src/services/sandbox/command'
 import { detectSandboxCapability, resetSandboxCapabilityCache } from '../../src/services/sandbox/capability'
@@ -31,7 +31,6 @@ import type { TempWorkspace } from '../helpers/test-env'
 import { readJson } from '../helpers/read-json'
 
 const ROOT_SESSION_ID = 'ses_root'
-const VM_NAME = sessionSandboxName(ROOT_SESSION_ID)
 
 const SandboxPlanSchema = z.union([
   z.object({ mode: z.literal('host') }),
@@ -67,10 +66,18 @@ describe('internal sandbox routes', () => {
   let app: Hono
   let token: string
 
+  function checkoutKey(): string {
+    return realpathSync(repoDirectory)
+  }
+
+  function checkoutVmName(): string {
+    return checkoutSandboxName(checkoutKey())
+  }
+
   function vmSpec(): SandboxVmSpec {
     return {
-      name: VM_NAME,
-      rootSessionId: ROOT_SESSION_ID,
+      name: checkoutVmName(),
+      checkoutKey: checkoutKey(),
       projectMounts: [repoDirectory],
       cpus: ENV.SANDBOX.CPUS,
       memoryMib: parseMemoryMib(ENV.SANDBOX.MEMORY) ?? 0,
@@ -97,7 +104,7 @@ describe('internal sandbox routes', () => {
       },
     }
     return JSON.stringify({
-      name: VM_NAME,
+      name: checkoutVmName(),
       status: 'Running',
       config,
       created_at: '2026-08-12T00:00:00Z',
@@ -155,7 +162,7 @@ describe('internal sandbox routes', () => {
       getClaim: async () => ({ sandboxed: false }),
       getState: async () => state,
       resolveShellTarget: async () => ({
-        rootSessionId: ROOT_SESSION_ID,
+        sandboxed: true,
         resources: { cpus: ENV.SANDBOX.CPUS, memoryMib: parseMemoryMib(ENV.SANDBOX.MEMORY) ?? 0 },
       }),
       update: async () => state,
@@ -209,9 +216,7 @@ describe('internal sandbox routes', () => {
     const ancestry = new SessionAncestry(createStubOpenCodeClient({
       api: { session: { get: mock(async () => sessionInfo({ id: ROOT_SESSION_ID })) } },
     }))
-    sessionSandboxService = new SessionSandboxService(db, ancestry, settingsService, {
-      removeSessionSandbox: async () => undefined,
-    })
+    sessionSandboxService = new SessionSandboxService(db, ancestry, settingsService)
     token = getOrCreateInternalToken(db)
     app = new Hono()
     app.route('/api/internal', createInternalTestApp(db, { sessionSandbox: sessionSandboxService }))
@@ -233,12 +238,12 @@ describe('internal sandbox routes', () => {
     expect(res.status).toBe(401)
   })
 
-  it('POST /shell returns host mode when the sandbox preference is off', async () => {
+  it('POST /shell returns a blocked 409 when the sandbox preference is off', async () => {
     const res = await postShell(shellBody())
-    const body = await readJson(res, SandboxPlanSchema)
+    const body = await readJson(res, BlockedPlanSchema)
 
-    expect(res.status).toBe(200)
-    expect(body).toEqual({ mode: 'host' })
+    expect(res.status).toBe(409)
+    expect(body).toEqual({ mode: 'blocked', reason: 'Sandboxing is off for this session' })
   })
 
   it('POST /shell returns the named sandbox plan when enforcement is on', async () => {
@@ -248,7 +253,7 @@ describe('internal sandbox routes', () => {
     const body = await readJson(res, SandboxPlanSchema)
 
     expect(res.status).toBe(200)
-    expect(body).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoDirectory })
+    expect(body).toEqual({ mode: 'sandbox', name: checkoutVmName(), workdir: repoDirectory })
   })
 
   it.each([
@@ -275,15 +280,17 @@ describe('internal sandbox routes', () => {
     expect(body.reason).toContain('/dev/kvm')
   })
 
-  it('POST /shell never returns host mode for an enforced request even when the preference is off', async () => {
+  it('POST /shell returns a blocked 409 for an enforced request when the session is not sandboxed', async () => {
     const res = await postShell(shellBody({ enforced: true }))
-    const body = await readJson(res, SandboxPlanSchema)
+    const body = await readJson(res, BlockedPlanSchema)
 
-    expect(res.status).toBe(200)
-    expect(body).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoDirectory })
+    expect(res.status).toBe(409)
+    expect(body).toEqual({ mode: 'blocked', reason: 'Sandboxing is off for this session' })
   })
 
   it('POST /shell blocks an enforced request for a directory outside the session mounts', async () => {
+    settingsService.updateSettings({ sandbox: { enabled: true } })
+
     const res = await postShell(shellBody({ directory: '/etc', enforced: true }))
     const body = await readJson(res, BlockedPlanSchema)
 

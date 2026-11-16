@@ -225,9 +225,7 @@ export function createBackendApp(dependencies: BackendAppDependencies = {}): Bac
     })
   }
   const sessionAncestry = new SessionAncestry((serverId) => opencodeServerRegistry.getClient(serverId))
-  const sessionSandboxService = new SessionSandboxService(database, sessionAncestry, settingsService, {
-    removeSessionSandbox: (rootSessionId) => sandboxRuntimeService.removeSessionSandbox(rootSessionId),
-  })
+  const sessionSandboxService = new SessionSandboxService(database, sessionAncestry, settingsService)
   const scheduleWorktreeManager = new ScheduleWorktreeManager(gitAuthService, database)
   const scheduleService = new ScheduleService(database, openCodeClient, scheduleWorktreeManager, opencodeServerRegistry, {
     sessions: sessionSandboxService,

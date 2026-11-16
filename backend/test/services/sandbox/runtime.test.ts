@@ -9,6 +9,8 @@ import {
   SANDBOX_DOCKER_DATA_GUEST_PATH,
   buildSandboxStopArgs,
   buildSandboxStopManagedArgs,
+  checkoutSandboxLabel,
+  checkoutSandboxName,
   parseMemoryMib,
   resolveExpectedSandboxNetworkPolicy,
   resolveSandboxExecUser,
@@ -16,7 +18,6 @@ import {
   sandboxDockerDataVolumeName,
   sandboxExecutablePath,
   sandboxProjectRoots,
-  sessionSandboxName,
 } from '../../../src/services/sandbox/command'
 import {
   SandboxRuntimeService,
@@ -35,7 +36,7 @@ import { z } from 'zod'
 import { expectLoggedMessage, resetTestLogs, testLogEntries } from '../../helpers/log-assertions'
 import { FAKE_MSB_SCRIPT, FAKE_MSB_STATE_ENV } from '../../helpers/fake-msb'
 import { createTestDatabase } from '../../helpers/test-database'
-import { git } from '../../helpers/git-fixtures'
+import { createCommittedRepo, git } from '../../helpers/git-fixtures'
 import { applyTestEnv } from '../../helpers/test-env'
 
 const suiteBinDir = mkdtempSync(path.join(realpathSync(tmpdir()), 'ocm-runtime-bin-'))
@@ -63,15 +64,14 @@ const worktreeDir = path.join(worktreesRoot, 'job-1-run-2')
 const KVM_UNAVAILABLE_REASON =
   '/dev/kvm is not available or not writable; pass --device /dev/kvm and run on a KVM-capable Linux host'
 
-const ROOT_SESSION = 'ses_root'
-const OTHER_ROOT_SESSION = 'ses_other'
-const VM_NAME = sessionSandboxName(ROOT_SESSION)
-const OTHER_VM_NAME = sessionSandboxName(OTHER_ROOT_SESSION)
+const VM_NAME = checkoutSandboxName(repoADir)
+const OTHER_VM_NAME = checkoutSandboxName(repoBDir)
+const WORKTREE_VM_NAME = checkoutSandboxName(worktreeDir)
 const SHARED_MOUNT_ROOTS = [toolOutputRoot, skillsRoot, agentTmpRoot]
 
 const FakeVmStateSchema = z.object({
   projectMounts: z.array(z.string()),
-  rootSessionId: z.string(),
+  checkoutLabel: z.string(),
   cpus: z.number(),
   memoryMib: z.number(),
   running: z.boolean(),
@@ -246,7 +246,7 @@ function installFakeMsb(vms: Map<string, FakeVm>, options: FakeMsbOptions = {}):
   for (const [name, entry] of vms) {
     states[name] = {
       projectMounts: entry.projectMounts,
-      rootSessionId: entry.rootSessionId,
+      checkoutLabel: entry.checkoutLabel,
       cpus: entry.cpus,
       memoryMib: entry.memoryMib,
       running: entry.running,
@@ -303,7 +303,7 @@ async function waitForFakeMsbGate(kind: 'inspect' | 'rm' | 'stop'): Promise<void
 function vm(overrides: Partial<FakeVm> = {}): FakeVm {
   return {
     projectMounts: [repoADir],
-    rootSessionId: ROOT_SESSION,
+    checkoutLabel: checkoutSandboxLabel(repoADir),
     cpus: ENV.SANDBOX.CPUS,
     memoryMib: memoryMib(),
     running: true,
@@ -326,7 +326,7 @@ function defaultResources() {
 }
 
 function shellTarget(locationDirectory: string, resources = defaultResources()): SandboxShellTarget {
-  return { rootSessionId: ROOT_SESSION, locationDirectory, resources }
+  return { locationDirectory, resources }
 }
 
 function bindMount(host: string): FakeBindMount {
@@ -391,7 +391,7 @@ function inspectConfig(vm: FakeVmState, name: string, overrides: Partial<FakeIns
       disable_metrics_sample: false,
     },
     env: [{ key: 'PATH', value: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' }],
-    labels: { 'ocm.managed': 'true', 'ocm.net': ENV.SANDBOX.NET, 'ocm.session': vm.rootSessionId },
+    labels: { 'ocm.managed': 'true', 'ocm.net': ENV.SANDBOX.NET, 'ocm.checkout': vm.checkoutLabel },
     rlimits: [],
     mounts: sandboxMounts(vm, name),
     patches: [],
@@ -531,20 +531,16 @@ describe('SandboxRuntimeService', () => {
     expect(msbCalls('run')).toHaveLength(0)
   })
 
-  it('isolates two root sessions into two named VMs with distinct volumes and mounts', async () => {
+  it('isolates two repository checkouts into two named VMs with distinct volumes and mounts', async () => {
     enableEnforcement()
     const vms = new Map<string, FakeVm>([
-      [VM_NAME, vm({ projectMounts: [repoADir], rootSessionId: ROOT_SESSION })],
-      [OTHER_VM_NAME, vm({ projectMounts: [repoBDir], rootSessionId: OTHER_ROOT_SESSION })],
+      [VM_NAME, vm({ projectMounts: [repoADir], checkoutLabel: checkoutSandboxLabel(repoADir) })],
+      [OTHER_VM_NAME, vm({ projectMounts: [repoBDir], checkoutLabel: checkoutSandboxLabel(repoBDir) })],
     ])
     installFakeMsb(vms)
 
     const first = await service.planShell(repoADir, shellTarget(repoADir))
-    const second = await service.planShell(repoBDir, {
-      rootSessionId: OTHER_ROOT_SESSION,
-      locationDirectory: repoBDir,
-      resources: defaultResources(),
-    })
+    const second = await service.planShell(repoBDir, shellTarget(repoBDir))
 
     expect(first).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
     expect(second).toEqual({ mode: 'sandbox', name: OTHER_VM_NAME, workdir: repoBDir })
@@ -564,6 +560,37 @@ describe('SandboxRuntimeService', () => {
       expect(plan).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: nested })
     } finally {
       rmSync(nested, { recursive: true, force: true })
+    }
+  })
+
+  it('plans the same checkout VM for a repository and a nested directory inside it', async () => {
+    enableEnforcement()
+    createCommittedRepo(repoADir, 'main')
+    const nested = path.join(repoADir, 'src')
+    mkdirSync(nested, { recursive: true })
+    installFakeMsb(new Map([[VM_NAME, vm()]]))
+
+    const fromRoot = await service.planShell(repoADir, shellTarget(repoADir))
+    const fromNested = await service.planShell(nested, shellTarget(repoADir))
+
+    expect(fromRoot).toMatchObject({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
+    expect(fromNested).toMatchObject({ mode: 'sandbox', name: VM_NAME, workdir: nested })
+  })
+
+  it('plans a different VM for a linked worktree of the same repository', async () => {
+    enableEnforcement()
+    createCommittedRepo(repoADir, 'main')
+    mkdirSync(worktreesRoot, { recursive: true })
+    const linkedPath = path.join(worktreesRoot, 'linked-checkout')
+    rmSync(linkedPath, { recursive: true, force: true })
+    git(['worktree', 'add', '--detach', linkedPath], repoADir)
+    try {
+      const plan = await service.planShell(linkedPath, shellTarget(linkedPath))
+
+      expect(plan).toMatchObject({ mode: 'sandbox', name: checkoutSandboxName(linkedPath), workdir: linkedPath })
+      expect(checkoutSandboxName(linkedPath)).not.toBe(VM_NAME)
+    } finally {
+      rmSync(linkedPath, { recursive: true, force: true })
     }
   })
 
@@ -593,12 +620,14 @@ describe('SandboxRuntimeService', () => {
 
   it('accepts a schedule-worktree directory as its own session mount', async () => {
     enableEnforcement()
-    const vms = new Map<string, FakeVm>([[VM_NAME, vm({ projectMounts: [worktreeDir] })]])
+    const vms = new Map<string, FakeVm>([
+      [WORKTREE_VM_NAME, vm({ projectMounts: [worktreeDir], checkoutLabel: checkoutSandboxLabel(worktreeDir) })],
+    ])
     installFakeMsb(vms)
 
     const plan = await service.planShell(worktreeDir, shellTarget(worktreeDir))
 
-    expect(plan).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: worktreeDir })
+    expect(plan).toEqual({ mode: 'sandbox', name: WORKTREE_VM_NAME, workdir: worktreeDir })
   })
 
   it('includes the resolved git identity in the sandbox plan env', async () => {
@@ -717,7 +746,7 @@ describe('SandboxRuntimeService', () => {
     expect(plan).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
     expect(msbCalls('run')).toHaveLength(1)
     expect(fakeVm(VM_NAME)?.projectMounts).toEqual([repoADir])
-    expect(fakeVm(VM_NAME)?.rootSessionId).toBe(ROOT_SESSION)
+    expect(fakeVm(VM_NAME)?.checkoutLabel).toBe(checkoutSandboxLabel(repoADir))
   })
 
   it('reuses a running sandbox whose inspect config nests the spec under config.spec', async () => {
@@ -776,10 +805,10 @@ describe('SandboxRuntimeService', () => {
     await expectRecreateForMutation((config) => ({ ...config, labels: {} }), 'not labelled ocm.managed=true')
   })
 
-  it('removes and recreates a sandbox whose session label belongs to another root session', async () => {
+  it('removes and recreates a sandbox whose checkout label belongs to another checkout', async () => {
     await expectRecreateForMutation(
-      (config) => ({ ...config, labels: { 'ocm.managed': 'true', 'ocm.net': ENV.SANDBOX.NET, 'ocm.session': 'ses_intruder' } }),
-      'session label',
+      (config) => ({ ...config, labels: { 'ocm.managed': 'true', 'ocm.net': ENV.SANDBOX.NET, 'ocm.checkout': checkoutSandboxLabel('/workspace/repos/intruder') } }),
+      'checkout label',
     )
   })
 
@@ -1046,7 +1075,7 @@ describe('SandboxRuntimeService', () => {
       allowCapability('msb 0.6.15')
       const vms = new Map<string, FakeVm>([
         [VM_NAME, vm({ projectMounts: [repoADir] })],
-        [OTHER_VM_NAME, vm({ projectMounts: [repoBDir], rootSessionId: OTHER_ROOT_SESSION, running: false })],
+        [OTHER_VM_NAME, vm({ projectMounts: [repoBDir], checkoutLabel: checkoutSandboxLabel(repoBDir), running: false })],
       ])
       installFakeMsb(vms)
 
@@ -1055,11 +1084,7 @@ describe('SandboxRuntimeService', () => {
 
       await advanceSandboxTime(ENV.SANDBOX.EXEC_TIMEOUT_MS)
 
-      const second = await service.planShell(repoBDir, {
-        rootSessionId: OTHER_ROOT_SESSION,
-        locationDirectory: repoBDir,
-        resources: defaultResources(),
-      })
+      const second = await service.planShell(repoBDir, shellTarget(repoBDir))
 
       expect(second).toEqual({ mode: 'sandbox', name: OTHER_VM_NAME, workdir: repoBDir })
       expect(fakeMsbInvocations()).toContainEqual([sandboxExecutablePath(), ...buildSandboxStopArgs(VM_NAME)])
@@ -1073,17 +1098,13 @@ describe('SandboxRuntimeService', () => {
     allowCapability('msb 0.6.15')
     const vms = new Map<string, FakeVm>([
       [VM_NAME, vm({ projectMounts: [repoADir] })],
-      [OTHER_VM_NAME, vm({ projectMounts: [repoBDir], rootSessionId: OTHER_ROOT_SESSION, running: false })],
+      [OTHER_VM_NAME, vm({ projectMounts: [repoBDir], checkoutLabel: checkoutSandboxLabel(repoBDir), running: false })],
     ])
     installFakeMsb(vms)
 
     await service.planShell(repoADir, shellTarget(repoADir))
 
-    const blocked = await service.planShell(repoBDir, {
-      rootSessionId: OTHER_ROOT_SESSION,
-      locationDirectory: repoBDir,
-      resources: defaultResources(),
-    })
+    const blocked = await service.planShell(repoBDir, shellTarget(repoBDir))
 
     expect(blocked.mode).toBe('blocked')
     expect(blocked.mode === 'blocked' ? blocked.reason : '').toContain('already running')
@@ -1097,11 +1118,7 @@ describe('SandboxRuntimeService', () => {
     const vms = new Map<string, FakeVm>([[VM_NAME, vm({ projectMounts: [repoADir] })]])
     installFakeMsb(vms, { stopError: 'failed to stop vm' })
 
-    const plan = await service.planShell(repoBDir, {
-      rootSessionId: OTHER_ROOT_SESSION,
-      locationDirectory: repoBDir,
-      resources: defaultResources(),
-    })
+    const plan = await service.planShell(repoBDir, shellTarget(repoBDir))
 
     expect(plan).toEqual({
       mode: 'blocked',
@@ -1118,11 +1135,7 @@ describe('SandboxRuntimeService', () => {
     const vms = new Map<string, FakeVm>([[VM_NAME, vm({ projectMounts: [repoADir] })]])
     installFakeMsb(vms, { stopError: 'spawn msb ENOENT' })
 
-    const plan = await service.planShell(repoBDir, {
-      rootSessionId: OTHER_ROOT_SESSION,
-      locationDirectory: repoBDir,
-      resources: defaultResources(),
-    })
+    const plan = await service.planShell(repoBDir, shellTarget(repoBDir))
 
     expect(plan).toEqual({
       mode: 'blocked',
@@ -1160,6 +1173,33 @@ describe('SandboxRuntimeService', () => {
     }
   })
 
+  it('removes a legacy session VM and its Docker data volume from the sweep', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
+    try {
+      enableEnforcement()
+      const LEGACY_VM_NAME = 'ocm-session-0123456789ab'
+      const vms = new Map<string, FakeVm>([
+        [LEGACY_VM_NAME, vm({ projectMounts: [repoADir], checkoutLabel: checkoutSandboxLabel(repoADir) })],
+      ])
+      installFakeMsb(vms)
+
+      await service.prepareSandboxOnBoot()
+      await advanceSandboxTime(31 * 60 * 1000)
+      await vi.waitFor(() => {
+        expect(hasFakeVm(LEGACY_VM_NAME)).toBe(false)
+      })
+
+      expect(fakeMsbInvocations()).toContainEqual([
+        sandboxExecutablePath(),
+        'volume',
+        'rm',
+        sandboxDockerDataVolumeName(LEGACY_VM_NAME),
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('removes a session VM that the running cap stopped once it is idle', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
     try {
@@ -1167,17 +1207,13 @@ describe('SandboxRuntimeService', () => {
       allowCapability('msb 0.6.15')
       const vms = new Map<string, FakeVm>([
         [VM_NAME, vm({ projectMounts: [repoADir] })],
-        [OTHER_VM_NAME, vm({ projectMounts: [repoBDir], rootSessionId: OTHER_ROOT_SESSION, running: false })],
+        [OTHER_VM_NAME, vm({ projectMounts: [repoBDir], checkoutLabel: checkoutSandboxLabel(repoBDir), running: false })],
       ])
       installFakeMsb(vms)
 
       await service.planShell(repoADir, shellTarget(repoADir))
       await advanceSandboxTime(ENV.SANDBOX.EXEC_TIMEOUT_MS)
-      const second = await service.planShell(repoBDir, {
-        rootSessionId: OTHER_ROOT_SESSION,
-        locationDirectory: repoBDir,
-        resources: defaultResources(),
-      })
+      const second = await service.planShell(repoBDir, shellTarget(repoBDir))
       expect(second).toEqual({ mode: 'sandbox', name: OTHER_VM_NAME, workdir: repoBDir })
       expect(fakeVm(VM_NAME)?.running).toBe(false)
 
@@ -1269,7 +1305,7 @@ describe('SandboxRuntimeService', () => {
       enableEnforcement()
       const vms = new Map<string, FakeVm>([
         [VM_NAME, vm()],
-        [OTHER_VM_NAME, vm({ projectMounts: [repoBDir], rootSessionId: OTHER_ROOT_SESSION })],
+        [OTHER_VM_NAME, vm({ projectMounts: [repoBDir], checkoutLabel: checkoutSandboxLabel(repoBDir) })],
       ])
       installFakeMsb(vms)
       writeFailureFile(`rm-${VM_NAME}`, 'operation not permitted')
@@ -1314,7 +1350,7 @@ describe('SandboxRuntimeService', () => {
 
     openFakeMsbGate('rm')
 
-    const removal = service.removeSessionSandbox(ROOT_SESSION)
+    const removal = service.removeCheckoutSandbox(repoADir)
     await waitForFakeMsbGate('rm')
 
     const planning = service.planShell(repoADir, shellTarget(repoADir))
@@ -1334,8 +1370,8 @@ describe('SandboxRuntimeService', () => {
     allowCapability('msb 0.6.15')
     installFakeMsb(new Map<string, FakeVm>([[VM_NAME, vm()]]))
 
-    const first = service.removeSessionSandbox(ROOT_SESSION)
-    const second = service.removeSessionSandbox(ROOT_SESSION)
+    const first = service.removeCheckoutSandbox(repoADir)
+    const second = service.removeCheckoutSandbox(repoADir)
     await Promise.all([first, second])
 
     expect(msbCalls('rm')).toHaveLength(1)
@@ -1360,7 +1396,7 @@ describe('SandboxRuntimeService', () => {
     }
   })
 
-  it('removes the VM and its Docker data volume when a root session is deleted', async () => {
+  it('removes the VM and its Docker data volume when a repository checkout is deleted', async () => {
     enableEnforcement()
     const vms = new Map<string, FakeVm>([[VM_NAME, vm()]])
     installFakeMsb(vms)
@@ -1368,32 +1404,32 @@ describe('SandboxRuntimeService', () => {
     await service.planShell(repoADir, shellTarget(repoADir))
     expect(hasFakeVm(VM_NAME)).toBe(true)
 
-    await service.removeSessionSandbox(ROOT_SESSION)
+    await service.removeCheckoutSandbox(repoADir)
 
     expect(hasFakeVm(VM_NAME)).toBe(false)
     expect(fakeMsbInvocations()).toContainEqual([sandboxExecutablePath(), 'volume', 'rm', sandboxDockerDataVolumeName(VM_NAME)])
   })
 
-  it('tolerates a missing VM and volume when removing a session sandbox', async () => {
+  it('tolerates a missing VM and volume when removing a checkout sandbox', async () => {
     allowCapability('msb 0.6.15')
     installFakeMsb(new Map(), { missingRemovals: true })
 
-    await expect(service.removeSessionSandbox(ROOT_SESSION)).resolves.toBeUndefined()
+    await expect(service.removeCheckoutSandbox(repoADir)).resolves.toBeUndefined()
   })
 
-  it('throws when removing a session sandbox fails for another reason', async () => {
+  it('throws when removing a checkout sandbox fails for another reason', async () => {
     allowCapability('msb 0.6.15')
     installFakeMsb(new Map(), { rmError: 'operation not permitted' })
 
-    await expect(service.removeSessionSandbox(ROOT_SESSION)).rejects.toThrow('operation not permitted')
+    await expect(service.removeCheckoutSandbox(repoADir)).rejects.toThrow('operation not permitted')
   })
 
-  it('does not touch msb when removing a session sandbox while the capability is unavailable', async () => {
+  it('does not touch msb when removing a checkout sandbox while the capability is unavailable', async () => {
     denyCapability()
     const vms = new Map<string, FakeVm>([[VM_NAME, vm()]])
     installFakeMsb(vms)
 
-    await expect(service.removeSessionSandbox(ROOT_SESSION)).resolves.toBeUndefined()
+    await expect(service.removeCheckoutSandbox(repoADir)).resolves.toBeUndefined()
 
     expect(fakeMsbInvocations()).toEqual([])
     expect(hasFakeVm(VM_NAME)).toBe(true)

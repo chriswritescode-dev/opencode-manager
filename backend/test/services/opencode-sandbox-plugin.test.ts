@@ -42,7 +42,7 @@ const WORKDIR = '/workspace/repos/ai-test'
 const SESSION_ID = 'ses_test'
 const CALL_ID = 'call_test'
 const LOCATION_DIRECTORY = '/workspace'
-const PLAN_NAME = 'ocm-session-0123456789ab'
+const PLAN_NAME = 'ocm-checkout-0123456789ab'
 const PLUGIN_OPTIONS: LoadGeneratedPluginOptions = { location: { directory: LOCATION_DIRECTORY } }
 
 const ShellToolInputSchema = z.object({ command: z.string() })
@@ -445,11 +445,11 @@ describe('ocm-sandbox plugin', () => {
       expect(createEvent.env[SANDBOX_SHELL_ENV_WORKDIR]).toBeUndefined()
     })
 
-    it('fails closed when the plan omits a valid session name', async () => {
+    it('fails closed when the plan carries a legacy session name', async () => {
       const plugin = await loadPlugin(configHome)
       const { shell, createEvent } = await runSandboxedShellCall(
         plugin,
-        managerFetch({ session: { sandboxed: true }, plan: { body: { mode: 'sandbox', workdir: WORKDIR, name: 'not-a-session-name' } } }),
+        managerFetch({ session: { sandboxed: true }, plan: { body: { mode: 'sandbox', workdir: WORKDIR, name: 'ocm-session-0123456789ab' } } }),
       )
 
       await expect(shell.execute!({ command: 'echo sentinel' }, toolContext())).rejects.toThrow(

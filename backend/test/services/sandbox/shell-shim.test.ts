@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { getReposPath } from '@opencode-manager/shared/config/env'
-import { sessionSandboxName } from '../../../src/services/sandbox/command'
+import { checkoutSandboxName } from '../../../src/services/sandbox/command'
 import {
   SANDBOX_MAX_FORWARDED_GIT_CONFIGS,
   SANDBOX_SHELL_ENV_FORWARD,
@@ -12,7 +12,7 @@ import {
   SANDBOX_SHELL_ENV_WORKDIR,
 } from '../../../src/services/sandbox/shell-shim'
 
-const SANDBOX_NAME = sessionSandboxName('ses_shim_test')
+const SANDBOX_NAME = checkoutSandboxName('/workspace/repos/ai-test')
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -432,12 +432,13 @@ describe('sandbox shell shim', () => {
         undefined,
         '',
         'ocm-workspace',
-        'ocm-session-short',
-        `ocm-session-${'a'.repeat(11)}`,
-        `ocm-session-${'a'.repeat(13)}`,
-        `ocm-session-${'g'.repeat(12)}`,
-        `ocm-session-${'A'.repeat(12)}`,
-        `ocm-session-${'a'.repeat(12)}extra`,
+        'ocm-checkout-short',
+        `ocm-checkout-${'a'.repeat(11)}`,
+        `ocm-checkout-${'a'.repeat(13)}`,
+        `ocm-checkout-${'g'.repeat(12)}`,
+        `ocm-checkout-${'A'.repeat(12)}`,
+        `ocm-checkout-${'a'.repeat(12)}extra`,
+        'ocm-session-0123456789ab',
       ]) {
         const env: NodeJS.ProcessEnv = {
           ...process.env,
@@ -481,7 +482,7 @@ describe('sandbox shell shim', () => {
       const shimPath = await shimMod.ensureSandboxShellShim(configHome)
 
       const directory = path.join(getReposPath(), 'foo')
-      const otherName = commandMod.sessionSandboxName('ses_other')
+      const otherName = commandMod.checkoutSandboxName('/workspace/repos/other')
       const result = spawnSync(shimPath, ['-c', 'echo ok'], {
         encoding: 'utf8',
         env: sandboxShellEnv({ [SANDBOX_SHELL_ENV_WORKDIR]: directory, [SANDBOX_SHELL_ENV_NAME]: otherName }),

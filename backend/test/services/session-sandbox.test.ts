@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import os from 'os'
 import { Database } from 'bun:sqlite'
 import { ENV } from '@opencode-manager/shared/config/env'
@@ -16,7 +16,6 @@ import { SessionSandboxService } from '../../src/services/session-sandbox'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { SSEEvent } from '../../src/services/sse-aggregator'
 import { createFakeSessionPermissionClient } from '../helpers/fake-session-permission-client'
-import { expectLoggedMessage } from '../helpers/log-assertions'
 
 const DIRECTORY = '/abs/repo'
 
@@ -32,9 +31,8 @@ function createService(
   db: Database,
   client: OpenCodeClient,
   settingsService: SettingsService,
-  sandboxes: { removeSessionSandbox(rootSessionId: string): Promise<void> } = { removeSessionSandbox: async () => undefined },
 ): SessionSandboxService {
-  return new SessionSandboxService(db, new SessionAncestry(client), settingsService, sandboxes)
+  return new SessionSandboxService(db, new SessionAncestry(client), settingsService)
 }
 
 type SessionCreatedEvent = Extract<SSEEvent, { type: 'session.created' }>
@@ -278,107 +276,34 @@ describe('SessionSandboxService', () => {
     expect(getSessionSandboxMode(db, 'ses_fork')?.sandboxed).toBe(false)
   })
 
-  it('clears the stored value when the session is deleted', async () => {
+  it('clears the stored value of a sandboxed root session when it is deleted', async () => {
+    const settingsService = new SettingsService(db)
+    settingsService.updateSettings({ sandbox: { enabled: true } })
     setSessionSandboxed(db, 'ses_root', true)
-    const service = createService(db, createFakeSessionPermissionClient(), new SettingsService(db))
+    const service = createService(db, createFakeSessionPermissionClient(), settingsService)
 
-    await service.handleEvent(DIRECTORY, sessionDeletedEvent('ses_root'))
+    await expect(service.handleEvent(DIRECTORY, sessionDeletedEvent('ses_root'))).resolves.toBeUndefined()
 
     expect(getSessionSandboxMode(db, 'ses_root')).toBeNull()
   })
 
-  it('removes the sandbox microVM when a sandboxed root session is deleted', async () => {
+  it('keeps the root mode row when a child session is deleted', async () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sandbox: { enabled: true } })
     setSessionSandboxed(db, 'ses_root', true)
-    const removed: string[] = []
-    const service = createService(db, createFakeSessionPermissionClient(), settingsService, {
-      removeSessionSandbox: async (rootSessionId) => {
-        removed.push(rootSessionId)
-      },
-    })
-
-    await service.handleEvent(DIRECTORY, sessionDeletedEvent('ses_root'))
-
-    expect(removed).toEqual(['ses_root'])
-    expect(getSessionSandboxMode(db, 'ses_root')).toBeNull()
-  })
-
-  it('removes the sandbox microVM when a root session is deleted with a null directory', async () => {
-    const settingsService = new SettingsService(db)
-    settingsService.updateSettings({ sandbox: { enabled: true } })
-    setSessionSandboxed(db, 'ses_root', true)
-    const removed: string[] = []
-    const service = createService(db, createFakeSessionPermissionClient(), settingsService, {
-      removeSessionSandbox: async (rootSessionId) => {
-        removed.push(rootSessionId)
-      },
-    })
-
-    await service.handleEvent(null, sessionDeletedEvent('ses_root'))
-
-    expect(removed).toEqual(['ses_root'])
-    expect(getSessionSandboxMode(db, 'ses_root')).toBeNull()
-  })
-
-  it('does not remove a sandbox microVM when a child session is deleted', async () => {
-    const settingsService = new SettingsService(db)
-    settingsService.updateSettings({ sandbox: { enabled: true } })
-    setSessionSandboxed(db, 'ses_root', true)
-    const removed: string[] = []
-    const service = createService(db, createFakeSessionPermissionClient(), settingsService, {
-      removeSessionSandbox: async (rootSessionId) => {
-        removed.push(rootSessionId)
-      },
-    })
+    const service = createService(db, createFakeSessionPermissionClient(), settingsService)
 
     await service.handleEvent(DIRECTORY, sessionDeletedEvent('ses_child'))
 
-    expect(removed).toEqual([])
+    expect(getSessionSandboxMode(db, 'ses_root')).toMatchObject({ sandboxed: true, source: 'user' })
+    expect(getSessionSandboxMode(db, 'ses_child')).toBeNull()
   })
 
-  it('removes the sandbox microVM when a session with a mode row is deleted even when support is disabled', async () => {
-    setSessionSandboxed(db, 'ses_root', true)
-    const removed: string[] = []
-    const service = createService(db, createFakeSessionPermissionClient(), new SettingsService(db), {
-      removeSessionSandbox: async (rootSessionId) => {
-        removed.push(rootSessionId)
-      },
-    })
-
-    await service.handleEvent(DIRECTORY, sessionDeletedEvent('ses_root'))
-
-    expect(removed).toEqual(['ses_root'])
-    expect(getSessionSandboxMode(db, 'ses_root')).toBeNull()
-  })
-
-  it('logs and swallows a failure while removing the deleted session sandbox', async () => {
+  it('persists turning sandboxing off and returns the updated state', async () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sandbox: { enabled: true } })
     setSessionSandboxed(db, 'ses_root', true)
-    const service = createService(db, createFakeSessionPermissionClient(), settingsService, {
-      removeSessionSandbox: async () => {
-        throw new Error('msb rm failed')
-      },
-    })
-
-    await expect(service.handleEvent(DIRECTORY, sessionDeletedEvent('ses_root'))).resolves.toBeUndefined()
-    await vi.waitFor(() => {
-      expectLoggedMessage('msb rm failed', 'warn')
-    })
-    expect(getSessionSandboxMode(db, 'ses_root')).toBeNull()
-  })
-
-  it('removes the sandbox microVM when sandboxing is turned off and returns the updated state', async () => {
-    const settingsService = new SettingsService(db)
-    settingsService.updateSettings({ sandbox: { enabled: true } })
-    setSessionSandboxed(db, 'ses_root', true)
-    const removed: string[] = []
-    const service = createService(db, createFakeSessionPermissionClient(), settingsService, {
-      removeSessionSandbox: async (rootSessionId) => {
-        removed.push(rootSessionId)
-      },
-    })
+    const service = createService(db, createFakeSessionPermissionClient(), settingsService)
 
     await expect(service.update('ses_root', { sandboxed: false })).resolves.toMatchObject({
       sessionId: 'ses_root',
@@ -387,71 +312,17 @@ describe('SessionSandboxService', () => {
       source: 'user',
       available: true,
     })
-    await vi.waitFor(() => {
-      expect(removed).toEqual(['ses_root'])
-    })
+    expect(getSessionSandboxMode(db, 'ses_root')).toMatchObject({ sandboxed: false, source: 'user' })
   })
 
-  it('does not remove the sandbox microVM when sandboxing is turned on', async () => {
+  it('persists resources on a resources-only update', async () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sandbox: { enabled: true } })
-    const removed: string[] = []
-    const service = createService(db, createFakeSessionPermissionClient(), settingsService, {
-      removeSessionSandbox: async (rootSessionId) => {
-        removed.push(rootSessionId)
-      },
-    })
-
-    await service.update('ses_root', { sandboxed: true })
-
-    expect(removed).toEqual([])
-  })
-
-  it('does not remove the sandbox microVM for a resources-only update', async () => {
-    const settingsService = new SettingsService(db)
-    settingsService.updateSettings({ sandbox: { enabled: true } })
-    const removed: string[] = []
-    const service = createService(db, createFakeSessionPermissionClient(), settingsService, {
-      removeSessionSandbox: async (rootSessionId) => {
-        removed.push(rootSessionId)
-      },
-    })
+    const service = createService(db, createFakeSessionPermissionClient(), settingsService)
 
     await service.update('ses_root', { resources: { cpus: 4, memoryMib: 8192 } })
 
-    expect(removed).toEqual([])
-  })
-
-  it('logs and swallows a failure while removing the sandbox after it is turned off', async () => {
-    const settingsService = new SettingsService(db)
-    settingsService.updateSettings({ sandbox: { enabled: true } })
-    setSessionSandboxed(db, 'ses_root', true)
-    const service = createService(db, createFakeSessionPermissionClient(), settingsService, {
-      removeSessionSandbox: async () => {
-        throw new Error('msb rm failed')
-      },
-    })
-
-    await expect(service.update('ses_root', { sandboxed: false })).resolves.toMatchObject({ sandboxed: false })
-    await vi.waitFor(() => {
-      expectLoggedMessage('ses_root after its sandbox was turned off', 'warn')
-    })
-    expectLoggedMessage('msb rm failed', 'warn')
-  })
-
-  it('does not remove the sandbox microVM when sandboxing is turned off and support is disabled', async () => {
-    const removed: string[] = []
-    const service = createService(db, createFakeSessionPermissionClient(), new SettingsService(db), {
-      removeSessionSandbox: async (rootSessionId) => {
-        removed.push(rootSessionId)
-      },
-    })
-
-    await expect(service.update('ses_root', { sandboxed: false })).resolves.toMatchObject({
-      sandboxed: false,
-      available: false,
-    })
-    expect(removed).toEqual([])
+    expect(getSessionSandboxMode(db, 'ses_root')).toMatchObject({ resources: { cpus: 4, memoryMib: 8192 } })
   })
 
   it('rejects updating a child session with 400', async () => {
@@ -557,10 +428,45 @@ describe('SessionSandboxService', () => {
     await expect(service.getClaim('ses_root')).rejects.toThrow('upstream unavailable')
   })
 
-  it('resolves the shell target to the root session and effective resources', async () => {
+  it('reports sandboxed with the effective defaults for an unstored root session', async () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sandbox: { enabled: true } })
-    setSessionSandboxResources(db, 'ses_root', { cpus: 4, memoryMib: 8192 }, true)
+    const service = createService(db, createFakeSessionPermissionClient(), settingsService)
+
+    await expect(service.resolveShellTarget('ses_root')).resolves.toEqual({
+      sandboxed: true,
+      resources: ENV_RESOURCES,
+    })
+  })
+
+  it('reports unsandboxed when server sandbox support is disabled', async () => {
+    const service = createService(db, createFakeSessionPermissionClient(), new SettingsService(db))
+
+    setSessionSandboxed(db, 'ses_root', true)
+
+    await expect(service.resolveShellTarget('ses_root')).resolves.toEqual({
+      sandboxed: false,
+      resources: ENV_RESOURCES,
+    })
+  })
+
+  it('reports the stored sandbox flag and effective overridden resources', async () => {
+    const settingsService = new SettingsService(db)
+    settingsService.updateSettings({ sandbox: { enabled: true } })
+    setSessionSandboxed(db, 'ses_root', false)
+    setSessionSandboxResources(db, 'ses_root', { cpus: 4, memoryMib: 8192 }, false)
+    const service = createService(db, createFakeSessionPermissionClient(), settingsService)
+
+    await expect(service.resolveShellTarget('ses_root')).resolves.toEqual({
+      sandboxed: false,
+      resources: { cpus: 4, memoryMib: 8192 },
+    })
+  })
+
+  it('resolves the root sandboxed state for a child session', async () => {
+    const settingsService = new SettingsService(db)
+    settingsService.updateSettings({ sandbox: { enabled: true } })
+    setSessionSandboxed(db, 'ses_root', false)
     const service = createService(
       db,
       createFakeSessionPermissionClient({ parents: { ses_child: 'ses_root', ses_root: null } }),
@@ -568,8 +474,8 @@ describe('SessionSandboxService', () => {
     )
 
     await expect(service.resolveShellTarget('ses_child')).resolves.toEqual({
-      rootSessionId: 'ses_root',
-      resources: { cpus: 4, memoryMib: 8192 },
+      sandboxed: false,
+      resources: ENV_RESOURCES,
     })
   })
 })

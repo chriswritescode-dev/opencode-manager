@@ -31,9 +31,7 @@ function createTestApp(
         }
       : undefined,
   })
-  const service = new SessionSandboxService(db, new SessionAncestry(client), settingsService, {
-    removeSessionSandbox: async () => undefined,
-  })
+  const service = new SessionSandboxService(db, new SessionAncestry(client), settingsService)
   const app = new Hono()
   app.route('/session-sandbox', createSessionSandboxRoutes(service))
   return app

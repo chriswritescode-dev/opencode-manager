@@ -80,7 +80,7 @@ if [ -z "\${${SANDBOX_SHELL_ENV_WORKDIR}:-}" ]; then
   exit 126
 fi
 case "\${${SANDBOX_SHELL_ENV_NAME}:-}" in
-  ocm-session-[0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef]) ;;
+  ocm-checkout-[0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef]) ;;
   *)
     echo 'ocm-sandbox-shell: sandbox name missing or invalid; refusing to run on the host' >&2
     exit 126

@@ -286,7 +286,7 @@ interface ScheduleTargetContext {
 
 export interface ScheduleSandboxDependencies {
   sessions: Pick<SessionSandboxService, 'assertSandboxRequestAllowed' | 'update' | 'resolveShellTarget'>
-  runtime: Pick<SandboxRuntimeService, 'planShell' | 'removeSessionSandbox'>
+  runtime: Pick<SandboxRuntimeService, 'planShell' | 'removeCheckoutSandbox'>
 }
 
 export interface ScheduleActiveRunSnapshot {
@@ -580,7 +580,7 @@ export class ScheduleService {
 
     await dependencies.sessions.update(sessionId, { sandboxed: true, resources: sandbox.resources })
     const target = await dependencies.sessions.resolveShellTarget(sessionId)
-    const plan = await dependencies.runtime.planShell(directory, { ...target, locationDirectory: directory }, true)
+    const plan = await dependencies.runtime.planShell(directory, { locationDirectory: directory, resources: target.resources }, true)
 
     if (plan.mode !== 'sandbox') {
       const reason = plan.mode === 'blocked' ? plan.reason : 'the shell plan was not sandboxed'
@@ -1656,10 +1656,11 @@ export class ScheduleService {
     if (!this.runs.beginTeardown(key)) return
     try {
       const fresh = getScheduleRunById(this.db, repoId, jobId, runId)
+      const runDirectory = fresh?.worktreePath ?? (repoId === null ? null : this.findRepoPath(repoId))
+      await this.removeRunSandbox(sessionId ?? fresh?.sessionId ?? null, runDirectory)
       if (repo && fresh?.worktreePath) {
         await this.finalizeRunWorktree(repo, job, runId, fresh.worktreePath, fresh.runBranch, fresh.triggerSource, repoId, jobId)
       }
-      await this.removeRunSandbox(sessionId ?? fresh?.sessionId ?? null)
     } finally {
       this.runs.endTeardown(key)
     }
@@ -1690,13 +1691,13 @@ export class ScheduleService {
     }
   }
 
-  private async removeRunSandbox(sessionId: string | null): Promise<void> {
+  private async removeRunSandbox(sessionId: string | null, directory: string | null): Promise<void> {
     const runtime = this.sandbox?.runtime
-    if (!sessionId || !runtime) return
+    if (!sessionId || !directory || !runtime) return
     const mode = getSessionSandboxMode(this.db, sessionId)
     if (mode?.sandboxed !== true && mode?.source !== 'user') return
     try {
-      await runtime.removeSessionSandbox(sessionId)
+      await runtime.removeCheckoutSandbox(directory)
     } catch (error) {
       logger.warn(`Failed to remove the sandbox microVM for scheduled run session ${sessionId}: ${getErrorMessage(error)}`)
     }

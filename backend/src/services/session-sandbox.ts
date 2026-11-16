@@ -17,7 +17,6 @@ import { resolveSandboxResources, sandboxResourceLimitError } from './sandbox/re
 import type { SessionAncestry } from './session-ancestry'
 import type { SSEEvent } from './sse-aggregator'
 import type { SettingsService } from './settings'
-import { logger } from '../utils/logger'
 
 export class SessionSandboxError extends Error {
   status: number
@@ -33,7 +32,6 @@ export class SessionSandboxService {
     private readonly db: Database,
     private readonly ancestry: SessionAncestry,
     private readonly settingsService: SettingsService,
-    private readonly sandboxes: { removeSessionSandbox(rootSessionId: string): Promise<void> },
   ) {}
 
   async handleEvent(directory: string | null, event: SSEEvent): Promise<void> {
@@ -64,9 +62,6 @@ export class SessionSandboxService {
       case 'session.deleted': {
         const { sessionID } = event.data
         this.ancestry.forget(sessionID)
-        if (getSessionSandboxMode(this.db, sessionID) !== null) {
-          this.removeSandboxInBackground(sessionID, `deleted session ${sessionID}`)
-        }
         deleteSessionSandboxMode(this.db, sessionID)
         return
       }
@@ -116,10 +111,6 @@ export class SessionSandboxService {
       }
     })()
 
-    if (request.sandboxed === false && this.sandboxSupported()) {
-      this.removeSandboxInBackground(sessionId, `session ${sessionId} after its sandbox was turned off`)
-    }
-
     return this.getState(sessionId)
   }
 
@@ -136,21 +127,13 @@ export class SessionSandboxService {
     }
   }
 
-  async resolveShellTarget(sessionId: string): Promise<{ rootSessionId: string; resources: SessionSandboxResources }> {
+  async resolveShellTarget(sessionId: string): Promise<{ sandboxed: boolean; resources: SessionSandboxResources }> {
     const rootSessionId = await this.ancestry.resolveRootSessionId(sessionId)
     const stored = getSessionSandboxMode(this.db, rootSessionId)
     return {
-      rootSessionId,
+      sandboxed: this.sandboxSupported() && (stored?.sandboxed ?? this.defaultSandboxed()),
       resources: resolveSandboxResources(this.preferences().sandbox, stored?.resources ?? null),
     }
-  }
-
-  private removeSandboxInBackground(rootSessionId: string, reason: string): void {
-    void this.sandboxes.removeSessionSandbox(rootSessionId).catch((error) => {
-      logger.warn(
-        `Failed to remove the sandbox microVM for ${reason}: ${error instanceof Error ? error.message : String(error)}`,
-      )
-    })
   }
 
   private async resolveParentRootRow(parentId: string): Promise<SessionSandboxModeRow | null> {

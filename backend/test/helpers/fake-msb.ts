@@ -148,7 +148,7 @@ function synthesize(vm, name) {
       disable_metrics_sample: false,
     },
     env: [{ key: 'PATH', value: spec.pathEnv }],
-    labels: { 'ocm.managed': 'true', 'ocm.net': spec.net, 'ocm.session': vm.rootSessionId },
+    labels: { 'ocm.managed': 'true', 'ocm.net': spec.net, 'ocm.checkout': vm.checkoutLabel },
     rlimits: [],
     mounts,
     patches: [],
@@ -208,12 +208,12 @@ switch (command) {
     const replaceFailure = readFailure('run-replace')
     if (replaceFailure && args.includes('--replace')) stderrExit(replaceFailure.stderr, replaceFailure.exitCode)
     const memory = valueAfter('-m') || '0M'
-    const sessionLabel = valuesAfter('--label').find((label) => label.startsWith('ocm.session='))
+    const checkoutLabel = valuesAfter('--label').find((label) => label.startsWith('ocm.checkout='))
     clearInspect(name)
     const sharedRoots = new Set(spec.sharedMountRoots || [])
     state.vms[name] = {
       projectMounts: valuesAfter('--mount-dir').map((mount) => mount.split(':')[0]).filter((host) => !sharedRoots.has(host)),
-      rootSessionId: sessionLabel ? sessionLabel.slice('ocm.session='.length) : '',
+      checkoutLabel: checkoutLabel ? checkoutLabel.slice('ocm.checkout='.length) : '',
       cpus: Number(valueAfter('-c') || 0),
       memoryMib: Number(memory.replace(/M$/, '')),
       running: true,
