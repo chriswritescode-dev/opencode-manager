@@ -257,6 +257,9 @@ switch (command) {
     break
   case 'exec':
     fail('exec')
+    if (args.some((arg) => arg.includes('uname -srm'))) {
+      stdout(typeof spec.guestProbeOutput === 'string' ? spec.guestProbeOutput : 'Linux 6.8.0-test x86_64\\nDebian GNU/Linux 12 (bookworm)\\n')
+    }
     break
   case 'pull':
     fail('pull')

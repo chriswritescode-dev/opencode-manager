@@ -34,6 +34,7 @@ import { detectSandboxCapability } from './capability'
 import {
   buildCanonicalSandboxSpec,
   buildSandboxCreateArgs,
+  buildSandboxGuestProbeArgs,
   buildSandboxInspectArgs,
   buildSandboxListArgs,
   buildSandboxPingArgs,
@@ -55,6 +56,7 @@ import {
   resolveSessionSandboxMounts,
   sandboxDockerDataVolumeName,
   sandboxExecutablePath,
+  sandboxNetworkGroups,
   sandboxNetworkPolicyMismatch,
   sandboxProjectRoots,
   sandboxVmMountRoots,
@@ -106,6 +108,15 @@ export type SandboxStatus = {
   msbVersion?: string
 }
 
+export type SandboxCheckoutEnvironment = {
+  vmName: string
+  resources: { effective: SessionSandboxResources; running: SessionSandboxResources | null }
+  pendingResources: SessionSandboxResources | null
+  network: string[]
+  idleMinutes: number
+  guest: string | null
+}
+
 type VmState = {
   inFlightBoot: Promise<void> | null
   inFlightRemoval: Promise<void> | null
@@ -118,6 +129,10 @@ type VmState = {
 }
 
 const vmStates = new Map<string, VmState>()
+
+const guestEnvironments = new Map<string, string | null>()
+const guestProbes = new Set<Promise<void>>()
+let guestProbeGeneration = 0
 
 let shutdownRequested = false
 let stopInProgress = false
@@ -151,6 +166,8 @@ export function resetSandboxRuntimeState(): void {
     state.inFlightRemoval = null
   }
   vmStates.clear()
+  guestEnvironments.clear()
+  guestProbeGeneration += 1
   resetCheckoutRunResources()
   shutdownRequested = false
   stopInProgress = false
@@ -207,10 +224,51 @@ function ensureSessionSandbox(spec: SandboxVmSpec, maxRunningVms: number): Promi
     }
     await validateSandboxVmMountRoots(spec)
     await bootSessionSandbox(spec, maxRunningVms)
+    scheduleGuestProbe(spec.name)
   })().finally(() => {
     state.inFlightBoot = null
   })
   return state.inFlightBoot
+}
+
+function scheduleGuestProbe(name: string): void {
+  if (guestEnvironments.has(name)) return
+  guestEnvironments.set(name, null)
+  const generation = guestProbeGeneration
+  const probe = probeGuestEnvironment(name, generation).catch((error) => {
+    logger.debug(`Failed to probe the guest environment for ${name}: ${getErrorMessage(error)}`)
+  })
+  guestProbes.add(probe)
+  void probe.finally(() => {
+    guestProbes.delete(probe)
+  })
+}
+
+export async function waitForGuestProbesForTests(): Promise<void> {
+  await Promise.allSettled([...guestProbes])
+}
+
+async function probeGuestEnvironment(name: string, generation: number): Promise<void> {
+  const probe = await executeCommand([sandboxExecutablePath(), ...buildSandboxGuestProbeArgs(name)], {
+    ignoreExitCode: true,
+    silent: true,
+    timeout: SANDBOX_LS_TIMEOUT_MS,
+  })
+  if (probe.exitCode !== 0) {
+    logger.debug(`Guest environment probe for ${name} exited with code ${probe.exitCode}`)
+    return
+  }
+  const lines = probe.stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+  const [kernel, prettyName] = lines
+  if (kernel === undefined || prettyName === undefined) {
+    logger.debug(`Guest environment probe for ${name} returned no usable output`)
+    return
+  }
+  if (guestProbeGeneration !== generation) return
+  guestEnvironments.set(name, `${prettyName} | ${kernel}`)
 }
 
 async function bootSessionSandbox(spec: SandboxVmSpec, maxRunningVms: number): Promise<void> {
@@ -942,6 +1000,7 @@ async function executeSandboxCreate(args: string[]): Promise<ExecuteCommandResul
 
 async function removeSandboxVm(name: string): Promise<void> {
   await runSandboxRemoval(buildSandboxRemoveArgs(name), SANDBOX_REMOVAL_MISSING_PATTERN, 'msb rm')
+  guestEnvironments.delete(name)
 }
 
 function removeSandboxVmAndVolume(name: string): Promise<void> {
@@ -1285,6 +1344,26 @@ export class SandboxRuntimeService {
     return {
       effective: await resolveCheckoutSandboxResources(this.db, checkoutKey),
       running: vmStates.get(checkoutSandboxName(checkoutKey))?.runningResources ?? null,
+    }
+  }
+
+  async describeCheckoutEnvironment(directory: string): Promise<SandboxCheckoutEnvironment | null> {
+    const checkoutKey = await resolveCheckoutKey(directory)
+    if (checkoutKey === null) return null
+    const vmName = checkoutSandboxName(checkoutKey)
+    const effective = await resolveCheckoutSandboxResources(this.db, checkoutKey)
+    const running = vmStates.get(vmName)?.runningResources ?? null
+    const pendingResources =
+      running !== null && (running.cpus !== effective.cpus || running.memoryMib !== effective.memoryMib)
+        ? effective
+        : null
+    return {
+      vmName,
+      resources: { effective, running },
+      pendingResources,
+      network: sandboxNetworkGroups(ENV.SANDBOX.NET),
+      idleMinutes: sandboxIdleStopMinutes(this.db),
+      guest: guestEnvironments.get(vmName) ?? null,
     }
   }
 

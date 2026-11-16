@@ -17,6 +17,7 @@ import {
   resolveSandboxRuntimeTmpfsSizeMib,
   sandboxDockerDataVolumeName,
   sandboxExecutablePath,
+  sandboxNetworkGroups,
   sandboxProjectRoots,
 } from '../../../src/services/sandbox/command'
 import {
@@ -25,6 +26,7 @@ import {
   provisionSandboxExecUserForTests,
   resetSandboxRuntimeState,
   stopSandboxesOnShutdown,
+  waitForGuestProbesForTests,
   type SandboxShellTarget,
 } from '../../../src/services/sandbox/runtime'
 import type { JsonValue } from '@opencode-manager/shared/utils'
@@ -180,6 +182,7 @@ interface FakeMsbOptions {
   missingRemovals?: boolean
   gateInspect?: boolean
   gateStop?: boolean
+  guestProbeOutput?: string
   createdOverride?: { name: string; mutate: (config: FakeInspectConfig) => FakeReportedConfig }
 }
 
@@ -230,6 +233,7 @@ function writeFakeMsbSpec(options: FakeMsbOptions = {}): void {
     dockerVolumeSuffix: '-docker-data',
     dockerGuestPath: SANDBOX_DOCKER_DATA_GUEST_PATH,
     manifestDigest: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+    guestProbeOutput: options.guestProbeOutput ?? null,
   })
 }
 
@@ -470,7 +474,8 @@ describe('SandboxRuntimeService', () => {
     installFakeMsb(new Map())
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    await waitForGuestProbesForTests()
     resetSandboxRuntimeState()
     db.close()
     rmSync(repoADir, { recursive: true, force: true })
@@ -943,6 +948,114 @@ describe('SandboxRuntimeService', () => {
       effective: defaultResources(),
       running: null,
     })
+  })
+
+  it('describes a checkout environment without booting or listing sandboxes', async () => {
+    installFakeMsb(new Map())
+
+    await expect(service.describeCheckoutEnvironment(repoADir)).resolves.toEqual({
+      vmName: VM_NAME,
+      resources: { effective: defaultResources(), running: null },
+      pendingResources: null,
+      network: sandboxNetworkGroups(ENV.SANDBOX.NET),
+      idleMinutes: 30,
+      guest: null,
+    })
+    expect(msbCalls('inspect')).toHaveLength(0)
+    expect(msbCalls('ls')).toHaveLength(0)
+    expect(msbCalls('run')).toHaveLength(0)
+    expect(msbCalls('start')).toHaveLength(0)
+  })
+
+  it('reports the guest environment after the first boot', async () => {
+    enableEnforcement()
+    installFakeMsb(new Map([[VM_NAME, vm()]]))
+
+    await expect(service.describeCheckoutEnvironment(repoADir)).resolves.toMatchObject({ guest: null })
+
+    const plan = await service.planShell(repoADir, shellTarget(repoADir))
+
+    expect(plan).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
+    await vi.waitFor(async () => {
+      const environment = await service.describeCheckoutEnvironment(repoADir)
+      expect(environment?.guest).toBe('Debian GNU/Linux 12 (bookworm) | Linux 6.8.0-test x86_64')
+    })
+    expect(msbCalls('exec').some((args) => args.some((arg) => arg.includes('uname -srm')))).toBe(true)
+  })
+
+  it('reports pending resources while a running VM differs from the effective resources', async () => {
+    enableEnforcement()
+    const runningResources = { cpus: ENV.SANDBOX.CPUS + 2, memoryMib: memoryMib() }
+    installFakeMsb(new Map([[VM_NAME, vm({ running: true, ...runningResources })]]))
+
+    await service.planShell(repoADir, shellTarget(repoADir))
+
+    await expect(service.describeCheckoutEnvironment(repoADir)).resolves.toMatchObject({
+      resources: { effective: defaultResources(), running: runningResources },
+      pendingResources: defaultResources(),
+    })
+  })
+
+  it('reports no pending resources once the running resources match', async () => {
+    enableEnforcement()
+    installFakeMsb(new Map([[VM_NAME, vm()]]))
+
+    await service.planShell(repoADir, shellTarget(repoADir))
+
+    await expect(service.describeCheckoutEnvironment(repoADir)).resolves.toMatchObject({
+      resources: { effective: defaultResources(), running: defaultResources() },
+      pendingResources: null,
+    })
+  })
+
+  it('reports no pending resources after a restart removes the running VM', async () => {
+    enableEnforcement()
+    const runningResources = { cpus: ENV.SANDBOX.CPUS + 2, memoryMib: memoryMib() }
+    installFakeMsb(new Map([[VM_NAME, vm({ running: true, ...runningResources })]]))
+
+    await service.planShell(repoADir, shellTarget(repoADir))
+    await service.restartCheckoutSandbox(repoADir)
+
+    await expect(service.describeCheckoutEnvironment(repoADir)).resolves.toMatchObject({
+      resources: { effective: defaultResources(), running: null },
+      pendingResources: null,
+    })
+  })
+
+  it('clears the guest environment after removing the checkout sandbox', async () => {
+    enableEnforcement()
+    installFakeMsb(new Map([[VM_NAME, vm()]]))
+
+    await service.planShell(repoADir, shellTarget(repoADir))
+    await vi.waitFor(async () => {
+      const environment = await service.describeCheckoutEnvironment(repoADir)
+      expect(environment?.guest).not.toBeNull()
+    })
+
+    await service.removeCheckoutSandbox(repoADir)
+
+    await expect(service.describeCheckoutEnvironment(repoADir)).resolves.toMatchObject({ guest: null })
+  })
+
+  it('leaves the guest environment null when the probe returns no usable output', async () => {
+    enableEnforcement()
+    installFakeMsb(new Map([[VM_NAME, vm()]]), { guestProbeOutput: '' })
+
+    await service.planShell(repoADir, shellTarget(repoADir))
+    await vi.waitFor(() => {
+      expect(msbCalls('exec').some((args) => args.some((arg) => arg.includes('uname -srm')))).toBe(true)
+    })
+    await new Promise<void>((resolve) => {
+      realSetTimeout(resolve, 100)
+    })
+
+    await expect(service.describeCheckoutEnvironment(repoADir)).resolves.toMatchObject({ guest: null })
+  })
+
+  it('resolves no environment for a directory outside the project roots', async () => {
+    installFakeMsb(new Map())
+
+    await expect(service.describeCheckoutEnvironment('/etc')).resolves.toBeNull()
   })
 
   it('removes and recreates a sandbox carrying an unexpected bind mount', async () => {

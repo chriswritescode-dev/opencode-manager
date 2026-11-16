@@ -193,6 +193,11 @@ export function buildSandboxVerifyProvisionArgs(name: string): string[] {
   ]
 }
 
+export function buildSandboxGuestProbeArgs(name: string): string[] {
+  const script = `uname -srm; . /etc/os-release 2>/dev/null; printf '%s\\n' "$PRETTY_NAME"`
+  return ['exec', name, '--no-tty', '-q', '--', '/bin/sh', '-c', script]
+}
+
 export function sandboxProjectRoots(): string[] {
   return [getReposPath(), getScheduleWorktreesPath(), getOpenCodeWorktreesPath(), getForgeWorktreesPath()]
 }
@@ -336,7 +341,7 @@ function stableJson(value: JsonValue | undefined): string {
   return String(JSON.stringify(value))
 }
 
-export function resolveExpectedSandboxNetworkPolicy(netProfile: string): SandboxNetworkPolicy | null {
+function sandboxNetworkProfileGroups(netProfile: string): string[] | null {
   const tokens = netProfile.split(',').map((token) => token.trim()).filter((token) => token !== '')
   if (tokens.length === 0) {
     return null
@@ -352,6 +357,18 @@ export function resolveExpectedSandboxNetworkPolicy(netProfile: string): Sandbox
     if (!groups.includes(token)) {
       groups.push(token)
     }
+  }
+  return groups
+}
+
+export function sandboxNetworkGroups(netProfile: string): string[] {
+  return sandboxNetworkProfileGroups(netProfile) ?? []
+}
+
+export function resolveExpectedSandboxNetworkPolicy(netProfile: string): SandboxNetworkPolicy | null {
+  const groups = sandboxNetworkProfileGroups(netProfile)
+  if (groups === null) {
+    return null
   }
   return {
     default_egress: 'deny',

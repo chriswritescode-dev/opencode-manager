@@ -13,6 +13,7 @@ import {
   SANDBOX_DOCKER_DATA_SIZE,
   buildCanonicalSandboxSpec,
   buildSandboxCreateArgs,
+  buildSandboxGuestProbeArgs,
   buildSandboxInspectArgs,
   buildSandboxListArgs,
   buildSandboxPingArgs,
@@ -40,6 +41,7 @@ import {
   resolveSessionSandboxMounts,
   sandboxDockerDataVolumeName,
   sandboxMountRoots,
+  sandboxNetworkGroups,
   sandboxNetworkPolicyMismatch,
   sandboxVmMountRoots,
   type SandboxVmSpec,
@@ -502,6 +504,18 @@ describe('sandbox command builders', () => {
     ])
   })
 
+  it('builds guest probe args that report the kernel and pretty OS name without switching user', () => {
+    const args = buildSandboxGuestProbeArgs(VM_NAME)
+
+    expect(args.slice(0, 7)).toEqual(['exec', VM_NAME, '--no-tty', '-q', '--', '/bin/sh', '-c'])
+    expect(args).not.toContain('-u')
+    expect(args).toContain(VM_NAME)
+    const script = args[args.length - 1]
+    expect(script).toContain('uname -srm')
+    expect(script).toContain('/etc/os-release')
+    expect(script).toContain('PRETTY_NAME')
+  })
+
   it('aligns a numeric exec user with the manager gid', async () => {
     process.env.SANDBOX_EXEC_USER = '1001'
     try {
@@ -742,6 +756,18 @@ describe('sandbox network policy attestation helpers', () => {
 
   it('deduplicates repeated profiles', () => {
     expect(resolveExpectedSandboxNetworkPolicy('public, public')).toEqual(publicPolicy)
+  })
+
+  it('lists the allowed network groups in profile order', () => {
+    expect(sandboxNetworkGroups('public')).toEqual(['public'])
+    expect(sandboxNetworkGroups('private, host, private')).toEqual(['private', 'host'])
+  })
+
+  it('lists no network groups for terminal, unknown, or empty profiles', () => {
+    for (const profile of ['', 'none', 'all', 'bogus']) {
+      expect(sandboxNetworkGroups(profile)).toEqual([])
+      expect(resolveExpectedSandboxNetworkPolicy(profile)).toBeNull()
+    }
   })
 
   it('returns null for terminal, unknown, or empty profiles', () => {

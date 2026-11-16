@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { Hono } from 'hono'
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { z } from 'zod'
@@ -15,8 +15,10 @@ import {
   parseMemoryMib,
   resolveExpectedSandboxNetworkPolicy,
   resolveSandboxRuntimeTmpfsSizeMib,
+  sandboxNetworkGroups,
 } from '../../src/services/sandbox/command'
 import type { SandboxVmSpec } from '../../src/services/sandbox/command'
+import { resetSandboxRuntimeState, waitForGuestProbesForTests } from '../../src/services/sandbox/runtime'
 import { detectSandboxCapability, resetSandboxCapabilityCache } from '../../src/services/sandbox/capability'
 import type { SandboxCapabilityProbes } from '../../src/services/sandbox/capability'
 import { forceProcessAttestation } from '../../src/services/opencode/process-identity'
@@ -47,6 +49,23 @@ const SandboxPlanSchema = z.union([
 const BlockedPlanSchema = z.object({ mode: z.literal('blocked'), reason: z.string() })
 const ErrorResponseSchema = z.object({ error: z.string() })
 const ClaimSchema = z.object({ sandboxed: z.boolean() })
+
+const SandboxResourcesSchema = z.object({ cpus: z.number(), memoryMib: z.number() })
+
+const EnvironmentSchema = z.object({
+  sandboxed: z.literal(true),
+  vmName: z.string(),
+  resources: z.object({
+    effective: SandboxResourcesSchema,
+    running: SandboxResourcesSchema.nullable(),
+  }),
+  pendingResources: SandboxResourcesSchema.nullable(),
+  network: z.array(z.string()),
+  idleMinutes: z.number(),
+  guest: z.string().nullable(),
+})
+
+const UnsandboxedEnvironmentSchema = z.object({ sandboxed: z.literal(false) })
 
 interface ShellRequestBody {
   directory: string
@@ -114,13 +133,32 @@ describe('internal sandbox routes', () => {
     })
   }
 
+  function callsPath(): string {
+    return path.join(binDirectory, 'calls.jsonl')
+  }
+
+  function readFakeCalls(): string[][] {
+    if (!existsSync(callsPath())) return []
+    return readFileSync(callsPath(), 'utf8')
+      .split('\n')
+      .filter((line) => line.length > 0)
+      .map((line) => z.object({ argv: z.array(z.string()) }).parse(JSON.parse(line)).argv)
+  }
+
+  function fakeCalls(subcommand: string): string[][] {
+    return readFakeCalls().filter((args) => args[1] === subcommand)
+  }
+
   function writeFakeMsb(directory: string, inspectPayload: string): void {
     const binary = path.join(directory, 'msb')
     const script = [
       `#!${process.execPath}`,
+      "const fs = require('node:fs')",
       'const args = process.argv.slice(2)',
+      `fs.appendFileSync(${JSON.stringify(callsPath())}, JSON.stringify({ argv: [process.argv[1]].concat(args) }) + '\\n')`,
       `if (args[0] === 'inspect') { process.stdout.write(${JSON.stringify(inspectPayload)}); process.exit(0) }`,
       "if (args[0] === 'ls') { process.stdout.write('[]'); process.exit(0) }",
+      "if (args[0] === 'exec' && args.some((arg) => arg.includes('uname -srm'))) { process.stdout.write('Linux 6.8.0-test x86_64\\nDebian GNU/Linux 12 (bookworm)\\n') }",
       'process.exit(0)',
     ].join('\n')
     writeFileSync(binary, script, { mode: 0o755 })
@@ -189,6 +227,13 @@ describe('internal sandbox routes', () => {
     })
   }
 
+  function getEnvironment(directory: string | null, auth = true) {
+    const query = directory === null ? '' : `?directory=${encodeURIComponent(directory)}`
+    return app.request(`/api/internal/sandbox/sessions/${ROOT_SESSION_ID}/environment${query}`, {
+      headers: shellHeaders(auth),
+    })
+  }
+
   beforeEach(() => {
     workspace = createTempWorkspace('ocm-sandbox-routes-')
     binDirectory = mkdtempSync(path.join(tmpdir(), 'ocm-sandbox-msb-'))
@@ -205,6 +250,7 @@ describe('internal sandbox routes', () => {
     overrideSandboxExecutableTrustValidator(() => true)
     forceProcessAttestation(true)
     primeSandboxCapability(true)
+    resetSandboxRuntimeState()
 
     db = createTestDatabase()
     settingsService = new SettingsService(db)
@@ -217,7 +263,8 @@ describe('internal sandbox routes', () => {
     app.route('/api/internal', createInternalTestApp(db, { sessionSandbox: sessionSandboxService }))
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    await waitForGuestProbesForTests()
     resetSandboxCapabilityCache()
     overrideSandboxExecutableTrustValidator(null)
     forceProcessAttestation(null)
@@ -362,5 +409,88 @@ describe('internal sandbox routes', () => {
 
     expect(res.status).toBe(500)
     expect(body).toEqual({ error: 'lookup failed' })
+  })
+
+  it('GET environment returns 401 without bearer token', async () => {
+    const res = await getEnvironment(repoDirectory, false)
+
+    expect(res.status).toBe(401)
+  })
+
+  it('GET environment reports unsandboxed when the sandbox preference is off', async () => {
+    const res = await getEnvironment(repoDirectory)
+    const body = await readJson(res, UnsandboxedEnvironmentSchema)
+
+    expect(res.status).toBe(200)
+    expect(body).toEqual({ sandboxed: false })
+  })
+
+  it('GET environment describes the checkout without booting it', async () => {
+    settingsService.updateSettings({ sandbox: { enabled: true } })
+
+    const res = await getEnvironment(repoDirectory)
+    const body = await readJson(res, EnvironmentSchema)
+
+    expect(res.status).toBe(200)
+    expect(body).toEqual({
+      sandboxed: true,
+      vmName: checkoutVmName(),
+      resources: {
+        effective: { cpus: vmSpec().cpus, memoryMib: vmSpec().memoryMib },
+        running: null,
+      },
+      pendingResources: null,
+      network: sandboxNetworkGroups(ENV.SANDBOX.NET),
+      idleMinutes: 30,
+      guest: null,
+    })
+    expect(fakeCalls('run')).toHaveLength(0)
+    expect(fakeCalls('start')).toHaveLength(0)
+  })
+
+  it('GET environment reports the guest after a shell plan attests the running VM', async () => {
+    settingsService.updateSettings({ sandbox: { enabled: true } })
+
+    const shell = await postShell(shellBody())
+
+    expect(shell.status).toBe(200)
+
+    const deadline = Date.now() + 5000
+    let guest: string | null = null
+    while (Date.now() < deadline) {
+      const res = await getEnvironment(repoDirectory)
+      const body = await readJson(res, EnvironmentSchema)
+      if (body.guest !== null) {
+        guest = body.guest
+        break
+      }
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 50)
+      })
+    }
+
+    expect(guest).toBe('Debian GNU/Linux 12 (bookworm) | Linux 6.8.0-test x86_64')
+    expect(fakeCalls('run')).toHaveLength(0)
+    expect(fakeCalls('start')).toHaveLength(0)
+  })
+
+  it('GET environment returns 400 for a missing directory', async () => {
+    settingsService.updateSettings({ sandbox: { enabled: true } })
+
+    const res = await getEnvironment(null)
+    const body = await readJson(res, ErrorResponseSchema)
+
+    expect(res.status).toBe(400)
+    expect(body).toEqual({ error: 'Invalid request' })
+  })
+
+  it('GET environment returns 400 for a directory outside the project roots', async () => {
+    settingsService.updateSettings({ sandbox: { enabled: true } })
+
+    const res = await getEnvironment('/etc')
+    const body = await readJson(res, ErrorResponseSchema)
+
+    expect(res.status).toBe(400)
+    expect(body).toEqual({ error: 'could not resolve the checkout for /etc' })
   })
 })

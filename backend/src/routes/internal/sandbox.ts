@@ -29,6 +29,27 @@ export function createInternalSandboxRoutes(
     }
   })
 
+  app.get('/sessions/:sessionId/environment', async (c) => {
+    const directory = c.req.query('directory')?.trim() ?? ''
+    if (directory === '') {
+      return c.json({ error: 'Invalid request' }, 400)
+    }
+    try {
+      const target = await sessionSandbox.resolveShellTarget(c.req.param('sessionId'))
+      if (!target.sandboxed) {
+        return c.json({ sandboxed: false })
+      }
+      const environment = await new SandboxRuntimeService(db, repoEnvService).describeCheckoutEnvironment(directory)
+      if (environment === null) {
+        return c.json({ error: `could not resolve the checkout for ${directory}` }, 400)
+      }
+      return c.json({ sandboxed: true, ...environment })
+    } catch (error) {
+      logger.error('Failed to describe the sandbox environment', error)
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 500)
+    }
+  })
+
   app.post('/shell', async (c) => {
     let body: unknown
     try {
