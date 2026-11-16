@@ -285,8 +285,11 @@ interface ScheduleTargetContext {
 }
 
 export interface ScheduleSandboxDependencies {
-  sessions: Pick<SessionSandboxService, 'assertSandboxRequestAllowed' | 'update' | 'resolveShellTarget'>
-  runtime: Pick<SandboxRuntimeService, 'planShell' | 'removeCheckoutSandbox'>
+  sessions: Pick<SessionSandboxService, 'assertSandboxRequestAllowed' | 'update'>
+  runtime: Pick<
+    SandboxRuntimeService,
+    'planShell' | 'removeCheckoutSandbox' | 'registerCheckoutRunResources' | 'releaseCheckoutRunResources'
+  >
 }
 
 export interface ScheduleActiveRunSnapshot {
@@ -572,15 +575,24 @@ export class ScheduleService {
     }
   }
 
-  private async startRunSandbox(directory: string, sandbox: ScheduleSandboxConfig, sessionId: string): Promise<void> {
+  private async startRunSandbox(
+    directory: string,
+    sandbox: ScheduleSandboxConfig,
+    sessionId: string,
+    workspaceMode: ScheduleWorkspaceMode,
+  ): Promise<void> {
     const dependencies = this.sandbox
     if (!dependencies) {
       throw new ScheduleServiceError('Sandboxing is not available for schedules.', 409)
     }
 
-    await dependencies.sessions.update(sessionId, { sandboxed: true, resources: sandbox.resources })
-    const target = await dependencies.sessions.resolveShellTarget(sessionId)
-    const plan = await dependencies.runtime.planShell(directory, { locationDirectory: directory, resources: target.resources }, true)
+    await dependencies.sessions.update(sessionId, { sandboxed: true })
+
+    if (sandbox.resources && (workspaceMode === 'worktree' || workspaceMode === 'kept-worktree')) {
+      await dependencies.runtime.registerCheckoutRunResources(directory, sandbox.resources)
+    }
+
+    const plan = await dependencies.runtime.planShell(directory, { locationDirectory: directory }, true)
 
     if (plan.mode !== 'sandbox') {
       const reason = plan.mode === 'blocked' ? plan.reason : 'the shell plan was not sandboxed'
@@ -1063,7 +1075,7 @@ export class ScheduleService {
       }
 
       if (job.sandbox?.enabled === true) {
-        await this.startRunSandbox(runDirectory, job.sandbox, session.id)
+        await this.startRunSandbox(runDirectory, job.sandbox, session.id, job.workspaceMode)
         if (abort.signal.aborted) {
           return this.abandonCancelledStartup(context.client, repoId, jobId, run, job, repo, session.id)
         }
@@ -1696,6 +1708,11 @@ export class ScheduleService {
     if (!sessionId || !directory || !runtime) return
     const mode = getSessionSandboxMode(this.db, sessionId)
     if (mode?.sandboxed !== true && mode?.source !== 'user') return
+    try {
+      await runtime.releaseCheckoutRunResources(directory)
+    } catch (error) {
+      logger.warn(`Failed to release the sandbox resources for scheduled run session ${sessionId}: ${getErrorMessage(error)}`)
+    }
     try {
       await runtime.removeCheckoutSandbox(directory)
     } catch (error) {

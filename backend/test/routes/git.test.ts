@@ -15,6 +15,7 @@ import { CredentialProvider } from '../../src/services/credential-provider'
 import { createCommittedRepo, createGitAuthService, createOrigin, cloneOrigin, git } from '../helpers/git-fixtures'
 import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
 import { createStubRepoEnvService } from '../helpers/stub-repo-env-service'
+import { createStubSandboxRuntime } from '../helpers/stub-sandbox-runtime'
 import { createTestDatabase, seedRepo } from '../helpers/test-database'
 import { createTempWorkspace } from '../helpers/test-env'
 import type { TempWorkspace } from '../helpers/test-env'
@@ -121,6 +122,7 @@ describe('git routes', () => {
       projectConfigService,
       repoWorkspaces,
       new SecretsService(db),
+      createStubSandboxRuntime(),
     ))
   })
 

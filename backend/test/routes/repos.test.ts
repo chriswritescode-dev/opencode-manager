@@ -18,6 +18,7 @@ import { TerminalService } from '../../src/services/terminal'
 import { CredentialProvider } from '../../src/services/credential-provider'
 import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
 import { createStubRepoEnvService } from '../helpers/stub-repo-env-service'
+import { createStubSandboxRuntime } from '../helpers/stub-sandbox-runtime'
 import { createCommittedRepo, cloneOrigin, createGitAuthService, createOrigin, git } from '../helpers/git-fixtures'
 import { readJson } from '../helpers/read-json'
 import { createTestDatabase, seedRepo, seedSettings } from '../helpers/test-database'
@@ -114,6 +115,7 @@ describe('repo routes', () => {
       projectConfigService,
       repoWorkspaces,
       new SecretsService(db),
+      createStubSandboxRuntime(),
     ))
     return app
   }

@@ -3,11 +3,14 @@ import type { Database } from 'bun:sqlite'
 import { z } from 'zod'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import {
+  REPO_SANDBOX_RESOURCES_SETTING_KEY,
   createRepo,
   deleteRepo,
   ensureAssistantRepo,
   getRepoById,
+  getRepoSandboxResources,
   listRepos,
+  setRepoSandboxResources,
   setRepoSetting,
   updateLastAccessed,
   updateLastPulled,
@@ -225,6 +228,47 @@ describe('Database Queries', () => {
       deleteRepo(database, ASSISTANT_REPO_ID)
 
       expect(getRepoById(database, ASSISTANT_REPO_ID)).not.toBeNull()
+    })
+  })
+
+  describe('repo sandbox resources', () => {
+    it('returns null when the repo has no stored resources', () => {
+      const repo = seedRepo(database)
+
+      expect(getRepoSandboxResources(database, repo.id)).toBeNull()
+    })
+
+    it('round-trips stored resources', () => {
+      const repo = seedRepo(database)
+
+      setRepoSandboxResources(database, repo.id, { cpus: 3, memoryMib: 3072 })
+
+      expect(getRepoSandboxResources(database, repo.id)).toEqual({ cpus: 3, memoryMib: 3072 })
+    })
+
+    it('clears stored resources when set to null', () => {
+      const repo = seedRepo(database)
+      setRepoSandboxResources(database, repo.id, { cpus: 3, memoryMib: 3072 })
+
+      setRepoSandboxResources(database, repo.id, null)
+
+      expect(getRepoSandboxResources(database, repo.id)).toBeNull()
+    })
+
+    it('returns null when the stored value is not JSON', () => {
+      const repo = seedRepo(database)
+
+      setRepoSetting(database, repo.id, REPO_SANDBOX_RESOURCES_SETTING_KEY, 'not-json')
+
+      expect(getRepoSandboxResources(database, repo.id)).toBeNull()
+    })
+
+    it('returns null when the stored value fails validation', () => {
+      const repo = seedRepo(database)
+
+      setRepoSetting(database, repo.id, REPO_SANDBOX_RESOURCES_SETTING_KEY, '{"cpus":0,"memoryMib":1}')
+
+      expect(getRepoSandboxResources(database, repo.id)).toBeNull()
     })
   })
 })

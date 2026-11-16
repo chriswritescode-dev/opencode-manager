@@ -161,10 +161,7 @@ describe('internal sandbox routes', () => {
     return {
       getClaim: async () => ({ sandboxed: false }),
       getState: async () => state,
-      resolveShellTarget: async () => ({
-        sandboxed: true,
-        resources: { cpus: ENV.SANDBOX.CPUS, memoryMib: parseMemoryMib(ENV.SANDBOX.MEMORY) ?? 0 },
-      }),
+      resolveShellTarget: async () => ({ sandboxed: true }),
       update: async () => state,
       ...overrides,
     }

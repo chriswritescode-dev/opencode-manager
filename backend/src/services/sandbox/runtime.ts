@@ -7,7 +7,12 @@ import {
   getOpenCodeGlobalSkillsPath,
   getOpenCodeToolOutputPath,
 } from '@opencode-manager/shared/config/env'
-import { DEFAULT_SANDBOX_IDLE_STOP_MINUTES, DEFAULT_SANDBOX_MAX_RUNNING_VMS } from '@opencode-manager/shared/schemas'
+import {
+  DEFAULT_SANDBOX_IDLE_STOP_MINUTES,
+  DEFAULT_SANDBOX_MAX_RUNNING_VMS,
+  SessionSandboxResourcesSchema,
+  type SessionSandboxResources,
+} from '@opencode-manager/shared/schemas'
 import { executeCommand, type ExecuteCommandResult } from '../../utils/process'
 import { getErrorMessage } from '../../utils/error-utils'
 import { isPathWithinRoot, mkdirSafe } from '../../utils/fs-safe'
@@ -55,6 +60,13 @@ import {
   sandboxVmMountRoots,
   type SandboxVmSpec,
 } from './command'
+import {
+  clearCheckoutRunResources,
+  resetCheckoutRunResources,
+  resolveCheckoutSandboxResources,
+  resolveSandboxResources,
+  setCheckoutRunResources,
+} from './resources'
 
 const SANDBOX_LS_CACHE_MS = 5000
 const SANDBOX_LS_TIMEOUT_MS = 15000
@@ -72,7 +84,6 @@ const SANDBOX_CREATE_EXISTS_PATTERN = /already exists/i
 
 export type SandboxShellTarget = {
   locationDirectory: string
-  resources: { cpus: number; memoryMib: number }
 }
 
 export type SandboxShellSandboxPlan = {
@@ -103,6 +114,7 @@ type VmState = {
   inFlightProvision: Promise<void> | null
   backgroundProvisionRetry: Promise<void> | null
   provisionRetryGeneration: number
+  runningResources: SessionSandboxResources | null
 }
 
 const vmStates = new Map<string, VmState>()
@@ -124,6 +136,7 @@ function vmState(name: string): VmState {
     inFlightProvision: null,
     backgroundProvisionRetry: null,
     provisionRetryGeneration: 0,
+    runningResources: null,
   }
   vmStates.set(name, created)
   return created
@@ -138,6 +151,7 @@ export function resetSandboxRuntimeState(): void {
     state.inFlightRemoval = null
   }
   vmStates.clear()
+  resetCheckoutRunResources()
   shutdownRequested = false
   stopInProgress = false
   idleSweepStartedAt = 0
@@ -204,15 +218,19 @@ async function bootSessionSandbox(spec: SandboxVmSpec, maxRunningVms: number): P
   try {
     const outcome = await inspectSandbox(spec.name)
     if (outcome.kind === 'failed' || (outcome.record.config === undefined && outcome.record.active_config === undefined)) {
-      await bootSessionSandboxFromListing(spec, maxRunningVms)
+      state.runningResources = await bootSessionSandboxFromListing(spec, maxRunningVms)
     } else {
       const inspected = outcome.record
       if (inspected.active_config !== undefined && inspected.active_config !== null) {
-        const attestation = await attestSandboxConfig(spec, inspected.active_config)
+        const observed = inspectedResources(inspected.active_config)
+        const attestation = await attestSandboxConfig(specWithRunningResources(spec, observed), inspected.active_config)
         if (!attestation.trusted) {
           logger.warn(`Recreating unverifiable sandbox ${spec.name}: ${attestation.reason}`)
           await removeSandboxVm(spec.name)
           await createSessionSandbox(spec, maxRunningVms)
+          state.runningResources = sandboxSpecResources(spec)
+        } else {
+          state.runningResources = observed ?? sandboxSpecResources(spec)
         }
       } else {
         const attestation = await attestSandboxConfig(spec, inspected.config)
@@ -220,6 +238,7 @@ async function bootSessionSandbox(spec: SandboxVmSpec, maxRunningVms: number): P
           logger.warn(`Recreating unverifiable sandbox ${spec.name}: ${attestation.reason}`)
           await removeSandboxVm(spec.name)
           await createSessionSandbox(spec, maxRunningVms)
+          state.runningResources = sandboxSpecResources(spec)
         } else {
           await withStartAdmission(spec.name, maxRunningVms, () => startSessionSandbox(spec.name))
           await provisionSandboxExecUser(spec.name)
@@ -230,6 +249,9 @@ async function bootSessionSandbox(spec: SandboxVmSpec, maxRunningVms: number): P
             )
             await removeSandboxVm(spec.name)
             await createSessionSandbox(spec, maxRunningVms)
+            state.runningResources = sandboxSpecResources(spec)
+          } else {
+            state.runningResources = runningAttestation.resources
           }
         }
       }
@@ -238,37 +260,50 @@ async function bootSessionSandbox(spec: SandboxVmSpec, maxRunningVms: number): P
     state.lastKnownRunningAt = Date.now()
   } catch (error) {
     state.lastKnownRunningAt = null
+    state.runningResources = null
     throw error
   }
 }
 
-async function bootSessionSandboxFromListing(spec: SandboxVmSpec, maxRunningVms: number): Promise<void> {
+async function bootSessionSandboxFromListing(
+  spec: SandboxVmSpec,
+  maxRunningVms: number,
+): Promise<SessionSandboxResources> {
   const entry = findSessionSandboxEntry(await listSandboxes(), spec.name)
 
   if (!entry) {
     await createSessionSandbox(spec, maxRunningVms)
-  } else {
-    const attestation = await attestSessionSandbox(spec, entry.running)
-    if (!attestation.trusted) {
-      logger.warn(`Recreating unverifiable sandbox ${spec.name}: ${attestation.reason}`)
-      await removeSandboxVm(spec.name)
-      await createSessionSandbox(spec, maxRunningVms)
-    } else if (!entry.running) {
-      await withStartAdmission(spec.name, maxRunningVms, () => startSessionSandbox(spec.name))
-      await provisionSandboxExecUser(spec.name)
-      const runningAttestation = await attestSessionSandbox(spec, true)
-      if (!runningAttestation.trusted) {
-        logger.warn(
-          `Recreating sandbox ${spec.name} that failed running attestation: ${runningAttestation.reason}`,
-        )
-        await removeSandboxVm(spec.name)
-        await createSessionSandbox(spec, maxRunningVms)
-      }
-    }
+    return sandboxSpecResources(spec)
   }
+
+  const attestation = await attestSessionSandbox(spec, entry.running)
+  if (!attestation.trusted) {
+    logger.warn(`Recreating unverifiable sandbox ${spec.name}: ${attestation.reason}`)
+    await removeSandboxVm(spec.name)
+    await createSessionSandbox(spec, maxRunningVms)
+    return sandboxSpecResources(spec)
+  }
+  if (entry.running) return attestation.resources
+
+  await withStartAdmission(spec.name, maxRunningVms, () => startSessionSandbox(spec.name))
+  await provisionSandboxExecUser(spec.name)
+  const runningAttestation = await attestSessionSandbox(spec, true)
+  if (!runningAttestation.trusted) {
+    logger.warn(
+      `Recreating sandbox ${spec.name} that failed running attestation: ${runningAttestation.reason}`,
+    )
+    await removeSandboxVm(spec.name)
+    await createSessionSandbox(spec, maxRunningVms)
+    return sandboxSpecResources(spec)
+  }
+  return runningAttestation.resources
 }
 
 type SandboxAttestation = { trusted: true } | { trusted: false; reason: string }
+
+type SandboxBootAttestation =
+  | { trusted: true; resources: SessionSandboxResources }
+  | { trusted: false; reason: string }
 
 function resolveInspectSpec(config: JsonValue | undefined): JsonObject | null {
   const record = parseJsonObject(config)
@@ -292,6 +327,30 @@ function resolveInspectSpec(config: JsonValue | undefined): JsonObject | null {
     return record
   }
   return null
+}
+
+function sandboxSpecResources(spec: SandboxVmSpec): SessionSandboxResources {
+  return { cpus: spec.cpus, memoryMib: spec.memoryMib }
+}
+
+function inspectedResources(config: JsonValue | undefined): SessionSandboxResources | null {
+  const inspectedSpec = resolveInspectSpec(config)
+  if (inspectedSpec === null) return null
+  const resources = parseJsonObject(inspectedSpec.resources)
+  if (resources === null) return null
+  const parsed = SessionSandboxResourcesSchema.safeParse({
+    cpus: resources.cpus,
+    memoryMib: resources.memory_mib,
+  })
+  return parsed.success ? parsed.data : null
+}
+
+function specWithRunningResources(
+  spec: SandboxVmSpec,
+  running: SessionSandboxResources | null,
+): SandboxVmSpec {
+  if (running === null || (running.cpus === spec.cpus && running.memoryMib === spec.memoryMib)) return spec
+  return { ...spec, cpus: running.cpus, memoryMib: running.memoryMib }
 }
 
 function inspectImageReference(image: JsonValue | undefined): string | null {
@@ -696,7 +755,7 @@ async function inspectSandbox(name: string): Promise<SandboxInspectOutcome> {
   return { kind: 'parsed', record }
 }
 
-async function attestSessionSandbox(spec: SandboxVmSpec, running: boolean): Promise<SandboxAttestation> {
+async function attestSessionSandbox(spec: SandboxVmSpec, running: boolean): Promise<SandboxBootAttestation> {
   const outcome = await inspectSandbox(spec.name)
   if (outcome.kind === 'failed') {
     return { trusted: false, reason: outcome.reason }
@@ -705,9 +764,17 @@ async function attestSessionSandbox(spec: SandboxVmSpec, running: boolean): Prom
     if (outcome.record.active_config === undefined || outcome.record.active_config === null) {
       return { trusted: false, reason: 'msb inspect returned no active configuration for the running sandbox' }
     }
-    return await attestSandboxConfig(spec, outcome.record.active_config)
+    const observed = inspectedResources(outcome.record.active_config)
+    const attestation = await attestSandboxConfig(
+      specWithRunningResources(spec, observed),
+      outcome.record.active_config,
+    )
+    if (!attestation.trusted) return attestation
+    return { trusted: true, resources: observed ?? sandboxSpecResources(spec) }
   }
-  return await attestSandboxConfig(spec, outcome.record.config)
+  const attestation = await attestSandboxConfig(spec, outcome.record.config)
+  if (!attestation.trusted) return attestation
+  return { trusted: true, resources: sandboxSpecResources(spec) }
 }
 
 async function cacheSandboxImage(): Promise<void> {
@@ -878,6 +945,23 @@ async function removeSandboxVm(name: string): Promise<void> {
 }
 
 function removeSandboxVmAndVolume(name: string): Promise<void> {
+  return trackSandboxRemoval(name, async (sandboxName) => {
+    await removeSandboxVm(sandboxName)
+    await runSandboxRemoval(
+      buildSandboxVolumeRemoveArgs(sandboxDockerDataVolumeName(sandboxName)),
+      SANDBOX_VOLUME_REMOVAL_MISSING_PATTERN,
+      'msb volume rm',
+    )
+  })
+}
+
+function removeSandboxVmKeepingVolume(name: string): Promise<void> {
+  return trackSandboxRemoval(name, async (sandboxName) => {
+    await removeSandboxVm(sandboxName)
+  })
+}
+
+function trackSandboxRemoval(name: string, remove: (sandboxName: string) => Promise<void>): Promise<void> {
   const state = vmState(name)
   if (state.inFlightRemoval !== null) {
     return state.inFlightRemoval
@@ -887,13 +971,9 @@ function removeSandboxVmAndVolume(name: string): Promise<void> {
     if (inFlightBoot !== null) {
       await inFlightBoot.catch(() => undefined)
     }
-    await removeSandboxVm(name)
-    await runSandboxRemoval(
-      buildSandboxVolumeRemoveArgs(sandboxDockerDataVolumeName(name)),
-      SANDBOX_VOLUME_REMOVAL_MISSING_PATTERN,
-      'msb volume rm',
-    )
+    await remove(name)
     state.lastKnownRunningAt = null
+    state.runningResources = null
   })().finally(() => {
     state.inFlightRemoval = null
   })
@@ -1024,6 +1104,7 @@ async function admitVmStart(name: string, maxRunningVms: number): Promise<void> 
   const victimState = vmStates.get(victim.vmName)
   if (victimState !== undefined) {
     victimState.lastKnownRunningAt = null
+    victimState.runningResources = null
   }
 }
 
@@ -1136,12 +1217,13 @@ export class SandboxRuntimeService {
     if (checkoutKey === null) {
       return { mode: 'blocked', reason: `could not resolve the checkout root for ${target.locationDirectory}` }
     }
+    const resources = await resolveCheckoutSandboxResources(this.db, checkoutKey)
     const spec: SandboxVmSpec = {
       name: checkoutSandboxName(checkoutKey),
       checkoutKey,
       projectMounts,
-      cpus: target.resources.cpus,
-      memoryMib: target.resources.memoryMib,
+      cpus: resources.cpus,
+      memoryMib: resources.memoryMib,
     }
     const state = vmState(spec.name)
     state.lastUsedAt = Date.now()
@@ -1180,6 +1262,44 @@ export class SandboxRuntimeService {
     await removeSandboxVmAndVolume(checkoutSandboxName(checkoutKey))
   }
 
+  async restartCheckoutSandbox(directory: string): Promise<void> {
+    if (!detectSandboxCapability().available) return
+    const checkoutKey = await resolveCheckoutKey(directory)
+    if (checkoutKey === null) return
+    await removeSandboxVmKeepingVolume(checkoutSandboxName(checkoutKey))
+  }
+
+  async getCheckoutResources(
+    directory: string,
+  ): Promise<{ effective: SessionSandboxResources; running: SessionSandboxResources | null }> {
+    const checkoutKey = await resolveCheckoutKey(directory)
+    if (checkoutKey === null) {
+      return {
+        effective: resolveSandboxResources(
+          new SettingsService(this.db).getSettings('default').preferences.sandbox,
+          null,
+        ),
+        running: null,
+      }
+    }
+    return {
+      effective: await resolveCheckoutSandboxResources(this.db, checkoutKey),
+      running: vmStates.get(checkoutSandboxName(checkoutKey))?.runningResources ?? null,
+    }
+  }
+
+  async registerCheckoutRunResources(directory: string, resources: SessionSandboxResources): Promise<void> {
+    const checkoutKey = await resolveCheckoutKey(directory)
+    if (checkoutKey === null) return
+    setCheckoutRunResources(checkoutKey, resources)
+  }
+
+  async releaseCheckoutRunResources(directory: string): Promise<void> {
+    const checkoutKey = await resolveCheckoutKey(directory)
+    if (checkoutKey === null) return
+    clearCheckoutRunResources(checkoutKey)
+  }
+
   async stopAllSandboxes(): Promise<void> {
     shutdownRequested = true
     await this.stopManagedSandboxes()
@@ -1212,6 +1332,7 @@ export class SandboxRuntimeService {
     }
     for (const state of vmStates.values()) {
       state.lastKnownRunningAt = null
+      state.runningResources = null
     }
     const stopResult = await executeCommand([sandboxExecutablePath(), ...buildSandboxStopManagedArgs()], {
       ignoreExitCode: true,

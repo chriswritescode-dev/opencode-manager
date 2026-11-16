@@ -1,6 +1,10 @@
 import type { Database } from 'bun:sqlite'
 import type { Repo, CreateRepoInput } from '../types/repo'
-import { RepoStatusSchema } from '@opencode-manager/shared/schemas'
+import {
+  RepoStatusSchema,
+  SessionSandboxResourcesSchema,
+  type SessionSandboxResources,
+} from '@opencode-manager/shared/schemas'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH, getRepoDisplayName } from '@opencode-manager/shared/utils'
 import { getErrorMessage } from '../utils/error-utils'
@@ -35,6 +39,8 @@ const RepoSettingRowSchema = z.object({ value: z.string() })
 const REPO_GIT_CREDENTIAL_SETTING_KEY = 'gitCredentialId'
 
 const REPO_SANDBOX_GIT_CREDENTIALS_SETTING_KEY = 'sandboxGitCredentials'
+
+export const REPO_SANDBOX_RESOURCES_SETTING_KEY = 'sandboxResources'
 
 function rowToRepo(row: RepoRow): Repo {
   const fullPath = row.source_path || path.join(getReposPath(), row.local_path)
@@ -99,6 +105,29 @@ export function getRepoSandboxGitCredentials(db: Database, repoId: number): bool
 
 export function setRepoSandboxGitCredentials(db: Database, repoId: number, allowed: boolean | null): void {
   setRepoSetting(db, repoId, REPO_SANDBOX_GIT_CREDENTIALS_SETTING_KEY, allowed === null ? null : String(allowed))
+}
+
+export function getRepoSandboxResources(db: Database, repoId: number): SessionSandboxResources | null {
+  const value = getRepoSetting(db, repoId, REPO_SANDBOX_RESOURCES_SETTING_KEY)
+  if (value === null) return null
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    return null
+  }
+
+  const result = SessionSandboxResourcesSchema.safeParse(parsed)
+  return result.success ? result.data : null
+}
+
+export function setRepoSandboxResources(
+  db: Database,
+  repoId: number,
+  resources: SessionSandboxResources | null,
+): void {
+  setRepoSetting(db, repoId, REPO_SANDBOX_RESOURCES_SETTING_KEY, resources === null ? null : JSON.stringify(resources))
 }
 
 export function getRepoByExactDirectory(db: Database, directory: string): Repo | null {

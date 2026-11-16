@@ -1,6 +1,10 @@
 import os from 'os'
+import type { Database } from 'bun:sqlite'
 import { ENV } from '@opencode-manager/shared/config/env'
 import type { SandboxPreferences, SessionSandboxResources } from '@opencode-manager/shared/schemas'
+import { getRepoByExactDirectory, getRepoSandboxResources } from '../../db/queries'
+import { resolveMainCheckoutPath, resolveRepoForDirectory } from '../repo'
+import { SettingsService } from '../settings'
 import { parseMemoryMib } from './command'
 
 export function envSandboxResources(): SessionSandboxResources {
@@ -40,4 +44,37 @@ export function sandboxResourceLimitError(resources: Partial<SessionSandboxResou
   }
 
   return null
+}
+
+const checkoutRunResources = new Map<string, SessionSandboxResources>()
+
+export function setCheckoutRunResources(checkoutKey: string, resources: SessionSandboxResources): void {
+  checkoutRunResources.set(checkoutKey, resources)
+}
+
+export function clearCheckoutRunResources(checkoutKey: string): void {
+  checkoutRunResources.delete(checkoutKey)
+}
+
+export function resetCheckoutRunResources(): void {
+  checkoutRunResources.clear()
+}
+
+async function resolveRepoSandboxResources(db: Database, checkoutKey: string): Promise<SessionSandboxResources | null> {
+  const repo = await resolveRepoForDirectory(db, checkoutKey)
+  if (repo === null) return null
+  const resources = getRepoSandboxResources(db, repo.id)
+  if (resources !== null || !repo.isWorktree) return resources
+  const mainCheckout = await resolveMainCheckoutPath(repo.fullPath)
+  if (mainCheckout === null) return null
+  const mainRepo = getRepoByExactDirectory(db, mainCheckout)
+  return mainRepo === null ? null : getRepoSandboxResources(db, mainRepo.id)
+}
+
+export async function resolveCheckoutSandboxResources(
+  db: Database,
+  checkoutKey: string,
+): Promise<SessionSandboxResources> {
+  const override = checkoutRunResources.get(checkoutKey) ?? await resolveRepoSandboxResources(db, checkoutKey)
+  return resolveSandboxResources(new SettingsService(db).getSettings('default').preferences.sandbox, override)
 }

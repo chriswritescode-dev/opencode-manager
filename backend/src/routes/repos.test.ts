@@ -2,16 +2,19 @@ import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test'
 import { Hono } from 'hono'
 import type { Database } from 'bun:sqlite'
 import path from 'node:path'
+import os from 'node:os'
 import { mkdirSync } from 'node:fs'
 import { z } from 'zod'
 import { getReposPath } from '@opencode-manager/shared/config/env'
-import { createRepo, getRepoById, setRepoSetting } from '../db/queries'
+import { RepoSandboxResourcesSchema, type SessionSandboxResources } from '@opencode-manager/shared/schemas'
+import { createRepo, getRepoById, getRepoSandboxResources, setRepoSetting } from '../db/queries'
 import type { CreateRepoInput } from '../types/repo'
 import { createRepoRoutes } from './repos'
 import { createStubOpenCodeClient } from '../../test/helpers/stub-opencode-client'
 import { createGitService } from '../services/git/GitService'
 import { ProjectConfigService } from '../services/project-config'
 import { SecretsService } from '../services/secrets'
+import { SettingsService } from '../services/settings'
 import { RepoWorkspaceService } from '../services/repo-workspace'
 import { ScheduleService } from '../services/schedules'
 import { ScheduleWorktreeManager } from '../services/schedule-worktree'
@@ -60,7 +63,25 @@ const DeletedRepoSchema = z.object({
 
 const jsonHeaders = { 'Content-Type': 'application/json' }
 
-function createTestApp(db: Database, openCodeClient: OpenCodeClient = createStubOpenCodeClient()): Hono {
+type SandboxRuntimeStub = {
+  getCheckoutResources: (
+    directory: string,
+  ) => Promise<{ effective: SessionSandboxResources; running: SessionSandboxResources | null }>
+  restartCheckoutSandbox: (directory: string) => Promise<void>
+}
+
+function createSandboxRuntimeStub(): SandboxRuntimeStub {
+  return {
+    getCheckoutResources: mock(async () => ({ effective: { cpus: 2, memoryMib: 2048 }, running: null })),
+    restartCheckoutSandbox: mock(async () => undefined),
+  }
+}
+
+function createTestApp(
+  db: Database,
+  openCodeClient: OpenCodeClient = createStubOpenCodeClient(),
+  sandboxRuntime: SandboxRuntimeStub = createSandboxRuntimeStub(),
+): Hono {
   const gitAuthService = createGitAuthService()
   const terminalService = new TerminalService(
     { client: openCodeClient, baseUrl: () => 'http://127.0.0.1:5551', includeLocalEnv: false },
@@ -87,6 +108,7 @@ function createTestApp(db: Database, openCodeClient: OpenCodeClient = createStub
     projectConfigService,
     repoWorkspaces,
     new SecretsService(db),
+    sandboxRuntime,
   ))
   return app
 }
@@ -793,5 +815,280 @@ describe('DELETE /api/repos/:id', () => {
 
     expect(res.status).toBe(400)
     expect(getRepoById(db, 1)).not.toBeNull()
+  })
+})
+
+describe('repo sandbox resources', () => {
+  let workspace: TempWorkspace
+  let db: Database
+
+  beforeEach(() => {
+    workspace = createTempWorkspace('repos-sandbox-resources-')
+    db = createTestDatabase()
+    mkdirSync(getReposPath(), { recursive: true })
+  })
+
+  afterEach(() => {
+    db.close()
+    workspace.restore()
+  })
+
+  function enableSandboxing(): void {
+    new SettingsService(db).updateSettings({ sandbox: { enabled: true } })
+  }
+
+  function seedRepoTarget(name: string) {
+    mkdirSync(path.join(getReposPath(), name), { recursive: true })
+    return createLocalRepo(db, name)
+  }
+
+  describe('GET /api/repos/:id/sandbox/resources', () => {
+    it('returns 404 for an unknown repo', async () => {
+      const res = await createTestApp(db).request('/repos/999/sandbox/resources')
+
+      expect(res.status).toBe(404)
+      expect((await readJson(res, ErrorSchema)).error).toBe('Repo not found')
+    })
+
+    it('returns 409 when sandboxing is disabled', async () => {
+      seedRepoTarget('repo-a')
+
+      const res = await createTestApp(db).request('/repos/1/sandbox/resources')
+
+      expect(res.status).toBe(409)
+      expect((await readJson(res, ErrorSchema)).error).toBe('Sandboxing is not enabled for this server')
+    })
+
+    it('returns the override, effective and running resources', async () => {
+      const repo = seedRepoTarget('repo-a')
+      enableSandboxing()
+      const runtime = createSandboxRuntimeStub()
+
+      const res = await createTestApp(db, createStubOpenCodeClient(), runtime).request('/repos/1/sandbox/resources')
+
+      expect(res.status).toBe(200)
+      expect(await readJson(res, RepoSandboxResourcesSchema)).toEqual({
+        override: null,
+        effective: { cpus: 2, memoryMib: 2048 },
+        running: null,
+      })
+      expect(runtime.getCheckoutResources).toHaveBeenCalledWith(repo.fullPath)
+    })
+
+    it('returns the stored override', async () => {
+      seedRepoTarget('repo-a')
+      enableSandboxing()
+      const override = { cpus: 2, memoryMib: 2048 }
+      const app = createTestApp(db)
+      await app.request('/repos/1/sandbox/resources', {
+        method: 'PUT',
+        headers: jsonHeaders,
+        body: JSON.stringify(override),
+      })
+
+      const res = await app.request('/repos/1/sandbox/resources')
+
+      expect(res.status).toBe(200)
+      expect((await readJson(res, RepoSandboxResourcesSchema)).override).toEqual(override)
+    })
+
+    it('returns 400 when the directory belongs to another repo', async () => {
+      seedRepoTarget('repo-a')
+      seedRepoTarget('repo-b')
+      enableSandboxing()
+      const directory = path.join(getReposPath(), 'repo-b')
+
+      const res = await createTestApp(db).request(
+        `/repos/1/sandbox/resources?directory=${encodeURIComponent(directory)}`,
+      )
+
+      expect(res.status).toBe(400)
+      expect((await readJson(res, ErrorSchema)).error).toBe('directory does not belong to this repository')
+    })
+  })
+
+  describe('PUT /api/repos/:id/sandbox/resources', () => {
+    it('stores and returns the override', async () => {
+      const repo = seedRepoTarget('repo-a')
+      enableSandboxing()
+      const runtime = createSandboxRuntimeStub()
+      const override = { cpus: 2, memoryMib: 2048 }
+
+      const res = await createTestApp(db, createStubOpenCodeClient(), runtime).request('/repos/1/sandbox/resources', {
+        method: 'PUT',
+        headers: jsonHeaders,
+        body: JSON.stringify(override),
+      })
+
+      expect(res.status).toBe(200)
+      expect(await readJson(res, RepoSandboxResourcesSchema)).toEqual({
+        override,
+        effective: { cpus: 2, memoryMib: 2048 },
+        running: null,
+      })
+      expect(getRepoSandboxResources(db, repo.id)).toEqual(override)
+      expect(runtime.getCheckoutResources).toHaveBeenCalledWith(repo.fullPath)
+    })
+
+    it('rejects cpus above the host limit and keeps the stored override', async () => {
+      const repo = seedRepoTarget('repo-a')
+      enableSandboxing()
+      const stored = { cpus: 2, memoryMib: 2048 }
+      const app = createTestApp(db)
+      await app.request('/repos/1/sandbox/resources', {
+        method: 'PUT',
+        headers: jsonHeaders,
+        body: JSON.stringify(stored),
+      })
+
+      const res = await app.request('/repos/1/sandbox/resources', {
+        method: 'PUT',
+        headers: jsonHeaders,
+        body: JSON.stringify({ cpus: os.availableParallelism() + 1, memoryMib: 2048 }),
+      })
+
+      expect(res.status).toBe(400)
+      expect((await readJson(res, ErrorSchema)).error).toBeTruthy()
+      expect(getRepoSandboxResources(db, repo.id)).toEqual(stored)
+    })
+
+    it('rejects memory above the host limit and keeps the stored override', async () => {
+      const repo = seedRepoTarget('repo-a')
+      enableSandboxing()
+      const stored = { cpus: 2, memoryMib: 2048 }
+      const app = createTestApp(db)
+      await app.request('/repos/1/sandbox/resources', {
+        method: 'PUT',
+        headers: jsonHeaders,
+        body: JSON.stringify(stored),
+      })
+
+      const res = await app.request('/repos/1/sandbox/resources', {
+        method: 'PUT',
+        headers: jsonHeaders,
+        body: JSON.stringify({ cpus: 2, memoryMib: Math.floor(os.totalmem() / 1048576) + 1024 }),
+      })
+
+      expect(res.status).toBe(400)
+      expect((await readJson(res, ErrorSchema)).error).toBeTruthy()
+      expect(getRepoSandboxResources(db, repo.id)).toEqual(stored)
+    })
+
+    it('returns 400 for an invalid body', async () => {
+      seedRepoTarget('repo-a')
+      enableSandboxing()
+
+      const res = await createTestApp(db).request('/repos/1/sandbox/resources', {
+        method: 'PUT',
+        headers: jsonHeaders,
+        body: JSON.stringify({ cpus: 0, memoryMib: 1024 }),
+      })
+
+      expect(res.status).toBe(400)
+      expect((await readJson(res, ErrorSchema)).error).toBeTruthy()
+    })
+
+    it('clears the stored override when the body is null', async () => {
+      const repo = seedRepoTarget('repo-a')
+      enableSandboxing()
+      const app = createTestApp(db)
+      await app.request('/repos/1/sandbox/resources', {
+        method: 'PUT',
+        headers: jsonHeaders,
+        body: JSON.stringify({ cpus: 2, memoryMib: 2048 }),
+      })
+
+      const res = await app.request('/repos/1/sandbox/resources', {
+        method: 'PUT',
+        headers: jsonHeaders,
+        body: 'null',
+      })
+
+      expect(res.status).toBe(200)
+      expect((await readJson(res, RepoSandboxResourcesSchema)).override).toBeNull()
+      expect(getRepoSandboxResources(db, repo.id)).toBeNull()
+    })
+
+    it('returns 404 for an unknown repo and 409 when sandboxing is disabled', async () => {
+      const missing = await createTestApp(db).request('/repos/999/sandbox/resources', {
+        method: 'PUT',
+        headers: jsonHeaders,
+        body: JSON.stringify({ cpus: 2, memoryMib: 2048 }),
+      })
+      expect(missing.status).toBe(404)
+
+      seedRepoTarget('repo-a')
+      const disabled = await createTestApp(db).request('/repos/1/sandbox/resources', {
+        method: 'PUT',
+        headers: jsonHeaders,
+        body: JSON.stringify({ cpus: 2, memoryMib: 2048 }),
+      })
+      expect(disabled.status).toBe(409)
+    })
+  })
+
+  describe('POST /api/repos/:id/sandbox/restart', () => {
+    it('restarts the checkout sandbox and returns 204', async () => {
+      const repo = seedRepoTarget('repo-a')
+      enableSandboxing()
+      const runtime = createSandboxRuntimeStub()
+
+      const res = await createTestApp(db, createStubOpenCodeClient(), runtime).request('/repos/1/sandbox/restart', {
+        method: 'POST',
+      })
+
+      expect(res.status).toBe(204)
+      expect(runtime.restartCheckoutSandbox).toHaveBeenCalledWith(repo.fullPath)
+    })
+
+    it('restarts the same-repo directory passed in the body', async () => {
+      const alternateDirectory = path.join(workspace.path, 'alternate-checkout')
+      createRepo(db, {
+        localPath: 'repo-a',
+        sourcePath: alternateDirectory,
+        defaultBranch: 'main',
+        cloneStatus: 'ready',
+        clonedAt: Date.now(),
+        isLocal: true,
+      })
+      enableSandboxing()
+      const runtime = createSandboxRuntimeStub()
+      const directory = path.join(getReposPath(), 'repo-a')
+
+      const res = await createTestApp(db, createStubOpenCodeClient(), runtime).request('/repos/1/sandbox/restart', {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({ directory }),
+      })
+
+      expect(res.status).toBe(204)
+      expect(runtime.restartCheckoutSandbox).toHaveBeenCalledWith(directory)
+    })
+
+    it('returns 400 when the directory belongs to another repo', async () => {
+      seedRepoTarget('repo-a')
+      seedRepoTarget('repo-b')
+      enableSandboxing()
+      const runtime = createSandboxRuntimeStub()
+
+      const res = await createTestApp(db, createStubOpenCodeClient(), runtime).request('/repos/1/sandbox/restart', {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({ directory: path.join(getReposPath(), 'repo-b') }),
+      })
+
+      expect(res.status).toBe(400)
+      expect((await readJson(res, ErrorSchema)).error).toBe('directory does not belong to this repository')
+      expect(runtime.restartCheckoutSandbox).not.toHaveBeenCalled()
+    })
+
+    it('returns 404 for an unknown repo and 409 when sandboxing is disabled', async () => {
+      const missing = await createTestApp(db).request('/repos/999/sandbox/restart', { method: 'POST' })
+      expect(missing.status).toBe(404)
+
+      seedRepoTarget('repo-a')
+      const disabled = await createTestApp(db).request('/repos/1/sandbox/restart', { method: 'POST' })
+      expect(disabled.status).toBe(409)
+    })
   })
 })

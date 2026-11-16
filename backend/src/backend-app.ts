@@ -336,7 +336,7 @@ export function createBackendApp(dependencies: BackendAppDependencies = {}): Bac
   protectedApi.use('/*', requireAuth)
 
   protectedApi.route('/repos', createRepoTerminalSocketRoutes(database, gitAuthService, openCodeClient, terminalService, upgradeWebSocket))
-  protectedApi.route('/repos', createRepoRoutes(database, gitAuthService, scheduleService, openCodeClient, terminalService, projectConfigService, repoWorkspaces, secretsService))
+  protectedApi.route('/repos', createRepoRoutes(database, gitAuthService, scheduleService, openCodeClient, terminalService, projectConfigService, repoWorkspaces, secretsService, sandboxRuntimeService))
   protectedApi.route('/settings', createSettingsRoutes(database, gitAuthService, openCodeClient, openCodeSupervisor))
   protectedApi.route('/device-pairing', createDevicePairingRoutes({
     mintPairingCode: (headers) => auth.api.createDevicePairingCode({ headers }),

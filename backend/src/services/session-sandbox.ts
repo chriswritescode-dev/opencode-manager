@@ -1,7 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import type {
   SessionSandboxClaim,
-  SessionSandboxResources,
   SessionSandboxState,
   SetSessionSandboxRequest,
 } from '@opencode-manager/shared/schemas'
@@ -127,12 +126,11 @@ export class SessionSandboxService {
     }
   }
 
-  async resolveShellTarget(sessionId: string): Promise<{ sandboxed: boolean; resources: SessionSandboxResources }> {
+  async resolveShellTarget(sessionId: string): Promise<{ sandboxed: boolean }> {
     const rootSessionId = await this.ancestry.resolveRootSessionId(sessionId)
     const stored = getSessionSandboxMode(this.db, rootSessionId)
     return {
       sandboxed: this.sandboxSupported() && (stored?.sandboxed ?? this.defaultSandboxed()),
-      resources: resolveSandboxResources(this.preferences().sandbox, stored?.resources ?? null),
     }
   }
 

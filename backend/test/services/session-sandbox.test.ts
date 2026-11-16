@@ -433,10 +433,7 @@ describe('SessionSandboxService', () => {
     settingsService.updateSettings({ sandbox: { enabled: true } })
     const service = createService(db, createFakeSessionPermissionClient(), settingsService)
 
-    await expect(service.resolveShellTarget('ses_root')).resolves.toEqual({
-      sandboxed: true,
-      resources: ENV_RESOURCES,
-    })
+    await expect(service.resolveShellTarget('ses_root')).resolves.toEqual({ sandboxed: true })
   })
 
   it('reports unsandboxed when server sandbox support is disabled', async () => {
@@ -444,23 +441,17 @@ describe('SessionSandboxService', () => {
 
     setSessionSandboxed(db, 'ses_root', true)
 
-    await expect(service.resolveShellTarget('ses_root')).resolves.toEqual({
-      sandboxed: false,
-      resources: ENV_RESOURCES,
-    })
+    await expect(service.resolveShellTarget('ses_root')).resolves.toEqual({ sandboxed: false })
   })
 
-  it('reports the stored sandbox flag and effective overridden resources', async () => {
+  it('reports the stored sandbox flag', async () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sandbox: { enabled: true } })
     setSessionSandboxed(db, 'ses_root', false)
     setSessionSandboxResources(db, 'ses_root', { cpus: 4, memoryMib: 8192 }, false)
     const service = createService(db, createFakeSessionPermissionClient(), settingsService)
 
-    await expect(service.resolveShellTarget('ses_root')).resolves.toEqual({
-      sandboxed: false,
-      resources: { cpus: 4, memoryMib: 8192 },
-    })
+    await expect(service.resolveShellTarget('ses_root')).resolves.toEqual({ sandboxed: false })
   })
 
   it('resolves the root sandboxed state for a child session', async () => {
@@ -473,9 +464,6 @@ describe('SessionSandboxService', () => {
       settingsService,
     )
 
-    await expect(service.resolveShellTarget('ses_child')).resolves.toEqual({
-      sandboxed: false,
-      resources: ENV_RESOURCES,
-    })
+    await expect(service.resolveShellTarget('ses_child')).resolves.toEqual({ sandboxed: false })
   })
 })

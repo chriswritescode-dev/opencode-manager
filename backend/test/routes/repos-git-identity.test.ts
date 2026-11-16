@@ -22,6 +22,7 @@ import { CredentialProvider } from '../../src/services/credential-provider'
 import { createGitAuthService, cloneOrigin, createOrigin, git, uniqueName } from '../helpers/git-fixtures'
 import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
 import { createStubRepoEnvService } from '../helpers/stub-repo-env-service'
+import { createStubSandboxRuntime } from '../helpers/stub-sandbox-runtime'
 import { createTestDatabase } from '../helpers/test-database'
 
 const workspaceRoot = mkdtempSync(path.join(tmpdir(), 'repos-git-identity-'))
@@ -82,6 +83,7 @@ describe('repo git identity routes', () => {
       projectConfigService,
       repoWorkspaces,
       new SecretsService(db),
+      createStubSandboxRuntime(),
     ))
   })
 

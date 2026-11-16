@@ -3,8 +3,10 @@ import { Readable } from 'node:stream'
 import { z } from 'zod'
 import type { Database } from 'bun:sqlite'
 import type { DeleteRepoResult, Repo } from '@opencode-manager/shared/types'
-import { DiscoverReposRequestSchema, AssistantModeInitRequestSchema, UpdateRepoRequestSchema, CreateRepoWorkspaceRequestSchema, DeleteRepoRequestSchema } from '@opencode-manager/shared/schemas'
-import { listRepos, getRepoById, updateLastAccessed, getRepoGitCredentialId, setRepoGitCredentialId, updateRepoName } from '../db/queries'
+import { DiscoverReposRequestSchema, AssistantModeInitRequestSchema, UpdateRepoRequestSchema, CreateRepoWorkspaceRequestSchema, DeleteRepoRequestSchema, SessionSandboxResourcesSchema } from '@opencode-manager/shared/schemas'
+import { listRepos, getRepoById, updateLastAccessed, getRepoGitCredentialId, setRepoGitCredentialId, updateRepoName, getRepoSandboxResources, setRepoSandboxResources } from '../db/queries'
+import { sandboxResourceLimitError } from '../services/sandbox/resources'
+import type { SandboxRuntimeService } from '../services/sandbox/runtime'
 import * as repoService from '../services/repo'
 import * as archiveService from '../services/archive'
 import { SettingsService } from '../services/settings'
@@ -46,11 +48,29 @@ const RepoGitIdentityBodySchema = z.object({
   identityId: z.string().optional(),
 })
 
+const RepoSandboxRestartBodySchema = z.object({
+  directory: z.string().trim().min(1).optional(),
+})
+
 function withRepoSettings(database: Database, repo: Repo): Repo {
   return {
     ...repo,
     gitCredentialId: getRepoGitCredentialId(database, repo.id) ?? undefined,
   }
+}
+
+function sandboxingDisabled(database: Database): boolean {
+  return new SettingsService(database).getSettings().preferences.sandbox?.enabled !== true
+}
+
+async function resolveRepoDirectory(
+  database: Database,
+  repo: Repo,
+  requested: string | undefined,
+): Promise<string | null> {
+  const directory = requested?.trim() ? requested.trim() : repo.fullPath
+  const resolved = await repoService.resolveRepoForDirectory(database, directory)
+  return resolved?.id === repo.id ? directory : null
 }
 
 export function createRepoRoutes(
@@ -62,6 +82,7 @@ export function createRepoRoutes(
   projectConfigService: ProjectConfigService,
   repoWorkspaces: RepoWorkspaceService,
   secretsService: SecretsService,
+  sandboxRuntime: Pick<SandboxRuntimeService, 'getCheckoutResources' | 'restartCheckoutSandbox'>,
 ) {
   const app = new Hono()
   const git = createGitService(gitAuthService)
@@ -635,5 +656,91 @@ app.get('/', async (c) => {
     }
   })
   
+  app.get('/:id/sandbox/resources', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      if (Number.isNaN(id)) return c.json({ error: 'Invalid repo id' }, 400)
+
+      const repo = getRepoById(database, id)
+      if (!repo) return c.json({ error: 'Repo not found' }, 404)
+      if (sandboxingDisabled(database)) {
+        return c.json({ error: 'Sandboxing is not enabled for this server' }, 409)
+      }
+
+      const directory = await resolveRepoDirectory(database, repo, c.req.query('directory'))
+      if (directory === null) {
+        return c.json({ error: 'directory does not belong to this repository' }, 400)
+      }
+
+      const { effective, running } = await sandboxRuntime.getCheckoutResources(directory)
+      return c.json({ override: getRepoSandboxResources(database, repo.id), effective, running })
+    } catch (error: unknown) {
+      logger.error('Failed to read repo sandbox resources:', error)
+      return c.json({ error: getErrorMessage(error) }, 500)
+    }
+  })
+
+  app.put('/:id/sandbox/resources', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      if (Number.isNaN(id)) return c.json({ error: 'Invalid repo id' }, 400)
+
+      const repo = getRepoById(database, id)
+      if (!repo) return c.json({ error: 'Repo not found' }, 404)
+      if (sandboxingDisabled(database)) {
+        return c.json({ error: 'Sandboxing is not enabled for this server' }, 409)
+      }
+
+      const parsed = SessionSandboxResourcesSchema.nullable().safeParse(
+        await c.req.json().catch(() => undefined),
+      )
+      if (!parsed.success) {
+        return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request' }, 400)
+      }
+
+      if (parsed.data !== null) {
+        const limitError = sandboxResourceLimitError(parsed.data)
+        if (limitError !== null) return c.json({ error: limitError }, 400)
+      }
+
+      setRepoSandboxResources(database, repo.id, parsed.data)
+
+      const { effective, running } = await sandboxRuntime.getCheckoutResources(repo.fullPath)
+      return c.json({ override: parsed.data, effective, running })
+    } catch (error: unknown) {
+      logger.error('Failed to update repo sandbox resources:', error)
+      return c.json({ error: getErrorMessage(error) }, 500)
+    }
+  })
+
+  app.post('/:id/sandbox/restart', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      if (Number.isNaN(id)) return c.json({ error: 'Invalid repo id' }, 400)
+
+      const repo = getRepoById(database, id)
+      if (!repo) return c.json({ error: 'Repo not found' }, 404)
+      if (sandboxingDisabled(database)) {
+        return c.json({ error: 'Sandboxing is not enabled for this server' }, 409)
+      }
+
+      const parsed = RepoSandboxRestartBodySchema.safeParse(await c.req.json().catch(() => ({})))
+      if (!parsed.success) {
+        return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request' }, 400)
+      }
+
+      const directory = await resolveRepoDirectory(database, repo, parsed.data.directory)
+      if (directory === null) {
+        return c.json({ error: 'directory does not belong to this repository' }, 400)
+      }
+
+      await sandboxRuntime.restartCheckoutSandbox(directory)
+      return c.body(null, 204)
+    } catch (error: unknown) {
+      logger.error('Failed to restart repo sandbox:', error)
+      return c.json({ error: getErrorMessage(error) }, 500)
+    }
+  })
+
   return app
 }

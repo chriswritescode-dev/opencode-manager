@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Database } from 'bun:sqlite'
+import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import type { SessionInfo, V2Event } from '@opencode-manager/shared/opencode'
 import { LOCAL_OPENCODE_SERVER_ID, SessionSandboxStateSchema } from '@opencode-manager/shared/schemas'
@@ -149,11 +150,12 @@ describe('ScheduleService', () => {
     const sessions: ScheduleSandboxDependencies['sessions'] = {
       assertSandboxRequestAllowed: vi.fn(),
       update: vi.fn(async () => SANDBOX_STATE),
-      resolveShellTarget: vi.fn(async () => ({ sandboxed: true, resources: SANDBOX_RESOURCES })),
     }
     const runtime: ScheduleSandboxDependencies['runtime'] = {
       planShell: vi.fn(async () => ({ mode: 'sandbox' as const, name: 'ocm-ses-run-1', workdir: repo.fullPath })),
       removeCheckoutSandbox: vi.fn(async () => undefined),
+      registerCheckoutRunResources: vi.fn(async () => undefined),
+      releaseCheckoutRunResources: vi.fn(async () => undefined),
     }
     return { sessions, runtime }
   }
@@ -863,15 +865,56 @@ describe('ScheduleService', () => {
       const run = await service.runJob(repo.id, sandboxJob.id, 'manual')
       await waitForRun(sandboxJob.id, run.id, { status: 'completed' })
 
-      expect(sessions.update).toHaveBeenCalledWith('ses-run-1', { sandboxed: true, resources: SANDBOX_RESOURCES })
+      expect(sessions.update).toHaveBeenCalledWith('ses-run-1', { sandboxed: true })
       expect(runtime.planShell).toHaveBeenCalledWith(
         repo.fullPath,
-        { locationDirectory: repo.fullPath, resources: SANDBOX_RESOURCES },
+        { locationDirectory: repo.fullPath },
         true,
       )
+      expect(runtime.registerCheckoutRunResources).toHaveBeenCalledWith(repo.fullPath, SANDBOX_RESOURCES)
+      const [registerOrder] = vi.mocked(runtime.registerCheckoutRunResources).mock.invocationCallOrder
       const [planOrder] = vi.mocked(runtime.planShell).mock.invocationCallOrder
       const [promptOrder] = vi.mocked(api.session.prompt).mock.invocationCallOrder
+      expect(registerOrder).toBeLessThan(planOrder ?? 0)
       expect(planOrder).toBeLessThan(promptOrder ?? 0)
+    })
+
+    it('registers the job resources for a dedicated worktree and releases them at teardown', async () => {
+      const { client } = createClient({ messages: [assistantMessage('Done.', { completed: true })] })
+      const { sessions, runtime } = createSandboxDeps()
+      const worktreeManager = createStubWorktreeManager()
+      const { service } = createService(client, { sandbox: { sessions, runtime }, worktreeManager })
+      const sandboxJob = seedJob({ sandbox: sandboxJobConfig })
+      const worktreePath = path.join(workspace.path, 'worktrees', `job-${sandboxJob.id}-run-1`)
+      mkdirSync(worktreePath, { recursive: true })
+      worktreeManager.prepare.mockResolvedValue({
+        directory: worktreePath,
+        worktreePath,
+        runBranch: `schedule/${sandboxJob.id}/run-1`,
+      })
+      insertSessionSandboxModeIfAbsent(db, 'ses-run-1', { sandboxed: true, source: 'user', resources: null })
+
+      const run = await service.runJob(repo.id, sandboxJob.id, 'manual')
+      await waitForRun(sandboxJob.id, run.id, { status: 'completed' })
+
+      expect(runtime.registerCheckoutRunResources).toHaveBeenCalledWith(worktreePath, SANDBOX_RESOURCES)
+      expect(runtime.registerCheckoutRunResources).not.toHaveBeenCalledWith(repo.fullPath, SANDBOX_RESOURCES)
+      expect(runtime.planShell).toHaveBeenCalledWith(worktreePath, { locationDirectory: worktreePath }, true)
+      await vi.waitFor(() => expect(runtime.releaseCheckoutRunResources).toHaveBeenCalledWith(worktreePath))
+      expect(runtime.releaseCheckoutRunResources).not.toHaveBeenCalledWith(repo.fullPath)
+    })
+
+    it('plans a shared-worktree run in the shared directory without registering job resources', async () => {
+      const { client } = createClient({ messages: [assistantMessage('Done.', { completed: true })] })
+      const { sessions, runtime } = createSandboxDeps()
+      const { service } = createService(client, { sandbox: { sessions, runtime } })
+      const sandboxJob = seedJob({ sandbox: sandboxJobConfig, workspaceMode: 'shared-worktree' })
+
+      const run = await service.runJob(repo.id, sandboxJob.id, 'manual')
+      await waitForRun(sandboxJob.id, run.id, { status: 'completed' })
+
+      expect(runtime.registerCheckoutRunResources).not.toHaveBeenCalled()
+      expect(runtime.planShell).toHaveBeenCalledWith(repo.fullPath, { locationDirectory: repo.fullPath }, true)
     })
 
     it('fails the run without prompting when the sandbox cannot start', async () => {
@@ -969,6 +1012,8 @@ describe('ScheduleService', () => {
 
       expect(sessions.update).not.toHaveBeenCalled()
       expect(runtime.planShell).not.toHaveBeenCalled()
+      expect(runtime.registerCheckoutRunResources).not.toHaveBeenCalled()
+      expect(runtime.releaseCheckoutRunResources).not.toHaveBeenCalled()
       expect(runtime.removeCheckoutSandbox).not.toHaveBeenCalled()
     })
 

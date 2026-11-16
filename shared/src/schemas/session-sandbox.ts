@@ -11,6 +11,13 @@ export const SessionSandboxResourcesSchema = z.object({
 
 export type SessionSandboxResources = z.infer<typeof SessionSandboxResourcesSchema>;
 
+export const RepoSandboxResourcesSchema = z.object({
+  override: SessionSandboxResourcesSchema.nullable(),
+  effective: SessionSandboxResourcesSchema,
+  running: SessionSandboxResourcesSchema.nullable(),
+});
+export type RepoSandboxResources = z.infer<typeof RepoSandboxResourcesSchema>;
+
 export const SessionSandboxSourceSchema = z.enum(['default', 'user']);
 
 export type SessionSandboxSource = z.infer<typeof SessionSandboxSourceSchema>;

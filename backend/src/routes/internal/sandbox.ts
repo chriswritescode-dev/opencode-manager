@@ -50,7 +50,7 @@ export function createInternalSandboxRoutes(
       return c.json(
         await new SandboxRuntimeService(db, repoEnvService).planShell(
           parsed.data.directory,
-          { locationDirectory: parsed.data.locationDirectory, resources: target.resources },
+          { locationDirectory: parsed.data.locationDirectory },
           parsed.data.enforced === true,
         ),
       )

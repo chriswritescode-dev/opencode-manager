@@ -22,6 +22,7 @@ import { RepoWorkspaceService } from '../../../src/services/repo-workspace'
 import { CredentialProvider } from '../../../src/services/credential-provider'
 import { createStubOpenCodeClient } from '../../helpers/stub-opencode-client'
 import { createStubRepoEnvService } from '../../helpers/stub-repo-env-service'
+import { createStubSandboxRuntime } from '../../helpers/stub-sandbox-runtime'
 import { readJson } from '../../helpers/read-json'
 import { testLogEntries } from '../../helpers/log-assertions'
 import { cloneOrigin, createCommittedRepo, createGitAuthService, createOrigin, git, uniqueName } from '../../helpers/git-fixtures'
@@ -1202,7 +1203,7 @@ describe('GitService real git', () => {
       const scheduleService = new ScheduleService(db, openCodeClient, new ScheduleWorktreeManager(gitAuth, db))
       const repoWorkspaces = new RepoWorkspaceService(db, openCodeClient, gitAuth, projectConfigService, terminalService, scheduleService)
       const app = new Hono()
-      app.route('/repos', createRepoRoutes(db, gitAuth, scheduleService, openCodeClient, terminalService, projectConfigService, repoWorkspaces, new SecretsService(db)))
+      app.route('/repos', createRepoRoutes(db, gitAuth, scheduleService, openCodeClient, terminalService, projectConfigService, repoWorkspaces, new SecretsService(db), createStubSandboxRuntime()))
       return app
     }
 

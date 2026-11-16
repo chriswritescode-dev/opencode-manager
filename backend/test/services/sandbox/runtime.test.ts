@@ -35,9 +35,10 @@ import { forceProcessAttestation } from '../../../src/services/opencode/process-
 import { z } from 'zod'
 import { expectLoggedMessage, resetTestLogs, testLogEntries } from '../../helpers/log-assertions'
 import { FAKE_MSB_SCRIPT, FAKE_MSB_STATE_ENV } from '../../helpers/fake-msb'
-import { createTestDatabase } from '../../helpers/test-database'
+import { createTestDatabase, seedRepo } from '../../helpers/test-database'
 import { createCommittedRepo, git } from '../../helpers/git-fixtures'
 import { applyTestEnv } from '../../helpers/test-env'
+import { setRepoSandboxResources } from '../../../src/db/queries'
 
 const suiteBinDir = mkdtempSync(path.join(realpathSync(tmpdir()), 'ocm-runtime-bin-'))
 writeFileSync(path.join(suiteBinDir, 'msb'), FAKE_MSB_SCRIPT, { mode: 0o755 })
@@ -325,8 +326,8 @@ function defaultResources() {
   return { cpus: ENV.SANDBOX.CPUS, memoryMib: memoryMib() }
 }
 
-function shellTarget(locationDirectory: string, resources = defaultResources()): SandboxShellTarget {
-  return { locationDirectory, resources }
+function shellTarget(locationDirectory: string): SandboxShellTarget {
+  return { locationDirectory }
 }
 
 function bindMount(host: string): FakeBindMount {
@@ -487,9 +488,10 @@ describe('SandboxRuntimeService', () => {
   async function expectRecreateForMutation(
     mutate: (config: FakeInspectConfig) => FakeReportedConfig,
     expectedReasonPart: string,
+    running = true,
   ): Promise<void> {
     enableEnforcement()
-    const vms = new Map<string, FakeVm>([[VM_NAME, vm({ running: true, mutate })]])
+    const vms = new Map<string, FakeVm>([[VM_NAME, vm({ running, mutate })]])
     installFakeMsb(vms)
 
     const plan = await service.planShell(repoADir, shellTarget(repoADir))
@@ -812,18 +814,135 @@ describe('SandboxRuntimeService', () => {
     )
   })
 
-  it('removes and recreates a sandbox whose cpus differ from the session resources', async () => {
+  it('removes and recreates a stopped sandbox whose cpus differ from the effective resources', async () => {
     await expectRecreateForMutation(
       (config) => ({ ...config, resources: { ...config.resources, cpus: ENV.SANDBOX.CPUS + 3 } }),
       'cpus',
+      false,
     )
   })
 
-  it('removes and recreates a sandbox whose memory differs from the session resources', async () => {
+  it('removes and recreates a stopped sandbox whose memory differs from the effective resources', async () => {
     await expectRecreateForMutation(
       (config) => ({ ...config, resources: { ...config.resources, memory_mib: memoryMib() * 2 } }),
       'memory',
+      false,
     )
+  })
+
+  it('keeps a running VM whose resources differ from the effective spec', async () => {
+    enableEnforcement()
+    const runningResources = { cpus: ENV.SANDBOX.CPUS + 2, memoryMib: memoryMib() }
+    installFakeMsb(new Map([[VM_NAME, vm({ running: true, ...runningResources })]]))
+
+    const plan = await service.planShell(repoADir, shellTarget(repoADir))
+
+    expect(plan).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
+    expect(msbCalls('rm')).toHaveLength(0)
+    expect(msbCalls('run')).toHaveLength(0)
+    await expect(service.getCheckoutResources(repoADir)).resolves.toEqual({
+      effective: defaultResources(),
+      running: runningResources,
+    })
+  })
+
+  it('applies new resources on the next boot after a restart and keeps the Docker volume', async () => {
+    enableEnforcement()
+    const override = { cpus: ENV.SANDBOX.CPUS + 1, memoryMib: memoryMib() + 1024 }
+    const repo = seedRepo(db, { localPath: repoADir, sourcePath: repoADir })
+    setRepoSandboxResources(db, repo.id, override)
+    installFakeMsb(new Map([[VM_NAME, vm({ running: true })]]))
+
+    const kept = await service.planShell(repoADir, shellTarget(repoADir))
+
+    expect(kept).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
+    expect(msbCalls('rm')).toHaveLength(0)
+    expect(msbCalls('run')).toHaveLength(0)
+
+    await service.restartCheckoutSandbox(repoADir)
+
+    expect(msbCalls('rm')).toHaveLength(1)
+    expect(msbCalls('volume')).toHaveLength(0)
+    expect(hasFakeVm(VM_NAME)).toBe(false)
+    await expect(service.getCheckoutResources(repoADir)).resolves.toEqual({
+      effective: override,
+      running: null,
+    })
+
+    const recreated = await service.planShell(repoADir, shellTarget(repoADir))
+
+    expect(recreated).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
+    expect(msbCalls('run')).toHaveLength(1)
+    expect(fakeVm(VM_NAME)).toMatchObject(override)
+    expect(msbCalls('volume')).toHaveLength(0)
+  })
+
+  it('uses a repo override for the main checkout and its linked worktree', async () => {
+    enableEnforcement()
+    const override = { cpus: ENV.SANDBOX.CPUS + 1, memoryMib: memoryMib() + 1024 }
+    createCommittedRepo(repoADir, 'main')
+    const mainRepo = seedRepo(db, { localPath: repoADir, sourcePath: repoADir })
+    setRepoSandboxResources(db, mainRepo.id, override)
+    mkdirSync(worktreesRoot, { recursive: true })
+    const linkedPath = path.join(worktreesRoot, 'linked-override')
+    rmSync(linkedPath, { recursive: true, force: true })
+    git(['worktree', 'add', '--detach', linkedPath], repoADir)
+    try {
+      seedRepo(db, { localPath: linkedPath, sourcePath: linkedPath, isWorktree: true })
+      installFakeMsb(new Map())
+
+      const mainPlan = await service.planShell(repoADir, shellTarget(repoADir))
+
+      expect(mainPlan).toMatchObject({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
+      expect(fakeVm(VM_NAME)).toMatchObject(override)
+
+      const linkedPlan = await service.planShell(linkedPath, shellTarget(linkedPath))
+      const linkedVmName = checkoutSandboxName(linkedPath)
+
+      expect(linkedPlan).toMatchObject({ mode: 'sandbox', name: linkedVmName, workdir: linkedPath })
+      expect(linkedVmName).not.toBe(VM_NAME)
+      expect(fakeVm(linkedVmName)).toMatchObject(override)
+    } finally {
+      rmSync(linkedPath, { recursive: true, force: true })
+    }
+  })
+
+  it('a registered run override wins for its checkout only', async () => {
+    enableEnforcement()
+    const jobResources = { cpus: ENV.SANDBOX.CPUS + 1, memoryMib: memoryMib() + 512 }
+    installFakeMsb(new Map())
+
+    await service.registerCheckoutRunResources(worktreeDir, jobResources)
+
+    const worktreePlan = await service.planShell(worktreeDir, shellTarget(worktreeDir))
+
+    expect(worktreePlan).toEqual({ mode: 'sandbox', name: WORKTREE_VM_NAME, workdir: worktreeDir })
+    expect(fakeVm(WORKTREE_VM_NAME)).toMatchObject(jobResources)
+    await expect(service.getCheckoutResources(worktreeDir)).resolves.toEqual({
+      effective: jobResources,
+      running: jobResources,
+    })
+
+    const repoPlan = await service.planShell(repoADir, shellTarget(repoADir))
+
+    expect(repoPlan).toEqual({ mode: 'sandbox', name: VM_NAME, workdir: repoADir })
+    expect(fakeVm(VM_NAME)).toMatchObject(defaultResources())
+
+    await service.releaseCheckoutRunResources(worktreeDir)
+    await service.restartCheckoutSandbox(worktreeDir)
+    const recreated = await service.planShell(worktreeDir, shellTarget(worktreeDir))
+
+    expect(recreated).toEqual({ mode: 'sandbox', name: WORKTREE_VM_NAME, workdir: worktreeDir })
+    expect(fakeVm(WORKTREE_VM_NAME)).toMatchObject(defaultResources())
+  })
+
+  it('reports no running resources for a checkout that was never booted', async () => {
+    installFakeMsb(new Map())
+
+    await expect(service.getCheckoutResources(repoADir)).resolves.toEqual({
+      effective: defaultResources(),
+      running: null,
+    })
   })
 
   it('removes and recreates a sandbox carrying an unexpected bind mount', async () => {
