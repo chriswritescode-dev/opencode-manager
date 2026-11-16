@@ -93,6 +93,12 @@ type SessionPromptHookCallback = (event: SessionPromptEvent) => Promise<void> | 
 type SessionContextHookCallback = (event: SessionContextEvent) => Promise<void> | void
 type SessionHookCallback = SessionPromptHookCallback | SessionContextHookCallback
 
+type InstructionEntry = { key: string; value: JsonValue }
+
+type InstructionEntryListInput = { sessionID: string }
+type InstructionEntryPutInput = { sessionID: string; key: string; value: JsonValue }
+type InstructionEntryRemoveInput = { sessionID: string; key: string }
+
 type ToolEditor = {
   list: () => GeneratedTool[]
   get: (id: string) => GeneratedTool | undefined
@@ -120,6 +126,13 @@ type PluginContext = {
   }
   session: {
     hook: (name: string, callback: SessionHookCallback) => Promise<Registration>
+    instructions: {
+      entry: {
+        list: (input: InstructionEntryListInput) => Promise<InstructionEntry[]>
+        put: (input: InstructionEntryPutInput) => Promise<void>
+        remove: (input: InstructionEntryRemoveInput) => Promise<void>
+      }
+    }
   }
 }
 
@@ -139,6 +152,20 @@ function createRegistry<Event>(name: string) {
       for (const callback of callbacks) await callback(event)
     },
   }
+}
+
+const instructionEntries = new Map<string, Map<string, JsonValue>>()
+
+function instructionStore(sessionID: string): Map<string, JsonValue> {
+  const existing = instructionEntries.get(sessionID)
+  if (existing) return existing
+  const created = new Map<string, JsonValue>()
+  instructionEntries.set(sessionID, created)
+  return created
+}
+
+export function readInstructionEntry(sessionID: string, key: string): JsonValue | undefined {
+  return instructionEntries.get(sessionID)?.get(key)
 }
 
 function createPluginContext(location: { directory: string }) {
@@ -178,6 +205,19 @@ function createPluginContext(location: { directory: string }) {
         if (name === 'prompt') return sessionPrompt.register(callback)
         if (name === 'context') return sessionContext.register(callback)
         throw new Error(`unexpected session hook ${name}`)
+      },
+      instructions: {
+        entry: {
+          list: async (input) => [...instructionStore(input.sessionID)].map(([key, value]) => ({ key, value })),
+          put: async (input) => {
+            const entries = instructionStore(input.sessionID)
+            if (JSON.stringify(entries.get(input.key)) === JSON.stringify(input.value)) return
+            entries.set(input.key, input.value)
+          },
+          remove: async (input) => {
+            instructionStore(input.sessionID).delete(input.key)
+          },
+        },
       },
     },
   }
@@ -282,6 +322,7 @@ export function readSandboxShellState(): SandboxShellState | undefined {
 export function resetPluginGlobalState(): void {
   Reflect.deleteProperty(globalThis, Symbol.for(SECRET_MASK_STATE_KEY))
   Reflect.deleteProperty(globalThis, Symbol.for(SANDBOX_SHELL_STATE_KEY))
+  instructionEntries.clear()
 }
 
 let importCount = 0

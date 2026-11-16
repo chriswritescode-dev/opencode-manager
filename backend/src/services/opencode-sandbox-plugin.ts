@@ -13,11 +13,10 @@ import {
 
 export const SANDBOX_PLAN_TIMEOUT_MS = sandboxPlanTimeoutMs()
 
-const SANDBOX_DOCKER_HINT = '\n\nCommands run inside an isolated sandbox microVM that includes Docker (docker, docker compose, docker buildx). The Docker daemon is not started automatically: run `ocm-dockerd-start` once before your first docker command; it is safe to run again and exits immediately if the daemon is already running.'
-
 export function buildSandboxPluginSource(id: string, shellShimPath: string, serviceSettingsPath: string): string {
   return `import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
+import os from 'os'
 import path from 'path'
 
 var SANDBOX_UNAVAILABLE_PREFIX = ${JSON.stringify(SANDBOX_UNAVAILABLE_PREFIX)}
@@ -31,7 +30,10 @@ var CONTROL_ENV_PREFIXES = ${JSON.stringify(SANDBOX_CONTROL_ENV_PREFIXES)}
 var SERVICE_SETTINGS_PATH = path.resolve(${JSON.stringify(serviceSettingsPath)})
 var SERVICE_SETTINGS_DIRECTORY = path.dirname(SERVICE_SETTINGS_PATH)
 var SERVICE_SETTINGS_DENIED = 'OpenCode Manager denies access to its service settings file (service.json), which holds the OpenCode server password.'
-var DOCKER_HINT = ${JSON.stringify(SANDBOX_DOCKER_HINT)}
+var SANDBOX_NOTE_KEY = 'ocm-sandbox'
+var SANDBOX_NOTE_PREFIX = '[Sandbox] '
+var HOST_NOTE_MARKER = '[Sandbox] Execution has returned to the host environment'
+var NETWORK_GROUP_LABELS = { public: 'public internet', private: 'LAN', host: 'the host' }
 var SHELL_TOOL_NAME = 'shell'
 var SHELL_MARKER_PREFIX = ${JSON.stringify(SANDBOX_SHELL_MARKER_PREFIX)}
 var FORGE_MARKER_PATTERN = /forge-sandbox-required-[0-9a-f-]{36} && /
@@ -207,6 +209,146 @@ async function isSessionSandboxed(sessionID) {
   return body.sandboxed
 }
 
+function hostEnvironmentLabel() {
+  return os.type() + ' ' + os.release()
+}
+
+function formatResourceCount(cpus) {
+  return cpus + (cpus === 1 ? ' CPU' : ' CPUs')
+}
+
+function formatGib(mib) {
+  return String(Math.round((mib / 1024) * 10) / 10)
+}
+
+function describeResources(resources) {
+  if (resources === null || typeof resources !== 'object') return null
+  if (typeof resources.cpus !== 'number' || !Number.isFinite(resources.cpus)) return null
+  if (typeof resources.memoryMib !== 'number' || !Number.isFinite(resources.memoryMib)) return null
+  return formatResourceCount(resources.cpus) + ', ' + formatGib(resources.memoryMib) + ' GiB memory'
+}
+
+function describeNetwork(groups) {
+  var labels = []
+  if (Array.isArray(groups)) {
+    for (var group of groups) {
+      if (typeof group !== 'string') continue
+      if (!Object.prototype.hasOwnProperty.call(NETWORK_GROUP_LABELS, group)) continue
+      var label = NETWORK_GROUP_LABELS[group]
+      if (labels.indexOf(label) !== -1) continue
+      labels.push(label)
+    }
+  }
+  if (labels.length === 0) return null
+  if (labels.length === 1) return labels[0]
+  return labels.slice(0, -1).join(', ') + ' and ' + labels[labels.length - 1]
+}
+
+function sandboxNoteLines(environment) {
+  var lines = []
+  if (typeof environment.guest === 'string' && environment.guest.length > 0) {
+    lines.push('Environment: microVM (' + environment.guest + ').')
+  }
+  var resources = environment.resources
+  var current = null
+  if (resources !== null && typeof resources === 'object') {
+    current = resources.running !== null && typeof resources.running === 'object' ? resources.running : resources.effective
+  }
+  var resourceText = describeResources(current)
+  if (resourceText !== null) lines.push('Resources: ' + resourceText + '.')
+  var pending = environment.pendingResources
+  var pendingText = pending !== null && typeof pending === 'object' ? describeResources(pending) : null
+  if (pendingText !== null) lines.push('Pending after the VM restarts: ' + pendingText + '.')
+  var allowed = describeNetwork(environment.network)
+  lines.push(allowed === null ? 'Network: everything else blocked.' : 'Network: ' + allowed + '; everything else blocked.')
+  lines.push('Shell commands run in the sandbox. Read, edit and write tools act on the same files on the host. The repository directory is shared with the host, so dependency directories or native build output from the other environment may target the wrong OS and must be reinstalled.')
+  var idleMinutes = typeof environment.idleMinutes === 'number' && Number.isFinite(environment.idleMinutes) ? environment.idleMinutes : 0
+  lines.push('The VM is shared with other sandboxed sessions in this repository checkout and is removed after ' + idleMinutes + ' minutes without commands, losing installed packages and Docker data.')
+  lines.push('Passwordless sudo is available. Run \`ocm-dockerd-start\` once before your first Docker command. Playwright Chromium is under \`/ms-playwright\`.')
+  return lines
+}
+
+function isHostNote(value) {
+  return typeof value === 'string' && value.indexOf(HOST_NOTE_MARKER) === 0
+}
+
+function isSandboxNote(value) {
+  return typeof value === 'string' && value.indexOf(SANDBOX_NOTE_PREFIX) === 0 && !isHostNote(value)
+}
+
+function isSwitchNote(value) {
+  return typeof value === 'string' && value.indexOf(SANDBOX_NOTE_PREFIX + 'Environment changed') === 0
+}
+
+function prefixNoteLines(lines) {
+  return lines.map(function (line) { return SANDBOX_NOTE_PREFIX + line }).join('\\n')
+}
+
+function buildSandboxNote(environment, previous) {
+  var lines = sandboxNoteLines(environment)
+  if (isHostNote(previous) || isSwitchNote(previous)) {
+    var guest = typeof environment.guest === 'string' && environment.guest.length > 0 ? environment.guest : 'sandbox'
+    lines.unshift('Environment changed: host (' + hostEnvironmentLabel() + ') -> microVM (' + guest + '). Reinstall dependencies built on the host.')
+  }
+  return prefixNoteLines(lines)
+}
+
+function buildHostNote() {
+  return SANDBOX_NOTE_PREFIX + 'Execution has returned to the host environment (' + hostEnvironmentLabel() + '). Dependencies built inside the sandbox may target the wrong OS and must be reinstalled.'
+}
+
+async function fetchSandboxEnvironment(baseUrl, token, sessionID, directory) {
+  var controller = new AbortController()
+  var timer = setTimeout(function () { controller.abort() }, PLAN_TIMEOUT_MS)
+  try {
+    var res = await fetch(baseUrl + '/sandbox/sessions/' + encodeURIComponent(sessionID) + '/environment?directory=' + encodeURIComponent(directory), {
+      method: 'GET',
+      headers: { Authorization: 'Bearer ' + token },
+      signal: controller.signal,
+    })
+    if (!res.ok) return null
+    var body = await res.json()
+    if (body === null || typeof body !== 'object') return null
+    if (typeof body.sandboxed !== 'boolean') return null
+    return body
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function syncSandboxNote(ctx, sessionID) {
+  try {
+    var baseUrl = process.env.OCM_INTERNAL_API_URL
+    var token = process.env.OCM_INTERNAL_TOKEN
+    if (!baseUrl || !token) return
+    var entries = await ctx.session.instructions.entry.list({ sessionID: sessionID })
+    var previous = null
+    if (Array.isArray(entries)) {
+      for (var entry of entries) {
+        if (entry !== null && typeof entry === 'object' && entry.key === SANDBOX_NOTE_KEY) {
+          previous = entry.value
+          break
+        }
+      }
+    }
+    var environment = await fetchSandboxEnvironment(baseUrl, token, sessionID, ctx.location.directory)
+    if (environment === null) return
+    var value = null
+    if (environment.sandboxed !== true) {
+      if (!isSandboxNote(previous)) return
+      value = buildHostNote()
+    } else {
+      value = buildSandboxNote(environment, previous)
+    }
+    if (JSON.stringify(previous) === JSON.stringify(value)) return
+    await ctx.session.instructions.entry.put({ sessionID: sessionID, key: SANDBOX_NOTE_KEY, value: value })
+  } catch {
+    return
+  }
+}
+
 async function planSandboxShell(cwd, sessionID, locationDirectory) {
   var baseUrl = process.env.OCM_INTERNAL_API_URL
   var token = process.env.OCM_INTERNAL_TOKEN
@@ -337,19 +479,13 @@ export default {
       event.command = event.command.slice(marked[0].length)
       await pinSandboxShell(event, pending.sessionID, ctx.location.directory)
     })
+    await ctx.session.hook('prompt', async (event) => {
+      if (!isEnforced()) return
+      await syncSandboxNote(ctx, event.sessionID)
+    })
     await ctx.session.hook('context', async (event) => {
       if (!isEnforced()) return
-      var shell = event.tools && event.tools.shell
-      if (!shell) return
-      if (typeof shell.description !== 'string' || shell.description.indexOf(DOCKER_HINT) !== -1) return
-      var sandboxed = false
-      try {
-        sandboxed = await isSessionSandboxed(event.sessionID)
-      } catch (error) {
-        return
-      }
-      if (!sandboxed) return
-      shell.description = shell.description + DOCKER_HINT
+      await syncSandboxNote(ctx, event.sessionID)
     })
     await ctx.tool.hook('execute.after', (event) => {
       if (!isEnforced() || event.tool !== SHELL_TOOL_NAME) return

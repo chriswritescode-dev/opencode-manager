@@ -18,6 +18,7 @@ import {
 } from '../../src/services/sandbox/shell-shim'
 import {
   loadGeneratedPlugin,
+  readInstructionEntry,
   readSandboxShellState,
   readSecretMaskState,
   resetPluginGlobalState,
@@ -27,6 +28,7 @@ import {
   type LoadGeneratedPluginOptions,
   type PermissionEvaluateEvent,
   type SessionContextEvent,
+  type SessionPromptEvent,
   type ShellCreateBeforeEvent,
   type ToolExecuteAfterEvent,
 } from '../helpers/opencode-plugin-context'
@@ -80,10 +82,31 @@ type SessionLookupStub = {
   sandboxed?: boolean | 'non-ok' | 'bad-json'
 }
 
-function managerFetch(options: { session?: SessionLookupStub; plan?: PlanStub } = {}): FetchStub {
+type EnvironmentStub = {
+  sandboxed?: boolean
+  status?: number
+  body?: JsonObject
+}
+
+const DEFAULT_ENVIRONMENT: JsonObject = {
+  sandboxed: true,
+  vmName: 'ocm-checkout-0123456789ab',
+  resources: { effective: { cpus: 4, memoryMib: 8192 }, running: null },
+  pendingResources: null,
+  network: ['public', 'private', 'host'],
+  idleMinutes: 30,
+  guest: 'Ubuntu 24.04.3 LTS | Linux 6.12.115 x86_64',
+}
+
+function managerFetch(options: { session?: SessionLookupStub; plan?: PlanStub; environment?: EnvironmentStub } = {}): FetchStub {
   const session = options.session ?? {}
+  const environment = options.environment ?? {}
   return createFetchStub(async (input) => {
     const url = String(input)
+    if (url.includes('/environment')) {
+      if (environment.sandboxed === false) return jsonResponse(environment.body ?? { sandboxed: false }, environment.status)
+      return jsonResponse(environment.body ?? DEFAULT_ENVIRONMENT, environment.status)
+    }
     if (url.includes('/sandbox/sessions/')) {
       if (session.sandboxed === 'non-ok') return new Response('{}', { status: 503 })
       if (session.sandboxed === 'bad-json') return new BadJsonResponse('{}', { status: 200 })
@@ -991,65 +1014,161 @@ describe('ocm-sandbox plugin', () => {
     })
   })
 
-  describe('session context hook', () => {
-    function sessionContextEvent(description = 'Run a shell command'): SessionContextEvent {
-      return { sessionID: SESSION_ID, tools: { shell: { description, input: { type: 'object' } } } }
+  describe('sandbox note', () => {
+    const NOTE_KEY = 'ocm-sandbox'
+
+    function sessionContextEvent(): SessionContextEvent {
+      return { sessionID: SESSION_ID, tools: { shell: { description: 'Run a shell command', input: { type: 'object' } } } }
     }
 
-    function shellDescription(event: SessionContextEvent): string {
-      const shell = event.tools?.shell
-      if (!shell) throw new Error('the session context event has no shell tool')
-      return shell.description
+    function sessionPromptEvent(): SessionPromptEvent {
+      return { sessionID: SESSION_ID }
     }
 
-    it('appends the docker hint to the shell tool description when OCM owns the session', async () => {
+    function noteValue(): string {
+      return z.string().parse(readInstructionEntry(SESSION_ID, NOTE_KEY))
+    }
+
+    it('writes the steady sandbox note for a sandboxed session', async () => {
       const plugin = await loadPlugin(configHome)
       vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true } }))
-      const event = sessionContextEvent()
 
-      await plugin.triggerSessionContext(event)
+      await plugin.triggerSessionContext(sessionContextEvent())
 
-      expect(shellDescription(event)).toContain('ocm-dockerd-start')
-      expect(shellDescription(event).startsWith('Run a shell command')).toBe(true)
+      const value = noteValue()
+      expect(value.startsWith('[Sandbox] Environment: microVM (Ubuntu 24.04.3 LTS | Linux 6.12.115 x86_64).')).toBe(true)
+      expect(value).toContain('[Sandbox] Resources: 4 CPUs, 8 GiB memory.')
+      expect(value).toContain('[Sandbox] Network: public internet, LAN and the host; everything else blocked.')
+      expect(value).toContain('[Sandbox] Shell commands run in the sandbox.')
+      expect(value).toContain('[Sandbox] The VM is shared with other sandboxed sessions in this repository checkout and is removed after 30 minutes without commands')
+      expect(value).toContain('ocm-dockerd-start')
+      expect(value).toContain('/ms-playwright')
+      expect(value).not.toContain('Environment changed')
     })
 
-    it('leaves the shell tool description untouched when enforcement is off', async () => {
+    it('leaves the note identical across repeated prompt and context hooks', async () => {
+      const plugin = await loadPlugin(configHome)
+      vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true } }))
+
+      await plugin.triggerSessionPrompt(sessionPromptEvent())
+      const first = noteValue()
+
+      await plugin.triggerSessionPrompt(sessionPromptEvent())
+      await plugin.triggerSessionContext(sessionContextEvent())
+
+      expect(noteValue()).toBe(first)
+    })
+
+    it('replaces the note with the host note and announces the switch back to the sandbox', async () => {
+      const plugin = await loadPlugin(configHome)
+      vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true } }))
+
+      await plugin.triggerSessionPrompt(sessionPromptEvent())
+      expect(noteValue().startsWith('[Sandbox] Environment: microVM (')).toBe(true)
+      expect(noteValue()).not.toContain('Environment changed')
+
+      vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true }, environment: { sandboxed: false } }))
+      await plugin.triggerSessionPrompt(sessionPromptEvent())
+      expect(noteValue().startsWith('[Sandbox] Execution has returned to the host environment (')).toBe(true)
+
+      vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true } }))
+      await plugin.triggerSessionPrompt(sessionPromptEvent())
+      const value = noteValue()
+      expect(value.split('Environment changed').length - 1).toBe(1)
+      expect(value.startsWith('[Sandbox] Environment changed: host (')).toBe(true)
+
+      await plugin.triggerSessionPrompt(sessionPromptEvent())
+      await plugin.triggerSessionContext(sessionContextEvent())
+
+      expect(noteValue()).toBe(value)
+      expect(noteValue().split('Environment changed').length - 1).toBe(1)
+    })
+
+    it('announces the switch to the sandbox when a previous plugin instance stored the host note', async () => {
+      const first = await loadPlugin(configHome)
+      vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true } }))
+      await first.triggerSessionPrompt(sessionPromptEvent())
+
+      vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true }, environment: { sandboxed: false } }))
+      await first.triggerSessionPrompt(sessionPromptEvent())
+      expect(noteValue().startsWith('[Sandbox] Execution has returned to the host environment (')).toBe(true)
+
+      vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true } }))
+      const second = await loadPlugin(configHome)
+      expect(second).not.toBe(first)
+      await second.triggerSessionPrompt(sessionPromptEvent())
+
+      expect(noteValue()).toContain('Environment changed: host (')
+    })
+
+    it('never writes an entry for a host-only session', async () => {
+      const plugin = await loadPlugin(configHome)
+      vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: false }, environment: { sandboxed: false } }))
+
+      await plugin.triggerSessionPrompt(sessionPromptEvent())
+      await plugin.triggerSessionContext(sessionContextEvent())
+
+      expect(readInstructionEntry(SESSION_ID, NOTE_KEY)).toBeUndefined()
+    })
+
+    it('never writes an entry when enforcement is off', async () => {
       delete process.env.OCM_SANDBOX_ENFORCED
       const plugin = await loadPlugin(configHome)
-      const event = sessionContextEvent()
-
-      await plugin.triggerSessionContext(event)
-
-      expect(shellDescription(event)).toBe('Run a shell command')
-    })
-
-    it('does nothing when the context exposes no shell tool', async () => {
-      const plugin = await loadPlugin(configHome)
-      const event: SessionContextEvent = { sessionID: SESSION_ID, tools: { read: { description: 'Read a file' } } }
-
-      await expect(plugin.triggerSessionContext(event)).resolves.toBeUndefined()
-      expect(event.tools?.read?.description).toBe('Read a file')
-    })
-
-    it('appends the docker hint only once across repeated context hooks', async () => {
-      const plugin = await loadPlugin(configHome)
       vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true } }))
-      const event = sessionContextEvent()
 
-      await plugin.triggerSessionContext(event)
-      await plugin.triggerSessionContext(event)
+      await plugin.triggerSessionPrompt(sessionPromptEvent())
+      await plugin.triggerSessionContext(sessionContextEvent())
 
-      expect(shellDescription(event).split('ocm-dockerd-start').length - 1).toBe(1)
+      expect(readInstructionEntry(SESSION_ID, NOTE_KEY)).toBeUndefined()
     })
 
-    it('leaves the description unchanged and does not throw when the session lookup fails', async () => {
+    it('leaves the note untouched when the environment request fails', async () => {
       const plugin = await loadPlugin(configHome)
-      vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: 'non-ok' } }))
-      const event = sessionContextEvent()
+      const failing = managerFetch({ session: { sandboxed: true }, environment: { status: 500 } })
+      vi.stubGlobal('fetch', failing)
 
-      await expect(plugin.triggerSessionContext(event)).resolves.toBeUndefined()
+      await expect(plugin.triggerSessionPrompt(sessionPromptEvent())).resolves.toBeUndefined()
+      expect(readInstructionEntry(SESSION_ID, NOTE_KEY)).toBeUndefined()
 
-      expect(shellDescription(event)).toBe('Run a shell command')
+      vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true } }))
+      await plugin.triggerSessionPrompt(sessionPromptEvent())
+      const stored = noteValue()
+
+      vi.stubGlobal('fetch', failing)
+      await expect(plugin.triggerSessionContext(sessionContextEvent())).resolves.toBeUndefined()
+      expect(noteValue()).toBe(stored)
+    })
+
+    it('reports the running resources and the pending resources separately', async () => {
+      const plugin = await loadPlugin(configHome)
+      vi.stubGlobal('fetch', managerFetch({
+        session: { sandboxed: true },
+        environment: {
+          body: {
+            ...DEFAULT_ENVIRONMENT,
+            resources: { effective: { cpus: 4, memoryMib: 8192 }, running: { cpus: 2, memoryMib: 4096 } },
+            pendingResources: { cpus: 8, memoryMib: 16384 },
+          },
+        },
+      }))
+
+      await plugin.triggerSessionContext(sessionContextEvent())
+
+      const value = noteValue()
+      expect(value).toContain('[Sandbox] Resources: 2 CPUs, 4 GiB memory.')
+      expect(value).toContain('[Sandbox] Pending after the VM restarts: 8 CPUs, 16 GiB memory.')
+    })
+
+    it('omits the environment line when the guest is unknown', async () => {
+      const plugin = await loadPlugin(configHome)
+      vi.stubGlobal('fetch', managerFetch({
+        session: { sandboxed: true },
+        environment: { body: { ...DEFAULT_ENVIRONMENT, guest: null } },
+      }))
+
+      await plugin.triggerSessionContext(sessionContextEvent())
+
+      expect(noteValue().startsWith('[Sandbox] Resources:')).toBe(true)
     })
   })
 

@@ -19,7 +19,7 @@ import {
 import { createFetchStub } from '../helpers/fetch-stub'
 
 const INTERNAL_API_URL = 'http://localhost:5003/api/internal'
-const PLAN_NAME = 'ocm-session-0123456789ab'
+const PLAN_NAME = 'ocm-checkout-0123456789ab'
 
 const ToolExecuteInputSchema = z.object({ command: z.string() })
 
