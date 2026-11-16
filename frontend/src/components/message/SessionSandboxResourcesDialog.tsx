@@ -1,51 +1,83 @@
 import { useEffect, useRef, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { SandboxResourceInputs } from '@/components/sandbox/SandboxResourceInputs'
-import { useSetSessionSandbox } from '@/hooks/useSessionSandbox'
 import { FetchError } from '@/api/fetchWrapper'
-import { formatSandboxMemory } from '@/lib/sandboxResources'
-import { SessionSandboxResourcesSchema, type SessionSandboxResources } from '@opencode-manager/shared/schemas'
+import { getRepoSandboxResources, restartRepoSandbox, updateRepoSandboxResources } from '@/api/repos'
+import { formatSandboxMemory, formatSandboxResources } from '@/lib/sandboxResources'
+import {
+  SessionSandboxResourcesSchema,
+  type RepoSandboxResources,
+  type SessionSandboxResources,
+} from '@opencode-manager/shared/schemas'
 
 interface SessionSandboxResourcesDialogProps {
-  sessionID: string
+  repoId: number
+  directory: string
   open: boolean
   onOpenChange: (open: boolean) => void
-  override: SessionSandboxResources | null
-  effective: SessionSandboxResources
 }
 
 export function SessionSandboxResourcesDialog({
-  sessionID,
+  repoId,
+  directory,
   open,
   onOpenChange,
-  override,
-  effective,
 }: SessionSandboxResourcesDialogProps) {
-  const setSandbox = useSetSessionSandbox(sessionID)
+  const queryClient = useQueryClient()
+  const queryKey = ['repoSandboxResources', repoId, directory] as const
+  const { data } = useQuery({
+    queryKey,
+    queryFn: () => getRepoSandboxResources(repoId, directory),
+    enabled: open,
+  })
   const [cpus, setCpus] = useState('')
   const [memoryGib, setMemoryGib] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const wasOpen = useRef(false)
+  const initialized = useRef(false)
 
   useEffect(() => {
-    if (open && !wasOpen.current) {
-      const source = override ?? effective
-      setCpus(String(source.cpus))
-      setMemoryGib(formatSandboxMemory(source.memoryMib))
-      setError(null)
+    if (!open) {
+      initialized.current = false
+      return
     }
-    wasOpen.current = open
-  }, [open, override, effective])
-
-  const submit = async (resources: SessionSandboxResources | null) => {
+    if (initialized.current || !data) return
+    const source = data.override ?? data.effective
+    setCpus(String(source.cpus))
+    setMemoryGib(formatSandboxMemory(source.memoryMib))
     setError(null)
-    try {
-      await setSandbox.mutateAsync({ resources })
+    initialized.current = true
+  }, [open, data])
+
+  const updateMutation = useMutation({
+    mutationFn: (resources: SessionSandboxResources | null) => updateRepoSandboxResources(repoId, resources),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(queryKey, updated)
+      setError(null)
       onOpenChange(false)
-    } catch (err) {
+    },
+    onError: (err) => {
       setError(err instanceof FetchError ? err.message : 'Failed to update sandbox resources')
-    }
+    },
+  })
+
+  const restartMutation = useMutation({
+    mutationFn: () => restartRepoSandbox(repoId, directory),
+    onSuccess: () => {
+      queryClient.setQueryData<RepoSandboxResources>(queryKey, (current) =>
+        current ? { ...current, running: null } : current
+      )
+      setError(null)
+    },
+    onError: (err) => {
+      setError(err instanceof FetchError ? err.message : 'Failed to restart sandbox')
+    },
+  })
+
+  const submit = (resources: SessionSandboxResources | null) => {
+    setError(null)
+    updateMutation.mutate(resources)
   }
 
   const handleSave = () => {
@@ -55,8 +87,14 @@ export function SessionSandboxResourcesDialog({
       setError('CPUs must be a whole number from 1 to 64 and memory must be at least 1 GiB')
       return
     }
-    void submit(parsed.data)
+    submit(parsed.data)
   }
+
+  const runningStatus =
+    data?.running != null &&
+    (data.running.cpus !== data.effective.cpus || data.running.memoryMib !== data.effective.memoryMib)
+      ? `Running with ${formatSandboxResources(data.running).replace(' · ', ', ')} until the VM restarts`
+      : null
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -64,8 +102,8 @@ export function SessionSandboxResourcesDialog({
         <DialogHeader>
           <DialogTitle>Sandbox resources</DialogTitle>
           <DialogDescription>
-            CPU and memory changes apply on this session's next sandboxed command and recreate its VM. The Docker
-            data volume is kept.
+            Applies to every sandboxed session in this repository the next time its sandbox VM starts. Running commands
+            are not interrupted.
           </DialogDescription>
         </DialogHeader>
         <SandboxResourceInputs
@@ -74,14 +112,27 @@ export function SessionSandboxResourcesDialog({
           onCpusChange={setCpus}
           memoryGib={memoryGib}
           onMemoryGibChange={setMemoryGib}
-          disabled={setSandbox.isPending}
+          disabled={updateMutation.isPending}
           error={error}
         />
+        {runningStatus ? <p className="text-sm text-muted-foreground">{runningStatus}</p> : null}
+        <div className="space-y-2 border-t pt-3">
+          <p className="text-sm text-muted-foreground">
+            Running commands in this repository's sandbox are interrupted. Installed packages and Docker data are kept.
+          </p>
+          <Button
+            variant="outline"
+            onClick={() => restartMutation.mutate()}
+            disabled={restartMutation.isPending || data === undefined}
+          >
+            Restart sandbox now
+          </Button>
+        </div>
         <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={() => void submit(null)} disabled={setSandbox.isPending}>
+          <Button variant="outline" onClick={() => submit(null)} disabled={updateMutation.isPending}>
             Use defaults
           </Button>
-          <Button onClick={handleSave} disabled={setSandbox.isPending}>
+          <Button onClick={handleSave} disabled={updateMutation.isPending}>
             Save
           </Button>
         </DialogFooter>

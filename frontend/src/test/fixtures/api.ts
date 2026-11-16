@@ -330,8 +330,6 @@ export function makeSessionSandboxState(overrides: Partial<SessionSandboxState> 
     rootSessionId: 'ses_1',
     sandboxed: false,
     source: 'default',
-    resources: null,
-    effectiveResources: { cpus: 2, memoryMib: 4096 },
     lockedReason: null,
     available: true,
     ...overrides,

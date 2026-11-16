@@ -994,6 +994,7 @@ export function SessionDetail() {
                     key={sessionId}
                     ref={promptInputRef}
                     directory={sessionDirectory}
+                    repoId={isRemoteServer ? undefined : repoId}
                     goalDirectory={resolvedDirectory}
                     sessionID={sessionId}
                     onVoiceConversationActiveChange={setIsVoiceConversationActive}

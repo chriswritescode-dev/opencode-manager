@@ -21,6 +21,7 @@ import { SessionSandboxResourcesDialog } from './SessionSandboxResourcesDialog'
 interface ComposerToolsMenuProps {
   sessionID: string
   directory: string
+  repoId?: number
   goalArmed: boolean
   goalDisabled: boolean
   goalLabel: string
@@ -31,6 +32,7 @@ interface ComposerToolsMenuProps {
 export function ComposerToolsMenu({
   sessionID,
   directory,
+  repoId,
   goalArmed,
   goalDisabled,
   goalLabel,
@@ -68,7 +70,7 @@ export function ComposerToolsMenu({
             />
           </DropdownMenuCheckboxItem>
           {isLocalServer && (
-            <SandboxMenuItems sandbox={sandbox} onOpenResources={() => setResourcesOpen(true)} />
+            <SandboxMenuItems sandbox={sandbox} repoId={repoId} onOpenResources={() => setResourcesOpen(true)} />
           )}
           <DropdownMenuCheckboxItem checked={goalArmed} disabled={goalDisabled} onCheckedChange={onToggleGoal}>
             <ToolMenuItemContent
@@ -83,13 +85,12 @@ export function ComposerToolsMenu({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      {shouldShowSandboxResources(sandbox) ? (
+      {shouldShowSandboxResources(sandbox, repoId) ? (
         <SessionSandboxResourcesDialog
-          sessionID={sessionID}
+          repoId={repoId!}
+          directory={directory}
           open={resourcesOpen}
           onOpenChange={setResourcesOpen}
-          override={sandbox.resources}
-          effective={sandbox.effectiveResources!}
         />
       ) : null}
     </>

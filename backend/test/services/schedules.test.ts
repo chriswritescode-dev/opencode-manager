@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Database } from 'bun:sqlite'
 import { mkdirSync } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import type { SessionInfo, V2Event } from '@opencode-manager/shared/opencode'
 import { LOCAL_OPENCODE_SERVER_ID, SessionSandboxStateSchema } from '@opencode-manager/shared/schemas'
@@ -58,8 +59,6 @@ const SANDBOX_STATE = SessionSandboxStateSchema.parse({
   rootSessionId: 'ses-run-1',
   sandboxed: true,
   source: 'user',
-  resources: SANDBOX_RESOURCES,
-  effectiveResources: SANDBOX_RESOURCES,
   lockedReason: null,
   available: true,
 })
@@ -892,7 +891,7 @@ describe('ScheduleService', () => {
         worktreePath,
         runBranch: `schedule/${sandboxJob.id}/run-1`,
       })
-      insertSessionSandboxModeIfAbsent(db, 'ses-run-1', { sandboxed: true, source: 'user', resources: null })
+      insertSessionSandboxModeIfAbsent(db, 'ses-run-1', { sandboxed: true, source: 'user' })
 
       const run = await service.runJob(repo.id, sandboxJob.id, 'manual')
       await waitForRun(sandboxJob.id, run.id, { status: 'completed' })
@@ -921,7 +920,7 @@ describe('ScheduleService', () => {
       const { api, client } = createClient()
       const { sessions, runtime } = createSandboxDeps()
       vi.mocked(runtime.planShell).mockResolvedValue({ mode: 'blocked', reason: '2 sandbox VMs are already running' })
-      insertSessionSandboxModeIfAbsent(db, 'ses-run-1', { sandboxed: true, source: 'user', resources: SANDBOX_RESOURCES })
+      insertSessionSandboxModeIfAbsent(db, 'ses-run-1', { sandboxed: true, source: 'user' })
       const { service } = createService(client, { sandbox: { sessions, runtime } })
       const sandboxJob = seedJob({ sandbox: sandboxJobConfig })
 
@@ -944,7 +943,7 @@ describe('ScheduleService', () => {
       const { client } = createClient({ messages: [assistantMessage('Done.', { completed: true })] })
       const { sessions, runtime } = createSandboxDeps()
       vi.mocked(runtime.removeCheckoutSandbox).mockRejectedValue(new Error('msb rm failed'))
-      insertSessionSandboxModeIfAbsent(db, 'ses-run-1', { sandboxed: true, source: 'user', resources: SANDBOX_RESOURCES })
+      insertSessionSandboxModeIfAbsent(db, 'ses-run-1', { sandboxed: true, source: 'user' })
       const { service } = createService(client, { sandbox: { sessions, runtime } })
       const sandboxJob = seedJob({ sandbox: sandboxJobConfig })
 
@@ -961,7 +960,7 @@ describe('ScheduleService', () => {
     it('removes the sandbox of a cancelled run', async () => {
       const { client } = createClient({ messages: [] })
       const { sessions, runtime } = createSandboxDeps()
-      insertSessionSandboxModeIfAbsent(db, 'ses-run-3', { sandboxed: true, source: 'user', resources: SANDBOX_RESOURCES })
+      insertSessionSandboxModeIfAbsent(db, 'ses-run-3', { sandboxed: true, source: 'user' })
       const { service } = createService(client, { sandbox: { sessions, runtime } })
       const run = seedRunningRun(job.id)
       updateScheduleRun(db, repo.id, job.id, run.id, { status: 'running', finishedAt: 0, sessionId: 'ses-run-3' })
@@ -978,7 +977,7 @@ describe('ScheduleService', () => {
     ])('removes the sandbox of a cancelled run with %s', async (_label, mode) => {
       const { client } = createClient({ messages: [] })
       const { sessions, runtime } = createSandboxDeps()
-      insertSessionSandboxModeIfAbsent(db, 'ses-run-4', { ...mode, resources: SANDBOX_RESOURCES })
+      insertSessionSandboxModeIfAbsent(db, 'ses-run-4', mode)
       const { service } = createService(client, { sandbox: { sessions, runtime } })
       const run = seedRunningRun(job.id)
       updateScheduleRun(db, repo.id, job.id, run.id, { status: 'running', finishedAt: 0, sessionId: 'ses-run-4' })
@@ -991,7 +990,7 @@ describe('ScheduleService', () => {
     it('keeps a default-disabled session sandbox untouched', async () => {
       const { client } = createClient({ messages: [] })
       const { sessions, runtime } = createSandboxDeps()
-      insertSessionSandboxModeIfAbsent(db, 'ses-run-5', { sandboxed: false, source: 'default', resources: null })
+      insertSessionSandboxModeIfAbsent(db, 'ses-run-5', { sandboxed: false, source: 'default' })
       const { service } = createService(client, { sandbox: { sessions, runtime } })
       const run = seedRunningRun(job.id)
       updateScheduleRun(db, repo.id, job.id, run.id, { status: 'running', finishedAt: 0, sessionId: 'ses-run-5' })
@@ -1032,8 +1031,26 @@ describe('ScheduleService', () => {
         sandbox: sandboxJobConfig,
       })
 
-      expect(sessions.assertSandboxRequestAllowed).toHaveBeenCalledWith({ sandboxed: true, resources: SANDBOX_RESOURCES })
+      expect(sessions.assertSandboxRequestAllowed).toHaveBeenCalledWith({ sandboxed: true })
       expect(getScheduleJobById(db, repo.id, created.id)?.sandbox).toMatchObject({ enabled: true })
+    })
+
+    it('rejects a job resource request above the host limit with 400', async () => {
+      const { client } = createClient()
+      const { sessions, runtime } = createSandboxDeps()
+      const { service } = createService(client, { sandbox: { sessions, runtime } })
+
+      await expect(service.createJob(repo.id, {
+        name: 'Oversized sandbox job',
+        enabled: true,
+        showInInbox: true,
+        scheduleMode: 'interval',
+        intervalMinutes: 60,
+        prompt: 'Audit the project.',
+        sandbox: { enabled: true, resources: { cpus: os.availableParallelism() + 1, memoryMib: 1024 } },
+      })).rejects.toMatchObject({ status: 400 })
+
+      expect(service.listJobs(repo.id).map((entry) => entry.name)).not.toContain('Oversized sandbox job')
     })
 
     it('maps a rejected sandbox request to the schedule error status', async () => {

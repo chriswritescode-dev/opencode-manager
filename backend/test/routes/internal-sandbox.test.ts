@@ -153,8 +153,6 @@ describe('internal sandbox routes', () => {
       rootSessionId: ROOT_SESSION_ID,
       sandboxed: false,
       source: 'default',
-      resources: null,
-      effectiveResources: { cpus: ENV.SANDBOX.CPUS, memoryMib: parseMemoryMib(ENV.SANDBOX.MEMORY) ?? 0 },
       lockedReason: null,
       available: true,
     }

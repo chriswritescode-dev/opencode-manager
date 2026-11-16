@@ -22,14 +22,9 @@ export const SessionSandboxSourceSchema = z.enum(['default', 'user']);
 
 export type SessionSandboxSource = z.infer<typeof SessionSandboxSourceSchema>;
 
-export const SetSessionSandboxRequestSchema = z
-  .object({
-    sandboxed: z.boolean().optional(),
-    resources: SessionSandboxResourcesSchema.nullable().optional(),
-  })
-  .refine((value) => value.sandboxed !== undefined || value.resources !== undefined, {
-    message: 'At least one of sandboxed or resources is required',
-  });
+export const SetSessionSandboxRequestSchema = z.object({
+  sandboxed: z.boolean(),
+});
 
 export type SetSessionSandboxRequest = z.infer<typeof SetSessionSandboxRequestSchema>;
 
@@ -38,8 +33,6 @@ export const SessionSandboxStateSchema = z.object({
   rootSessionId: z.string(),
   sandboxed: z.boolean(),
   source: SessionSandboxSourceSchema,
-  resources: SessionSandboxResourcesSchema.nullable(),
-  effectiveResources: SessionSandboxResourcesSchema,
   lockedReason: z.enum(["child"]).nullable(),
   available: z.boolean(),
 });

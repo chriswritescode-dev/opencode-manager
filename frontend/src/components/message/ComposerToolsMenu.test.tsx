@@ -20,8 +20,6 @@ const baseSandboxState: SessionSandboxState = {
   rootSessionId: 'ses_1',
   sandboxed: false,
   source: 'default',
-  resources: null,
-  effectiveResources: { cpus: 2, memoryMib: 4096 },
   lockedReason: null,
   available: true,
 }
@@ -29,17 +27,18 @@ const baseSandboxState: SessionSandboxState = {
 interface MenuFixture {
   permission?: Partial<SessionPermissionModeState>
   sandbox?: Partial<SessionSandboxState>
-  sandboxError?: { status: number, message: string }
   goalArmed?: boolean
   goalDisabled?: boolean
   goalLabel?: string
   sessionID?: string
+  repoId?: number
   remote?: boolean
 }
 
 async function renderMenu(fixture: MenuFixture = {}) {
   const user = userEvent.setup()
   const sessionID = fixture.sessionID ?? 'ses_1'
+  const repoId = 'repoId' in fixture ? fixture.repoId : fixture.remote ? undefined : 1
   const permissionState = { ...basePermissionState, sessionId: sessionID, rootSessionId: sessionID, ...fixture.permission }
   const sandboxState = { ...baseSandboxState, sessionId: sessionID, rootSessionId: sessionID, ...fixture.sandbox }
   const routes: FetchRoute[] = [
@@ -64,18 +63,29 @@ async function renderMenu(fixture: MenuFixture = {}) {
     {
       method: 'PUT',
       path: `/api/session-sandbox/${sessionID}`,
-      respond: () => {
-        if (fixture.sandboxError) {
-          return { status: fixture.sandboxError.status, json: { error: fixture.sandboxError.message } }
-        }
-        return { json: sandboxState }
-      },
+      respond: () => ({ json: sandboxState }),
     },
     { method: 'GET', path: '/api/settings', respond: () => ({ json: makeSettingsResponse() }) },
+    {
+      method: 'GET',
+      path: '/api/repos/:repoId/sandbox/resources',
+      respond: () => ({
+        json: { override: null, effective: { cpus: 2, memoryMib: 4096 }, running: null },
+      }),
+    },
+    {
+      method: 'PUT',
+      path: '/api/repos/:repoId/sandbox/resources',
+      respond: () => ({
+        json: { override: null, effective: { cpus: 2, memoryMib: 4096 }, running: null },
+      }),
+    },
+    { method: 'POST', path: '/api/repos/:repoId/sandbox/restart', respond: () => ({ status: 204 }) },
   ]
   const props = {
     sessionID,
     directory: '/repo',
+    repoId,
     goalArmed: fixture.goalArmed ?? false,
     goalDisabled: fixture.goalDisabled ?? false,
     goalLabel: fixture.goalLabel ?? 'Goal mode: the next message becomes the objective',
@@ -224,7 +234,7 @@ describe('ComposerToolsMenu', () => {
 })
 
 describe('ComposerToolsMenu sandbox resources', () => {
-  async function openResources(fixture: MenuFixture) {
+  async function openResources(fixture: MenuFixture = {}) {
     const result = await renderMenu({ ...fixture, sandbox: { sandboxed: true, ...fixture.sandbox } })
     await openMenu(result.user)
     const item = await screen.findByRole('menuitem', { name: /Sandbox resources/ })
@@ -256,38 +266,25 @@ describe('ComposerToolsMenu sandbox resources', () => {
     expect(screen.queryByRole('menuitem', { name: /Sandbox resources/ })).not.toBeInTheDocument()
   })
 
-  it('shows the effective values with a custom marker when an override exists', async () => {
-    const { user } = await renderMenu({
-      sandbox: { sandboxed: true, resources: { cpus: 8, memoryMib: 2048 }, effectiveResources: { cpus: 8, memoryMib: 2048 } },
-    })
+  it('hides the resources item when the repository id is unknown', async () => {
+    const { user } = await renderMenu({ repoId: undefined, sandbox: { sandboxed: true } })
     await openMenu(user)
+    await screen.findByRole('menuitemcheckbox', { name: /Sandbox commands/ })
 
-    const item = await screen.findByRole('menuitem', { name: /Sandbox resources/ })
-
-    expect(item).toHaveTextContent('8 CPUs · 2 GiB · custom')
+    expect(screen.queryByRole('menuitem', { name: /Sandbox resources/ })).not.toBeInTheDocument()
   })
 
-  it('prefills the dialog from the override', async () => {
-    await openResources({
-      sandbox: { resources: { cpus: 8, memoryMib: 2048 }, effectiveResources: { cpus: 8, memoryMib: 2048 } },
-    })
+  it('opens the repository resources dialog for a sandboxed session', async () => {
+    await openResources()
 
-    expect(screen.getByLabelText('CPUs')).toHaveValue(8)
-    expect(screen.getByLabelText('Memory (GiB)')).toHaveValue(2)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(await screen.findByLabelText('CPUs')).toHaveValue(2)
   })
 
-  it('prefills the dialog from the effective values without an override', async () => {
-    await openResources({ sandbox: { resources: null, effectiveResources: { cpus: 2, memoryMib: 4096 } } })
+  it('saves the entered resources to the repository', async () => {
+    const { fetchFake, user } = await openResources()
 
-    expect(screen.getByLabelText('CPUs')).toHaveValue(2)
-    expect(screen.getByLabelText('Memory (GiB)')).toHaveValue(4)
-  })
-
-  it('saves the entered resources', async () => {
-    const { fetchFake, sessionID, user } = await openResources({
-      sandbox: { resources: null, effectiveResources: { cpus: 2, memoryMib: 4096 } },
-    })
-
+    await waitFor(() => expect(screen.getByLabelText('CPUs')).toHaveValue(2))
     const cpus = screen.getByLabelText('CPUs')
     await user.clear(cpus)
     await user.type(cpus, '4')
@@ -296,29 +293,22 @@ describe('ComposerToolsMenu sandbox resources', () => {
     await user.type(memory, '3')
     await user.click(screen.getByRole('button', { name: 'Save' }))
 
-    expect(fetchFake.lastRequest('PUT', `/api/session-sandbox/${sessionID}`)?.body).toMatchObject({
-      resources: { cpus: 4, memoryMib: 3072 },
-    })
+    await waitFor(() =>
+      expect(fetchFake.lastRequest('PUT', '/api/repos/1/sandbox/resources')?.body).toEqual({
+        cpus: 4,
+        memoryMib: 3072,
+      }),
+    )
   })
 
-  it('clears the override with Use defaults', async () => {
-    const { fetchFake, sessionID, user } = await openResources({
-      sandbox: { resources: { cpus: 8, memoryMib: 2048 }, effectiveResources: { cpus: 8, memoryMib: 2048 } },
-    })
+  it('restarts the repository sandbox from the dialog', async () => {
+    const { fetchFake, user } = await openResources()
 
-    await user.click(screen.getByRole('button', { name: 'Use defaults' }))
+    await screen.findByRole('button', { name: 'Restart sandbox now' })
+    await user.click(screen.getByRole('button', { name: 'Restart sandbox now' }))
 
-    expect(fetchFake.lastRequest('PUT', `/api/session-sandbox/${sessionID}`)?.body).toMatchObject({ resources: null })
-  })
-
-  it('shows the server error when saving resources fails', async () => {
-    const { user } = await openResources({
-      sandbox: { resources: null, effectiveResources: { cpus: 2, memoryMib: 4096 } },
-      sandboxError: { status: 400, message: 'Requested resources exceed the host' },
-    })
-
-    await user.click(screen.getByRole('button', { name: 'Save' }))
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('Requested resources exceed the host')
+    await waitFor(() =>
+      expect(fetchFake.findRequests('POST', '/api/repos/1/sandbox/restart')).toHaveLength(1),
+    )
   })
 })

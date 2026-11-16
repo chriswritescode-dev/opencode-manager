@@ -1,19 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import os from 'os'
 import { Hono } from 'hono'
 import type { Database } from 'bun:sqlite'
-import { ENV } from '@opencode-manager/shared/config/env'
 import { SessionSandboxStateSchema } from '@opencode-manager/shared/schemas'
 import { SettingsService } from '../../src/services/settings'
 import { SessionAncestry } from '../../src/services/session-ancestry'
 import { SessionSandboxService } from '../../src/services/session-sandbox'
-import { parseMemoryMib } from '../../src/services/sandbox/command'
 import { createSessionSandboxRoutes } from '../../src/routes/session-sandbox'
 import { createFakeSessionPermissionClient } from '../helpers/fake-session-permission-client'
 import { readJson } from '../helpers/read-json'
 import { createTestDatabase } from '../helpers/test-database'
-
-const ENV_RESOURCES = { cpus: ENV.SANDBOX.CPUS, memoryMib: parseMemoryMib(ENV.SANDBOX.MEMORY) ?? 0 }
 
 function createTestApp(
   db: Database,
@@ -58,8 +53,6 @@ describe('session sandbox routes', () => {
       rootSessionId: 'ses_root',
       sandboxed: false,
       source: 'default',
-      resources: null,
-      effectiveResources: ENV_RESOURCES,
       lockedReason: null,
       available: false,
     })
@@ -75,8 +68,6 @@ describe('session sandbox routes', () => {
       rootSessionId: 'ses_root',
       sandboxed: true,
       source: 'default',
-      resources: null,
-      effectiveResources: ENV_RESOURCES,
       lockedReason: null,
       available: true,
     })
@@ -146,34 +137,19 @@ describe('session sandbox routes', () => {
     expect(body.sandboxed).toBe(false)
   })
 
-  it('PUT stores a resource override and GET reports it', async () => {
-    const app = createTestApp(db, { sandboxEnabled: true })
-
-    const putRes = await app.request('/session-sandbox/ses_root', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ resources: { cpus: 4, memoryMib: 8192 } }),
-    })
-    expect(putRes.status).toBe(200)
-    await expect(putRes.json()).resolves.toMatchObject({
-      resources: { cpus: 4, memoryMib: 8192 },
-      effectiveResources: { cpus: 4, memoryMib: 8192 },
-    })
-  })
-
-  it('PUT rejects a resource override above the host limit with 400', async () => {
+  it('PUT rejects a resource override with 400', async () => {
     const app = createTestApp(db, { sandboxEnabled: true })
 
     const res = await app.request('/session-sandbox/ses_root', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ resources: { cpus: os.availableParallelism() + 1, memoryMib: 1024 } }),
+      body: JSON.stringify({ resources: { cpus: 4, memoryMib: 8192 } }),
     })
     expect(res.status).toBe(400)
-    await expect(res.json()).resolves.toMatchObject({ error: expect.any(String) })
+    await expect(res.json()).resolves.toEqual({ error: expect.any(String), details: expect.any(Array) })
   })
 
-  it('PUT rejects a body without sandboxed or resources with 400', async () => {
+  it('PUT rejects an empty body with 400', async () => {
     const app = createTestApp(db, { sandboxEnabled: true })
 
     const res = await app.request('/session-sandbox/ses_root', {

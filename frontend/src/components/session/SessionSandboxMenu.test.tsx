@@ -3,6 +3,7 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import {
   SetSessionSandboxRequestSchema,
+  type RepoSandboxResources,
   type SessionSandboxState,
 } from '@opencode-manager/shared/schemas'
 import type { FetchRoute, FetchRouteResult } from '@/test/fetchFake'
@@ -14,15 +15,28 @@ const baseSandboxState: SessionSandboxState = {
   rootSessionId: 'ses_1',
   sandboxed: false,
   source: 'default',
-  resources: null,
-  effectiveResources: { cpus: 2, memoryMib: 4096 },
   lockedReason: null,
   available: true,
 }
 
-function renderMenu(overrides: Partial<SessionSandboxState> = {}, putRespond?: FetchRoute['respond']) {
+interface MenuOptions {
+  repoId?: number
+  repoResources?: RepoSandboxResources
+}
+
+function renderMenu(
+  overrides: Partial<SessionSandboxState> = {},
+  putRespond?: FetchRoute['respond'],
+  options: MenuOptions = {},
+) {
   let state: SessionSandboxState = { ...baseSandboxState, ...overrides }
   const sandboxUrl = '/api/session-sandbox/ses_1'
+  const repoId = 'repoId' in options ? options.repoId : 1
+  const repoResources: RepoSandboxResources = options.repoResources ?? {
+    override: null,
+    effective: { cpus: 2, memoryMib: 4096 },
+    running: null,
+  }
 
   const routes: FetchRoute[] = [
     { method: 'GET', path: sandboxUrl, respond: () => ({ json: state }) },
@@ -36,9 +50,19 @@ function renderMenu(overrides: Partial<SessionSandboxState> = {}, putRespond?: F
         return { json: state }
       },
     },
+    {
+      method: 'GET',
+      path: '/api/repos/:repoId/sandbox/resources',
+      respond: () => ({ json: repoResources }),
+    },
+    {
+      method: 'PUT',
+      path: '/api/repos/:repoId/sandbox/resources',
+      respond: () => ({ json: repoResources }),
+    },
   ]
 
-  return renderWithProviders(<SessionSandboxMenu sessionID="ses_1" />, {
+  return renderWithProviders(<SessionSandboxMenu sessionID="ses_1" directory="/repo" repoId={repoId} />, {
     auth: false,
     theme: false,
     tts: false,
@@ -100,14 +124,34 @@ describe('SessionSandboxMenu', () => {
 
   it('opens the resources dialog from the menu item', async () => {
     const user = userEvent.setup()
-    renderMenu({ sandboxed: true, effectiveResources: { cpus: 2, memoryMib: 4096 } })
+    renderMenu(
+      { sandboxed: true },
+      undefined,
+      {
+        repoResources: {
+          override: { cpus: 8, memoryMib: 2048 },
+          effective: { cpus: 8, memoryMib: 2048 },
+          running: null,
+        },
+      },
+    )
 
     await user.click(await screen.findByRole('button', { name: 'Sandbox: on' }))
     const item = await screen.findByRole('menuitem', { name: /Sandbox resources/ })
     await user.click(item)
 
     expect(await screen.findByRole('dialog')).toBeInTheDocument()
-    expect(screen.getByLabelText('CPUs')).toHaveValue(2)
+    expect(await screen.findByLabelText('CPUs')).toHaveValue(8)
+  })
+
+  it('hides the resources item when the repository id is unknown', async () => {
+    const user = userEvent.setup()
+    renderMenu({ sandboxed: true }, undefined, { repoId: undefined })
+
+    await user.click(await screen.findByRole('button', { name: 'Sandbox: on' }))
+    await screen.findByRole('menuitemcheckbox', { name: /Sandbox commands/ })
+
+    expect(screen.queryByRole('menuitem', { name: /Sandbox resources/ })).not.toBeInTheDocument()
   })
 
   it('disables the checkbox and explains inheritance for a child session', async () => {

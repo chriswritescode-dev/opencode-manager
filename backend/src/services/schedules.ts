@@ -67,6 +67,7 @@ import { canonicalPathSync } from '../utils/fs-safe'
 import { buildAssistantRepo } from './assistant-mode'
 import { createScheduleWorktreeDescriber } from './schedule-worktree-paths'
 import { SessionSandboxError, type SessionSandboxService } from './session-sandbox'
+import { sandboxResourceLimitError } from './sandbox/resources'
 import type { SandboxRuntimeService } from './sandbox/runtime'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 
@@ -566,12 +567,17 @@ export class ScheduleService {
     }
 
     try {
-      dependencies.sessions.assertSandboxRequestAllowed({ sandboxed: true, resources: sandbox.resources })
+      dependencies.sessions.assertSandboxRequestAllowed({ sandboxed: true })
     } catch (error) {
       if (error instanceof SessionSandboxError) {
         throw new ScheduleServiceError(error.message, error.status)
       }
       throw error
+    }
+
+    const limitError = sandbox.resources === null ? null : sandboxResourceLimitError(sandbox.resources)
+    if (limitError !== null) {
+      throw new ScheduleServiceError(limitError, 400)
     }
   }
 

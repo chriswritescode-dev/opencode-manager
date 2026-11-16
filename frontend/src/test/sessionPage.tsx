@@ -145,8 +145,6 @@ export function sessionPageRoutes(options: SessionPageOptions = {}): FetchRoute[
           rootSessionId: 'session-1',
           sandboxed: false,
           source: 'default',
-          resources: null,
-          effectiveResources: { cpus: 2, memoryMib: 2048 },
           lockedReason: null,
           available: false,
         },

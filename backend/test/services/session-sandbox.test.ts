@@ -1,15 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import os from 'os'
 import { Database } from 'bun:sqlite'
-import { ENV } from '@opencode-manager/shared/config/env'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import {
   getSessionSandboxMode,
-  setSessionSandboxResources,
   setSessionSandboxed,
 } from '../../src/db/session-sandbox-modes'
-import { parseMemoryMib } from '../../src/services/sandbox/command'
 import { SettingsService } from '../../src/services/settings'
 import { SessionAncestry } from '../../src/services/session-ancestry'
 import { SessionSandboxService } from '../../src/services/session-sandbox'
@@ -18,8 +14,6 @@ import type { SSEEvent } from '../../src/services/sse-aggregator'
 import { createFakeSessionPermissionClient } from '../helpers/fake-session-permission-client'
 
 const DIRECTORY = '/abs/repo'
-
-const ENV_RESOURCES = { cpus: ENV.SANDBOX.CPUS, memoryMib: parseMemoryMib(ENV.SANDBOX.MEMORY) ?? 0 }
 
 function createTestDb(): Database {
   const db = new Database(':memory:')
@@ -106,8 +100,6 @@ describe('SessionSandboxService', () => {
       rootSessionId: 'ses_root',
       sandboxed: true,
       source: 'default',
-      resources: null,
-      effectiveResources: ENV_RESOURCES,
       lockedReason: null,
       available: true,
     })
@@ -124,8 +116,6 @@ describe('SessionSandboxService', () => {
       rootSessionId: 'ses_root',
       sandboxed: false,
       source: 'user',
-      resources: null,
-      effectiveResources: ENV_RESOURCES,
       lockedReason: null,
       available: false,
     })
@@ -143,23 +133,7 @@ describe('SessionSandboxService', () => {
       rootSessionId: 'ses_root',
       sandboxed: false,
       source: 'user',
-      resources: null,
       available: true,
-    })
-  })
-
-  it('reports the per-session override and the effective resources', async () => {
-    const settingsService = new SettingsService(db)
-    settingsService.updateSettings({ sandbox: { enabled: true } })
-    const service = createService(db, createFakeSessionPermissionClient(), settingsService)
-
-    setSessionSandboxed(db, 'ses_root', true)
-    setSessionSandboxResources(db, 'ses_root', { cpus: 4, memoryMib: 8192 }, true)
-
-    await expect(service.getState('ses_root')).resolves.toMatchObject({
-      source: 'user',
-      resources: { cpus: 4, memoryMib: 8192 },
-      effectiveResources: { cpus: 4, memoryMib: 8192 },
     })
   })
 
@@ -174,7 +148,6 @@ describe('SessionSandboxService', () => {
     expect(getSessionSandboxMode(db, 'ses_root')).toMatchObject({
       sandboxed: true,
       source: 'default',
-      resources: null,
     })
     expect(getSessionSandboxMode(db, 'ses_child')).toBeNull()
   })
@@ -220,31 +193,10 @@ describe('SessionSandboxService', () => {
     await expect(service.getState('ses_root')).rejects.toThrow('upstream unavailable')
   })
 
-  it('copies the parent root sandbox flag, source, and resources onto a forked session', async () => {
-    const settingsService = new SettingsService(db)
-    settingsService.updateSettings({ sandbox: { enabled: true } })
-    setSessionSandboxed(db, 'ses_source', false)
-    setSessionSandboxResources(db, 'ses_source', { cpus: 4, memoryMib: 8192 }, false)
-    const service = createService(
-      db,
-      createFakeSessionPermissionClient({ parents: { ses_source: null } }),
-      settingsService,
-    )
-
-    await service.handleEvent(DIRECTORY, sessionForkedEvent('ses_fork', 'ses_source'))
-
-    expect(getSessionSandboxMode(db, 'ses_fork')).toMatchObject({
-      sandboxed: false,
-      source: 'user',
-      resources: { cpus: 4, memoryMib: 8192 },
-    })
-  })
-
-  it('copies the parent root row onto a fork when the parent is itself a child', async () => {
+  it('copies the parent root sandbox flag and source onto a fork when the parent is itself a child', async () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sandbox: { enabled: true } })
     setSessionSandboxed(db, 'ses_root', false)
-    setSessionSandboxResources(db, 'ses_root', { cpus: 2, memoryMib: 4096 }, false)
     const service = createService(
       db,
       createFakeSessionPermissionClient({ parents: { ses_child: 'ses_root', ses_root: null } }),
@@ -256,7 +208,6 @@ describe('SessionSandboxService', () => {
     expect(getSessionSandboxMode(db, 'ses_fork')).toMatchObject({
       sandboxed: false,
       source: 'user',
-      resources: { cpus: 2, memoryMib: 4096 },
     })
   })
 
@@ -315,16 +266,6 @@ describe('SessionSandboxService', () => {
     expect(getSessionSandboxMode(db, 'ses_root')).toMatchObject({ sandboxed: false, source: 'user' })
   })
 
-  it('persists resources on a resources-only update', async () => {
-    const settingsService = new SettingsService(db)
-    settingsService.updateSettings({ sandbox: { enabled: true } })
-    const service = createService(db, createFakeSessionPermissionClient(), settingsService)
-
-    await service.update('ses_root', { resources: { cpus: 4, memoryMib: 8192 } })
-
-    expect(getSessionSandboxMode(db, 'ses_root')).toMatchObject({ resources: { cpus: 4, memoryMib: 8192 } })
-  })
-
   it('rejects updating a child session with 400', async () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sandbox: { enabled: true } })
@@ -353,47 +294,6 @@ describe('SessionSandboxService', () => {
       available: false,
     })
     expect(getSessionSandboxMode(db, 'ses_root')?.sandboxed).toBe(false)
-  })
-
-  it('rejects a resource override above the host limit with 400', async () => {
-    const settingsService = new SettingsService(db)
-    settingsService.updateSettings({ sandbox: { enabled: true } })
-    const service = createService(db, createFakeSessionPermissionClient(), settingsService)
-
-    await expect(
-      service.update('ses_root', { resources: { cpus: os.availableParallelism() + 1, memoryMib: 1024 } }),
-    ).rejects.toMatchObject({ status: 400 })
-    expect(getSessionSandboxMode(db, 'ses_root')).toBeNull()
-  })
-
-  it('persists a resource override and keeps the toggle timestamp stable', async () => {
-    const settingsService = new SettingsService(db)
-    settingsService.updateSettings({ sandbox: { enabled: true } })
-    const service = createService(db, createFakeSessionPermissionClient(), settingsService)
-
-    await service.update('ses_root', { sandboxed: true })
-    const toggledAt = getSessionSandboxMode(db, 'ses_root')?.toggledAt
-
-    await expect(service.update('ses_root', { resources: { cpus: 4, memoryMib: 8192 } })).resolves.toMatchObject({
-      source: 'user',
-      resources: { cpus: 4, memoryMib: 8192 },
-      effectiveResources: { cpus: 4, memoryMib: 8192 },
-    })
-
-    expect(getSessionSandboxMode(db, 'ses_root')).toMatchObject({ toggledAt })
-  })
-
-  it('clears a resource override with null', async () => {
-    const settingsService = new SettingsService(db)
-    settingsService.updateSettings({ sandbox: { enabled: true } })
-    const service = createService(db, createFakeSessionPermissionClient(), settingsService)
-
-    setSessionSandboxResources(db, 'ses_root', { cpus: 4, memoryMib: 8192 }, true)
-
-    await expect(service.update('ses_root', { resources: null })).resolves.toMatchObject({
-      resources: null,
-      effectiveResources: ENV_RESOURCES,
-    })
   })
 
   it('reports the stored sandbox flag for a session', async () => {
@@ -428,7 +328,7 @@ describe('SessionSandboxService', () => {
     await expect(service.getClaim('ses_root')).rejects.toThrow('upstream unavailable')
   })
 
-  it('reports sandboxed with the effective defaults for an unstored root session', async () => {
+  it('reports sandboxed for an unstored root session', async () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sandbox: { enabled: true } })
     const service = createService(db, createFakeSessionPermissionClient(), settingsService)
@@ -448,7 +348,6 @@ describe('SessionSandboxService', () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sandbox: { enabled: true } })
     setSessionSandboxed(db, 'ses_root', false)
-    setSessionSandboxResources(db, 'ses_root', { cpus: 4, memoryMib: 8192 }, false)
     const service = createService(db, createFakeSessionPermissionClient(), settingsService)
 
     await expect(service.resolveShellTarget('ses_root')).resolves.toEqual({ sandboxed: false })

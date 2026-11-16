@@ -127,6 +127,7 @@ export interface PromptInputHandle {
 
 interface PromptInputProps {
   directory?: string
+  repoId?: number
   goalDirectory: string | undefined
   sessionID: string
   onVoiceConversationActiveChange?: (active: boolean) => void
@@ -141,6 +142,7 @@ interface PromptInputProps {
 
 export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(function PromptInput({ 
   directory,
+  repoId,
   goalDirectory,
   sessionID,
   onVoiceConversationActiveChange,
@@ -1355,7 +1357,7 @@ return (
               {directory && !isMobile ? (
                 <>
                   <PermissionModeToggle sessionID={sessionID} directory={directory} />
-                  {isLocalServer && <SessionSandboxMenu sessionID={sessionID} />}
+                  {isLocalServer && <SessionSandboxMenu sessionID={sessionID} directory={directory} repoId={repoId} />}
                   <IconToggleButton
                     active={isGoalArmed}
                     label={goalButtonLabel}
@@ -1410,6 +1412,7 @@ return (
             <ComposerToolsMenu
               sessionID={sessionID}
               directory={directory}
+              repoId={repoId}
               goalArmed={isGoalArmed}
               goalDisabled={isGoalModeDisabled}
               goalLabel={goalButtonLabel}

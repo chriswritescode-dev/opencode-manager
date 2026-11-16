@@ -8,11 +8,9 @@ import {
   deleteSessionSandboxMode,
   getSessionSandboxMode,
   insertSessionSandboxModeIfAbsent,
-  setSessionSandboxResources,
   setSessionSandboxed,
   type SessionSandboxModeRow,
 } from '../db/session-sandbox-modes'
-import { resolveSandboxResources, sandboxResourceLimitError } from './sandbox/resources'
 import type { SessionAncestry } from './session-ancestry'
 import type { SSEEvent } from './sse-aggregator'
 import type { SettingsService } from './settings'
@@ -42,7 +40,6 @@ export class SessionSandboxService {
           insertSessionSandboxModeIfAbsent(this.db, sessionID, {
             sandboxed: this.defaultSandboxed(),
             source: 'default',
-            resources: null,
           })
         }
         return
@@ -54,7 +51,6 @@ export class SessionSandboxService {
         insertSessionSandboxModeIfAbsent(this.db, sessionID, {
           sandboxed: parentRow?.sandboxed ?? this.defaultSandboxed(),
           source: parentRow?.source ?? 'default',
-          resources: parentRow?.resources ?? null,
         })
         return
       }
@@ -100,15 +96,7 @@ export class SessionSandboxService {
 
     this.assertSandboxRequestAllowed(request)
 
-    const defaultSandboxed = this.defaultSandboxed()
-    this.db.transaction(() => {
-      if (request.sandboxed !== undefined) {
-        setSessionSandboxed(this.db, sessionId, request.sandboxed)
-      }
-      if (request.resources !== undefined) {
-        setSessionSandboxResources(this.db, sessionId, request.resources, defaultSandboxed)
-      }
-    })()
+    setSessionSandboxed(this.db, sessionId, request.sandboxed)
 
     return this.getState(sessionId)
   }
@@ -116,13 +104,6 @@ export class SessionSandboxService {
   assertSandboxRequestAllowed(request: SetSessionSandboxRequest): void {
     if (request.sandboxed === true && !this.sandboxSupported()) {
       throw new SessionSandboxError('Sandboxing is not enabled for this server', 409)
-    }
-
-    if (request.resources != null) {
-      const limitError = sandboxResourceLimitError(request.resources)
-      if (limitError !== null) {
-        throw new SessionSandboxError(limitError, 400)
-      }
     }
   }
 
@@ -152,14 +133,11 @@ export class SessionSandboxService {
     lockedReason: 'child' | null,
     available: boolean,
   ): SessionSandboxState {
-    const resources = stored?.resources ?? null
     return {
       sessionId,
       rootSessionId,
       sandboxed,
       source: stored?.source ?? 'default',
-      resources,
-      effectiveResources: resolveSandboxResources(this.preferences().sandbox, resources),
       lockedReason,
       available,
     }

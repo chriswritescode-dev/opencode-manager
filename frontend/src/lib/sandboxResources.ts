@@ -53,12 +53,12 @@ export function parseSandboxResourceInput(
   return { kind: 'valid', resources: { cpus: parsedCpus, memoryMib } }
 }
 
-export function shouldShowSandboxResources(sandbox: SandboxToggleState): boolean {
+export function shouldShowSandboxResources(sandbox: SandboxToggleState, repoId: number | undefined): boolean {
   return (
     sandbox.available &&
     sandbox.isSandboxed &&
     sandbox.lockedReason !== 'child' &&
-    sandbox.effectiveResources !== undefined
+    repoId !== undefined
   )
 }
 

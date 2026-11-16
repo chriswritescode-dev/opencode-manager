@@ -8,8 +8,11 @@ import {
   DeleteRepoResultSchema,
   DiscoverReposResponseSchema,
   RepoGitIdentitySchema,
+  RepoSandboxResourcesSchema,
   RepoSchema,
   WorktreeSetupResultSchema,
+  type RepoSandboxResources,
+  type SessionSandboxResources,
 } from '@opencode-manager/shared/schemas'
 import type { CreateRepoWorkspaceRequest, DiscoverReposResponse, AssistantModeStatus, AssistantModeInitRequest, DeleteRepoRequest, DeleteRepoResult, RepoGitIdentity, WorktreeSetupResult } from '@opencode-manager/shared/types'
 import type { RepoSibling } from '@opencode-manager/shared/utils'
@@ -279,5 +282,30 @@ export async function initializeAssistantMode(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(options ?? {}),
+  })
+}
+
+export async function getRepoSandboxResources(id: number, directory: string): Promise<RepoSandboxResources> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/sandbox/resources`, RepoSandboxResourcesSchema, {
+    params: { directory },
+  })
+}
+
+export async function updateRepoSandboxResources(
+  id: number,
+  resources: SessionSandboxResources | null
+): Promise<RepoSandboxResources> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/sandbox/resources`, RepoSandboxResourcesSchema, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(resources),
+  })
+}
+
+export async function restartRepoSandbox(id: number, directory: string): Promise<void> {
+  return fetchWrapperVoid(`${API_BASE_URL}/api/repos/${id}/sandbox/restart`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ directory }),
   })
 }

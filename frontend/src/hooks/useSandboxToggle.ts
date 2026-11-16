@@ -8,8 +8,6 @@ export function useSandboxToggle(sessionID: string, options: { enabled?: boolean
   const isSandboxed = data?.sandboxed ?? false
   const available = data?.available ?? true
   const lockedReason = data?.lockedReason ?? null
-  const resources = data?.resources ?? null
-  const effectiveResources = data?.effectiveResources
   const disabled = !loaded || lockedReason !== null || setSandbox.isPending
 
   const label = !loaded
@@ -27,5 +25,5 @@ export function useSandboxToggle(sessionID: string, options: { enabled?: boolean
     setSandbox.mutate({ sandboxed: !isSandboxed })
   }
 
-  return { isSandboxed, available, disabled, label, toggle, lockedReason, resources, effectiveResources }
+  return { isSandboxed, available, disabled, label, toggle, lockedReason }
 }

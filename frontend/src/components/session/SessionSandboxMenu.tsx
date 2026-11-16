@@ -9,9 +9,11 @@ import { SessionSandboxResourcesDialog } from '@/components/message/SessionSandb
 
 interface SessionSandboxMenuProps {
   sessionID: string
+  directory: string
+  repoId: number | undefined
 }
 
-export function SessionSandboxMenu({ sessionID }: SessionSandboxMenuProps) {
+export function SessionSandboxMenu({ sessionID, directory, repoId }: SessionSandboxMenuProps) {
   const sandbox = useSandboxToggle(sessionID)
   const [resourcesOpen, setResourcesOpen] = useState(false)
 
@@ -35,16 +37,15 @@ export function SessionSandboxMenu({ sessionID }: SessionSandboxMenuProps) {
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent side="top" align="start" collisionPadding={8} className="w-64">
-          <SandboxMenuItems sandbox={sandbox} onOpenResources={() => setResourcesOpen(true)} />
+          <SandboxMenuItems sandbox={sandbox} repoId={repoId} onOpenResources={() => setResourcesOpen(true)} />
         </DropdownMenuContent>
       </DropdownMenu>
-      {shouldShowSandboxResources(sandbox) ? (
+      {shouldShowSandboxResources(sandbox, repoId) ? (
         <SessionSandboxResourcesDialog
-          sessionID={sessionID}
+          repoId={repoId!}
+          directory={directory}
           open={resourcesOpen}
           onOpenChange={setResourcesOpen}
-          override={sandbox.resources}
-          effective={sandbox.effectiveResources!}
         />
       ) : null}
     </>
