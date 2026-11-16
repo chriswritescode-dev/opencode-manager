@@ -36,6 +36,8 @@ import { getConfigPath } from '@opencode-manager/shared/config/env'
 import { JsonObjectSchema, JsonValueSchema, type JsonObject, type JsonValue } from '@opencode-manager/shared/utils'
 
 const UNAVAILABLE_PREFIX = 'Sandbox enforcement is on but the sandbox is unavailable: '
+const FORGE_CONFLICT_MESSAGE = "Forge's sandbox also claims this shell call. Turn off the sandbox for this session in OpenCode Manager, or set sandbox.enabled to false in ~/.config/opencode/forge-config.jsonc."
+const FORGE_CONTAINER_ENV = 'FORGE_SANDBOX_CONTAINER'
 const WORKDIR = '/workspace/repos/ai-test'
 const SESSION_ID = 'ses_test'
 const CALL_ID = 'call_test'
@@ -598,6 +600,67 @@ describe('ocm-sandbox plugin', () => {
         `${UNAVAILABLE_PREFIX}sandbox enforcement could not pin the sandbox shell`,
       )
     })
+
+    it('refuses a Forge sandbox wrapper that reaches create.before ahead of the manager marker', async () => {
+      const plugin = await loadPlugin(configHome)
+      const forgeMarker = `forge-sandbox-required-${randomUUID()}`
+      let forgedEvent: ShellCreateBeforeEvent | undefined
+      const fetchMock = managerFetch({ session: { sandboxed: true } })
+      const { shell, createEvent } = await runSandboxedShellCall(plugin, fetchMock, (marked) => {
+        forgedEvent = shellCreateEvent({ command: `${forgeMarker} && ${marked}` })
+        return forgedEvent
+      })
+
+      await expect(shell.execute!({ command: 'echo sentinel' }, toolContext())).rejects.toThrow(
+        `${UNAVAILABLE_PREFIX}${FORGE_CONFLICT_MESSAGE}`,
+      )
+
+      expect(forgedEvent?.command).toBe(`${forgeMarker} && ${createEvent.command}`)
+      expect(forgedEvent?.shell).toBe('/bin/sh')
+      expect(forgedEvent?.env[SANDBOX_SHELL_ENV_WORKDIR]).toBeUndefined()
+      expect(createEvent.shell).toBe('/bin/sh')
+      expect(createEvent.env[SANDBOX_SHELL_ENV_WORKDIR]).toBeUndefined()
+      expect(readSandboxShellState()?.pendingMarkers.size).toBe(0)
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/sandbox/shell'))).toBe(false)
+    })
+
+    it('refuses a create.before event that carries the Forge sandbox container env', async () => {
+      const plugin = await loadPlugin(configHome)
+      let forgedEvent: ShellCreateBeforeEvent | undefined
+      const fetchMock = managerFetch({ session: { sandboxed: true } })
+      const { shell } = await runSandboxedShellCall(plugin, fetchMock, (marked) => {
+        forgedEvent = shellCreateEvent({ command: marked, env: { [FORGE_CONTAINER_ENV]: 'forge-container' } })
+        return forgedEvent
+      })
+
+      await expect(shell.execute!({ command: 'echo sentinel' }, toolContext())).rejects.toThrow(
+        `${UNAVAILABLE_PREFIX}${FORGE_CONFLICT_MESSAGE}`,
+      )
+
+      expect(forgedEvent?.shell).toBe('/bin/sh')
+      expect(forgedEvent?.env[SANDBOX_SHELL_ENV_WORKDIR]).toBeUndefined()
+      expect(readSandboxShellState()?.pendingMarkers.size).toBe(0)
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/sandbox/shell'))).toBe(false)
+    })
+
+    it('refuses a create.before event whose shell is a Forge shell shim', async () => {
+      const plugin = await loadPlugin(configHome)
+      let forgedEvent: ShellCreateBeforeEvent | undefined
+      const fetchMock = managerFetch({ session: { sandboxed: true } })
+      const { shell } = await runSandboxedShellCall(plugin, fetchMock, (marked) => {
+        forgedEvent = shellCreateEvent({ command: marked, shell: '/usr/local/bin/forge-shell' })
+        return forgedEvent
+      })
+
+      await expect(shell.execute!({ command: 'echo sentinel' }, toolContext())).rejects.toThrow(
+        `${UNAVAILABLE_PREFIX}${FORGE_CONFLICT_MESSAGE}`,
+      )
+
+      expect(forgedEvent?.shell).toBe('/usr/local/bin/forge-shell')
+      expect(forgedEvent?.env[SANDBOX_SHELL_ENV_WORKDIR]).toBeUndefined()
+      expect(readSandboxShellState()?.pendingMarkers.size).toBe(0)
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/sandbox/shell'))).toBe(false)
+    })
   })
 
   describe('tool transform wrapper', () => {
@@ -745,6 +808,48 @@ describe('ocm-sandbox plugin', () => {
 
       expect(original).toHaveBeenCalledWith(input, expect.anything())
       expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('refuses a shell call that already carries a Forge sandbox marker', async () => {
+      const plugin = await loadPlugin(configHome)
+      const original = vi.fn()
+      const fetchMock = managerFetch({ session: { sandboxed: true } })
+      vi.stubGlobal('fetch', fetchMock)
+      const shell = shellTool(plugin, original)
+      const command = `forge-sandbox-required-${randomUUID()} && echo sentinel`
+
+      await expect(shell.execute!({ command }, toolContext())).rejects.toThrow(
+        `${UNAVAILABLE_PREFIX}${FORGE_CONFLICT_MESSAGE}`,
+      )
+      expect(original).not.toHaveBeenCalled()
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(String(fetchMock.mock.calls[0]![0])).toBe('http://localhost:5003/api/internal/sandbox/sessions/ses_test')
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/sandbox/shell'))).toBe(false)
+    })
+
+    it('passes Forge-marked commands through untouched when the session is not sandboxed', async () => {
+      const plugin = await loadPlugin(configHome)
+      const original = shellBase(async () => ({ output: 'ok' }))
+      vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: false } }))
+      const shell = shellTool(plugin, original)
+      const forgeMarked = `forge-sandbox-required-${randomUUID()} && echo sentinel`
+      const input = { command: forgeMarked }
+
+      await shell.execute!(input, toolContext())
+
+      expect(original).toHaveBeenCalledTimes(1)
+      expect(original.mock.calls[0]![0]).toBe(input)
+      expect(original.mock.calls[0]![0]).toEqual({ command: forgeMarked })
+
+      const inertFetch = vi.fn()
+      vi.stubGlobal('fetch', inertFetch)
+      const event = shellCreateEvent({ command: forgeMarked })
+
+      await plugin.triggerShellCreateBefore(event)
+
+      expect(event.command).toBe(forgeMarked)
+      expect(event.shell).toBe('/bin/sh')
+      expect(inertFetch).not.toHaveBeenCalled()
     })
   })
 

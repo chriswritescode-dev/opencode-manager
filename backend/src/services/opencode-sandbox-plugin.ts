@@ -34,7 +34,10 @@ var SERVICE_SETTINGS_DENIED = 'OpenCode Manager denies access to its service set
 var DOCKER_HINT = ${JSON.stringify(SANDBOX_DOCKER_HINT)}
 var SHELL_TOOL_NAME = 'shell'
 var SHELL_MARKER_PREFIX = ${JSON.stringify(SANDBOX_SHELL_MARKER_PREFIX)}
-var SHELL_MARKER_PATTERN = /^(${SANDBOX_SHELL_MARKER_PREFIX}[0-9a-f-]{36}) && /
+var FORGE_MARKER_PATTERN = /forge-sandbox-required-[0-9a-f-]{36} && /
+var FORGE_CONTAINER_ENV = 'FORGE_SANDBOX_CONTAINER'
+var FORGE_CONFLICT = ${JSON.stringify("Forge's sandbox also claims this shell call. Turn off the sandbox for this session in OpenCode Manager, or set sandbox.enabled to false in ~/.config/opencode/forge-config.jsonc.")}
+var SHELL_MARKER_PATTERN = /^(forge-sandbox-required-[0-9a-f-]{36} && )?(${SANDBOX_SHELL_MARKER_PREFIX}[0-9a-f-]{36}) && /
 var PLAN_NAME_PATTERN = /^ocm-session-[0-9a-f]{12}$/
 var SHELL_STATE_KEY = Symbol.for(${JSON.stringify(SANDBOX_SHELL_STATE_KEY)})
 
@@ -81,6 +84,19 @@ function unavailable(reason) {
 function isWithin(directory, target) {
   var relative = path.relative(directory, target)
   return relative === '' || (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative))
+}
+
+function isForgeShellPath(shell) {
+  return path.basename(shell).indexOf('forge-shell') === 0
+}
+
+function forgeClaims(command, env, shell) {
+  if (typeof command === 'string' && FORGE_MARKER_PATTERN.test(command)) return true
+  if (env !== null && typeof env === 'object') {
+    var container = env[FORGE_CONTAINER_ENV]
+    if (typeof container === 'string' && container.length > 0) return true
+  }
+  return typeof shell === 'string' && isForgeShellPath(shell)
 }
 
 function globDirectory(resource) {
@@ -278,6 +294,9 @@ async function wrapSandboxedShellTool(ctx) {
         if (input === null || typeof input !== 'object' || typeof input.command !== 'string') {
           throw unavailable('refusing to run a sandboxed shell call without a command')
         }
+        if (forgeClaims(input.command)) {
+          throw unavailable(FORGE_CONFLICT)
+        }
         var marker = SHELL_MARKER_PREFIX + randomUUID()
         var markedCommand = marker + ' && ' + input.command
         shellState.pendingMarkers.set(marker, { callID: context.id, sessionID: context.sessionID })
@@ -306,11 +325,15 @@ export default {
       if (!isEnforced()) return
       var marked = SHELL_MARKER_PATTERN.exec(event.command)
       if (marked === null) return
-      var pending = shellState.pendingMarkers.get(marked[1])
+      var pending = shellState.pendingMarkers.get(marked[2])
       if (pending === undefined) {
-        throw unavailable('sandbox marker ' + marked[1] + ' is not pending; refusing to run the command on the host')
+        throw unavailable('sandbox marker ' + marked[2] + ' is not pending; refusing to run the command on the host')
       }
-      shellState.pendingMarkers.delete(marked[1])
+      shellState.pendingMarkers.delete(marked[2])
+      var unmarked = (marked[1] === undefined ? '' : marked[1]) + event.command.slice(marked[0].length)
+      if (forgeClaims(unmarked, event.env, event.shell)) {
+        throw unavailable(FORGE_CONFLICT)
+      }
       event.command = event.command.slice(marked[0].length)
       await pinSandboxShell(event, pending.sessionID, ctx.location.directory)
     })
