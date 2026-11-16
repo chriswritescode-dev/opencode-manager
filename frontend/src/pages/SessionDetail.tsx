@@ -82,6 +82,7 @@ import { SessionMessagePickerDialog } from "@/components/session/SessionMessageP
 import { ChangesWalkthroughSheet, type WalkthroughSourceRequest } from "@/components/session/ChangesWalkthroughSheet";
 import { ToolSidePanel } from "@/components/navigation/ToolSidePanel";
 import type { WalkthroughSource } from "@opencode-manager/shared/schemas";
+import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils';
 import { useToolPanel } from "@/hooks/useToolPanel";
 
 const OLDER_HISTORY_SCROLL_THRESHOLD_PX = 200
@@ -994,7 +995,7 @@ export function SessionDetail() {
                     key={sessionId}
                     ref={promptInputRef}
                     directory={sessionDirectory}
-                    repoId={isRemoteServer ? undefined : repoId}
+                    repoId={isRemoteServer || repoId === ASSISTANT_REPO_ID ? undefined : repoId}
                     goalDirectory={resolvedDirectory}
                     sessionID={sessionId}
                     onVoiceConversationActiveChange={setIsVoiceConversationActive}

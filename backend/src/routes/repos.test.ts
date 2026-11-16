@@ -10,6 +10,7 @@ import { RepoSandboxResourcesSchema, type SessionSandboxResources } from '@openc
 import { createRepo, getRepoById, getRepoSandboxResources, setRepoSetting } from '../db/queries'
 import type { CreateRepoInput } from '../types/repo'
 import { createRepoRoutes } from './repos'
+import { SandboxRestartError } from '../services/sandbox/runtime'
 import { createStubOpenCodeClient } from '../../test/helpers/stub-opencode-client'
 import { createGitService } from '../services/git/GitService'
 import { ProjectConfigService } from '../services/project-config'
@@ -1089,6 +1090,56 @@ describe('repo sandbox resources', () => {
       seedRepoTarget('repo-a')
       const disabled = await createTestApp(db).request('/repos/1/sandbox/restart', { method: 'POST' })
       expect(disabled.status).toBe(409)
+    })
+
+    it('maps an unavailable sandbox runtime to 409', async () => {
+      seedRepoTarget('repo-a')
+      enableSandboxing()
+      const runtime = createSandboxRuntimeStub()
+      runtime.restartCheckoutSandbox = mock(async () => {
+        throw new SandboxRestartError('The sandbox runtime is unavailable on this host', 409)
+      })
+
+      const res = await createTestApp(db, createStubOpenCodeClient(), runtime).request('/repos/1/sandbox/restart', {
+        method: 'POST',
+      })
+
+      expect(res.status).toBe(409)
+      expect((await readJson(res, ErrorSchema)).error).toBe('The sandbox runtime is unavailable on this host')
+    })
+
+    it('maps an unresolvable repository checkout to 400', async () => {
+      seedRepoTarget('repo-a')
+      enableSandboxing()
+      const runtime = createSandboxRuntimeStub()
+      runtime.restartCheckoutSandbox = mock(async () => {
+        throw new SandboxRestartError('Could not resolve the repository checkout for /workspace/repos/repo-a', 400)
+      })
+
+      const res = await createTestApp(db, createStubOpenCodeClient(), runtime).request('/repos/1/sandbox/restart', {
+        method: 'POST',
+      })
+
+      expect(res.status).toBe(400)
+      expect((await readJson(res, ErrorSchema)).error).toBe(
+        'Could not resolve the repository checkout for /workspace/repos/repo-a',
+      )
+    })
+
+    it('keeps an unexpected restart failure at 500', async () => {
+      seedRepoTarget('repo-a')
+      enableSandboxing()
+      const runtime = createSandboxRuntimeStub()
+      runtime.restartCheckoutSandbox = mock(async () => {
+        throw new Error('msb rm failed with code 1: operation not permitted')
+      })
+
+      const res = await createTestApp(db, createStubOpenCodeClient(), runtime).request('/repos/1/sandbox/restart', {
+        method: 'POST',
+      })
+
+      expect(res.status).toBe(500)
+      expect((await readJson(res, ErrorSchema)).error).toBe('msb rm failed with code 1: operation not permitted')
     })
   })
 })

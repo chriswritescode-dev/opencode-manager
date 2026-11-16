@@ -12,6 +12,7 @@ import {
 } from './opencode-plugin-state'
 
 export const SANDBOX_PLAN_TIMEOUT_MS = sandboxPlanTimeoutMs()
+export const SANDBOX_NOTE_TIMEOUT_MS = 5000
 
 export function buildSandboxPluginSource(id: string, shellShimPath: string, serviceSettingsPath: string): string {
   return `import { existsSync } from 'fs'
@@ -21,6 +22,7 @@ import path from 'path'
 
 var SANDBOX_UNAVAILABLE_PREFIX = ${JSON.stringify(SANDBOX_UNAVAILABLE_PREFIX)}
 var PLAN_TIMEOUT_MS = ${SANDBOX_PLAN_TIMEOUT_MS}
+var NOTE_TIMEOUT_MS = ${SANDBOX_NOTE_TIMEOUT_MS}
 var SHELL_SHIM_PATH = ${JSON.stringify(shellShimPath)}
 var ENV_WORKDIR = ${JSON.stringify(SANDBOX_SHELL_ENV_WORKDIR)}
 var ENV_SANDBOX_NAME = ${JSON.stringify(SANDBOX_SHELL_ENV_NAME)}
@@ -299,7 +301,7 @@ function buildHostNote() {
 
 async function fetchSandboxEnvironment(baseUrl, token, sessionID, directory) {
   var controller = new AbortController()
-  var timer = setTimeout(function () { controller.abort() }, PLAN_TIMEOUT_MS)
+  var timer = setTimeout(function () { controller.abort() }, NOTE_TIMEOUT_MS)
   try {
     var res = await fetch(baseUrl + '/sandbox/sessions/' + encodeURIComponent(sessionID) + '/environment?directory=' + encodeURIComponent(directory), {
       method: 'GET',
@@ -320,9 +322,10 @@ async function fetchSandboxEnvironment(baseUrl, token, sessionID, directory) {
 
 async function syncSandboxNote(ctx, sessionID) {
   try {
+    var enforced = isEnforced()
     var baseUrl = process.env.OCM_INTERNAL_API_URL
     var token = process.env.OCM_INTERNAL_TOKEN
-    if (!baseUrl || !token) return
+    if (enforced && (!baseUrl || !token)) return
     var entries = await ctx.session.instructions.entry.list({ sessionID: sessionID })
     var previous = null
     if (Array.isArray(entries)) {
@@ -332,6 +335,11 @@ async function syncSandboxNote(ctx, sessionID) {
           break
         }
       }
+    }
+    if (!enforced) {
+      if (!isSandboxNote(previous)) return
+      await ctx.session.instructions.entry.put({ sessionID: sessionID, key: SANDBOX_NOTE_KEY, value: buildHostNote() })
+      return
     }
     var environment = await fetchSandboxEnvironment(baseUrl, token, sessionID, ctx.location.directory)
     if (environment === null) return
@@ -480,11 +488,9 @@ export default {
       await pinSandboxShell(event, pending.sessionID, ctx.location.directory)
     })
     await ctx.session.hook('prompt', async (event) => {
-      if (!isEnforced()) return
       await syncSandboxNote(ctx, event.sessionID)
     })
     await ctx.session.hook('context', async (event) => {
-      if (!isEnforced()) return
       await syncSandboxNote(ctx, event.sessionID)
     })
     await ctx.tool.hook('execute.after', (event) => {

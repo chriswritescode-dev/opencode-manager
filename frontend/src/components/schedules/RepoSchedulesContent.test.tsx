@@ -168,3 +168,23 @@ describe('RepoSchedulesContent dialogs', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Create schedule' })).toBeNull())
   })
 })
+
+describe('RepoSchedulesContent job details', () => {
+  it('shows the job resources for a fresh worktree', async () => {
+    const job = createJob(1, 'Alpha')
+    job.sandbox = { enabled: true, resources: { cpus: 4, memoryMib: 6144 } }
+    job.workspaceMode = 'worktree'
+    renderContent({ jobs: [job], initialEntry: '/repos/1/schedules?jobId=1&scheduleTab=detail' })
+
+    expect(await screen.findByText('On · 4 CPUs · 6 GiB')).toBeInTheDocument()
+  })
+
+  it('shows the repository resources for a shared worktree', async () => {
+    const job = createJob(1, 'Alpha')
+    job.sandbox = { enabled: true, resources: { cpus: 4, memoryMib: 6144 } }
+    job.workspaceMode = 'shared-worktree'
+    renderContent({ jobs: [job], initialEntry: '/repos/1/schedules?jobId=1&scheduleTab=detail' })
+
+    expect(await screen.findByText('On · repository resources')).toBeInTheDocument()
+  })
+})

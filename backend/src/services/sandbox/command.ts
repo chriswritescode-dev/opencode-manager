@@ -326,6 +326,7 @@ export type SandboxNetworkPolicy = {
 
 const SUPPORTED_SANDBOX_NETWORK_PROFILES = new Set(['public', 'private', 'host'])
 const TERMINAL_SANDBOX_NETWORK_PROFILES = new Set(['all', 'none'])
+const ALL_SANDBOX_NETWORK_GROUPS = ['public', 'private', 'host']
 
 function stableJson(value: JsonValue | undefined): string {
   if (Array.isArray(value)) {
@@ -362,6 +363,7 @@ function sandboxNetworkProfileGroups(netProfile: string): string[] | null {
 }
 
 export function sandboxNetworkGroups(netProfile: string): string[] {
+  if (netProfile.trim() === 'all') return [...ALL_SANDBOX_NETWORK_GROUPS]
   return sandboxNetworkProfileGroups(netProfile) ?? []
 }
 

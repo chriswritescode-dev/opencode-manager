@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { makeRepo, makeSession } from '@/test/fixtures/api'
 import { connectTestEventStream } from '@/test/render'
 import { renderSessionPage } from '@/test/sessionPage'
@@ -92,5 +93,34 @@ describe('SessionDetail assistant loading at repoId=0', () => {
     })
 
     expect(await screen.findByText('Loading repository...')).toBeInTheDocument()
+  })
+
+  it('hides the sandbox resources item for assistant sessions', async () => {
+    const user = userEvent.setup()
+    renderSessionPage({
+      route: '/repos/0/sessions/sess-asst-1?assistant=1',
+      repo: assistantRepo,
+      extraRoutes: [
+        {
+          method: 'GET',
+          path: '/api/session-sandbox/:sessionId',
+          respond: () => ({
+            json: {
+              sessionId: 'sess-asst-1',
+              rootSessionId: 'sess-asst-1',
+              sandboxed: true,
+              source: 'user',
+              lockedReason: null,
+              available: true,
+            },
+          }),
+        },
+      ],
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Sandbox: on' }))
+    await screen.findByRole('menuitemcheckbox', { name: /Sandbox commands/ })
+
+    expect(screen.queryByRole('menuitem', { name: /Sandbox resources/ })).not.toBeInTheDocument()
   })
 })

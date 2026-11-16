@@ -197,7 +197,7 @@ export function JobDetailTab({
                 )}
                 <div>
                   <p className="text-muted-foreground">Sandbox</p>
-                  <p className="font-medium">{formatScheduleSandbox(selectedJob.sandbox)}</p>
+                  <p className="font-medium">{formatScheduleSandbox(selectedJob.sandbox, selectedJob.workspaceMode)}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Inbox</p>

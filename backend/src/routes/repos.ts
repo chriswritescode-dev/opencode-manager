@@ -7,6 +7,7 @@ import { DiscoverReposRequestSchema, AssistantModeInitRequestSchema, UpdateRepoR
 import { listRepos, getRepoById, updateLastAccessed, getRepoGitCredentialId, setRepoGitCredentialId, updateRepoName, getRepoSandboxResources, setRepoSandboxResources } from '../db/queries'
 import { sandboxResourceLimitError } from '../services/sandbox/resources'
 import type { SandboxRuntimeService } from '../services/sandbox/runtime'
+import { SandboxRestartError } from '../services/sandbox/runtime'
 import * as repoService from '../services/repo'
 import * as archiveService from '../services/archive'
 import { SettingsService } from '../services/settings'
@@ -14,7 +15,7 @@ import { getEffectiveGitIdentity, setRepoGitIdentity } from '../services/git-ide
 import type { OpenCodeClient } from '../services/opencode/client'
 import { logger } from '../utils/logger'
 import { getErrorMessage, getStatusCode } from '../utils/error-utils'
-import { handleOpenCodeError } from '../utils/route-helpers'
+import { handleOpenCodeError, handleServiceError } from '../utils/route-helpers'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { isWorktreeError, openCodeLocation } from '@opencode-manager/shared/opencode'
 import { createRepoGitRoutes } from './repo-git'
@@ -737,8 +738,7 @@ app.get('/', async (c) => {
       await sandboxRuntime.restartCheckoutSandbox(directory)
       return c.body(null, 204)
     } catch (error: unknown) {
-      logger.error('Failed to restart repo sandbox:', error)
-      return c.json({ error: getErrorMessage(error) }, 500)
+      return handleServiceError(c, error, 'Failed to restart repo sandbox:', SandboxRestartError)
     }
   })
 

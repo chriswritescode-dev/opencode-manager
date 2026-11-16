@@ -143,7 +143,7 @@ describe('session sandbox routes', () => {
     const res = await app.request('/session-sandbox/ses_root', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ resources: { cpus: 4, memoryMib: 8192 } }),
+      body: JSON.stringify({ sandboxed: true, resources: { cpus: 4, memoryMib: 8192 } }),
     })
     expect(res.status).toBe(400)
     await expect(res.json()).resolves.toEqual({ error: expect.any(String), details: expect.any(Array) })

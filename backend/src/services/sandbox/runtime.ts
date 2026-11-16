@@ -108,6 +108,15 @@ export type SandboxStatus = {
   msbVersion?: string
 }
 
+export class SandboxRestartError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+  }
+}
+
 export type SandboxCheckoutEnvironment = {
   vmName: string
   resources: { effective: SessionSandboxResources; running: SessionSandboxResources | null }
@@ -120,6 +129,7 @@ export type SandboxCheckoutEnvironment = {
 type VmState = {
   inFlightBoot: Promise<void> | null
   inFlightRemoval: Promise<void> | null
+  inFlightRemovalDeletesVolume: boolean
   lastKnownRunningAt: number | null
   lastUsedAt: number
   inFlightProvision: Promise<void> | null
@@ -132,7 +142,7 @@ const vmStates = new Map<string, VmState>()
 
 const guestEnvironments = new Map<string, string | null>()
 const guestProbes = new Set<Promise<void>>()
-let guestProbeGeneration = 0
+const guestProbeTokens = new Map<string, symbol>()
 
 let shutdownRequested = false
 let stopInProgress = false
@@ -146,6 +156,7 @@ function vmState(name: string): VmState {
   const created: VmState = {
     inFlightBoot: null,
     inFlightRemoval: null,
+    inFlightRemovalDeletesVolume: false,
     lastKnownRunningAt: null,
     lastUsedAt: 0,
     inFlightProvision: null,
@@ -164,10 +175,11 @@ export function resetSandboxRuntimeState(): void {
     state.inFlightProvision = null
     state.inFlightBoot = null
     state.inFlightRemoval = null
+    state.inFlightRemovalDeletesVolume = false
   }
   vmStates.clear()
   guestEnvironments.clear()
-  guestProbeGeneration += 1
+  guestProbeTokens.clear()
   resetCheckoutRunResources()
   shutdownRequested = false
   stopInProgress = false
@@ -234,8 +246,10 @@ function ensureSessionSandbox(spec: SandboxVmSpec, maxRunningVms: number): Promi
 function scheduleGuestProbe(name: string): void {
   if (guestEnvironments.has(name)) return
   guestEnvironments.set(name, null)
-  const generation = guestProbeGeneration
-  const probe = probeGuestEnvironment(name, generation).catch((error) => {
+  const token = Symbol(name)
+  guestProbeTokens.set(name, token)
+  const probe = probeGuestEnvironment(name, token).catch((error) => {
+    clearGuestProbePlaceholder(name, token)
     logger.debug(`Failed to probe the guest environment for ${name}: ${getErrorMessage(error)}`)
   })
   guestProbes.add(probe)
@@ -244,11 +258,22 @@ function scheduleGuestProbe(name: string): void {
   })
 }
 
+function clearGuestProbePlaceholder(name: string, token: symbol): void {
+  if (guestProbeTokens.get(name) !== token) return
+  guestProbeTokens.delete(name)
+  guestEnvironments.delete(name)
+}
+
+function forgetGuestEnvironment(name: string): void {
+  guestProbeTokens.delete(name)
+  guestEnvironments.delete(name)
+}
+
 export async function waitForGuestProbesForTests(): Promise<void> {
   await Promise.allSettled([...guestProbes])
 }
 
-async function probeGuestEnvironment(name: string, generation: number): Promise<void> {
+async function probeGuestEnvironment(name: string, token: symbol): Promise<void> {
   const probe = await executeCommand([sandboxExecutablePath(), ...buildSandboxGuestProbeArgs(name)], {
     ignoreExitCode: true,
     silent: true,
@@ -256,6 +281,7 @@ async function probeGuestEnvironment(name: string, generation: number): Promise<
   })
   if (probe.exitCode !== 0) {
     logger.debug(`Guest environment probe for ${name} exited with code ${probe.exitCode}`)
+    clearGuestProbePlaceholder(name, token)
     return
   }
   const lines = probe.stdout
@@ -265,9 +291,10 @@ async function probeGuestEnvironment(name: string, generation: number): Promise<
   const [kernel, prettyName] = lines
   if (kernel === undefined || prettyName === undefined) {
     logger.debug(`Guest environment probe for ${name} returned no usable output`)
+    clearGuestProbePlaceholder(name, token)
     return
   }
-  if (guestProbeGeneration !== generation) return
+  if (guestProbeTokens.get(name) !== token) return
   guestEnvironments.set(name, `${prettyName} | ${kernel}`)
 }
 
@@ -1000,11 +1027,16 @@ async function executeSandboxCreate(args: string[]): Promise<ExecuteCommandResul
 
 async function removeSandboxVm(name: string): Promise<void> {
   await runSandboxRemoval(buildSandboxRemoveArgs(name), SANDBOX_REMOVAL_MISSING_PATTERN, 'msb rm')
-  guestEnvironments.delete(name)
+  const state = vmStates.get(name)
+  if (state !== undefined) {
+    state.lastKnownRunningAt = null
+    state.runningResources = null
+  }
+  forgetGuestEnvironment(name)
 }
 
 function removeSandboxVmAndVolume(name: string): Promise<void> {
-  return trackSandboxRemoval(name, async (sandboxName) => {
+  return trackSandboxRemoval(name, true, async (sandboxName) => {
     await removeSandboxVm(sandboxName)
     await runSandboxRemoval(
       buildSandboxVolumeRemoveArgs(sandboxDockerDataVolumeName(sandboxName)),
@@ -1015,26 +1047,32 @@ function removeSandboxVmAndVolume(name: string): Promise<void> {
 }
 
 function removeSandboxVmKeepingVolume(name: string): Promise<void> {
-  return trackSandboxRemoval(name, async (sandboxName) => {
-    await removeSandboxVm(sandboxName)
-  })
+  return trackSandboxRemoval(name, false, removeSandboxVm)
 }
 
-function trackSandboxRemoval(name: string, remove: (sandboxName: string) => Promise<void>): Promise<void> {
+function trackSandboxRemoval(
+  name: string,
+  deleteVolume: boolean,
+  remove: (sandboxName: string) => Promise<void>,
+): Promise<void> {
   const state = vmState(name)
-  if (state.inFlightRemoval !== null) {
-    return state.inFlightRemoval
+  const inFlightRemoval = state.inFlightRemoval
+  if (inFlightRemoval !== null) {
+    if (!deleteVolume || state.inFlightRemovalDeletesVolume) {
+      return inFlightRemoval
+    }
+    return inFlightRemoval.catch(() => undefined).then(() => removeSandboxVmAndVolume(name))
   }
   const inFlightBoot = state.inFlightBoot
+  state.inFlightRemovalDeletesVolume = deleteVolume
   state.inFlightRemoval = (async () => {
     if (inFlightBoot !== null) {
       await inFlightBoot.catch(() => undefined)
     }
     await remove(name)
-    state.lastKnownRunningAt = null
-    state.runningResources = null
   })().finally(() => {
     state.inFlightRemoval = null
+    state.inFlightRemovalDeletesVolume = false
   })
   return state.inFlightRemoval
 }
@@ -1322,9 +1360,13 @@ export class SandboxRuntimeService {
   }
 
   async restartCheckoutSandbox(directory: string): Promise<void> {
-    if (!detectSandboxCapability().available) return
+    if (!detectSandboxCapability().available) {
+      throw new SandboxRestartError('The sandbox runtime is unavailable on this host', 409)
+    }
     const checkoutKey = await resolveCheckoutKey(directory)
-    if (checkoutKey === null) return
+    if (checkoutKey === null) {
+      throw new SandboxRestartError(`Could not resolve the repository checkout for ${directory}`, 400)
+    }
     await removeSandboxVmKeepingVolume(checkoutSandboxName(checkoutKey))
   }
 

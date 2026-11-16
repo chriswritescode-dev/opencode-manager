@@ -16,6 +16,7 @@ import {
 import { mcpStatusByName, openCodeLocation } from '@opencode-manager/shared/opencode'
 import { LOCAL_OPENCODE_SERVER_ID, buildSchedulePermissionRuleset } from '@opencode-manager/shared/schemas'
 import { getRepoById } from '../db/queries'
+import { getSessionSandboxMode } from '../db/session-sandbox-modes'
 import type { ScheduleJobWithRepo } from '../db/schedules'
 import {
   cleanupOrphanedSchedules,
@@ -64,7 +65,7 @@ import { getErrorMessage } from '../utils/error-utils'
 import { logger } from '../utils/logger'
 import { canonicalPathSync } from '../utils/fs-safe'
 import { buildAssistantRepo } from './assistant-mode'
-import { createScheduleWorktreeDescriber } from './schedule-worktree-paths'
+import { createScheduleWorktreeDescriber, isSharedScheduleWorktreePath } from './schedule-worktree-paths'
 import { SessionSandboxError, type SessionSandboxService } from './session-sandbox'
 import { sandboxResourceLimitError } from './sandbox/resources'
 import type { SandboxRuntimeService } from './sandbox/runtime'
@@ -584,7 +585,7 @@ export class ScheduleService {
     directory: string,
     sandbox: ScheduleSandboxConfig,
     sessionId: string,
-    workspaceMode: ScheduleWorkspaceMode,
+    registerRunResources: boolean,
   ): Promise<void> {
     const dependencies = this.sandbox
     if (!dependencies) {
@@ -593,7 +594,7 @@ export class ScheduleService {
 
     await dependencies.sessions.update(sessionId, { sandboxed: true })
 
-    if (sandbox.resources && (workspaceMode === 'worktree' || workspaceMode === 'kept-worktree')) {
+    if (sandbox.resources && registerRunResources) {
       await dependencies.runtime.registerCheckoutRunResources(directory, sandbox.resources)
     }
 
@@ -1010,10 +1011,12 @@ export class ScheduleService {
       this.assertSandboxJobSupported(context.serverId, job.sandbox)
 
       let runDirectory = context.directory
+      let dedicatedWorktreePrepared = false
       if (repo) {
         const wt = await this.worktreeManager.prepare(repo, job, run.id)
         if (wt) {
           runDirectory = wt.directory
+          dedicatedWorktreePrepared = job.workspaceMode !== 'shared-worktree'
           updateScheduleRunWorktree(this.db, repoId, jobId, run.id, {
             worktreePath: wt.worktreePath,
             runBranch: wt.runBranch,
@@ -1080,7 +1083,7 @@ export class ScheduleService {
       }
 
       if (job.sandbox?.enabled === true) {
-        await this.startRunSandbox(runDirectory, job.sandbox, session.id, job.workspaceMode)
+        await this.startRunSandbox(runDirectory, job.sandbox, session.id, dedicatedWorktreePrepared)
         if (abort.signal.aborted) {
           return this.abandonCancelledStartup(context.client, repoId, jobId, run, job, repo, session.id)
         }
@@ -1560,6 +1563,7 @@ export class ScheduleService {
       }
 
       if (outcome.kind === 'busy') {
+        await this.registerRecoveredRunResources(job, run.worktreePath)
         const sessionMonitor = createSessionMonitor(runDirectory, run.sessionId, context.serverId)
         this.runs.attachSessionMonitor(job.id, run.id, sessionMonitor)
         void this.monitorRunCompletion({
@@ -1672,9 +1676,13 @@ export class ScheduleService {
     if (!this.runs.beginTeardown(key)) return
     try {
       const fresh = getScheduleRunById(this.db, repoId, jobId, runId)
-      const runDirectory = fresh?.worktreePath ?? (repoId === null ? null : this.findRepoPath(repoId))
-      await this.releaseRunResources(job, runDirectory)
-      await this.removeRunSandbox(job, fresh?.worktreePath ?? null)
+      const runWorktreePath = this.dedicatedRunWorktreePath(fresh?.worktreePath)
+      if (runWorktreePath) {
+        await this.releaseRunResources(runWorktreePath)
+        if (this.isSandboxedScheduleRun(job, fresh?.sessionId ?? null)) {
+          await this.removeRunSandbox(runWorktreePath)
+        }
+      }
       if (repo && fresh?.worktreePath) {
         await this.finalizeRunWorktree(repo, job, runId, fresh.worktreePath, fresh.runBranch, fresh.triggerSource, repoId, jobId)
       }
@@ -1708,11 +1716,33 @@ export class ScheduleService {
     }
   }
 
-  private async releaseRunResources(job: ScheduleJob, directory: string | null): Promise<void> {
+  private dedicatedRunWorktreePath(worktreePath: string | null | undefined): string | null {
+    if (!worktreePath) return null
+    return isSharedScheduleWorktreePath(worktreePath) ? null : worktreePath
+  }
+
+  private isSandboxedScheduleRun(job: ScheduleJob, sessionId: string | null): boolean {
+    if (job.sandbox?.enabled === true) return true
+    if (!sessionId) return false
+    const mode = getSessionSandboxMode(this.db, sessionId)
+    return mode?.sandboxed === true || mode?.source === 'user'
+  }
+
+  private async registerRecoveredRunResources(job: ScheduleJob, worktreePath: string | null): Promise<void> {
     const runtime = this.sandbox?.runtime
-    if (!runtime || !directory) return
-    if (job.sandbox?.enabled !== true) return
-    if (job.workspaceMode !== 'worktree' && job.workspaceMode !== 'kept-worktree') return
+    const resources = job.sandbox?.enabled === true ? job.sandbox.resources : null
+    const dedicatedWorktreePath = this.dedicatedRunWorktreePath(worktreePath)
+    if (!runtime || !resources || !dedicatedWorktreePath) return
+    try {
+      await runtime.registerCheckoutRunResources(dedicatedWorktreePath, resources)
+    } catch (error) {
+      logger.warn(`Failed to restore the sandbox resources for the scheduled run worktree ${dedicatedWorktreePath}: ${getErrorMessage(error)}`)
+    }
+  }
+
+  private async releaseRunResources(directory: string): Promise<void> {
+    const runtime = this.sandbox?.runtime
+    if (!runtime) return
     try {
       await runtime.releaseCheckoutRunResources(directory)
     } catch (error) {
@@ -1720,11 +1750,9 @@ export class ScheduleService {
     }
   }
 
-  private async removeRunSandbox(job: ScheduleJob, directory: string | null): Promise<void> {
+  private async removeRunSandbox(directory: string): Promise<void> {
     const runtime = this.sandbox?.runtime
-    if (!runtime || !directory) return
-    if (job.sandbox?.enabled !== true) return
-    if (job.workspaceMode !== 'worktree' && job.workspaceMode !== 'kept-worktree') return
+    if (!runtime) return
     try {
       await runtime.removeCheckoutSandbox(directory)
     } catch (error) {

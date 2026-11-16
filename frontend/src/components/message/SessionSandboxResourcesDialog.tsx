@@ -27,7 +27,7 @@ export function SessionSandboxResourcesDialog({
 }: SessionSandboxResourcesDialogProps) {
   const queryClient = useQueryClient()
   const queryKey = ['repoSandboxResources', repoId, directory] as const
-  const { data } = useQuery({
+  const { data, error: queryError } = useQuery({
     queryKey,
     queryFn: () => getRepoSandboxResources(repoId, directory),
     enabled: open,
@@ -36,6 +36,13 @@ export function SessionSandboxResourcesDialog({
   const [memoryGib, setMemoryGib] = useState('')
   const [error, setError] = useState<string | null>(null)
   const initialized = useRef(false)
+
+  const loaded = data !== undefined
+  const queryErrorMessage = queryError
+    ? queryError instanceof FetchError
+      ? queryError.message
+      : 'Failed to load sandbox resources'
+    : null
 
   useEffect(() => {
     if (!open) {
@@ -52,8 +59,8 @@ export function SessionSandboxResourcesDialog({
 
   const updateMutation = useMutation({
     mutationFn: (resources: SessionSandboxResources | null) => updateRepoSandboxResources(repoId, resources),
-    onSuccess: (updated) => {
-      queryClient.setQueryData(queryKey, updated)
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['repoSandboxResources', repoId] })
       setError(null)
       onOpenChange(false)
     },
@@ -112,8 +119,8 @@ export function SessionSandboxResourcesDialog({
           onCpusChange={setCpus}
           memoryGib={memoryGib}
           onMemoryGibChange={setMemoryGib}
-          disabled={updateMutation.isPending}
-          error={error}
+          disabled={updateMutation.isPending || !loaded}
+          error={error ?? queryErrorMessage}
         />
         {runningStatus ? <p className="text-sm text-muted-foreground">{runningStatus}</p> : null}
         <div className="space-y-2 border-t pt-3">
@@ -123,16 +130,16 @@ export function SessionSandboxResourcesDialog({
           <Button
             variant="outline"
             onClick={() => restartMutation.mutate()}
-            disabled={restartMutation.isPending || data === undefined}
+            disabled={restartMutation.isPending || !loaded}
           >
             Restart sandbox now
           </Button>
         </div>
         <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={() => submit(null)} disabled={updateMutation.isPending}>
+          <Button variant="outline" onClick={() => submit(null)} disabled={updateMutation.isPending || !loaded}>
             Use defaults
           </Button>
-          <Button onClick={handleSave} disabled={updateMutation.isPending}>
+          <Button onClick={handleSave} disabled={updateMutation.isPending || !loaded}>
             Save
           </Button>
         </DialogFooter>

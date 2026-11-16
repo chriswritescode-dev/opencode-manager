@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { formatRunDuration, formatScheduleInbox, matchesScheduleJobSearch } from '@/components/schedules/schedule-utils'
+import {
+  formatRunDuration,
+  formatScheduleInbox,
+  formatScheduleSandbox,
+  matchesScheduleJobSearch,
+} from '@/components/schedules/schedule-utils'
 import type { ScheduleJob } from '@opencode-manager/shared/types'
 import { makeScheduleJob } from '@/test/fixtures/api'
 
@@ -19,6 +24,27 @@ describe('formatScheduleInbox', () => {
   it('labels every run versus failures only', () => {
     expect(formatScheduleInbox(true)).toBe('Every run')
     expect(formatScheduleInbox(false)).toBe('Failures only')
+  })
+})
+
+describe('formatScheduleSandbox', () => {
+  it('labels disabled sandboxing as off', () => {
+    expect(formatScheduleSandbox(null, 'worktree')).toBe('Off')
+    expect(formatScheduleSandbox({ enabled: false, resources: null }, 'worktree')).toBe('Off')
+    expect(formatScheduleSandbox({ enabled: false, resources: { cpus: 4, memoryMib: 6144 } }, 'worktree')).toBe('Off')
+  })
+
+  it('labels the repository resources when the job has none', () => {
+    expect(formatScheduleSandbox({ enabled: true, resources: null }, 'worktree')).toBe('On · repository resources')
+    expect(formatScheduleSandbox({ enabled: true, resources: null }, 'in-place')).toBe('On · repository resources')
+  })
+
+  it('labels job resources for fresh worktrees only', () => {
+    const sandbox = { enabled: true, resources: { cpus: 4, memoryMib: 6144 } }
+
+    expect(formatScheduleSandbox(sandbox, 'worktree')).toBe('On · 4 CPUs · 6 GiB')
+    expect(formatScheduleSandbox(sandbox, 'kept-worktree')).toBe('On · 4 CPUs · 6 GiB')
+    expect(formatScheduleSandbox(sandbox, 'shared-worktree')).toBe('On · repository resources')
   })
 })
 

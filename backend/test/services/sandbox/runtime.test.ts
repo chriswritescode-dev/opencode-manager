@@ -882,6 +882,28 @@ describe('SandboxRuntimeService', () => {
     expect(msbCalls('volume')).toHaveLength(0)
   })
 
+  it('throws a 409 restart error when the sandbox capability is unavailable', async () => {
+    denyCapability()
+    installFakeMsb(new Map([[VM_NAME, vm()]]))
+
+    await expect(service.restartCheckoutSandbox(repoADir)).rejects.toMatchObject({
+      message: 'The sandbox runtime is unavailable on this host',
+      status: 409,
+    })
+    expect(fakeMsbInvocations()).toEqual([])
+  })
+
+  it('throws a 400 restart error when the checkout key cannot be resolved', async () => {
+    allowCapability('msb 0.6.15')
+    installFakeMsb(new Map())
+
+    await expect(service.restartCheckoutSandbox('/etc')).rejects.toMatchObject({
+      message: 'Could not resolve the repository checkout for /etc',
+      status: 400,
+    })
+    expect(fakeMsbInvocations()).toEqual([])
+  })
+
   it('uses a repo override for the main checkout and its linked worktree', async () => {
     enableEnforcement()
     const override = { cpus: ENV.SANDBOX.CPUS + 1, memoryMib: memoryMib() + 1024 }
@@ -1050,6 +1072,37 @@ describe('SandboxRuntimeService', () => {
     })
 
     await expect(service.describeCheckoutEnvironment(repoADir)).resolves.toMatchObject({ guest: null })
+  })
+
+  it('re-probes the guest environment on the next ensure after a failed probe', async () => {
+    enableEnforcement()
+    installFakeMsb(new Map([[VM_NAME, vm()]]), { guestProbeOutput: '' })
+
+    await service.planShell(repoADir, shellTarget(repoADir))
+    await waitForGuestProbesForTests()
+
+    await expect(service.describeCheckoutEnvironment(repoADir)).resolves.toMatchObject({ guest: null })
+
+    writeFakeMsbSpec()
+
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(Date.now() + 6000)
+      await expect(service.planShell(repoADir, shellTarget(repoADir))).resolves.toEqual({
+        mode: 'sandbox',
+        name: VM_NAME,
+        workdir: repoADir,
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+
+    await waitForGuestProbesForTests()
+
+    await expect(service.describeCheckoutEnvironment(repoADir)).resolves.toMatchObject({
+      guest: 'Debian GNU/Linux 12 (bookworm) | Linux 6.8.0-test x86_64',
+    })
+    expect(msbCalls('exec').filter((args) => args.some((arg) => arg.includes('uname -srm')))).toHaveLength(2)
   })
 
   it('resolves no environment for a directory outside the project roots', async () => {
@@ -1608,6 +1661,30 @@ describe('SandboxRuntimeService', () => {
 
     expect(msbCalls('rm')).toHaveLength(1)
     expect(msbCalls('volume')).toHaveLength(1)
+  })
+
+  it('removes the Docker data volume when a teardown waits for an in-flight restart removal', async () => {
+    enableEnforcement()
+    installFakeMsb(new Map<string, FakeVm>([[VM_NAME, vm()]]))
+    openFakeMsbGate('rm')
+
+    const restarting = service.restartCheckoutSandbox(repoADir)
+    await waitForFakeMsbGate('rm')
+
+    const teardown = service.removeCheckoutSandbox(repoADir)
+    releaseFakeMsbGate('rm')
+
+    await restarting
+    await teardown
+
+    expect(msbCalls('rm')).toHaveLength(2)
+    expect(fakeMsbInvocations()).toContainEqual([
+      sandboxExecutablePath(),
+      'volume',
+      'rm',
+      sandboxDockerDataVolumeName(VM_NAME),
+    ])
+    expect(hasFakeVm(VM_NAME)).toBe(false)
   })
 
   it('starts the idle sweep at boot so a stale sandbox is removed without a plan', async () => {

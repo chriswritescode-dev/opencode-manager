@@ -20,6 +20,7 @@ function makeRepoSandboxResources(overrides: Partial<RepoSandboxResources> = {})
 
 interface RenderDialogOptions {
   resources?: RepoSandboxResources
+  getResponse?: () => FetchRouteResult
   putResponse?: (request: RecordedFetchRequest) => FetchRouteResult
 }
 
@@ -27,7 +28,11 @@ function renderDialog(options: RenderDialogOptions = {}) {
   const resources = options.resources ?? makeRepoSandboxResources()
   const onOpenChange = vi.fn()
   const routes: FetchRoute[] = [
-    { method: 'GET', path: resourcesPath, respond: () => ({ json: resources }) },
+    {
+      method: 'GET',
+      path: resourcesPath,
+      respond: () => (options.getResponse ? options.getResponse() : { json: resources }),
+    },
     {
       method: 'PUT',
       path: resourcesPath,
@@ -84,6 +89,32 @@ describe('SessionSandboxResourcesDialog', () => {
       expect(fetchFake.lastRequest('PUT', resourcesPath)?.body).toEqual({ cpus: 4, memoryMib: 3072 }),
     )
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it('refetches the repository resources after saving instead of caching the response', async () => {
+    const user = userEvent.setup()
+    const { fetchFake } = renderDialog()
+
+    await waitFor(() => expect(screen.getByLabelText('CPUs')).toHaveValue(2))
+    expect(fetchFake.findRequests('GET', resourcesPath)).toHaveLength(1)
+
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(fetchFake.findRequests('GET', resourcesPath)).toHaveLength(2))
+  })
+
+  it('shows the load error and disables the controls when the resources cannot be loaded', async () => {
+    renderDialog({
+      getResponse: () => ({ status: 409, json: { error: 'Sandboxing is not enabled for this server' } }),
+    })
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Sandboxing is not enabled for this server')
+    expect(screen.getByLabelText('CPUs')).toBeDisabled()
+    expect(screen.getByLabelText('Memory (GiB)')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Use defaults' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Restart sandbox now' })).toBeDisabled()
   })
 
   it('clears the repository override with use defaults', async () => {

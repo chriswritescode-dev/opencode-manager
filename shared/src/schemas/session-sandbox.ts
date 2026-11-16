@@ -24,7 +24,7 @@ export type SessionSandboxSource = z.infer<typeof SessionSandboxSourceSchema>;
 
 export const SetSessionSandboxRequestSchema = z.object({
   sandboxed: z.boolean(),
-});
+}).strict();
 
 export type SetSessionSandboxRequest = z.infer<typeof SetSessionSandboxRequestSchema>;
 

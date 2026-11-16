@@ -16,6 +16,7 @@ import {
   updateScheduleRun,
   updateScheduleRunWorktree,
 } from '../../src/db/schedules'
+import { setSessionSandboxed } from '../../src/db/session-sandbox-modes'
 import {
   ScheduleRunner,
   ScheduleRunRegistry,
@@ -579,6 +580,23 @@ describe('ScheduleService', () => {
       const completed = await waitForRun(job.id, run.id, { status: 'completed' })
       expect(completed).toMatchObject({ responseText: 'Recovered after reconnect', sessionId: 'ses-run-9' })
     })
+
+    it('re-registers the job resources when recovering a busy dedicated worktree run', async () => {
+      const { client } = createClient({ active: { 'ses-run-10': { type: 'running' } } })
+      const { sessions, runtime } = createSandboxDeps()
+      const { service } = createService(client, { sandbox: { sessions, runtime } })
+      const sandboxJob = seedJob({ sandbox: { enabled: true, resources: SANDBOX_RESOURCES } })
+      const worktreePath = path.join(workspace.path, 'worktrees', `job-${sandboxJob.id}-run-1`)
+      mkdirSync(worktreePath, { recursive: true })
+      const run = seedRunningRun(sandboxJob.id, { triggerSource: 'schedule' })
+      updateScheduleRunWorktree(db, repo.id, sandboxJob.id, run.id, { worktreePath })
+      updateScheduleRun(db, repo.id, sandboxJob.id, run.id, { status: 'running', finishedAt: 0, sessionId: 'ses-run-10' })
+
+      await service.recoverRunningRuns()
+
+      expect(runtime.registerCheckoutRunResources).toHaveBeenCalledWith(worktreePath, SANDBOX_RESOURCES)
+      expect(runtime.registerCheckoutRunResources).not.toHaveBeenCalledWith(repo.fullPath, SANDBOX_RESOURCES)
+    })
   })
 
   describe('job management', () => {
@@ -857,24 +875,47 @@ describe('ScheduleService', () => {
     it('boots the run sandbox with the job resources before the first prompt', async () => {
       const { api, client } = createClient({ messages: [assistantMessage('Done.', { completed: true })] })
       const { sessions, runtime } = createSandboxDeps()
-      const { service } = createService(client, { sandbox: { sessions, runtime } })
+      const worktreeManager = createStubWorktreeManager()
+      const { service } = createService(client, { sandbox: { sessions, runtime }, worktreeManager })
       const sandboxJob = seedJob({ sandbox: sandboxJobConfig })
+      const worktreePath = path.join(workspace.path, 'worktrees', `job-${sandboxJob.id}-run-1`)
+      mkdirSync(worktreePath, { recursive: true })
+      worktreeManager.prepare.mockResolvedValue({
+        directory: worktreePath,
+        worktreePath,
+        runBranch: `schedule/${sandboxJob.id}/run-1`,
+      })
 
       const run = await service.runJob(repo.id, sandboxJob.id, 'manual')
       await waitForRun(sandboxJob.id, run.id, { status: 'completed' })
 
       expect(sessions.update).toHaveBeenCalledWith('ses-run-1', { sandboxed: true })
       expect(runtime.planShell).toHaveBeenCalledWith(
-        repo.fullPath,
-        { locationDirectory: repo.fullPath },
+        worktreePath,
+        { locationDirectory: worktreePath },
         true,
       )
-      expect(runtime.registerCheckoutRunResources).toHaveBeenCalledWith(repo.fullPath, SANDBOX_RESOURCES)
+      expect(runtime.registerCheckoutRunResources).toHaveBeenCalledWith(worktreePath, SANDBOX_RESOURCES)
       const [registerOrder] = vi.mocked(runtime.registerCheckoutRunResources).mock.invocationCallOrder
       const [planOrder] = vi.mocked(runtime.planShell).mock.invocationCallOrder
       const [promptOrder] = vi.mocked(api.session.prompt).mock.invocationCallOrder
       expect(registerOrder).toBeLessThan(planOrder ?? 0)
       expect(planOrder).toBeLessThan(promptOrder ?? 0)
+    })
+
+    it('does not register run resources when prepare returns no dedicated worktree', async () => {
+      const { client } = createClient({ messages: [assistantMessage('Done.', { completed: true })] })
+      const { sessions, runtime } = createSandboxDeps()
+      const { service } = createService(client, { sandbox: { sessions, runtime } })
+      const sandboxJob = seedJob({ sandbox: sandboxJobConfig })
+
+      const run = await service.runJob(repo.id, sandboxJob.id, 'manual')
+      await waitForRun(sandboxJob.id, run.id, { status: 'completed' })
+
+      expect(runtime.registerCheckoutRunResources).not.toHaveBeenCalled()
+      expect(runtime.planShell).toHaveBeenCalledWith(repo.fullPath, { locationDirectory: repo.fullPath }, true)
+      expect(runtime.releaseCheckoutRunResources).not.toHaveBeenCalled()
+      expect(runtime.removeCheckoutSandbox).not.toHaveBeenCalled()
     })
 
     it('registers the job resources for a dedicated worktree and releases them at teardown', async () => {
@@ -911,8 +952,16 @@ describe('ScheduleService', () => {
     it('plans a shared-worktree run in the shared directory without registering job resources', async () => {
       const { client } = createClient({ messages: [assistantMessage('Done.', { completed: true })] })
       const { sessions, runtime } = createSandboxDeps()
-      const { service } = createService(client, { sandbox: { sessions, runtime } })
+      const worktreeManager = createStubWorktreeManager()
+      const { service } = createService(client, { sandbox: { sessions, runtime }, worktreeManager })
       const sandboxJob = seedJob({ sandbox: sandboxJobConfig, workspaceMode: 'shared-worktree' })
+      const sharedWorktreePath = path.join(workspace.path, 'worktrees', `job-${sandboxJob.id}-shared`)
+      mkdirSync(sharedWorktreePath, { recursive: true })
+      worktreeManager.prepare.mockResolvedValue({
+        directory: sharedWorktreePath,
+        worktreePath: sharedWorktreePath,
+        runBranch: `schedule/${sandboxJob.id}/shared`,
+      })
 
       const run = await service.runJob(repo.id, sandboxJob.id, 'manual')
       await waitForRun(sandboxJob.id, run.id, { status: 'completed' })
@@ -921,7 +970,11 @@ describe('ScheduleService', () => {
       expect(runtime.registerCheckoutRunResources).not.toHaveBeenCalled()
       expect(runtime.releaseCheckoutRunResources).not.toHaveBeenCalled()
       expect(runtime.removeCheckoutSandbox).not.toHaveBeenCalled()
-      expect(runtime.planShell).toHaveBeenCalledWith(repo.fullPath, { locationDirectory: repo.fullPath }, true)
+      expect(runtime.planShell).toHaveBeenCalledWith(
+        sharedWorktreePath,
+        { locationDirectory: sharedWorktreePath },
+        true,
+      )
     })
 
     it('fails the run without prompting when the sandbox cannot start', async () => {
@@ -943,7 +996,8 @@ describe('ScheduleService', () => {
         errorText: 'Sandbox could not start: 2 sandbox VMs are already running',
       })
       expect(api.session.prompt).not.toHaveBeenCalled()
-      expect(runtime.releaseCheckoutRunResources).toHaveBeenCalledWith(repo.fullPath)
+      expect(runtime.registerCheckoutRunResources).not.toHaveBeenCalled()
+      expect(runtime.releaseCheckoutRunResources).not.toHaveBeenCalled()
       expect(runtime.removeCheckoutSandbox).not.toHaveBeenCalled()
     })
 
@@ -982,6 +1036,27 @@ describe('ScheduleService', () => {
       const run = seedRunningRun(sandboxJob.id)
       updateScheduleRunWorktree(db, repo.id, sandboxJob.id, run.id, { worktreePath })
       updateScheduleRun(db, repo.id, sandboxJob.id, run.id, { status: 'running', finishedAt: 0, sessionId: 'ses-run-3' })
+
+      const cancelled = await service.cancelRun(repo.id, sandboxJob.id, run.id)
+
+      expect(cancelled).toMatchObject({ status: 'cancelled' })
+      expect(runtime.releaseCheckoutRunResources).toHaveBeenCalledWith(worktreePath)
+      expect(runtime.removeCheckoutSandbox).toHaveBeenCalledWith(worktreePath)
+    })
+
+    it('removes the sandbox of a cancelled dedicated worktree run after the job sandbox was turned off', async () => {
+      const { client } = createClient({ messages: [] })
+      const { sessions, runtime } = createSandboxDeps()
+      const { service } = createService(client, { sandbox: { sessions, runtime } })
+      const sandboxJob = seedJob({ sandbox: sandboxJobConfig })
+      await service.updateJob(repo.id, sandboxJob.id, { sandbox: null })
+      expect(getScheduleJobById(db, repo.id, sandboxJob.id)?.sandbox).toBeNull()
+      const worktreePath = path.join(workspace.path, 'worktrees', `job-${sandboxJob.id}-run-1`)
+      mkdirSync(worktreePath, { recursive: true })
+      const run = seedRunningRun(sandboxJob.id)
+      updateScheduleRunWorktree(db, repo.id, sandboxJob.id, run.id, { worktreePath })
+      updateScheduleRun(db, repo.id, sandboxJob.id, run.id, { status: 'running', finishedAt: 0, sessionId: 'ses-run-6' })
+      setSessionSandboxed(db, 'ses-run-6', true)
 
       const cancelled = await service.cancelRun(repo.id, sandboxJob.id, run.id)
 

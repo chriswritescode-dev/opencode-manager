@@ -763,11 +763,17 @@ describe('sandbox network policy attestation helpers', () => {
     expect(sandboxNetworkGroups('private, host, private')).toEqual(['private', 'host'])
   })
 
-  it('lists no network groups for terminal, unknown, or empty profiles', () => {
-    for (const profile of ['', 'none', 'all', 'bogus']) {
+  it('lists every network group for the all profile', () => {
+    expect(sandboxNetworkGroups('all')).toEqual(['public', 'private', 'host'])
+    expect(sandboxNetworkGroups(' all ')).toEqual(['public', 'private', 'host'])
+  })
+
+  it('lists no network groups for none, unknown, or empty profiles', () => {
+    for (const profile of ['', 'none', 'bogus']) {
       expect(sandboxNetworkGroups(profile)).toEqual([])
       expect(resolveExpectedSandboxNetworkPolicy(profile)).toBeNull()
     }
+    expect(resolveExpectedSandboxNetworkPolicy('all')).toBeNull()
   })
 
   it('returns null for terminal, unknown, or empty profiles', () => {

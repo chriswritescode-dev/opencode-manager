@@ -69,12 +69,19 @@ export function formatWorkspaceMode(mode: ScheduleWorkspaceMode): string {
   return workspaceModeOptions.find((option) => option.value === mode)?.label ?? mode
 }
 
-export function formatScheduleSandbox(sandbox: ScheduleSandboxConfig | null | undefined): string {
+export function formatScheduleSandbox(
+  sandbox: ScheduleSandboxConfig | null | undefined,
+  workspaceMode: ScheduleWorkspaceMode,
+): string {
   if (!sandbox?.enabled) {
     return 'Off'
   }
 
-  return sandbox.resources ? `On · ${formatSandboxResources(sandbox.resources)}` : 'On · server defaults'
+  if (!sandbox.resources || workspaceMode === 'shared-worktree') {
+    return 'On · repository resources'
+  }
+
+  return `On · ${formatSandboxResources(sandbox.resources)}`
 }
 
 export function formatScheduleInbox(showInInbox: boolean): string {

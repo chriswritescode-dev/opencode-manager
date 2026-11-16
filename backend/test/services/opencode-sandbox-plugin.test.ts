@@ -7,6 +7,7 @@ import path from 'path'
 import os from 'os'
 import { z } from 'zod'
 import {
+  SANDBOX_NOTE_TIMEOUT_MS,
   SANDBOX_PLAN_TIMEOUT_MS,
 } from '../../src/services/opencode-sandbox-plugin'
 import { installManagedPlugins, getOpenCodePluginDir } from '../../src/services/opencode/plugin-registry'
@@ -189,6 +190,12 @@ describe('ocm-sandbox plugin', () => {
     expect(SANDBOX_PLAN_TIMEOUT_MS).toBeGreaterThan(ENV.SANDBOX.START_TIMEOUT_MS)
     const pluginSource = await fs.readFile(path.join(getOpenCodePluginDir(configHome), 'ocm-sandbox.js'), 'utf-8')
     expect(pluginSource).toContain(`var PLAN_TIMEOUT_MS = ${SANDBOX_PLAN_TIMEOUT_MS}`)
+  })
+
+  it('gives the sandbox note a short deadline of its own', async () => {
+    expect(SANDBOX_NOTE_TIMEOUT_MS).toBeLessThan(SANDBOX_PLAN_TIMEOUT_MS)
+    const pluginSource = await fs.readFile(path.join(getOpenCodePluginDir(configHome), 'ocm-sandbox.js'), 'utf-8')
+    expect(pluginSource).toContain(`var NOTE_TIMEOUT_MS = ${SANDBOX_NOTE_TIMEOUT_MS}`)
   })
 
   it('throws when the plugin file cannot be written', async () => {
@@ -1114,12 +1121,64 @@ describe('ocm-sandbox plugin', () => {
     it('never writes an entry when enforcement is off', async () => {
       delete process.env.OCM_SANDBOX_ENFORCED
       const plugin = await loadPlugin(configHome)
-      vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true } }))
+      const fetchMock = managerFetch({ session: { sandboxed: true } })
+      vi.stubGlobal('fetch', fetchMock)
 
       await plugin.triggerSessionPrompt(sessionPromptEvent())
       await plugin.triggerSessionContext(sessionContextEvent())
 
       expect(readInstructionEntry(SESSION_ID, NOTE_KEY)).toBeUndefined()
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('replaces a stored sandbox note with the host note once enforcement is turned off', async () => {
+      const enforcing = await loadPlugin(configHome)
+      vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true } }))
+      await enforcing.triggerSessionPrompt(sessionPromptEvent())
+      expect(noteValue().startsWith('[Sandbox] Environment: microVM (')).toBe(true)
+
+      delete process.env.OCM_SANDBOX_ENFORCED
+      const fetchMock = vi.fn()
+      vi.stubGlobal('fetch', fetchMock)
+      const disabled = await loadPlugin(configHome)
+      const writeSpy = vi.spyOn(Map.prototype, 'set')
+      try {
+        await disabled.triggerSessionPrompt(sessionPromptEvent())
+        expect(noteValue().startsWith('[Sandbox] Execution has returned to the host environment (')).toBe(true)
+
+        await disabled.triggerSessionContext(sessionContextEvent())
+        expect(noteValue().startsWith('[Sandbox] Execution has returned to the host environment (')).toBe(true)
+
+        expect(writeSpy.mock.calls.filter(([key]) => key === NOTE_KEY)).toHaveLength(1)
+        expect(fetchMock).not.toHaveBeenCalled()
+      } finally {
+        writeSpy.mockRestore()
+      }
+    })
+
+    it('gives up on a stalled environment request at the note deadline', async () => {
+      const plugin = await loadPlugin(configHome)
+      vi.stubGlobal('fetch', managerFetch({ session: { sandboxed: true } }))
+      await plugin.triggerSessionContext(sessionContextEvent())
+      const stored = noteValue()
+
+      vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string, init: { signal: AbortSignal }) => {
+        if (String(url).includes('/environment')) {
+          return new Promise((_resolve, reject) => {
+            init.signal.addEventListener('abort', () => reject(new Error('The operation was aborted')))
+          })
+        }
+        return Promise.resolve(jsonResponse({ sandboxed: true }))
+      }))
+      vi.useFakeTimers()
+      try {
+        const pending = plugin.triggerSessionContext(sessionContextEvent())
+        await vi.advanceTimersByTimeAsync(SANDBOX_NOTE_TIMEOUT_MS + 1)
+        await expect(pending).resolves.toBeUndefined()
+        expect(noteValue()).toBe(stored)
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it('leaves the note untouched when the environment request fails', async () => {
