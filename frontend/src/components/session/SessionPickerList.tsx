@@ -154,7 +154,7 @@ const SessionPickerRowItem = memo(function SessionPickerRowItem({
               <MoreHorizontal className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="z-[200]" onClick={(event) => event.stopPropagation()}>
+          <DropdownMenuContent align="end" className="z-[300]" onClick={(event) => event.stopPropagation()}>
             <DropdownMenuItem onClick={() => onTogglePin(row)}>
               {isPinned ? <PinOff className="h-4 w-4 mr-2" /> : <Pin className="h-4 w-4 mr-2" />}
               {isPinned ? 'Unpin' : 'Pin'}

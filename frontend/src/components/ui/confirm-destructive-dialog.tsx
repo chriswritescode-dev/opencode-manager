@@ -35,7 +35,7 @@ export function ConfirmDestructiveDialog({
 }: ConfirmDestructiveDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[90%] sm:max-w-sm">
+      <DialogContent className="z-[300] max-w-[90%] sm:max-w-sm" overlayClassName="z-[300]">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
