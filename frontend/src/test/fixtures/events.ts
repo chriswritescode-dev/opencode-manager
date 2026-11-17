@@ -330,6 +330,10 @@ export function goalChanged(
   return withContext(payload, context)
 }
 
+export function pluginUpdated(context: StreamEventContext = {}): JsonObject {
+  return streamEvent('plugin.updated', {}, context)
+}
+
 export function sshHostKeyRequest(properties: SSHHostKeyRequest): JsonObject {
   return { type: 'ssh.host-key-request', properties }
 }

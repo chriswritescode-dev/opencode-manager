@@ -118,6 +118,18 @@ describe('readSessionGoal', () => {
     await expect(readSessionGoal(createApi(call), { sessionID: SESSION_ID })).resolves.toEqual({ supported: false })
   })
 
+  it('reads the goal again after an unavailable rpc', async () => {
+    const call = vi
+      .fn<OpenCodeApi['rpc']['call']>()
+      .mockRejectedValueOnce(rpcError('rpc.unavailable', 'RPC is unavailable: opencode.goal'))
+      .mockResolvedValueOnce({ output: null })
+    const api = createApi(call)
+
+    await expect(readSessionGoal(api, { sessionID: SESSION_ID })).resolves.toEqual({ supported: false })
+    await expect(readSessionGoal(api, { sessionID: SESSION_ID })).resolves.toEqual({ supported: true, goal: null })
+    expect(call).toHaveBeenCalledTimes(2)
+  })
+
   it('rethrows every other error unchanged', async () => {
     const error = rpcError('rpc.failed', 'boom')
     const call = vi.fn<OpenCodeApi['rpc']['call']>().mockRejectedValue(error)

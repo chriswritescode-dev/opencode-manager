@@ -19,14 +19,18 @@ function sessionGoalQueryKey(sessionID: string, directory: string | undefined, s
   return serverScopedKey([SESSION_GOAL_QUERY_ROOT, sessionID, directory], serverId)
 }
 
-function isSessionGoalQueryFor(query: Query, sessionID: string, serverId: string): boolean {
+function isSessionGoalQueryOnServer(query: Query, serverId: string): boolean {
   const { queryKey } = query
-  if (queryKey[0] !== SESSION_GOAL_QUERY_ROOT || queryKey[1] !== sessionID) return false
+  if (queryKey[0] !== SESSION_GOAL_QUERY_ROOT) return false
   if (isLocalOpenCodeServer(serverId)) return queryKey.length === SESSION_GOAL_KEY_BASE_LENGTH
   return (
     queryKey.length === SESSION_GOAL_KEY_BASE_LENGTH + 1
     && queryKey[SESSION_GOAL_KEY_BASE_LENGTH] === serverId
   )
+}
+
+function isSessionGoalQueryFor(query: Query, sessionID: string, serverId: string): boolean {
+  return isSessionGoalQueryOnServer(query, serverId) && query.queryKey[1] === sessionID
 }
 
 function sessionGoalQueryPredicate(sessionID: string, serverId: string) {
@@ -54,6 +58,18 @@ export function applySessionGoalEvent(
   void queryClient.cancelQueries({ predicate })
   queryClient.setQueriesData<SessionGoalRead>({ predicate }, nextGoal)
   return true
+}
+
+export async function invalidateSessionGoalsForLocation(
+  queryClient: QueryClient,
+  serverId: string,
+  directory: string | null,
+): Promise<void> {
+  await queryClient.invalidateQueries({
+    predicate: (query) =>
+      isSessionGoalQueryOnServer(query, serverId)
+      && (directory === null || query.queryKey[2] === directory),
+  })
 }
 
 type GoalCommandInput = Omit<RunCommandInput, 'name' | 'delivery'> & {

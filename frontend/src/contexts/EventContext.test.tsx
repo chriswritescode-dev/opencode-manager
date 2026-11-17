@@ -1,6 +1,6 @@
 import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { useState } from 'react'
+import { useState, type ReactElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useLocation } from 'react-router-dom'
 import type { FormInfo, GoalState, PermissionRequest } from '@opencode-manager/shared/opencode'
@@ -11,6 +11,7 @@ import type { Repo } from '@/api/types'
 import type { OpenCodeServer } from '@opencode-manager/shared/schemas'
 import { hasBackgroundActivity, useSessionStatus } from '@/stores/sessionStatusStore'
 import { changeWalkthroughQueryKey } from '@/hooks/useChangeWalkthrough'
+import { useSessionGoal } from '@/hooks/useSessionGoals'
 import type { TestEventStreamTransport } from '@/lib/opencode-event-stream'
 import type { FetchFake, FetchRoute, FetchRouteResult, RecordedFetchRequest } from '@/test/fetchFake'
 import type { JsonObject } from '@opencode-manager/shared/utils'
@@ -24,6 +25,7 @@ import {
   goalChanged,
   permissionAsked,
   permissionReplied,
+  pluginUpdated,
   sessionCompactionEnded,
   sessionCompactionFailed,
   sessionCompactionStarted,
@@ -209,6 +211,11 @@ function CacheResolutionHarness({ sessionID }: { sessionID: string }) {
   )
 }
 
+function GoalReadHarness({ sessionID, directory }: { sessionID: string; directory: string }) {
+  useSessionGoal(sessionID, directory)
+  return null
+}
+
 interface ApiState {
   repos: Repo[]
   projects: OpenCodeProject[]
@@ -227,6 +234,7 @@ interface ApiState {
   activeResponder: FetchRoute['respond'] | null
   sessionResponder: FetchRoute['respond'] | null
   serversResponder: FetchRoute['respond'] | null
+  goalResponder: FetchRoute['respond'] | null
 }
 
 function createApiState(overrides: Partial<ApiState> = {}): ApiState {
@@ -248,6 +256,7 @@ function createApiState(overrides: Partial<ApiState> = {}): ApiState {
     activeResponder: null,
     sessionResponder: null,
     serversResponder: null,
+    goalResponder: null,
     ...overrides,
   }
 }
@@ -285,6 +294,8 @@ function providerRoutes(state: ApiState): FetchRoute[] {
     { method: 'POST', path: `${localApi}/session/:sessionID/permission/:permissionID/reply`, respond: () => state.permissionReply },
     { method: 'POST', path: `${localApi}/session/:sessionID/form/:formID/reply`, respond: () => state.formReply },
     { method: 'DELETE', path: `${localApi}/session/:sessionID/form/:formID`, respond: () => state.formCancel },
+    { method: 'POST', path: `${localApi}/rpc/opencode.goal/get`, respond: () => state.goalResponder ? state.goalResponder(emptyRequest, {}, undefined) : ({ json: { output: null } }) },
+    { method: 'POST', path: `${remoteApi}/rpc/opencode.goal/get`, respond: () => state.goalResponder ? state.goalResponder(emptyRequest, {}, undefined) : ({ json: { output: null } }) },
   ]
 }
 
@@ -309,6 +320,7 @@ interface RenderProviderOptions {
   queryClient?: ReturnType<typeof createTestQueryClient>
   auth?: 'anonymous' | 'authenticated'
   fakeTimers?: boolean
+  ui?: ReactElement
 }
 
 interface Deferred<T> {
@@ -357,7 +369,7 @@ interface ProviderHarness {
 async function renderProvider(options: RenderProviderOptions = {}): Promise<ProviderHarness> {
   const api = createApiState(options.api)
   const queryClient = options.queryClient ?? createTestQueryClient()
-  const result = renderWithProviders(<Harness />, {
+  const result = renderWithProviders(options.ui ?? <Harness />, {
     events: true,
     route: options.route ?? '/',
     auth: options.auth ?? 'authenticated',
@@ -1200,6 +1212,124 @@ describe('EventProvider permissions and forms', () => {
     harness.push(sessionIdle('other', { directory: '/repo' }))
 
     expect(queryClient.getQueryData(['session-goal', 'session-1', '/repo'])).toEqual({ supported: true, goal: updatedGoal })
+  })
+
+  it('refreshes an unavailable goal read on plugin.updated for its directory', async () => {
+    const goal: GoalState = {
+      id: 'goal-1',
+      objective: 'Ship the goal bar',
+      status: 'active',
+      rounds: 0,
+      maxRounds: 10,
+      boot: 'boot-1',
+      updatedAt: 1000,
+    }
+    let registered = false
+    const goalResponder: FetchRoute['respond'] = () =>
+      registered
+        ? { json: { output: goal } }
+        : {
+            status: 400,
+            json: {
+              _tag: 'RpcError',
+              type: 'rpc.unavailable',
+              message: 'RPC is unavailable: opencode.goal',
+            },
+          }
+    const queryClient = createTestQueryClient()
+    const goalKey = ['session-goal', 'session-1', '/repo']
+
+    const harness = await renderProvider({
+      queryClient,
+      ui: <GoalReadHarness sessionID="session-1" directory="/repo" />,
+      api: { goalResponder },
+    })
+
+    await waitFor(() => expect(queryClient.getQueryData(goalKey)).toEqual({ supported: false }))
+    await waitFor(() => expect(queryClient.getQueryState(goalKey)?.fetchStatus).toBe('idle'))
+
+    registered = true
+    harness.push(pluginUpdated({ directory: '/repo' }))
+
+    await waitFor(() => expect(queryClient.getQueryData(goalKey)).toEqual({ supported: true, goal }))
+    expect(
+      harness.fetchFake
+        .findRequests('POST', '/api/opencode/api/rpc/opencode.goal/get')
+        .every((request) => request.searchParams.get('location[directory]') === '/repo'),
+    ).toBe(true)
+  })
+
+  it('invalidates only goal reads for the event directory on the local server', async () => {
+    const harness = await renderProvider()
+    const repoKey = ['session-goal', 'session-1', '/repo']
+    const otherKey = ['session-goal', 'session-1', '/other']
+    const remoteKey = ['session-goal', 'session-1', '/repo', 'srv_remote']
+    harness.queryClient.setQueryData(repoKey, { supported: true, goal: null })
+    harness.queryClient.setQueryData(otherKey, { supported: true, goal: null })
+    harness.queryClient.setQueryData(remoteKey, { supported: true, goal: null })
+
+    harness.push(pluginUpdated({ directory: '/repo' }))
+
+    await waitFor(() => expect(harness.queryClient.getQueryState(repoKey)?.isInvalidated).toBe(true))
+    expect(harness.queryClient.getQueryState(otherKey)?.isInvalidated).toBe(false)
+    expect(harness.queryClient.getQueryState(remoteKey)?.isInvalidated).toBe(false)
+  })
+
+  it('invalidates only goal reads for the event server when the event names one', async () => {
+    const harness = await renderProvider()
+    const repoKey = ['session-goal', 'session-1', '/repo']
+    const otherKey = ['session-goal', 'session-1', '/other']
+    const remoteKey = ['session-goal', 'session-1', '/repo', 'srv_remote']
+    harness.queryClient.setQueryData(repoKey, { supported: true, goal: null })
+    harness.queryClient.setQueryData(otherKey, { supported: true, goal: null })
+    harness.queryClient.setQueryData(remoteKey, { supported: true, goal: null })
+
+    harness.push(pluginUpdated({ directory: '/repo', serverId: 'srv_remote' }))
+
+    await waitFor(() => expect(harness.queryClient.getQueryState(remoteKey)?.isInvalidated).toBe(true))
+    expect(harness.queryClient.getQueryState(repoKey)?.isInvalidated).toBe(false)
+    expect(harness.queryClient.getQueryState(otherKey)?.isInvalidated).toBe(false)
+  })
+
+  it('invalidates every local goal read for a location-less plugin.updated', async () => {
+    const harness = await renderProvider()
+    const repoKey = ['session-goal', 'session-1', '/repo']
+    const otherKey = ['session-goal', 'session-1', '/other']
+    const remoteKey = ['session-goal', 'session-1', '/repo', 'srv_remote']
+    harness.queryClient.setQueryData(repoKey, { supported: true, goal: null })
+    harness.queryClient.setQueryData(otherKey, { supported: true, goal: null })
+    harness.queryClient.setQueryData(remoteKey, { supported: true, goal: null })
+
+    harness.push(pluginUpdated())
+
+    await waitFor(() => {
+      expect(harness.queryClient.getQueryState(repoKey)?.isInvalidated).toBe(true)
+      expect(harness.queryClient.getQueryState(otherKey)?.isInvalidated).toBe(true)
+    })
+    expect(harness.queryClient.getQueryState(remoteKey)?.isInvalidated).toBe(false)
+  })
+
+  it('invalidates cached goal reads when the browser stream connects', async () => {
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData(['session-goal', 'session-1', '/repo'], { supported: false })
+
+    await renderProvider({ queryClient })
+
+    await waitFor(() =>
+      expect(queryClient.getQueryState(['session-goal', 'session-1', '/repo'])?.isInvalidated).toBe(true),
+    )
+  })
+
+  it('invalidates cached goal reads on an upstream resync', async () => {
+    const harness = await renderProvider()
+    const goalKey = ['session-goal', 'session-1', '/repo']
+    harness.queryClient.setQueryData(goalKey, { supported: true, goal: null })
+
+    expect(harness.queryClient.getQueryState(goalKey)?.isInvalidated).toBe(false)
+
+    await harness.resync()
+
+    await waitFor(() => expect(harness.queryClient.getQueryState(goalKey)?.isInvalidated).toBe(true))
   })
 
   it('invalidates the sibling caches when a branch changes outside a repo row', async () => {
