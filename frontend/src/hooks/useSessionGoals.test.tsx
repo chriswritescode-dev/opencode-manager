@@ -146,26 +146,27 @@ describe('invalidateSessionGoalsForLocation', () => {
   })
 
   it('keeps an always-unavailable goal unsupported without retrying', async () => {
-    const { result, fetchFake, queryClient } = renderHookWithProviders(() => useSessionGoal('ses_1', '/repo'), {
-      ...hookProviders,
-      fetchRoutes: [goalRoute(() => ({ status: 400, json: unavailableGoalBody }))],
-    })
-
-    await waitFor(() => expect(result.current.data).toEqual({ supported: false }))
-
-    await act(async () => {
-      await invalidateSessionGoalsForLocation(queryClient, LOCAL_OPENCODE_SERVER_ID, '/repo')
-    })
-
-    await waitFor(() => expect(fetchFake.findRequests('POST', goalReadPath)).toHaveLength(2))
-    expect(result.current.data).toEqual({ supported: false })
-
-    vi.useFakeTimers()
+    vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
+      const { result, fetchFake, queryClient } = renderHookWithProviders(() => useSessionGoal('ses_1', '/repo'), {
+        ...hookProviders,
+        fetchRoutes: [goalRoute(() => ({ status: 400, json: unavailableGoalBody }))],
+      })
+
+      await waitFor(() => expect(result.current.data).toEqual({ supported: false }))
+
+      await act(async () => {
+        await invalidateSessionGoalsForLocation(queryClient, LOCAL_OPENCODE_SERVER_ID, '/repo')
+      })
+
+      await waitFor(() => expect(fetchFake.findRequests('POST', goalReadPath)).toHaveLength(2))
+      expect(result.current.data).toEqual({ supported: false })
+
       await act(async () => {
         await vi.advanceTimersByTimeAsync(10_000)
       })
       expect(fetchFake.findRequests('POST', goalReadPath)).toHaveLength(2)
+      expect(result.current.data).toEqual({ supported: false })
     } finally {
       vi.useRealTimers()
     }
@@ -197,7 +198,7 @@ describe('invalidateSessionGoalsForLocation', () => {
     }
   })
 
-  it('does not refetch or leak data for an inactive query after unmount', async () => {
+  it('does not refetch an inactive goal query or cache other locations after unmount', async () => {
     const pending = deferred()
     const { unmount, fetchFake, queryClient } = renderHookWithProviders(() => useSessionGoal('ses_1', '/repo'), {
       ...hookProviders,
@@ -221,7 +222,13 @@ describe('invalidateSessionGoalsForLocation', () => {
       pending.resolve({ json: { output: goal } })
     })
 
-    expect(queryClient.getQueryData(['session-goal', 'ses_1', '/other'])).toBeUndefined()
+    await waitFor(() =>
+      expect(queryClient.getQueryState(['session-goal', 'ses_1', '/repo'])?.fetchStatus).toBe('idle'),
+    )
+    expect(queryClient.getQueryCache().findAll({ queryKey: ['session-goal'] }).map((query) => query.queryKey)).toEqual([
+      ['session-goal', 'ses_1', '/repo'],
+    ])
+    expect(fetchFake.findRequests('POST', goalReadPath)).toHaveLength(1)
   })
 })
 

@@ -66,8 +66,8 @@ describe.skipIf(BINARY === null)(`OpenCode ${VERSION ?? 'unknown'} cold-Location
   let recorded: RecordedEvent[]
   const controller = new AbortController()
 
-  function findPluginUpdated(directory: string): RecordedEvent | undefined {
-    return recorded.find((event) => event.type === 'plugin.updated' && event.directory === directory)
+  function findPluginUpdated(directory: string, fromIndex = 0): RecordedEvent | undefined {
+    return recorded.slice(fromIndex).find((event) => event.type === 'plugin.updated' && event.directory === directory)
   }
 
   async function startEventRecorder(): Promise<void> {
@@ -194,21 +194,26 @@ describe.skipIf(BINARY === null)(`OpenCode ${VERSION ?? 'unknown'} cold-Location
     }
   }, 120000)
 
-  it('restores the Goal read after a location reload', async () => {
+  it('reports the Goal unavailable after a location reload until plugin.updated names the directory', async () => {
     try {
+      const eventsBeforeReload = recorded.length
       await client.api.location.reload({ headers: { [OPENCODE_DIRECTORY_HEADER]: encodeURIComponent(coldDirectory) } })
       const immediateStartedAt = Date.now()
       const immediate = await readSessionGoal(client.api, { sessionID: SESSION_ID, directory: coldDirectory })
       const immediateDuration = Date.now() - immediateStartedAt
       if (RPC_SKIPS_ACTIVATION) {
-        const readable = await waitFor('the Goal to be readable after the location reload', async () => {
-          const read = await readSessionGoal(client.api, { sessionID: SESSION_ID, directory: coldDirectory })
-          return read.supported ? read : undefined
-        })
-        expect(readable).toEqual({ supported: true, goal: null })
+        expect(immediate).toEqual({ supported: false })
+        expect(immediateDuration).toBeLessThan(SLOW_PLUGIN_MS / 2)
+        await waitFor('a plugin.updated event for the cold Location after the reload', () =>
+          findPluginUpdated(coldDirectory, eventsBeforeReload),
+        )
+        expect(await readSessionGoal(client.api, { sessionID: SESSION_ID, directory: coldDirectory })).toEqual({ supported: true, goal: null })
       } else {
         expect(immediate).toEqual({ supported: true, goal: null })
         expect(immediateDuration).toBeGreaterThanOrEqual(SLOW_PLUGIN_MS - 500)
+        await waitFor('a plugin.updated event for the cold Location after the reload', () =>
+          findPluginUpdated(coldDirectory, eventsBeforeReload),
+        )
       }
     } catch (error) {
       throw new Error(`${error instanceof Error ? error.message : String(error)}\n${serve.readOutput()}`, { cause: error })
