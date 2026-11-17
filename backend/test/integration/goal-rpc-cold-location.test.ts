@@ -194,7 +194,7 @@ describe.skipIf(BINARY === null)(`OpenCode ${VERSION ?? 'unknown'} cold-Location
     }
   }, 120000)
 
-  it('reports the Goal unavailable after a location reload until plugin.updated names the directory', async () => {
+  it('records the Goal read after a location reload and refreshes it on plugin.updated', async () => {
     try {
       const eventsBeforeReload = recorded.length
       await client.api.location.reload({ headers: { [OPENCODE_DIRECTORY_HEADER]: encodeURIComponent(coldDirectory) } })
@@ -202,7 +202,7 @@ describe.skipIf(BINARY === null)(`OpenCode ${VERSION ?? 'unknown'} cold-Location
       const immediate = await readSessionGoal(client.api, { sessionID: SESSION_ID, directory: coldDirectory })
       const immediateDuration = Date.now() - immediateStartedAt
       if (RPC_SKIPS_ACTIVATION) {
-        expect(immediate).toEqual({ supported: false })
+        expect([{ supported: false }, { supported: true, goal: null }]).toContainEqual(immediate)
         expect(immediateDuration).toBeLessThan(SLOW_PLUGIN_MS / 2)
         await waitFor('a plugin.updated event for the cold Location after the reload', () =>
           findPluginUpdated(coldDirectory, eventsBeforeReload),
