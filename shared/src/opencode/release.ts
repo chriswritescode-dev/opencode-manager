@@ -1,8 +1,8 @@
 import { compareParsedSemver, compareSemver, normalizeSemver, parseSemver, type Semver } from '../utils/semver'
 
-export const OPENCODE_PINNED_VERSION = '2.2.5'
+export const OPENCODE_PINNED_VERSION = '2.3.0'
 
-export const OPENCODE_MIN_VERSION = '2.2.5'
+export const OPENCODE_MIN_VERSION = '2.3.0'
 
 const OPENCODE_RELEASE_BASE_URL = 'https://opencode.ai/files/bin'
 

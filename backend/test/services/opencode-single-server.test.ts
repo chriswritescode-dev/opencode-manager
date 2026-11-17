@@ -703,12 +703,12 @@ describe('OpenCodeServerManager - plugins and version', () => {
   it.each([true, false])('starts on a supported OpenCode 2 build (enforced: %s)', async (enforced) => {
     context.harness.sandbox.enabled = enforced
     context.harness.ownPortAfterSpawn()
-    context.harness.readVersionOutput.mockReturnValue({ stdout: 'opencode v2.2.5\n', stderr: '' })
+    context.harness.readVersionOutput.mockReturnValue({ stdout: 'opencode v2.3.0\n', stderr: '' })
 
     await context.harness.manager.start()
 
     expect(context.harness.spawnServer).toHaveBeenCalledTimes(1)
-    expect(context.harness.manager.getVersion()).toBe('2.2.5')
+    expect(context.harness.manager.getVersion()).toBe('2.3.0')
     expect(context.harness.manager.isVersionSupported()).toBe(true)
   })
 
@@ -717,7 +717,7 @@ describe('OpenCodeServerManager - plugins and version', () => {
 
     await expect(context.harness.manager.start()).rejects.toThrow('OpenCode 1.18.32 is not supported')
     expect(context.harness.spawnServer).not.toHaveBeenCalled()
-    expect(context.harness.manager.getLastStartupError()).toContain('requires OpenCode >=2.2.5 <3.0.0')
+    expect(context.harness.manager.getLastStartupError()).toContain('requires OpenCode >=2.3.0 <3.0.0')
     expect(context.harness.manager.isLastStartupErrorNonRecoverable()).toBe(true)
   })
 })

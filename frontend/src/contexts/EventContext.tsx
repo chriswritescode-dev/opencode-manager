@@ -41,7 +41,11 @@ import { getServerSessionPath, getSessionPath, parseRepoRoute, parseServerProjec
 import { serverScopedKey } from '@/lib/serverScope'
 import { repoMatchesDirectory } from '@/components/navigation/sidebar-session-tree'
 import { changeWalkthroughQueryKey } from '@/hooks/useChangeWalkthrough'
-import { applySessionGoalEvent, SESSION_GOAL_QUERY_ROOT } from '@/hooks/useSessionGoals'
+import {
+  applySessionGoalEvent,
+  invalidateSessionGoalsForLocation,
+  SESSION_GOAL_QUERY_ROOT,
+} from '@/hooks/useSessionGoals'
 import { busyStatusesFromActiveSessions, useSessionStatus } from '@/stores/sessionStatusStore'
 import {
   invalidateChildSessionCaches,
@@ -1105,6 +1109,9 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         case 'config.updated':
           invalidateQueryKeysDebounced(queryClient, [['opencode', 'config'], ['opencode-config']])
           invalidateProviderCachesDebounced(queryClient)
+          break
+        case 'plugin.updated':
+          void invalidateSessionGoalsForLocation(queryClient, serverId, event.directory ?? null)
           break
         case 'ssh.host-key-request':
           setSSHHostKeyRequest(event.properties)

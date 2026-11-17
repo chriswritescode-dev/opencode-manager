@@ -1,8 +1,15 @@
+import { QueryClient, focusManager } from '@tanstack/react-query'
 import { act, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { applySessionGoalEvent, useSessionGoal, useSessionGoalCommand } from './useSessionGoals'
+import {
+  applySessionGoalEvent,
+  invalidateSessionGoalsForLocation,
+  useSessionGoal,
+  useSessionGoalCommand,
+} from './useSessionGoals'
 import { renderHookWithProviders } from '@/test/render'
 import { makeSession } from '@/test/fixtures/api'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import type { GoalState, SessionGoalRead } from '@opencode-manager/shared/opencode'
 import type { FetchRoute, FetchRouteResult } from '@/test/fetchFake'
 
@@ -29,6 +36,22 @@ const goalReadPath = '/api/opencode/api/rpc/opencode.goal/get'
 
 function goalRoute(respond: FetchRoute['respond'] = () => ({ json: { output: goal } })): FetchRoute {
   return { method: 'POST', path: goalReadPath, respond }
+}
+
+const unavailableGoalBody = {
+  _tag: 'RpcError',
+  type: 'rpc.unavailable',
+  message: 'RPC is unavailable: opencode.goal',
+}
+
+function unavailableThenGoalRoute(): FetchRoute {
+  let calls = 0
+  return goalRoute(() => {
+    calls += 1
+    return calls === 1
+      ? { status: 400, json: unavailableGoalBody }
+      : { json: { output: goal } }
+  })
 }
 
 const commandRoute: FetchRoute = {
@@ -102,6 +125,110 @@ describe('useSessionGoal', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('invalidateSessionGoalsForLocation', () => {
+  it('recovers an unavailable goal read for the invalidated location', async () => {
+    const { result, fetchFake, queryClient } = renderHookWithProviders(() => useSessionGoal('ses_1', '/repo'), {
+      ...hookProviders,
+      fetchRoutes: [unavailableThenGoalRoute()],
+    })
+
+    await waitFor(() => expect(result.current.data).toEqual({ supported: false }))
+
+    await act(async () => {
+      await invalidateSessionGoalsForLocation(queryClient, LOCAL_OPENCODE_SERVER_ID, '/repo')
+    })
+
+    await waitFor(() => expect(result.current.data).toEqual(supportedGoal))
+    expect(fetchFake.findRequests('POST', goalReadPath)).toHaveLength(2)
+  })
+
+  it('keeps an always-unavailable goal unsupported without retrying', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const { result, fetchFake, queryClient } = renderHookWithProviders(() => useSessionGoal('ses_1', '/repo'), {
+        ...hookProviders,
+        fetchRoutes: [goalRoute(() => ({ status: 400, json: unavailableGoalBody }))],
+      })
+
+      await waitFor(() => expect(result.current.data).toEqual({ supported: false }))
+
+      await act(async () => {
+        await invalidateSessionGoalsForLocation(queryClient, LOCAL_OPENCODE_SERVER_ID, '/repo')
+      })
+
+      await waitFor(() => expect(fetchFake.findRequests('POST', goalReadPath)).toHaveLength(2))
+      expect(result.current.data).toEqual({ supported: false })
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000)
+      })
+      expect(fetchFake.findRequests('POST', goalReadPath)).toHaveLength(2)
+      expect(result.current.data).toEqual({ supported: false })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('recovers an unavailable goal read on window focus', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, staleTime: 0, refetchOnWindowFocus: true, gcTime: Infinity },
+        mutations: { retry: false },
+      },
+    })
+    const { result } = renderHookWithProviders(() => useSessionGoal('ses_1', '/repo'), {
+      ...hookProviders,
+      queryClient,
+      fetchRoutes: [unavailableThenGoalRoute()],
+    })
+
+    await waitFor(() => expect(result.current.data).toEqual({ supported: false }))
+
+    try {
+      act(() => {
+        focusManager.setFocused(false)
+        focusManager.setFocused(true)
+      })
+      await waitFor(() => expect(result.current.data).toEqual(supportedGoal))
+    } finally {
+      focusManager.setFocused(undefined)
+    }
+  })
+
+  it('does not refetch an inactive goal query or cache other locations after unmount', async () => {
+    const pending = deferred()
+    const { unmount, fetchFake, queryClient } = renderHookWithProviders(() => useSessionGoal('ses_1', '/repo'), {
+      ...hookProviders,
+      fetchRoutes: [goalRoute(() => pending.promise)],
+    })
+
+    await waitFor(() =>
+      expect(queryClient.getQueryState(['session-goal', 'ses_1', '/repo'])?.fetchStatus).toBe('fetching'),
+    )
+
+    unmount()
+
+    await act(async () => {
+      await invalidateSessionGoalsForLocation(queryClient, LOCAL_OPENCODE_SERVER_ID, '/repo')
+      await invalidateSessionGoalsForLocation(queryClient, LOCAL_OPENCODE_SERVER_ID, '/other')
+    })
+
+    expect(fetchFake.findRequests('POST', goalReadPath)).toHaveLength(1)
+
+    await act(async () => {
+      pending.resolve({ json: { output: goal } })
+    })
+
+    await waitFor(() =>
+      expect(queryClient.getQueryState(['session-goal', 'ses_1', '/repo'])?.fetchStatus).toBe('idle'),
+    )
+    expect(queryClient.getQueryCache().findAll({ queryKey: ['session-goal'] }).map((query) => query.queryKey)).toEqual([
+      ['session-goal', 'ses_1', '/repo'],
+    ])
+    expect(fetchFake.findRequests('POST', goalReadPath)).toHaveLength(1)
   })
 })
 

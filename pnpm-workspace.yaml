@@ -6,13 +6,13 @@ packages:
   - '!workspace/**'
 
 catalog:
-  '@opencode/client': 2.2.5
-  '@opencode/plugin': 2.2.5
-  '@opencode/schema': 2.2.5
-  '@opencode/theme': 2.2.5
-  '@opentui/core': 0.8.2
-  '@opentui/solid': 0.8.2
-  effect: 4.0.6
+  '@opencode/client': 2.3.0
+  '@opencode/plugin': 2.3.0
+  '@opencode/schema': 2.3.0
+  '@opencode/theme': 2.3.0
+  '@opentui/core': 0.8.4
+  '@opentui/solid': 0.8.4
+  effect: 4.1.0
   solid-js: 1.9.18
 
 onlyBuiltDependencies:

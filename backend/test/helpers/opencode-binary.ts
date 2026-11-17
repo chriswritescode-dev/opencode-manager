@@ -6,7 +6,7 @@ import { randomBytes } from 'crypto'
 import os from 'os'
 import path from 'path'
 import { z } from 'zod'
-import { buildOpenCodeBasicAuth, isSupportedOpenCodeVersion } from '@opencode-manager/shared/opencode'
+import { buildOpenCodeBasicAuth, isSameOpenCodeMajor, isSupportedOpenCodeVersion } from '@opencode-manager/shared/opencode'
 import { OPENCODE_SERVICE_SERVE_ARGS, getOpenCodeServiceRegistrationPath, writeOpenCodeServiceSettings } from '../../src/services/opencode-service-mode'
 
 const VERSION_TIMEOUT_MS = 5000
@@ -44,7 +44,7 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function readOpenCodeVersion(binary: string): string | null {
+export function readOpenCodeVersion(binary: string): string | null {
   const result = spawnSync(binary, ['--version'], { encoding: 'utf8', timeout: VERSION_TIMEOUT_MS })
   if (result.status !== 0) return null
   const match = /(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(`${result.stdout ?? ''}${result.stderr ?? ''}`)
@@ -68,6 +68,15 @@ export function resolveOpenCode2Binary(
     if (version && isSupportedOpenCodeVersion(version)) return candidate
   }
   return null
+}
+
+export function resolveGoalProbeBinary(): string | null {
+  const configured = process.env.OPENCODE_GOAL_PROBE_BIN
+  if (configured !== undefined && configured.length > 0) {
+    const version = readOpenCodeVersion(configured)
+    if (version && isSameOpenCodeMajor(version)) return configured
+  }
+  return resolveOpenCode2Binary()
 }
 
 export async function runOpenCodeStandalone(options: { cwd: string; env: NodeJS.ProcessEnv; message: string }): Promise<OpenCodeRunResult> {

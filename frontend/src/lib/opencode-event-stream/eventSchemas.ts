@@ -383,7 +383,7 @@ const CredentialUpdatedSchema = z.looseObject({
   metadata: JsonObjectSchema.optional(),
   type: z.literal('credential.updated'),
   location: LocationRefSchema.optional(),
-  data: z.looseObject({}),
+  data: z.looseObject({ integrationID: z.string(), credentialID: z.string() }),
 })
 
 const CredentialSwitchedSchema = z.looseObject({
