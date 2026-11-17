@@ -23,7 +23,7 @@ import { createStubOpenCodeClient } from './stub-opencode-client'
 export type OpenCodeServerInfo = Awaited<ReturnType<OpenCodeApi['server']['info']>>
 
 export const DEFAULT_SERVER_INFO: OpenCodeServerInfo = {
-  version: '2.2.5',
+  version: '2.3.0',
   pid: 1234,
   urls: ['http://127.0.0.1:5551'],
   paths: { tmp: '/tmp' },

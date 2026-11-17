@@ -7,7 +7,7 @@ import path from 'path'
 import { OPENCODE_SERVER_USERNAME } from '@opencode-manager/shared/opencode'
 import { openCodeBinaryCandidates, resolveOpenCode2Binary, startOpenCodeServe, type ServeSpawn } from './opencode-binary'
 
-const SUPPORTED_VERSION = '2.2.5'
+const SUPPORTED_VERSION = '2.3.0'
 const PATH_CANDIDATE = 'opencode'
 const ABSOLUTE_CANDIDATES = ['/usr/local/bin/opencode', '/opt/opencode/bin/opencode']
 

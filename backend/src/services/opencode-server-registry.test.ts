@@ -446,7 +446,7 @@ describe('OpenCodeServerRegistry', () => {
 
   describe('test', () => {
     it('reports a supported version', async () => {
-      fetchFn.mockResolvedValueOnce(jsonResponse({ version: '2.2.5' }))
+      fetchFn.mockResolvedValueOnce(jsonResponse({ version: '2.3.0' }))
 
       const result = await registry.test({
         baseUrl: 'https://studio.example.com/',
@@ -454,7 +454,7 @@ describe('OpenCodeServerRegistry', () => {
         password: 'super-secret',
       })
 
-      expect(result).toEqual({ ok: true, version: '2.2.5', versionSupported: true, error: null })
+      expect(result).toEqual({ ok: true, version: '2.3.0', versionSupported: true, error: null })
       expect(fetchFn.mock.calls[0]?.[0]).toBe('https://studio.example.com/api/info')
       const headers = new Headers(fetchFn.mock.calls[0]?.[1]?.headers)
       expect(headers.get('authorization')).toBe(`Basic ${btoa('alice:super-secret')}`)
@@ -475,7 +475,7 @@ describe('OpenCodeServerRegistry', () => {
         username: 'alice',
         password: 'super-secret',
       })
-      fetchFn.mockResolvedValueOnce(jsonResponse({ version: '2.2.5' }))
+      fetchFn.mockResolvedValueOnce(jsonResponse({ version: '2.3.0' }))
 
       const result = await registry.test({ serverId: server.id })
 
@@ -490,7 +490,7 @@ describe('OpenCodeServerRegistry', () => {
         baseUrl: 'https://studio.example.com',
         password: 'super-secret',
       })
-      fetchFn.mockResolvedValueOnce(jsonResponse({ version: '2.2.5' }))
+      fetchFn.mockResolvedValueOnce(jsonResponse({ version: '2.3.0' }))
 
       const result = await registry.test({
         baseUrl: 'https://studio.example.com/opencode',
@@ -510,7 +510,7 @@ describe('OpenCodeServerRegistry', () => {
         baseUrl: 'https://studio.example.com',
         password: 'super-secret',
       })
-      fetchFn.mockResolvedValueOnce(jsonResponse({ version: '2.2.5' }))
+      fetchFn.mockResolvedValueOnce(jsonResponse({ version: '2.3.0' }))
 
       const result = await registry.test({
         baseUrl: 'https://relocated.example.com',
@@ -530,7 +530,7 @@ describe('OpenCodeServerRegistry', () => {
         baseUrl: 'https://studio.example.com',
         password: 'super-secret',
       })
-      fetchFn.mockResolvedValueOnce(jsonResponse({ version: '2.2.5' }))
+      fetchFn.mockResolvedValueOnce(jsonResponse({ version: '2.3.0' }))
 
       await registry.test({
         baseUrl: 'https://studio.example.com',

@@ -7,26 +7,26 @@ settings:
 catalogs:
   default:
     '@opencode/client':
-      specifier: 2.2.5
-      version: 2.2.5
+      specifier: 2.3.0
+      version: 2.3.0
     '@opencode/plugin':
-      specifier: 2.2.5
-      version: 2.2.5
+      specifier: 2.3.0
+      version: 2.3.0
     '@opencode/schema':
-      specifier: 2.2.5
-      version: 2.2.5
+      specifier: 2.3.0
+      version: 2.3.0
     '@opencode/theme':
-      specifier: 2.2.5
-      version: 2.2.5
+      specifier: 2.3.0
+      version: 2.3.0
     '@opentui/core':
-      specifier: 0.8.2
-      version: 0.8.2
+      specifier: 0.8.4
+      version: 0.8.4
     '@opentui/solid':
-      specifier: 0.8.2
-      version: 0.8.2
+      specifier: 0.8.4
+      version: 0.8.4
     effect:
-      specifier: 4.0.6
-      version: 4.0.6
+      specifier: 4.1.0
+      version: 4.1.0
     solid-js:
       specifier: 1.9.18
       version: 1.9.18
@@ -315,16 +315,16 @@ importers:
         version: link:../shared
       '@opencode/plugin':
         specifier: 'catalog:'
-        version: 2.2.5(@opencode/theme@2.2.5(typescript@5.9.3)(web-tree-sitter@0.25.10))(@opentelemetry/semantic-conventions@1.43.0)(@opentui/core@0.8.2(typescript@5.9.3)(web-tree-sitter@0.25.10))(@opentui/solid@0.8.2(solid-js@1.9.18)(typescript@5.9.3)(web-tree-sitter@0.25.10))(redis@6.2.1(@opentelemetry/api@1.9.0))(solid-js@1.9.18)(vite@7.3.0(@types/node@22.19.19)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.46.0)(yaml@2.9.0))
+        version: 2.3.0(@opencode/theme@2.3.0(typescript@5.9.3)(web-tree-sitter@0.25.10))(@opentelemetry/semantic-conventions@1.43.0)(@opentui/core@0.8.4(typescript@5.9.3)(web-tree-sitter@0.25.10))(@opentui/solid@0.8.4(solid-js@1.9.18)(typescript@5.9.3)(web-tree-sitter@0.25.10))(redis@6.2.1(@opentelemetry/api@1.9.0))(solid-js@1.9.18)(vite@7.3.0(@types/node@22.19.19)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.46.0)(yaml@2.9.0))
       '@opencode/theme':
         specifier: 'catalog:'
-        version: 2.2.5(typescript@5.9.3)(web-tree-sitter@0.25.10)
+        version: 2.3.0(typescript@5.9.3)(web-tree-sitter@0.25.10)
       '@opentui/core':
         specifier: 'catalog:'
-        version: 0.8.2(typescript@5.9.3)(web-tree-sitter@0.25.10)
+        version: 0.8.4(typescript@5.9.3)(web-tree-sitter@0.25.10)
       '@opentui/solid':
         specifier: 'catalog:'
-        version: 0.8.2(solid-js@1.9.18)(typescript@5.9.3)(web-tree-sitter@0.25.10)
+        version: 0.8.4(solid-js@1.9.18)(typescript@5.9.3)(web-tree-sitter@0.25.10)
       '@types/bun':
         specifier: ^1.3.14
         version: 1.3.14
@@ -354,13 +354,13 @@ importers:
     dependencies:
       '@opencode/client':
         specifier: 'catalog:'
-        version: 2.2.5(effect@4.0.6)(solid-js@1.9.18)
+        version: 2.3.0(effect@4.1.0)(solid-js@1.9.18)
       '@opencode/schema':
         specifier: 'catalog:'
-        version: 2.2.5
+        version: 2.3.0
       effect:
         specifier: 'catalog:'
-        version: 4.0.6
+        version: 4.1.0
       jsonc-parser:
         specifier: ^3.3.1
         version: 3.3.1
@@ -816,9 +816,9 @@ packages:
     peerDependencies:
       react: '>=16.8.0'
 
-  '@effect/opentelemetry@4.0.6':
-    resolution: {integrity: sha512-xhLR1EN4ZNaKM7Bx59SCFiRNduFzgH8LZXDrCpPN8MpQ93V0GQcFHTBah5T3EXO2v+5HTEacdTgetIA0Creqvw==}
-    engines: {node: '>=18.0.0'}
+  '@effect/opentelemetry@4.1.0':
+    resolution: {integrity: sha512-j9bNzQaoQvcnimBFMG0i3piEW20E8HjkXAQHTJN/XqG2e4uJ9zCv53/HCNzD7+ooFn5S4nwQy/BOXeNReMIe+A==}
+    engines: {node: '>=22.19.0'}
     peerDependencies:
       '@opentelemetry/api': '>=1.9.0 <2.0.0'
       '@opentelemetry/api-logs': '>=0.203.0 <0.300.0'
@@ -829,7 +829,7 @@ packages:
       '@opentelemetry/sdk-trace-node': '>=2.0.0 <3.0.0'
       '@opentelemetry/sdk-trace-web': '>=2.0.0 <3.0.0'
       '@opentelemetry/semantic-conventions': '>=1.33.0 <2.0.0'
-      effect: ^4.0.6
+      effect: ^4.1.0
     peerDependenciesMeta:
       '@opentelemetry/api':
         optional: true
@@ -848,17 +848,17 @@ packages:
       '@opentelemetry/sdk-trace-web':
         optional: true
 
-  '@effect/platform-node-shared@4.0.6':
-    resolution: {integrity: sha512-0PhyC4uG30xGtsajnxjkcBWfTjNRzUh4ZKl1Kvo/MNyCTb+W2O+fBzf7wCRCoqt+nLudiq4V7vX40Q8XIBuMaQ==}
-    engines: {node: '>=18.0.0'}
+  '@effect/platform-node-shared@4.1.0':
+    resolution: {integrity: sha512-uYQfFRoxWLo8fIhiSeBcmz/R1ooOfE3HF3cWHFgxz82tZMk2Wn02BGABcdLmaAch9VpDLbtWnuhSxNyBsGMUFg==}
+    engines: {node: '>=22.19.0'}
     peerDependencies:
-      effect: ^4.0.6
+      effect: ^4.1.0
 
-  '@effect/platform-node@4.0.6':
-    resolution: {integrity: sha512-gXvGHAy0/8PZbWvMMguloDUyeSP+rzYEo3FSEqUuGduxo9ORcGioDxPI+GOLCIFfam7VuNkmSUxBOiRMIrMrBw==}
-    engines: {node: '>=18.0.0'}
+  '@effect/platform-node@4.1.0':
+    resolution: {integrity: sha512-v+X7moGVF9k5oMVvz0slA+NgtEod+W+oygeI285MDJgSlUCW3JcqElj+cD3rlijFZtpKhC7RLkU1GuCxjGHTpA==}
+    engines: {node: '>=22.19.0'}
     peerDependencies:
-      effect: ^4.0.6
+      effect: ^4.1.0
       redis: '>=5.0.0 <7.0.0'
 
   '@esbuild/aix-ppc64@0.27.2':
@@ -1186,13 +1186,13 @@ packages:
     resolution: {integrity: sha512-mGUWr1uMnf0le2TwfOZY4SFxZGXGfm4Jtay/nwAa2FLNAKXUoUwaGwBMNH36UHPtinWfTSJ3nqFQr0091CxVGg==}
     engines: {node: ^20.17.0 || >=22.9.0}
 
-  '@opencode/ai@2.2.5':
-    resolution: {integrity: sha512-TolUvNR615vpkc6FPf2np5PbAbO7k1gaVlrtZ5Wx5tN7Y8K2uSer0BZEiajJ2uBsF6RXJFfjjX1GZbcf85GtGQ==}
+  '@opencode/ai@2.3.0':
+    resolution: {integrity: sha512-CsaY18G5cXtNvOgvONaxguFeaWf+gENSYKzDnYIIREpoSLjLm9oF2v+adaE4nUozM1qIMR4+s23VOViaRypFLw==}
 
-  '@opencode/client@2.2.5':
-    resolution: {integrity: sha512-EjYrFGWHURsIbjtmQdIsGSPmYZGaulxqwEfYxQH5t9838508BCIvDX9f7/ZsgNGHYXM0punA3W8hTt6GjxIEaw==}
+  '@opencode/client@2.3.0':
+    resolution: {integrity: sha512-xu74XGiYIqLZ2FzIrtjaR5UNWWXY3fRln0WLgZoQTR/wWMgG+T9XGQQGCl8ry8jnCFsJVokiHemBqft9oMzC1A==}
     peerDependencies:
-      effect: 4.0.6
+      effect: 4.1.0
       solid-js: '>=1.9.0'
     peerDependenciesMeta:
       effect:
@@ -1200,12 +1200,12 @@ packages:
       solid-js:
         optional: true
 
-  '@opencode/plugin@2.2.5':
-    resolution: {integrity: sha512-DHtmC55UM5NbtZwyayLxI/ygTMt3n+6xXYYBkOdNxmZ+rLcIbpjmeJvySqdxFmT3K7Pk/2pHsuocxhquu6sysA==}
+  '@opencode/plugin@2.3.0':
+    resolution: {integrity: sha512-wfBz8UKpy1jb8EAuFqvqbmVG6+6X6B5B+54UAGmofuT7vZ6F6cC3OQwlw1ObEi4NTKG66y0x6Z6zz4AG0H2N9Q==}
     peerDependencies:
-      '@opencode/theme': 2.2.5
-      '@opentui/core': '>=0.8.0'
-      '@opentui/solid': '>=0.8.0'
+      '@opencode/theme': 2.3.0
+      '@opentui/core': '>=0.8.4'
+      '@opentui/solid': '>=0.8.4'
       electron: '*'
       solid-js: '>=1.9.0'
       vite: '>=6'
@@ -1226,17 +1226,17 @@ packages:
       vite-plugin-solid:
         optional: true
 
-  '@opencode/protocol@2.2.5':
-    resolution: {integrity: sha512-T3ET0kS1kj8sv7/d+c1T2he7TXoZ4Rki7zTqHuv8b0kWhg3Vk6o0t+T9KsEQdEat7PFksgH5haC2iSSdJOB7/w==}
+  '@opencode/protocol@2.3.0':
+    resolution: {integrity: sha512-V37zTGXVa1j9aXUvUY01YN1EtfMMSWoT5pSCc6M0UsGdTUZX6QL/vMgGVGzPvbt7+Z8Vo40/0DFRPyqT4sdvnw==}
 
-  '@opencode/schema@2.2.5':
-    resolution: {integrity: sha512-hlKk6cX28BwvOMOVG3Mtt4tEHxwY68Z6Gz5/cL32N8qfZexykCKsZai49Jms4/2gD8BzvVuBERnnlLDbdLstUA==}
+  '@opencode/schema@2.3.0':
+    resolution: {integrity: sha512-9CPS4+BXWUs3ELIWo68AA2q4XEPMkRYwpGYdqd/wNz3jRTOB8swef+2/z+igkCel+UtlX+dAlGTmSnid/JcoKw==}
 
-  '@opencode/theme@2.2.5':
-    resolution: {integrity: sha512-mUW5YKCxJQHnhrCepsyMoEqWZrQFipF5WrRmos9WB/iehZiUL6ix6OXjUmv5W5gctKzgQd8tYVi7x90H5/grHQ==}
+  '@opencode/theme@2.3.0':
+    resolution: {integrity: sha512-p0i87SpXs2JmGUfK00H5kTS5mJeMrSXv+ntu1LpK7q/wE3o7c2+43DQ7Fv9mzh+Zpz/vZ8XEbSiCVoCL39gQVw==}
 
-  '@opencode/util@2.2.5':
-    resolution: {integrity: sha512-RqbJ2EwxOs6oQMH1P4Yenkejit0oiAyxBTPXhzx4n6j4SOV0+Duz6lhftlJkAjTbq7Rw2b0Mzx4duOJUdw6s5A==}
+  '@opencode/util@2.3.0':
+    resolution: {integrity: sha512-0OIjkq9EQ/p50Wft57yr2NIyuzz1zqaBydwu/5rzEy1+Bu5hJkr5oUqAvt1ye6zZdBW3K8kiFGXFQsChX4cNPg==}
 
   '@opentelemetry/api-logs@0.219.0':
     resolution: {integrity: sha512-FFx7YnaYJlIjqWW/AG/yAZ0L/NEY724PipXXXQLdtZPbLwBGbUMTGL1i/esI56TWfTUXxhLfpgrnWJCG8aUJyg==}
@@ -1312,100 +1312,54 @@ packages:
     resolution: {integrity: sha512-eSYWTm620tTk45EKSedaUL8MFYI8hW164hIXsgIHyxu3VobUB3fFCu5t0hQby6OoWRPsG1KkKUG2M5UadiLiVg==}
     engines: {node: '>=14'}
 
-  '@opentui/core-darwin-arm64@0.8.0':
-    resolution: {integrity: sha512-Cp+BL1DsRZhUG56AuyXlH8DA4dsKfZ3Qgh1XMYDGokkC4p9uv8kdNNhyzmURAFa2LK77XqVv1Zhwr/6DqqpMlw==}
+  '@opentui/core-darwin-arm64@0.8.4':
+    resolution: {integrity: sha512-kAWCmLsGuxQANeq4AjjX0Yodca2VIofQGUfIH9Edg9BKajYpf941heZfMJkkkJUXawYTNFTR2lBYsdneUUJBrg==}
     cpu: [arm64]
     os: [darwin]
 
-  '@opentui/core-darwin-arm64@0.8.2':
-    resolution: {integrity: sha512-/8pFK289hi+jtoUgJYZJEABTreLoQ3tNVQuMFLF0xDBkREJaR9xvh2RHKzhVLut9bhKf9oY2bgD37pMgYNqwqA==}
-    cpu: [arm64]
-    os: [darwin]
-
-  '@opentui/core-darwin-x64@0.8.0':
-    resolution: {integrity: sha512-Jp4pzdIuKsS3XYq9xuWuAO52tTj9gnWeeoI3bg456CF6XnY2yQMasWOd/WmjfvYfAaJzGDFa4DNXhByBMPVuTw==}
+  '@opentui/core-darwin-x64@0.8.4':
+    resolution: {integrity: sha512-0S62YHtIh1Q9tTun7065njEtYUUtf1zXwllDKXr63R1cVgq+8eRdVQ2PsAGNOqB5OYYno+M8o2tuK/Es2uvmBA==}
     cpu: [x64]
     os: [darwin]
 
-  '@opentui/core-darwin-x64@0.8.2':
-    resolution: {integrity: sha512-AN3QB5yIGQyKs4XKgGuA1vSLA++jonTB6NR2fNLbw4+wizgETlQ77ur30175yEVysaN2tQNO2dJasvHMx05WQg==}
-    cpu: [x64]
-    os: [darwin]
-
-  '@opentui/core-linux-arm64-musl@0.8.0':
-    resolution: {integrity: sha512-8ZPl/2DChcS7XIVRPIazigXaMNyxa2bwvuzPprNbzT0+cVJLIoGC19pjiV3bI3oVXBPVMNqgIcppOrEHBhlouw==}
+  '@opentui/core-linux-arm64-musl@0.8.4':
+    resolution: {integrity: sha512-IG887NHjPJEw5D1dvNl9jPbcwNFREFKj2fnqEjdrwCnDRywtjNL7k7GgTo24NNlyMAZAq0OkoM0M0Sn6ex/Adg==}
     cpu: [arm64]
     os: [linux]
 
-  '@opentui/core-linux-arm64-musl@0.8.2':
-    resolution: {integrity: sha512-nB/RtlowKo9mlybfL1iHr0Wr4ZF/n4bQ8i7UaphUPNopXSq6YoWT7D4lyjubLBqjJ4KPkaXXHAiReSZ0e1V7ZA==}
+  '@opentui/core-linux-arm64@0.8.4':
+    resolution: {integrity: sha512-VGnBN3ItBwZog109wtPIou8pn93TseZwA5OZ05X2PYIYPw+IC6mVeO2Dn0qwwozLBDxeyH3ydbHMFlwzS4/fLg==}
     cpu: [arm64]
     os: [linux]
 
-  '@opentui/core-linux-arm64@0.8.0':
-    resolution: {integrity: sha512-b6D/VP9y0Z18tO86GSTp9BBykgR6r5CQM1ol9UMJfUt+PjN5HGksbOCDTMIQufXvt4WIUFHrSBProysJRFzbYw==}
-    cpu: [arm64]
-    os: [linux]
-
-  '@opentui/core-linux-arm64@0.8.2':
-    resolution: {integrity: sha512-Inkhg/P5UBNPySqeh0+4K8NbqUIolJ3WNgvX9I25x2nT/DFA8kUN1Y7fbQAaX2CrHa7rWu54xOmJYbYfOPsX8A==}
-    cpu: [arm64]
-    os: [linux]
-
-  '@opentui/core-linux-x64-musl@0.8.0':
-    resolution: {integrity: sha512-xGEYw6wkX0sPwPx6RosQZanuWF0+5cIup2alhHHQQfKJkcLS8r8NBWlcy2LK9CoEWH6SBtNXC+9Y5IrryCOvJQ==}
+  '@opentui/core-linux-x64-musl@0.8.4':
+    resolution: {integrity: sha512-FAiH7wMt/ZbpP2w6TL62deNExTg5w6mujKUBSK89+gJV8FN4jk/K2xz9f522aYhC6SdbpyIKwS0oGIJldYLkcg==}
     cpu: [x64]
     os: [linux]
 
-  '@opentui/core-linux-x64-musl@0.8.2':
-    resolution: {integrity: sha512-vicHTwx+jUFNcI39e6pK+hkjAhv33ebqmm0YpHHek9t3tY1PoWY6YfgI4jZVqVzcckJ7i3r3Nnl3x2YB94UUhw==}
+  '@opentui/core-linux-x64@0.8.4':
+    resolution: {integrity: sha512-N/uxyaPpWkCZlDXz3fgHMfMuj1L3IVZ/xZ4JifUc4NW9bwa/CYWFJ5J5jBoy2QsAIqoqo8/OD3iFpXR4o12mNQ==}
     cpu: [x64]
     os: [linux]
 
-  '@opentui/core-linux-x64@0.8.0':
-    resolution: {integrity: sha512-aXBNIdE6iMf58/Tdnd6UzXeFjYfaHzQ6E0nukjLe2ir41/meJJYEAHUQ62EBr/gxvuCNZHTBQB4T9BzF7PdENQ==}
-    cpu: [x64]
-    os: [linux]
-
-  '@opentui/core-linux-x64@0.8.2':
-    resolution: {integrity: sha512-R6SUsvcQdeVuVSdGIOYcAFrCdGGeAxzT2pJ7KT9LK6Tg0pELszpnC+FmRDiofMUz88VSjXP95NygBZx+SAvnuA==}
-    cpu: [x64]
-    os: [linux]
-
-  '@opentui/core-win32-arm64@0.8.0':
-    resolution: {integrity: sha512-XtK0QMyIiqeDmrIyyAXqqp7TKaRGaWnBlbnEsNrkRLrgP+aLwRhRSHdafxi+RMqj3h9qOlb1MgnPal1kx7wP4g==}
+  '@opentui/core-win32-arm64@0.8.4':
+    resolution: {integrity: sha512-vjDuuIcmanoipIKdME8A7ZuBgIw2E1fv4pRJp6M19+Zfx0HIUmtA8bv+mT/kaz8Cpad9EUzJkNI5fV8P2p/iKg==}
     cpu: [arm64]
     os: [win32]
 
-  '@opentui/core-win32-arm64@0.8.2':
-    resolution: {integrity: sha512-pGXmxoPcoNMRVm5DGX0+U7kwtm21Ubh+qJ5tz+kVk5LnuBiBhpkWDp2L+OjYmu9D57NrQbKhj0Tvrtu/SzdXaA==}
-    cpu: [arm64]
-    os: [win32]
-
-  '@opentui/core-win32-x64@0.8.0':
-    resolution: {integrity: sha512-P5X2RcDDntIJ4q1WvQawGWCae5BzHrm50PMy7+PZ3Su8GGwnaCQ5xRHvDIQfhki8pZMo2SoTOkpStR0Wj1QoXQ==}
+  '@opentui/core-win32-x64@0.8.4':
+    resolution: {integrity: sha512-I4XnzUmyKCb8cRD1UntQXRkIEl0fxfQnzS3bTODWbENAOdRsK2c7Ff07DG2qTAqNijyTuk63C+uLmAT9ObOQ1Q==}
     cpu: [x64]
     os: [win32]
 
-  '@opentui/core-win32-x64@0.8.2':
-    resolution: {integrity: sha512-Tc7eNcNSlkHPB1p/9NBqQkexq/vznOPzB6V7G/kGq08y5LtOXPL0zLMJoIMNV/l52gNvv/YEi6mcBLLnpkD9Rg==}
-    cpu: [x64]
-    os: [win32]
-
-  '@opentui/core@0.8.0':
-    resolution: {integrity: sha512-LwnIT7k+rGelridv7390enJXZpNuQYKIS3NdttJyoLPjbRFPyHnAKkCHk6X8MRS64vcSjOeVq9sl7XLWII16jQ==}
+  '@opentui/core@0.8.4':
+    resolution: {integrity: sha512-s2z2FFEWxsQ6IPVEiAjlHHY5yssnCI+dIltL54+ZhVz1EWxylaB0HER+ypPL2goot0DKwKqrM57rnomh19/2rQ==}
     engines: {bun: '>=1.3.14', node: '>=26.4.0'}
     peerDependencies:
       web-tree-sitter: 0.25.10
 
-  '@opentui/core@0.8.2':
-    resolution: {integrity: sha512-Ko6BfyIiCWjm/15nfgBW7aWS+jkZ+Lh16PaEecawWRnhKo7H0BsJGhnpOe/BVcrnBI7bzLgMIP5cWyDffWEP7w==}
-    engines: {bun: '>=1.3.14', node: '>=26.4.0'}
-    peerDependencies:
-      web-tree-sitter: 0.25.10
-
-  '@opentui/solid@0.8.2':
-    resolution: {integrity: sha512-VfIp83/Qgb040xwNQqeqe4pxDK1bmV4L2QfMPENEggXTkEcN+ZvDpsRhrfQjI0L27JWwDr9o44fXI9Ws/vo2sA==}
+  '@opentui/solid@0.8.4':
+    resolution: {integrity: sha512-QyaWIAtZTaAdYJiP4K2cG6hbXQkNUBfa0hjYQwvvr/V2OFIZWZ7l+SP8CYM05lBqVDfOraeThvSrhX+IuvKySA==}
     peerDependencies:
       solid-js: ^1.9.12
 
@@ -2183,7 +2137,9 @@ packages:
   '@smithy/core@3.35.0':
     resolution: {integrity: sha512-zRMhfkByhT2snNdr1si24vJitU6Cr9ix2MikUfWmkAgp4jrNP0GcKSP5YvwQ+TlI8AZXER5QOGJn3JsVtSD9/A==}
     engines: {node: '>=18.0.0'}
-    deprecated: Deprecated due to a bug in custom logger data redaction. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
+    deprecated: |-
+      Deprecated due to a bug in custom logger data redaction. Upgrade to the latest version. If you used a custom logger with this
+        version, review your logs and rotate any credentials or other secrets. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/credential-provider-imds@4.5.2':
     resolution: {integrity: sha512-A9uSdn72ozbRUSit0eib0TW7nXuNPlaeM0zcGkJ+nE6tFcSDbnmtwoxbTCFBukVQcszDAyvsd7+rTduPTXpygg==}
@@ -3322,8 +3278,8 @@ packages:
   ecdsa-sig-formatter@1.0.11:
     resolution: {integrity: sha512-nagl3RYrbNv6kQkeJIpt6NJZy8twLB/2vtz6yN9Z4vRKHN4/QZJIEbqohALSgwKdnksuY3k5Addp5lg8sVoVcQ==}
 
-  effect@4.0.6:
-    resolution: {integrity: sha512-Tc3mkzuLR6t6P9dhLt0D2GrxYtmU5td4XEJEiXCmILz53IRIfJyHsKZWjTA3xEjiwpNTtXBgI4iqYPxMztBDrw==}
+  effect@4.1.0:
+    resolution: {integrity: sha512-lGx2MJJyrXA8RZb2UpQ/0Nkb5Utaimby7oD92+18noBxLPE85IFOvptdzau8dvcxAOwfwHo9iqapbKeFzqQM/Q==}
 
   electron-to-chromium@1.5.267:
     resolution: {integrity: sha512-0Drusm6MVRXSOJpGbaSVgcQsuB4hEkMpHXaVstcPmhu5LIedxs1xNK/nIxmQIU/RPC0+1/o0AVZfBTkTNJOdUw==}
@@ -5903,10 +5859,10 @@ snapshots:
       react: 19.2.3
       tslib: 2.8.1
 
-  '@effect/opentelemetry@4.0.6(@opentelemetry/api-logs@0.219.0)(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.8.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.219.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.8.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.8.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.8.0(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.43.0)(effect@4.0.6)':
+  '@effect/opentelemetry@4.1.0(@opentelemetry/api-logs@0.219.0)(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.8.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.219.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.8.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.8.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.8.0(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.43.0)(effect@4.1.0)':
     dependencies:
       '@opentelemetry/semantic-conventions': 1.43.0
-      effect: 4.0.6
+      effect: 4.1.0
     optionalDependencies:
       '@opentelemetry/api': 1.9.0
       '@opentelemetry/api-logs': 0.219.0
@@ -5916,19 +5872,19 @@ snapshots:
       '@opentelemetry/sdk-trace-base': 2.8.0(@opentelemetry/api@1.9.0)
       '@opentelemetry/sdk-trace-node': 2.8.0(@opentelemetry/api@1.9.0)
 
-  '@effect/platform-node-shared@4.0.6(effect@4.0.6)':
+  '@effect/platform-node-shared@4.1.0(effect@4.1.0)':
     dependencies:
       '@types/ws': 8.18.2
-      effect: 4.0.6
+      effect: 4.1.0
       ws: 8.22.0
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@effect/platform-node@4.0.6(effect@4.0.6)(redis@6.2.1(@opentelemetry/api@1.9.0))':
+  '@effect/platform-node@4.1.0(effect@4.1.0)(redis@6.2.1(@opentelemetry/api@1.9.0))':
     dependencies:
-      '@effect/platform-node-shared': 4.0.6(effect@4.0.6)
-      effect: 4.0.6
+      '@effect/platform-node-shared': 4.1.0(effect@4.1.0)
+      effect: 4.1.0
       redis: 6.2.1(@opentelemetry/api@1.9.0)
       undici: 8.12.2
     transitivePeerDependencies:
@@ -6244,39 +6200,39 @@ snapshots:
       node-gyp: 12.4.0
       proc-log: 6.1.0
 
-  '@opencode/ai@2.2.5':
+  '@opencode/ai@2.3.0':
     dependencies:
       '@aws-sdk/credential-providers': 3.1057.0
-      '@opencode/schema': 2.2.5
+      '@opencode/schema': 2.3.0
       '@smithy/eventstream-codec': 4.2.14
       '@smithy/util-utf8': 4.2.2
       aws4fetch: 1.0.20
-      effect: 4.0.6
+      effect: 4.1.0
       google-auth-library: 10.5.0
     transitivePeerDependencies:
       - supports-color
 
-  '@opencode/client@2.2.5(effect@4.0.6)(solid-js@1.9.18)':
+  '@opencode/client@2.3.0(effect@4.1.0)(solid-js@1.9.18)':
     dependencies:
-      '@opencode/protocol': 2.2.5
-      '@opencode/schema': 2.2.5
+      '@opencode/protocol': 2.3.0
+      '@opencode/schema': 2.3.0
     optionalDependencies:
-      effect: 4.0.6
+      effect: 4.1.0
       solid-js: 1.9.18
 
-  '@opencode/plugin@2.2.5(@opencode/theme@2.2.5(typescript@5.9.3)(web-tree-sitter@0.25.10))(@opentelemetry/semantic-conventions@1.43.0)(@opentui/core@0.8.2(typescript@5.9.3)(web-tree-sitter@0.25.10))(@opentui/solid@0.8.2(solid-js@1.9.18)(typescript@5.9.3)(web-tree-sitter@0.25.10))(redis@6.2.1(@opentelemetry/api@1.9.0))(solid-js@1.9.18)(vite@7.3.0(@types/node@22.19.19)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.46.0)(yaml@2.9.0))':
+  '@opencode/plugin@2.3.0(@opencode/theme@2.3.0(typescript@5.9.3)(web-tree-sitter@0.25.10))(@opentelemetry/semantic-conventions@1.43.0)(@opentui/core@0.8.4(typescript@5.9.3)(web-tree-sitter@0.25.10))(@opentui/solid@0.8.4(solid-js@1.9.18)(typescript@5.9.3)(web-tree-sitter@0.25.10))(redis@6.2.1(@opentelemetry/api@1.9.0))(solid-js@1.9.18)(vite@7.3.0(@types/node@22.19.19)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.46.0)(yaml@2.9.0))':
     dependencies:
       '@ai-sdk/provider': 3.0.8
-      '@opencode/ai': 2.2.5
-      '@opencode/client': 2.2.5(effect@4.0.6)(solid-js@1.9.18)
-      '@opencode/protocol': 2.2.5
-      '@opencode/schema': 2.2.5
-      '@opencode/util': 2.2.5(@opentelemetry/semantic-conventions@1.43.0)(redis@6.2.1(@opentelemetry/api@1.9.0))
-      effect: 4.0.6
+      '@opencode/ai': 2.3.0
+      '@opencode/client': 2.3.0(effect@4.1.0)(solid-js@1.9.18)
+      '@opencode/protocol': 2.3.0
+      '@opencode/schema': 2.3.0
+      '@opencode/util': 2.3.0(@opentelemetry/semantic-conventions@1.43.0)(redis@6.2.1(@opentelemetry/api@1.9.0))
+      effect: 4.1.0
     optionalDependencies:
-      '@opencode/theme': 2.2.5(typescript@5.9.3)(web-tree-sitter@0.25.10)
-      '@opentui/core': 0.8.2(typescript@5.9.3)(web-tree-sitter@0.25.10)
-      '@opentui/solid': 0.8.2(solid-js@1.9.18)(typescript@5.9.3)(web-tree-sitter@0.25.10)
+      '@opencode/theme': 2.3.0(typescript@5.9.3)(web-tree-sitter@0.25.10)
+      '@opentui/core': 0.8.4(typescript@5.9.3)(web-tree-sitter@0.25.10)
+      '@opentui/solid': 0.8.4(solid-js@1.9.18)(typescript@5.9.3)(web-tree-sitter@0.25.10)
       solid-js: 1.9.18
       vite: 7.3.0(@types/node@22.19.19)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.46.0)(yaml@2.9.0)
     transitivePeerDependencies:
@@ -6287,29 +6243,29 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@opencode/protocol@2.2.5':
+  '@opencode/protocol@2.3.0':
     dependencies:
-      '@opencode/schema': 2.2.5
-      effect: 4.0.6
+      '@opencode/schema': 2.3.0
+      effect: 4.1.0
 
-  '@opencode/schema@2.2.5':
+  '@opencode/schema@2.3.0':
     dependencies:
       '@standard-schema/spec': 1.1.0
-      effect: 4.0.6
+      effect: 4.1.0
 
-  '@opencode/theme@2.2.5(typescript@5.9.3)(web-tree-sitter@0.25.10)':
+  '@opencode/theme@2.3.0(typescript@5.9.3)(web-tree-sitter@0.25.10)':
     dependencies:
-      '@opentui/core': 0.8.0(typescript@5.9.3)(web-tree-sitter@0.25.10)
-      effect: 4.0.6
+      '@opentui/core': 0.8.4(typescript@5.9.3)(web-tree-sitter@0.25.10)
+      effect: 4.1.0
     transitivePeerDependencies:
       - typescript
       - web-tree-sitter
 
-  '@opencode/util@2.2.5(@opentelemetry/semantic-conventions@1.43.0)(redis@6.2.1(@opentelemetry/api@1.9.0))':
+  '@opencode/util@2.3.0(@opentelemetry/semantic-conventions@1.43.0)(redis@6.2.1(@opentelemetry/api@1.9.0))':
     dependencies:
-      '@effect/opentelemetry': 4.0.6(@opentelemetry/api-logs@0.219.0)(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.8.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.219.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.8.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.8.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.8.0(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.43.0)(effect@4.0.6)
-      '@effect/platform-node': 4.0.6(effect@4.0.6)(redis@6.2.1(@opentelemetry/api@1.9.0))
-      '@effect/platform-node-shared': 4.0.6(effect@4.0.6)
+      '@effect/opentelemetry': 4.1.0(@opentelemetry/api-logs@0.219.0)(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.8.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.219.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.8.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.8.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.8.0(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.43.0)(effect@4.1.0)
+      '@effect/platform-node': 4.1.0(effect@4.1.0)(redis@6.2.1(@opentelemetry/api@1.9.0))
+      '@effect/platform-node-shared': 4.1.0(effect@4.1.0)
       '@npmcli/arborist': 9.4.0
       '@npmcli/config': 10.8.1
       '@opentelemetry/api': 1.9.0
@@ -6322,7 +6278,7 @@ snapshots:
       '@opentelemetry/sdk-trace-base': 2.8.0(@opentelemetry/api@1.9.0)
       '@opentelemetry/sdk-trace-node': 2.8.0(@opentelemetry/api@1.9.0)
       cross-spawn: 7.0.6
-      effect: 4.0.6
+      effect: 4.1.0
       glob: 13.0.5
       mime-types: 3.0.2
       minimatch: 10.2.5
@@ -6413,55 +6369,31 @@ snapshots:
 
   '@opentelemetry/semantic-conventions@1.43.0': {}
 
-  '@opentui/core-darwin-arm64@0.8.0':
+  '@opentui/core-darwin-arm64@0.8.4':
     optional: true
 
-  '@opentui/core-darwin-arm64@0.8.2':
+  '@opentui/core-darwin-x64@0.8.4':
     optional: true
 
-  '@opentui/core-darwin-x64@0.8.0':
+  '@opentui/core-linux-arm64-musl@0.8.4':
     optional: true
 
-  '@opentui/core-darwin-x64@0.8.2':
+  '@opentui/core-linux-arm64@0.8.4':
     optional: true
 
-  '@opentui/core-linux-arm64-musl@0.8.0':
+  '@opentui/core-linux-x64-musl@0.8.4':
     optional: true
 
-  '@opentui/core-linux-arm64-musl@0.8.2':
+  '@opentui/core-linux-x64@0.8.4':
     optional: true
 
-  '@opentui/core-linux-arm64@0.8.0':
+  '@opentui/core-win32-arm64@0.8.4':
     optional: true
 
-  '@opentui/core-linux-arm64@0.8.2':
+  '@opentui/core-win32-x64@0.8.4':
     optional: true
 
-  '@opentui/core-linux-x64-musl@0.8.0':
-    optional: true
-
-  '@opentui/core-linux-x64-musl@0.8.2':
-    optional: true
-
-  '@opentui/core-linux-x64@0.8.0':
-    optional: true
-
-  '@opentui/core-linux-x64@0.8.2':
-    optional: true
-
-  '@opentui/core-win32-arm64@0.8.0':
-    optional: true
-
-  '@opentui/core-win32-arm64@0.8.2':
-    optional: true
-
-  '@opentui/core-win32-x64@0.8.0':
-    optional: true
-
-  '@opentui/core-win32-x64@0.8.2':
-    optional: true
-
-  '@opentui/core@0.8.0(typescript@5.9.3)(web-tree-sitter@0.25.10)':
+  '@opentui/core@0.8.4(typescript@5.9.3)(web-tree-sitter@0.25.10)':
     dependencies:
       bun-ffi-structs: 0.3.1(typescript@5.9.3)
       diff: 9.0.0
@@ -6469,41 +6401,22 @@ snapshots:
       string-width: 7.2.0
       web-tree-sitter: 0.25.10
     optionalDependencies:
-      '@opentui/core-darwin-arm64': 0.8.0
-      '@opentui/core-darwin-x64': 0.8.0
-      '@opentui/core-linux-arm64': 0.8.0
-      '@opentui/core-linux-arm64-musl': 0.8.0
-      '@opentui/core-linux-x64': 0.8.0
-      '@opentui/core-linux-x64-musl': 0.8.0
-      '@opentui/core-win32-arm64': 0.8.0
-      '@opentui/core-win32-x64': 0.8.0
+      '@opentui/core-darwin-arm64': 0.8.4
+      '@opentui/core-darwin-x64': 0.8.4
+      '@opentui/core-linux-arm64': 0.8.4
+      '@opentui/core-linux-arm64-musl': 0.8.4
+      '@opentui/core-linux-x64': 0.8.4
+      '@opentui/core-linux-x64-musl': 0.8.4
+      '@opentui/core-win32-arm64': 0.8.4
+      '@opentui/core-win32-x64': 0.8.4
     transitivePeerDependencies:
       - typescript
 
-  '@opentui/core@0.8.2(typescript@5.9.3)(web-tree-sitter@0.25.10)':
-    dependencies:
-      bun-ffi-structs: 0.3.1(typescript@5.9.3)
-      diff: 9.0.0
-      marked: 17.0.1
-      string-width: 7.2.0
-      web-tree-sitter: 0.25.10
-    optionalDependencies:
-      '@opentui/core-darwin-arm64': 0.8.2
-      '@opentui/core-darwin-x64': 0.8.2
-      '@opentui/core-linux-arm64': 0.8.2
-      '@opentui/core-linux-arm64-musl': 0.8.2
-      '@opentui/core-linux-x64': 0.8.2
-      '@opentui/core-linux-x64-musl': 0.8.2
-      '@opentui/core-win32-arm64': 0.8.2
-      '@opentui/core-win32-x64': 0.8.2
-    transitivePeerDependencies:
-      - typescript
-
-  '@opentui/solid@0.8.2(solid-js@1.9.18)(typescript@5.9.3)(web-tree-sitter@0.25.10)':
+  '@opentui/solid@0.8.4(solid-js@1.9.18)(typescript@5.9.3)(web-tree-sitter@0.25.10)':
     dependencies:
       '@babel/core': 7.29.7
       '@babel/preset-typescript': 7.27.1(@babel/core@7.29.7)
-      '@opentui/core': 0.8.2(typescript@5.9.3)(web-tree-sitter@0.25.10)
+      '@opentui/core': 0.8.4(typescript@5.9.3)(web-tree-sitter@0.25.10)
       babel-plugin-module-resolver: 5.0.2
       babel-preset-solid: 1.9.16(@babel/core@7.29.7)(solid-js@1.9.18)
       entities: 7.0.1
@@ -8432,7 +8345,7 @@ snapshots:
     dependencies:
       safe-buffer: 5.2.1
 
-  effect@4.0.6: {}
+  effect@4.1.0: {}
 
   electron-to-chromium@1.5.267: {}
 

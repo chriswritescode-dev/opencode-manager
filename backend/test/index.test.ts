@@ -42,8 +42,8 @@ function lifecycleStatus(state: OpenCodeLifecycleState, healthy: boolean): OpenC
     state,
     healthy,
     port: 5551,
-    version: '2.2.5',
-    minVersion: '2.2.5',
+    version: '2.3.0',
+    minVersion: '2.3.0',
     versionSupported: true,
     lastError: null,
     activeRecoveryAction: null,
@@ -149,7 +149,7 @@ describe('backend app wiring', { timeout: 30000 }, () => {
     expect(response.status).toBe(200)
     const body = HealthResponseSchema.parse(await response.json())
     expect(body.database).toBe('connected')
-    expect(body.opencodeMinVersion).toBe('2.2.5')
+    expect(body.opencodeMinVersion).toBe('2.3.0')
   })
 
   it('creates the workspace directories, AGENTS.md and a seed OpenCode config on startup', async () => {

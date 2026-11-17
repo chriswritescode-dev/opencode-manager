@@ -75,7 +75,7 @@ describe('OpenCodeEventStream', () => {
       directory: null,
       payload: { id: 'evt_2', created: 1001, type: 'provider.updated', data: {} },
     })
-    transport.message({ payload: { id: 'evt_3', created: 1002, type: 'credential.updated', data: {} } })
+    transport.message({ payload: { id: 'evt_3', created: 1002, type: 'credential.updated', data: { integrationID: 'openai', credentialID: 'cred_1' } } })
 
     expect(onEvent).toHaveBeenNthCalledWith(1, {
       id: 'evt_2',
@@ -87,7 +87,7 @@ describe('OpenCodeEventStream', () => {
       id: 'evt_3',
       created: 1002,
       type: 'credential.updated',
-      data: {},
+      data: { integrationID: 'openai', credentialID: 'cred_1' },
     })
   })
 

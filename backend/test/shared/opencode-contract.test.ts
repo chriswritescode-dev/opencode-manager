@@ -52,10 +52,10 @@ function createFetchSpy() {
 describe('OpenCode v2 contract', () => {
   describe('version policy', () => {
     it('pins the built-against version, keeps a separate supported floor and fixes the V2 server username', () => {
-      expect(OPENCODE_PINNED_VERSION).toBe('2.2.5')
-      expect(OPENCODE_MIN_VERSION).toBe('2.2.5')
+      expect(OPENCODE_PINNED_VERSION).toBe('2.3.0')
+      expect(OPENCODE_MIN_VERSION).toBe('2.3.0')
       expect(compareOpenCodeVersions(OPENCODE_PINNED_VERSION, OPENCODE_MIN_VERSION)).toBeGreaterThanOrEqual(0)
-      expect(OPENCODE_SUPPORTED_VERSION_RANGE).toBe('>=2.2.5 <3.0.0')
+      expect(OPENCODE_SUPPORTED_VERSION_RANGE).toBe('>=2.3.0 <3.0.0')
       expect(OPENCODE_SERVER_USERNAME).toBe('opencode')
     })
 
@@ -67,41 +67,42 @@ describe('OpenCode v2 contract', () => {
       expect(isSupportedOpenCodeVersion('2.1.1')).toBe(false)
       expect(isSupportedOpenCodeVersion('2.2.1')).toBe(false)
       expect(isSupportedOpenCodeVersion('2.2.4')).toBe(false)
-      expect(isSupportedOpenCodeVersion('2.2.5')).toBe(true)
-      expect(isSupportedOpenCodeVersion('2.2.6')).toBe(true)
+      expect(isSupportedOpenCodeVersion('2.2.5')).toBe(false)
+      expect(isSupportedOpenCodeVersion('2.2.6')).toBe(false)
       expect(isSupportedOpenCodeVersion('2.3.0')).toBe(true)
-      expect(isSupportedOpenCodeVersion('v2.2.5')).toBe(true)
-      expect(isSupportedOpenCodeVersion(' v2.2.5 ')).toBe(true)
+      expect(isSupportedOpenCodeVersion('2.3.1')).toBe(true)
+      expect(isSupportedOpenCodeVersion('v2.3.0')).toBe(true)
+      expect(isSupportedOpenCodeVersion(' v2.3.0 ')).toBe(true)
       expect(isSupportedOpenCodeVersion('3.0.0')).toBe(false)
       expect(isSupportedOpenCodeVersion('3.1.0')).toBe(false)
       expect(isSupportedOpenCodeVersion('not-a-version')).toBe(false)
     })
 
     it('rejects prereleases of the pinned version', () => {
-      expect(isSupportedOpenCodeVersion('2.2.5-alpha.1')).toBe(false)
-      expect(isSupportedOpenCodeVersion('2.2.5-alpha')).toBe(false)
-      expect(isSupportedOpenCodeVersion('2.2.5-rc.1+build.5')).toBe(false)
-      expect(isSupportedOpenCodeVersion('2.2.5-0')).toBe(false)
+      expect(isSupportedOpenCodeVersion('2.3.0-alpha.1')).toBe(false)
+      expect(isSupportedOpenCodeVersion('2.3.0-alpha')).toBe(false)
+      expect(isSupportedOpenCodeVersion('2.3.0-rc.1+build.5')).toBe(false)
+      expect(isSupportedOpenCodeVersion('2.3.0-0')).toBe(false)
     })
 
     it('accepts prereleases of higher numeric cores within the pinned major', () => {
-      expect(isSupportedOpenCodeVersion('2.3.0-beta.1')).toBe(true)
-      expect(isSupportedOpenCodeVersion('2.2.6-rc.2')).toBe(true)
+      expect(isSupportedOpenCodeVersion('2.3.1-beta.1')).toBe(true)
+      expect(isSupportedOpenCodeVersion('2.3.1-rc.2')).toBe(true)
       expect(isSupportedOpenCodeVersion('3.0.0-beta.1')).toBe(false)
     })
 
     it('ignores build metadata for precedence', () => {
-      expect(isSupportedOpenCodeVersion('2.2.5+build')).toBe(true)
-      expect(isSupportedOpenCodeVersion('2.2.5+2.0.0')).toBe(true)
+      expect(isSupportedOpenCodeVersion('2.3.0+build')).toBe(true)
+      expect(isSupportedOpenCodeVersion('2.3.0+2.0.0')).toBe(true)
     })
 
     it('rejects malformed and incomplete versions', () => {
       expect(isSupportedOpenCodeVersion('2garbage')).toBe(false)
       expect(isSupportedOpenCodeVersion('2')).toBe(false)
       expect(isSupportedOpenCodeVersion('2.0')).toBe(false)
-      expect(isSupportedOpenCodeVersion('2.2.5.1')).toBe(false)
+      expect(isSupportedOpenCodeVersion('2.3.0.1')).toBe(false)
       expect(isSupportedOpenCodeVersion('02.2.1')).toBe(false)
-      expect(isSupportedOpenCodeVersion('2.2.5-alpha..1')).toBe(false)
+      expect(isSupportedOpenCodeVersion('2.3.0-alpha..1')).toBe(false)
       expect(isSupportedOpenCodeVersion('')).toBe(false)
     })
 
@@ -116,7 +117,7 @@ describe('OpenCode v2 contract', () => {
 
     it('describes the supported range for unsupported versions', () => {
       expect(describeUnsupportedOpenCodeVersion('3.0.0')).toBe(
-        'OpenCode 3.0.0 is not supported; OpenCode Manager requires OpenCode >=2.2.5 <3.0.0',
+        'OpenCode 3.0.0 is not supported; OpenCode Manager requires OpenCode >=2.3.0 <3.0.0',
       )
     })
   })

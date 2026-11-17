@@ -179,8 +179,8 @@ describe('Settings routes', () => {
     reload = vi.fn(async () => undefined)
     restart = vi.fn(async () => ({ healthy: true }))
     manager = {
-      getVersion: vi.fn(() => '2.2.5'),
-      fetchVersion: vi.fn(async () => '2.2.5'),
+      getVersion: vi.fn(() => '2.3.0'),
+      fetchVersion: vi.fn(async () => '2.3.0'),
       clearStartupError: vi.fn(),
       getLastStartupError: vi.fn(() => null),
       markRestartPending: vi.fn(),
@@ -200,7 +200,7 @@ describe('Settings routes', () => {
       syncManagerGitIdentityConfig: syncIdentity,
     }
     fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-      if (requestUrl(input) === REGISTRY_URL) return registryResponse(['2.2.5'])
+      if (requestUrl(input) === REGISTRY_URL) return registryResponse(['2.3.0'])
       return new Response(null, { status: 404 })
     })
     await writeConfig('opencode.json', '{}')
@@ -546,11 +546,11 @@ describe('Settings routes', () => {
   describe('OpenCode version routes', () => {
     it('lists supported OpenCode 2 releases with the current version', async () => {
       fetchMock.mockImplementation(async () => registryResponse(
-        ['1.18.32', '2.1.1', '2.2.5', '2.2.6', '2.2.5-beta.1', '3.0.0'],
-        { '2.2.5': '2026-01-02T00:00:00Z', '2.2.6': '2026-01-03T00:00:00Z' },
+        ['1.18.32', '2.2.7', '2.3.0', '2.3.1', '2.3.0-beta.1', '3.0.0'],
+        { '2.3.0': '2026-01-02T00:00:00Z', '2.3.1': '2026-01-03T00:00:00Z' },
       ))
       clearOpenCodeVersionCache()
-      manager.getVersion = vi.fn(() => '2.2.5')
+      manager.getVersion = vi.fn(() => '2.3.0')
       settingsApp = createApp()
 
       const res = await settingsApp.request('/opencode-versions')
@@ -558,10 +558,10 @@ describe('Settings routes', () => {
       expect(res.status).toBe(200)
       await expect(readJson(res, VersionsSchema)).resolves.toEqual({
         versions: [
-          { version: '2.2.6', tag: 'v2.2.6', name: 'v2.2.6', publishedAt: '2026-01-03T00:00:00Z' },
-          { version: '2.2.5', tag: 'v2.2.5', name: 'v2.2.5', publishedAt: '2026-01-02T00:00:00Z' },
+          { version: '2.3.1', tag: 'v2.3.1', name: 'v2.3.1', publishedAt: '2026-01-03T00:00:00Z' },
+          { version: '2.3.0', tag: 'v2.3.0', name: 'v2.3.0', publishedAt: '2026-01-02T00:00:00Z' },
         ],
-        currentVersion: '2.2.5',
+        currentVersion: '2.3.0',
       })
       expect(fetchMock).toHaveBeenCalledWith(REGISTRY_URL)
     })
@@ -586,11 +586,11 @@ describe('Settings routes', () => {
     })
 
     it.each([
-      ['an older installable version', '2.1.1', 'OpenCode upgraded from v2.1.1 to v2.2.5 and restarted'],
-      ['an unsupported newer major', '3.0.0', 'OpenCode upgraded from v3.0.0 to v2.2.5 and restarted'],
+      ['an older installable version', '2.1.1', 'OpenCode upgraded from v2.1.1 to v2.3.0 and restarted'],
+      ['an unsupported newer major', '3.0.0', 'OpenCode upgraded from v3.0.0 to v2.3.0 and restarted'],
     ])('upgrades from %s', async (_label, currentVersion, expectedMessage) => {
       manager.getVersion = vi.fn(() => currentVersion)
-      manager.fetchVersion = vi.fn(async () => '2.2.5')
+      manager.fetchVersion = vi.fn(async () => '2.3.0')
       settingsApp = createApp()
 
       const res = await settingsApp.request('/opencode-upgrade', { method: 'POST' })
@@ -600,15 +600,15 @@ describe('Settings routes', () => {
         success: true,
         upgraded: true,
         oldVersion: currentVersion,
-        newVersion: '2.2.5',
+        newVersion: '2.3.0',
         message: expectedMessage,
       })
-      expect(installer).toHaveBeenCalledWith('2.2.5')
+      expect(installer).toHaveBeenCalledWith('2.3.0')
       expect(restart).toHaveBeenCalledTimes(1)
     })
 
     it('does not install when the current version is already the latest', async () => {
-      manager.getVersion = vi.fn(() => '2.2.5')
+      manager.getVersion = vi.fn(() => '2.3.0')
       settingsApp = createApp()
 
       const res = await settingsApp.request('/opencode-upgrade', { method: 'POST' })
@@ -634,8 +634,8 @@ describe('Settings routes', () => {
         success: true,
         upgraded: true,
         oldVersion: null,
-        newVersion: '2.2.5',
-        message: 'OpenCode v2.2.5 installed and restarted',
+        newVersion: '2.3.0',
+        message: 'OpenCode v2.3.0 installed and restarted',
       })
       expect(restart).toHaveBeenCalledTimes(1)
     })
@@ -656,38 +656,38 @@ describe('Settings routes', () => {
 
     it('installs a requested version and restarts', async () => {
       manager.getVersion = vi.fn(() => '2.1.1')
-      manager.fetchVersion = vi.fn(async () => '2.2.5')
+      manager.fetchVersion = vi.fn(async () => '2.3.0')
       settingsApp = createApp()
 
       const res = await settingsApp.request('/opencode-install-version', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ version: '2.2.5' }),
+        body: JSON.stringify({ version: '2.3.0' }),
       })
 
       expect(res.status).toBe(200)
       await expect(readJson(res, UpgradeResultSchema)).resolves.toMatchObject({
         success: true,
         oldVersion: '2.1.1',
-        newVersion: '2.2.5',
-        message: 'OpenCode changed from v2.1.1 to v2.2.5',
+        newVersion: '2.3.0',
+        message: 'OpenCode changed from v2.1.1 to v2.3.0',
       })
-      expect(installer).toHaveBeenCalledWith('2.2.5')
+      expect(installer).toHaveBeenCalledWith('2.3.0')
       expect(restart).toHaveBeenCalledTimes(1)
     })
 
     it('installs the bare version when the request carries a v prefix', async () => {
       manager.getVersion = vi.fn(() => '2.1.1')
-      manager.fetchVersion = vi.fn(async () => '2.2.5')
+      manager.fetchVersion = vi.fn(async () => '2.3.0')
       settingsApp = createApp()
 
       await settingsApp.request('/opencode-install-version', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ version: 'v2.2.5' }),
+        body: JSON.stringify({ version: 'v2.3.0' }),
       })
 
-      expect(installer).toHaveBeenCalledWith('2.2.5')
+      expect(installer).toHaveBeenCalledWith('2.3.0')
     })
 
     it('reports failure when the installed version is not the requested one', async () => {
@@ -698,13 +698,13 @@ describe('Settings routes', () => {
       const res = await settingsApp.request('/opencode-install-version', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ version: '2.2.5' }),
+        body: JSON.stringify({ version: '2.3.0' }),
       })
 
       expect(res.status).toBe(400)
       const body = await readJson(res, UpgradeResultSchema)
       expect(body.success).toBe(false)
-      expect(String(body.details)).toContain('did not result in version 2.2.5')
+      expect(String(body.details)).toContain('did not result in version 2.3.0')
       expect(body.newVersion).toBe('2.1.1')
     })
 
@@ -713,10 +713,10 @@ describe('Settings routes', () => {
       ['a missing version', undefined, null],
       ['a command injection attempt', '1.2.27; cat /etc/passwd; #', null],
       ['an invalid format', 'invalid', null],
-      ['a prerelease', '2.2.5-beta.1', null],
-      ['an OpenCode 1.x version', '1.18.32', 'OpenCode 1.18.32 is not supported; OpenCode Manager requires OpenCode >=2.2.5 <3.0.0'],
-      ['a version below the supported range', '2.2.4', 'OpenCode 2.2.4 is not supported; OpenCode Manager requires OpenCode >=2.2.5 <3.0.0'],
-      ['a version above the supported range', '3.0.0', 'OpenCode 3.0.0 is not supported; OpenCode Manager requires OpenCode >=2.2.5 <3.0.0'],
+      ['a prerelease', '2.3.0-beta.1', null],
+      ['an OpenCode 1.x version', '1.18.32', 'OpenCode 1.18.32 is not supported; OpenCode Manager requires OpenCode >=2.3.0 <3.0.0'],
+      ['a version below the supported range', '2.2.7', 'OpenCode 2.2.7 is not supported; OpenCode Manager requires OpenCode >=2.3.0 <3.0.0'],
+      ['a version above the supported range', '3.0.0', 'OpenCode 3.0.0 is not supported; OpenCode Manager requires OpenCode >=2.3.0 <3.0.0'],
     ])('rejects %s before installing', async (_label, version, expectedError) => {
       const res = await settingsApp.request('/opencode-install-version', {
         method: 'POST',
@@ -803,7 +803,7 @@ describe('Settings routes', () => {
       const res = await settingsApp.request('/opencode-install-version', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ version: '2.2.5' }),
+        body: JSON.stringify({ version: '2.3.0' }),
       })
 
       expect(res.status).toBe(400)
@@ -813,7 +813,7 @@ describe('Settings routes', () => {
 
     it.each([
       ['/opencode-upgrade', undefined],
-      ['/opencode-install-version', JSON.stringify({ version: '2.2.5' })],
+      ['/opencode-install-version', JSON.stringify({ version: '2.3.0' })],
     ])('refuses %s while OPENCODE_BIN manages the binary', async (path, body) => {
       process.env.OPENCODE_BIN = '/usr/local/bin/opencode'
 
