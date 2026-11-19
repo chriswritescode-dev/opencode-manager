@@ -9,6 +9,7 @@ import {
 } from '@opencode-manager/shared/schemas'
 import { OpenCodeServerError } from '../services/opencode-server-registry'
 import { TerminalNotFoundError, type TerminalService } from '../services/terminal'
+import { isAbsoluteRemoteDirectory } from '../utils/remote-path'
 import { parseTerminalCursor } from '../utils/terminal-cursor'
 import { createBridgedSocketEvents, isAllowedUpgradeOrigin } from '../utils/websocket-bridge'
 import { handleOpenCodeError, handleServiceError, parseJsonBody } from '../utils/route-helpers'
@@ -23,14 +24,10 @@ interface ServerTerminalSocketVariables {
   session?: Session['session']
 }
 
-function isAbsoluteDirectory(directory: string): boolean {
-  return directory.startsWith('/') || /^[A-Za-z]:[\\/]/.test(directory)
-}
-
 function readAbsoluteDirectory(raw: string | undefined): string | null {
   if (raw === undefined) return null
   const directory = raw.trim()
-  return directory.length > 0 && isAbsoluteDirectory(directory) ? directory : null
+  return directory.length > 0 && isAbsoluteRemoteDirectory(directory) ? directory : null
 }
 
 function rejectLocalServer(c: Context, serverId: string): Response | null {

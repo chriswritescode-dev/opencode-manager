@@ -64,6 +64,7 @@ import { sseAggregator, type ScheduledSessionRef } from './sse-aggregator'
 import { getErrorMessage } from '../utils/error-utils'
 import { logger } from '../utils/logger'
 import { canonicalPathSync } from '../utils/fs-safe'
+import { isAbsoluteRemoteDirectory } from '../utils/remote-path'
 import { buildAssistantRepo } from './assistant-mode'
 import { createScheduleWorktreeDescriber } from './schedule-worktree-paths'
 import { SessionSandboxError, type SessionSandboxService } from './session-sandbox'
@@ -717,7 +718,7 @@ export class ScheduleService {
   }
 
   async createServerJob(serverId: string, directory: string, input: CreateScheduleJobRequest): Promise<ScheduleJob> {
-    if (!path.isAbsolute(directory)) {
+    if (!isAbsoluteRemoteDirectory(directory)) {
       throw new ScheduleServiceError('A remote schedule requires an absolute target directory', 400)
     }
     return this.createJobForTarget({ kind: 'server', serverId, directory }, input)
@@ -751,7 +752,7 @@ export class ScheduleService {
   }
 
   async updateServerJob(serverId: string, jobId: number, input: UpdateScheduleJobRequest): Promise<ScheduleJob> {
-    if (input.directory !== undefined && input.directory !== null && !path.isAbsolute(input.directory)) {
+    if (input.directory !== undefined && input.directory !== null && !isAbsoluteRemoteDirectory(input.directory)) {
       throw new ScheduleServiceError('A remote schedule requires an absolute target directory', 400)
     }
     return this.updateJobForTarget({ kind: 'server', serverId, directory: '' }, jobId, input)

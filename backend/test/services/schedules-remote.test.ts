@@ -102,6 +102,44 @@ describe('remote schedule targets', () => {
     expect(localClient.api.session.create).not.toHaveBeenCalled()
   })
 
+  it('accepts a Windows target directory for a remote job', async () => {
+    const localClient = createClient().client
+    const { client } = createClient()
+    const { service } = createService(localClient, client)
+
+    const job = await service.createServerJob(server.id, 'C:\\Projects\\ExampleApp', baseRequest)
+
+    expect(job.directory).toBe('C:\\Projects\\ExampleApp')
+    expect(getScheduleJobById(db, null, job.id)).toMatchObject({
+      serverId: server.id,
+      directory: 'C:\\Projects\\ExampleApp',
+    })
+  })
+
+  it('rejects a relative target directory for a remote job', async () => {
+    const localClient = createClient().client
+    const { client } = createClient()
+    const { service } = createService(localClient, client)
+
+    await expect(service.createServerJob(server.id, 'projects/app', baseRequest)).rejects.toMatchObject({
+      status: 400,
+      message: 'A remote schedule requires an absolute target directory',
+    })
+    expect(getScheduleJobById(db, null, 1)).toBeNull()
+  })
+
+  it('updates a remote job to a Windows target directory', async () => {
+    const localClient = createClient().client
+    const { client } = createClient()
+    const { service } = createService(localClient, client)
+    const job = await service.createServerJob(server.id, '/srv/projects/audit', baseRequest)
+
+    const updated = await service.updateServerJob(server.id, job.id, { directory: 'D:/work/app' })
+
+    expect(updated.directory).toBe('D:/work/app')
+    expect(getScheduleJobById(db, null, job.id)?.directory).toBe('D:/work/app')
+  })
+
   it('rejects worktree workspace modes for a remote job', async () => {
     const localClient = createClient().client
     const { client } = createClient()
