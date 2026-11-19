@@ -101,6 +101,12 @@ export function createStubOpenCodeApi(overrides: OpenCodeApiOverrides = {}): Ope
   applyNamespace(api.skill, {
     list: vi.fn(async () => ({ location: { directory: '/tmp/repo' }, data: [] })),
   })
+  applyNamespace(api.plugin, {
+    list: vi.fn<OpenCodeApi['plugin']['list']>(async () => ({
+      location: { directory: '/tmp/repo' },
+      data: [pluginInfo()],
+    })),
+  })
 
   applyNamespace(api.server, overrides.server)
   applyNamespace(api.location, overrides.location)
@@ -109,6 +115,7 @@ export function createStubOpenCodeApi(overrides: OpenCodeApiOverrides = {}): Ope
   applyNamespace(api.integration, overrides.integration)
   applyNamespace(api.credential, overrides.credential)
   applyNamespace(api.skill, overrides.skill)
+  applyNamespace(api.plugin, overrides.plugin)
   applyNamespace(api.pty, overrides.pty)
   applyNamespace(api.generate, overrides.generate)
   applyNamespace(api.session, overrides.session)
@@ -128,6 +135,17 @@ export function createStubOpenCodeClient(options: StubOpenCodeClientOptions = {}
   return {
     api: createStubOpenCodeApi(options.api),
     forwardRaw: options.forwardRaw ?? vi.fn(async () => new Response(JSON.stringify({}), { status: 200 })),
+  }
+}
+
+type PluginInfo = Awaited<ReturnType<OpenCodeApi['plugin']['list']>>['data'][number]
+
+export function pluginInfo(overrides: Partial<PluginInfo> = {}): PluginInfo {
+  return {
+    source: { type: 'builtin' },
+    features: {},
+    state: { status: 'active' },
+    ...overrides,
   }
 }
 
